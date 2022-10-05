@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Make sure to not include the viewing preference for mac finder
+.DS_Store
