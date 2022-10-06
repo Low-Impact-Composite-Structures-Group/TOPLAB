@@ -131,3 +131,6 @@ dmypy.json
 
 # Make sure to not include the viewing preference for mac finder
 .DS_Store
+
+# Make sure that my vscode settings are not added
+.vscode
