@@ -1,3 +1,13 @@
+"""This module enables the definition of thermal resistances and defines
+classes which enable the coupling between the different thermal
+resistances.
+
+Fuel Tank - Thermal Resistances
+Hydrogen Storage in Civil Aviation PhD
+Victor Kees Poorte, 2022
+"""
+
+
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
