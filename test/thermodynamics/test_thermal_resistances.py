@@ -15,7 +15,7 @@ class TestThermalResistance(unittest.TestCase):
         resistance = ThermalResistance(
             heat_transfer_coefficient, surface_area
         )
-        actual_value = resistance.resistance
+        actual_value = resistance.value
         expected_value = 1 / 15
         self.assertEqual(expected_value, actual_value)
 
@@ -25,7 +25,7 @@ class TestThermalResistance(unittest.TestCase):
         resistance = ThermalResistance(
             heat_transfer_coefficient, surface_area
         )
-        actual_value = resistance.resistance
+        actual_value = resistance.value
         expected_value = float("inf")
         self.assertEqual(expected_value, actual_value)
 
@@ -35,7 +35,7 @@ class TestThermalResistance(unittest.TestCase):
         resistance = ThermalResistance(
             heat_transfer_coefficient, surface_area
         )
-        actual_value = resistance.resistance
+        actual_value = resistance.value
         expected_value = float("inf")
         self.assertEqual(expected_value, actual_value)
 

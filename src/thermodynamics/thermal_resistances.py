@@ -28,7 +28,7 @@ class ThermalResistance:
     surface_area: float
 
     @property
-    def resistance(self) -> float:
+    def value(self) -> float:
         """Compute the value of the thermal resistance.
 
         This also accounts for null values in the surface area or the 
