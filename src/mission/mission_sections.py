@@ -11,8 +11,16 @@ class Hydrogen(Protocol):
 
 @dataclass
 class FuelFlow:
-    hydrogen: Hydrogen
     mass_flow: float
+
+
+@dataclass
+class OutFlow(FuelFlow):
+    phase: str
+
+
+class InFlow(FuelFlow):
+    hydrogen: Hydrogen
 
 
 @dataclass
