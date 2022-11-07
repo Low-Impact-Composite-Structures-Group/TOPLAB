@@ -51,7 +51,7 @@ class MissionSection:
                 "Invalid timestep and duration combination\n" \
                 "Ensure that the duration is a multiple of the step."
             )
-        return self.duration // timestep
+        return int(self.duration // timestep)
 
 
 def main():
