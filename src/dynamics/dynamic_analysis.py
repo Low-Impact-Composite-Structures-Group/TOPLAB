@@ -1,5 +1,7 @@
 
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -16,8 +18,9 @@ class FuelTank(Protocol):
         ...
 
 
-class FuelFlow(Protocol):
-    ...
+class Hydrogen(Protocol):
+    liquid: Hydrogen
+    gas: Hydrogen
 
 
 class StateDerivatives(Protocol):
@@ -67,7 +70,7 @@ class ConvectiveMedium:
 
 class MissionSection(Protocol):
     duration: float
-    fuel_flows: list[FuelFlow]
+    fuel_flows: list[FuelFlow | OutFlow]
     ambient: ConvectiveMedium
     flight_speed: float
 
@@ -97,6 +100,16 @@ class ThermodynamicModel(Protocol):
         mission_section: MissionSection
     ) -> tuple[float, list]:
         ...
+
+
+class OutFlow(Protocol):
+    mass_flow: float
+    phase: str
+
+@dataclass
+class FuelFlow:
+    mass_flow: float
+    hydrogen: Hydrogen
 
 
 @dataclass
