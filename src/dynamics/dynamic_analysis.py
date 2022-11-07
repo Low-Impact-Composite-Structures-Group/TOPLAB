@@ -126,13 +126,12 @@ class AnalyseMissionSection:
     heat_flux_factor: float = 1.0
 
     def __post_init__(self) -> None:
-        self.tank_states: list[TankState] = [
-            self.define_tank_state(
-                self.initial.pressure,
-                self.initial.temperature,
-                self.initial.fill
-            )
-        ]
+        self.tank_states: list[TankState] = list()
+        self.define_tank_state(
+            self.initial.pressure,
+            self.initial.temperature,
+            self.initial.fill
+        )
     
     @property
     def timesteps(self) -> int:
@@ -144,33 +143,47 @@ class AnalyseMissionSection:
     def last_tank_state(self) -> TankState:
         return self.tank_states[-1]
 
+    def define_fuel_flows(self) -> list[FuelFlow]:
+        fuel_flows = [
+            fuel_flow
+            if fuel_flow.mass_flow > 0 else
+            FuelFlow(
+                fuel_flow.mass_flow,
+                self.last_tank_state.hydrogen.get_phase(fuel_flow.phase)
+            )
+            for fuel_flow in self.mission_section.fuel_flows
+        ]
+        return fuel_flows
+
     def define_tank_state(
         self, pressure: float, temperature: float, fill: float
     ) -> TankState:
-        state = TankState(
-            temperature,
-            pressure,
-            fill,
-            self.tank.compute_fuel_height(self.tank.volume * fill),
-            self.tank.volume
-        )
-        heat_flux, temperatures = self.thermal_model.compute_heat_flux(
-            self.tank, state, self.mission_section
-        )
-        state.set_thermal_capacity(
-            self.tank.compute_thermal_capacity(temperatures[0])
-        )
-        state.set_heat_flux(heat_flux)
-        dynamic_model = self.dynamic_model_factory.get_dynamic_model(
-            state, self.target_conditions
-        )
-        state.set_state_derivatives(
-            dynamic_model.compute_state_derivatives(
-                state,
-                self.mission_section.fuel_flows
+        self.tank_states.append(
+            TankState(
+                temperature,
+                pressure,
+                fill,
+                self.tank.compute_fuel_height(self.tank.volume * fill),
+                self.tank.volume
             )
         )
-        return state
+        heat_flux, temperatures = self.thermal_model.compute_heat_flux(
+            self.tank, self.last_tank_state, self.mission_section
+        )
+        self.last_tank_state.set_thermal_capacity(
+            self.tank.compute_thermal_capacity(temperatures[0])
+        )
+        self.last_tank_state.set_heat_flux(heat_flux)
+        dynamic_model = self.dynamic_model_factory.get_dynamic_model(
+            self.last_tank_state, self.target_conditions
+        )
+        self.last_tank_state.set_state_derivatives(
+            dynamic_model.compute_state_derivatives(
+                self.last_tank_state,
+                self.define_fuel_flows()
+            )
+        )
+        return self.last_tank_state
 
     def compute_new_pressure(self) -> float:
         pressure_derivatives = [
@@ -217,12 +230,10 @@ class AnalyseMissionSection:
         for _ in range(self.timesteps):
 
             # Define the new tank state
-            self.tank_states.append(
-                self.define_tank_state(
-                    self.compute_new_pressure(),
-                    self.compute_new_temperature(),
-                    self.compute_new_fill()
-                )
+            self.define_tank_state(
+                self.compute_new_pressure(),
+                self.compute_new_temperature(),
+                self.compute_new_fill()
             )
             
             # Check if one of the stopping criteria has been met, if so,
