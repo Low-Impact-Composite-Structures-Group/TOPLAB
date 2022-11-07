@@ -98,6 +98,9 @@ class Hydrogen(ConvectiveMedium):
             raise ValueError("Hydrogen not in liquid phase")
         return self
 
+    def get_phase(self, phase: str) -> Hydrogen:
+        return self
+
 
 @dataclass
 class TwoPhaseHydrogen:
@@ -121,6 +124,13 @@ class TwoPhaseHydrogen:
     @property
     def heat_of_evaporation(self):
         return self.gas.enthalpy - self.liquid.enthalpy
+
+    def get_phase(self, phase: str) -> Hydrogen:
+        if phase == "gas":
+            return self.gas
+        if phase == "liquid":
+            return self.liquid
+        raise ValueError(f"'{phase}' is an unsupported phase...")
 
 
 def main():
