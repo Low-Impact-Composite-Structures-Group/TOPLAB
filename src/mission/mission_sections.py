@@ -19,6 +19,7 @@ class OutFlow(FuelFlow):
     phase: str
 
 
+@dataclass
 class InFlow(FuelFlow):
     hydrogen: Hydrogen
 
