@@ -127,11 +127,12 @@ class AnalyseMissionSection:
 
     def __post_init__(self) -> None:
         self.tank_states: list[TankState] = list()
-        self.define_tank_state(
+        self.set_up_new_tank_state(
             self.initial.pressure,
             self.initial.temperature,
             self.initial.fill
         )
+        self.compute_state_derivatives()
     
     @property
     def timesteps(self) -> int:
@@ -155,7 +156,7 @@ class AnalyseMissionSection:
         ]
         return fuel_flows
 
-    def define_tank_state(
+    def set_up_new_tank_state(
         self, pressure: float, temperature: float, fill: float
     ) -> TankState:
         self.tank_states.append(
@@ -167,6 +168,9 @@ class AnalyseMissionSection:
                 self.tank.volume
             )
         )
+        return self.last_tank_state
+    
+    def compute_state_derivatives(self):
         heat_flux, temperatures = self.thermal_model.compute_heat_flux(
             self.tank, self.last_tank_state, self.mission_section
         )
@@ -184,6 +188,13 @@ class AnalyseMissionSection:
             )
         )
         return self.last_tank_state
+ 
+    def phase_change(self):
+        if len(self.tank_states) >= 2:
+            return (
+                self.last_tank_state.phase != self.tank_states[-2].phase
+            )
+        return False
 
     def compute_new_pressure(self) -> float:
         pressure_derivatives = [
@@ -220,17 +231,20 @@ class AnalyseMissionSection:
     def stopping_criterion_is_met(self) -> bool:
         for criterion in self.stopping_criteria:
             if criterion.is_met(
-                self.tank_states[-1], self.target_conditions
+                self.last_tank_state, self.target_conditions
             ):
                 return True
-        return False
+        print(self.last_tank_state.fill)
+        if self.last_tank_state.is_full:
+            return True
+        return self.phase_change()
         
     def analyse_mission_section(self) -> list[TankState]:
 
         for _ in range(self.timesteps):
 
             # Define the new tank state
-            self.define_tank_state(
+            self.set_up_new_tank_state(
                 self.compute_new_pressure(),
                 self.compute_new_temperature(),
                 self.compute_new_fill()
@@ -240,6 +254,9 @@ class AnalyseMissionSection:
             # exit the iteration and return the tank states
             if self.stopping_criterion_is_met():
                 return self.tank_states
+
+            self.compute_state_derivatives()
+
         return self.tank_states
 
 
