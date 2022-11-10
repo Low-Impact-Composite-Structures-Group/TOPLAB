@@ -468,9 +468,9 @@ class DynamicModelFactory:
         tank_state: TankState,
         target_conditions: TargetConditions
     ) -> DynamicModel:
-        # The logic for the definition of the dynamic model is still to 
-        # be implemented
-        return TwoPhaseModel
+        if tank_state.phase == "twophase":
+            return TwoPhaseModel
+        return SinglePhaseModel
 
 
 def main():
