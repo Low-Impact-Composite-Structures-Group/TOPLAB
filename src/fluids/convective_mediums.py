@@ -122,6 +122,10 @@ class TwoPhaseHydrogen:
         return self.liquid.temperature
 
     @property
+    def phase(self):
+        return "twophase"
+
+    @property
     def heat_of_evaporation(self):
         return self.gas.enthalpy - self.liquid.enthalpy
 

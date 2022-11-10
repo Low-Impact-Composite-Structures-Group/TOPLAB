@@ -67,6 +67,15 @@ class TankState:
     def is_empty(self):
         return self.fill == 0 or self.fuel_height == 0
 
+    @property
+    def phase(self) -> str:
+        hydrogen_state = self.hydrogen.phase
+        if "liquid" in hydrogen_state:
+            return "liquid"
+        if hydrogen_state == "twophase":
+            return "twophase"
+        return "gas"
+
     def __post_init__(self) -> None:
         self.get_hydrogen_properties()
 
