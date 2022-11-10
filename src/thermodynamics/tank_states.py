@@ -58,6 +58,14 @@ class TankState:
     @property
     def fuel_mass(self) -> float:
         return self.gas_mass + self.liquid_mass
+    
+    @property
+    def is_full(self):
+        return self.fill >= 1
+
+    @property
+    def is_empty(self):
+        return self.fill == 0 or self.fuel_height == 0
 
     def __post_init__(self) -> None:
         self.get_hydrogen_properties()

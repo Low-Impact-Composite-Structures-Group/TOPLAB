@@ -31,6 +31,8 @@ class Hydrogen(Protocol):
 class TankState(Protocol):
     fuel_height: float
     hydrogen: Hydrogen
+    is_full: bool
+    is_empty: bool
 
 
 class InternalModel(Protocol):
@@ -69,12 +71,12 @@ class SingleZoneModel(InternalModel):
         surface_temperature: float
     ) -> list[ThermalResistance]:
         # Only gas in the tank
-        if tank_state.fuel_height == 0:
+        if tank_state.is_empty:
             return [self.create_gas_resistance(
                 tank, tank_state, surface_temperature
             )]
         # Full liquid tank
-        if tank_state.fuel_height == tank.characteristic_height:
+        if tank_state.is_full:
             return [self.create_liquid_resistance(
                 tank, tank_state, surface_temperature
             )]
