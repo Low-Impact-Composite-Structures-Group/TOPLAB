@@ -53,6 +53,7 @@ class TankState(Protocol):
     liquid_mass: float
     fuel_mass: float
     tank_thermal_capacity: float
+    phase: str
 
 
 @dataclass
@@ -80,7 +81,131 @@ class DynamicModel(Protocol):
 
 
 class SinglePhaseModel(DynamicModel):
-    ...
+    
+    @classmethod
+    def compute_state_derivatives(
+        cls, tank_state: TankState, fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
+        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
+            tank_state.phase, fuel_flows[0].mass_flow
+        )
+        return StateDerivatives(
+            dP_dt,
+            dT_dt,
+            dMg_dt,
+            dMl_dt,
+            cls.venting_mass,
+            cls.added_heat_flux
+        )
+
+    @classmethod
+    def solve_state_equations(
+        cls,
+        tank_state: TankState,
+        fuel_flow: FuelFlow,
+        heat_flux: float
+    ) -> list[float]:
+        a = [
+            [
+                cls.a11(tank_state.hydrogen),
+                cls.a12(tank_state.hydrogen)
+            ], [
+                cls.a21(tank_state.hydrogen, tank_state.volume),
+                cls.a22(
+                    tank_state.hydrogen,
+                    tank_state.volume,
+                    tank_state.tank_thermal_capacity
+                )
+            ]
+        ]
+        b = [
+            [
+                cls.y1(
+                    tank_state.fuel_mass,
+                    tank_state.hydrogen,
+                    fuel_flow.mass_flow
+                )
+            ], [
+                cls.y2(
+                    tank_state.hydrogen,
+                    fuel_flow,
+                    heat_flux
+                )
+            ]
+        ]
+        x = np.linalg.solve(a, b)
+        return x[0][0], x[1][0]
+
+    @staticmethod
+    def a11(hydrogen: Hydrogen) -> float:
+        return hydrogen.dRho_dP
+
+    @staticmethod
+    def a12(hydrogen: Hydrogen) -> float:
+        return hydrogen.dRho_dT
+
+    @staticmethod
+    def a21(
+        hydrogen: Hydrogen, tank_volume: float
+    ) -> float:
+        return (
+            tank_volume
+            * hydrogen.density
+            * hydrogen.dH_dP
+            - tank_volume
+        )
+
+    @staticmethod
+    def a22(
+        hydrogen: Hydrogen,
+        tank_volume: float,
+        tank_thermal_capacity: float
+    ) -> float:
+        return (
+            tank_thermal_capacity
+            + tank_volume * hydrogen.density * hydrogen.dH_dT
+        )
+
+    @staticmethod
+    def y1(
+        fuel_mass: float,
+        hydrogen: Hydrogen,
+        fuel_mass_flow: float
+    ) -> float:
+        return hydrogen.density * fuel_mass_flow / fuel_mass
+
+    @staticmethod
+    def y2(
+        tank_hydrogen: Hydrogen,
+        fuel_flow: FuelFlow,
+        heat_flux: float
+    ) -> float:
+        return (
+            heat_flux
+            + fuel_flow.mass_flow * (
+                fuel_flow.hydrogen.enthalpy
+                - tank_hydrogen.enthalpy
+            )
+        )
+
+    @property
+    def venting_mass(self):
+        return 0
+
+    @property
+    def added_heat_flux(self):
+        return 0
+
+    @staticmethod
+    def define_liquid_and_mass_derivatives(tank_phase, fuel_mass_flow):
+        if tank_phase == "gas":
+            return fuel_mass_flow, 0
+        if tank_phase == "liquid":
+            return 0, fuel_mass_flow
+        raise ValueError(
+            f"{tank_phase} not supported in single phase model"
+        )
 
 
 class TwoPhaseModel(DynamicModel):
