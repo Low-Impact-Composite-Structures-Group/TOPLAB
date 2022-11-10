@@ -14,6 +14,9 @@ from typing import Protocol, Union
 import numpy as np
 import numpy.typing as npt
 
+from src.fluids.hydrogen_retrievers import TwoPhaseRequester
+from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
+
 
 class TargetConditions(Protocol):
     ...
@@ -32,6 +35,7 @@ class TwoPhaseHydrogen(Protocol):
     dP_dT: float
     liquid: Hydrogen
     gas: Hydrogen
+    heat_of_evaporation: float
 
 
 class FuelFlow(Protocol):
@@ -282,6 +286,54 @@ class TwoPhaseModel(DynamicModel):
     @property
     def venting_mass(self) -> float:
         return 0
+
+
+class LinModel(DynamicModel):
+
+    energy_derivative_computer = EnergyDerivativeComputer()
+
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        dP_dt = cls.compute_pressure_derivative(tank_state, fuel_flows)
+        dT_dt = dP_dt / tank_state.hydrogen.dP_dT
+        return StateDerivatives(
+            dP_dt,
+            dT_dt,
+            None,
+            None,
+            None,
+            None
+        )
+
+    def compute_pressure_derivative(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> float:
+        hydrogen: TwoPhaseHydrogen = tank_state.hydrogen
+        energy_derivative = cls.compute_energy_derivative(
+            hydrogen, tank_state.fill
+        )
+        factor1 = energy_derivative / tank_state.volume
+        term2 = sum([
+            fuel_flow.mass_flow * hydrogen.heat_of_evaporation
+            for fuel_flow in fuel_flows
+        ])
+        factor2 = (
+            tank_state.heat_flux
+            + term2
+        )
+        return factor1 * factor2
+    
+    def compute_energy_derivative(
+        self, hydrogen: Hydrogen, fill: float
+    ) -> float:
+        return self.energy_derivative_computer.compute_energy_derivative(
+            hydrogen, fill
+        )
 
 
 class DynamicModelFactory:
