@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 
+import plotting.plot_style
+
 
 @dataclass
 class Line:
