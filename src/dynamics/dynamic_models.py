@@ -374,7 +374,7 @@ class TwoPhaseModel(DynamicModel):
         heat_flux: float
     ) -> float:
         term2 = sum([
-            - fuel_flow.mass_flow
+            fuel_flow.mass_flow
             * (
                 fuel_flow.hydrogen.enthalpy
                 - hydrogen.liquid.enthalpy
