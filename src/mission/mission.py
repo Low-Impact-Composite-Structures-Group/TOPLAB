@@ -18,11 +18,11 @@ class Mission:
         # Definition of the mission particulars
         durations = [2, 0.3, 14.5]
         altitudes = [0, 5e3, 8e3]
-        temperatures = [273.15, None, None]
+        temperatures = [273.15, 273.15, 273.15]
         mach_numbers = [0.02, 0.5, 0.85]
         # Full fuel flow is estimated in an old file
         full_fuel_flow = 0.38410455139160027    # Estimated from paper
-        throttles = [0, 0.9, 0.15]              # Estimated from paper
+        throttles = [0, 0.9, 0.19]              # Estimated from paper
 
         mission_sections = [
             MissionSection(
