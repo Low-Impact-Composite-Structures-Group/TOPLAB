@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from typing import Protocol
 
+EMPTY_LIMIT = 0.01  # A lower limit to define when the tank is empty
+
 
 class InitialState(Protocol):
     pressure: float
@@ -18,10 +20,7 @@ class TargetState(Protocol):
 
 class FuelTankState(Protocol):
     pressure: float
-
-
-class TargetState(Protocol):
-    pressure: float
+    fill: float
 
 
 class StoppingCriterion(Protocol):
@@ -40,7 +39,31 @@ class MaxPressure(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.pressure >= target_state.pressure
+        return fuel_tank_state.pressure >= target_state.max_pressure
+
+
+class IsEmpty(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, _: TargetState
+    ) -> bool:
+        return fuel_tank_state.fill <= EMPTY_LIMIT
+
+
+class IsFull(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.fill >= 1
+
+
+class TargetFillIsReached(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.fill >= target_state.fill
 
 
 def main():
