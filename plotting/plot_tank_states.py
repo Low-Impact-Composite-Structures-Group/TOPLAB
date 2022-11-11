@@ -2,9 +2,7 @@
 
 from typing import Protocol
 
-import matplotlib.pyplot as plt
-from plotting.figures import Line, TwinXFigure
-
+from plotting.figures import Line, SingleFigure, TwinXFigure
 
 SECONDS_TO_HOURS = 1 / 60 ** 2
 PASCAL_TO_BAR = 1e-5 
@@ -17,6 +15,36 @@ class TankState(Protocol):
     liquid_mass: float
     gas_mass: float
     fuel_mass: float
+
+
+def plot_tank_loads(
+    tank_states: list[list[TankState]],
+    labels: list[str],
+    timestep: float,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            [
+                i * timestep * SECONDS_TO_HOURS
+                for i, _ in enumerate(row)
+            ],
+            [
+                state.pressure * PASCAL_TO_BAR
+                for state in row
+            ],
+            label
+        )
+        for row, label in zip(tank_states, labels)
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Pressure [bar]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
 
 
 def plot_thermo_mechanical_loading(
