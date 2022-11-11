@@ -15,12 +15,13 @@ class TargetState(Protocol):
     min_pressure: float
     min_temperature: float
     fill: float
-    fuel_mass: float
+    mass: float
 
 
 class FuelTankState(Protocol):
     pressure: float
     fill: float
+    fuel_mass: float
 
 
 class StoppingCriterion(Protocol):
@@ -64,6 +65,14 @@ class TargetFillIsReached(StoppingCriterion):
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
         return fuel_tank_state.fill >= target_state.fill
+
+
+class TargetMassReached(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.fuel_mass >= target_state.mass
 
 
 def main():
