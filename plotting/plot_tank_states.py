@@ -20,7 +20,7 @@ class TankState(Protocol):
 def plot_tank_loads(
     tank_states: list[list[TankState]],
     labels: list[str],
-    timestep: float,
+    timestep: float = 60,
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
