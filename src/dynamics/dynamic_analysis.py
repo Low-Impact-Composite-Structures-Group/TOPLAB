@@ -220,24 +220,14 @@ class AnalyseMissionSection:
     def compute_new_fill(self) -> float:
         if self.last_tank_state.derivatives.liquid_mass == 0:
             return self.last_tank_state.fill
-        return (
+        new_fill = (
             self.last_tank_state.fill
             + self.last_tank_state.derivatives.liquid_mass
             / self.last_tank_state.hydrogen.liquid.density
             / self.tank.volume
             * self.multistep_method.timestep
         )
-
-    def stopping_criterion_is_met(self) -> bool:
-        for criterion in self.stopping_criteria:
-            if criterion.is_met(
-                self.last_tank_state, self.target_conditions
-            ):
-                return True
-        print(self.last_tank_state.fill)
-        if self.last_tank_state.is_full:
-            return True
-        return self.phase_change()
+        return round(new_fill, 3)
         
     def analyse_mission_section(self) -> list[TankState]:
 
