@@ -198,6 +198,33 @@ class GasPhaseConvection(NaturalConvection):
         return 17
 
 
+class NaturalCylinderConvection(NaturalConvection):
+
+    @property
+    def nussult_number(self) -> float:
+        return (
+            0.6
+            + (
+                0.387 * self.rayleigh_number ** (1 / 6)
+            ) / (
+                1 + (0.559 / self.medium.prantl_number) ** (9 / 16)
+            ) ** (8 / 27)
+        ) ** 2
+
+
+# class NaturalSphereConvection(NaturalConvection):
+
+#     @property
+#     def nussult_number(self) -> float:
+#         return (
+#             2 + (
+#                 0.589 * self.rayleigh_number ** (1 / 4)
+#             ) / (
+#                 1 + (0.469 / self.medium.prantl_number) ** (9 / 16)
+#             ) ** (4 / 9)
+#         )
+
+
 def main():
     pass
 
