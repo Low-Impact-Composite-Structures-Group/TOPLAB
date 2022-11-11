@@ -212,17 +212,17 @@ class NaturalCylinderConvection(NaturalConvection):
         ) ** 2
 
 
-# class NaturalSphereConvection(NaturalConvection):
+class NaturalSphereConvection(NaturalConvection):
 
-#     @property
-#     def nussult_number(self) -> float:
-#         return (
-#             2 + (
-#                 0.589 * self.rayleigh_number ** (1 / 4)
-#             ) / (
-#                 1 + (0.469 / self.medium.prantl_number) ** (9 / 16)
-#             ) ** (4 / 9)
-#         )
+    @property
+    def nussult_number(self) -> float:
+        return (
+            2 + (
+                0.589 * self.rayleigh_number ** (1 / 4)
+            ) / (
+                1 + (0.469 / self.medium.prantl_number) ** (9 / 16)
+            ) ** (4 / 9)
+        )
 
 
 def main():
