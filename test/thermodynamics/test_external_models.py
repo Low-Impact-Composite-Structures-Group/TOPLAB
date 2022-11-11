@@ -37,7 +37,7 @@ class TestExternalModel(unittest.TestCase):
 
         class ExternalModelTester(ExternalModel):
 
-            def get_thermal_resistances(
+            def get_convective_motions(
                 self,
                 tank: FuelTank,
                 tank_state: TankState,
@@ -77,7 +77,7 @@ class TestForcedExternalConvection(unittest.TestCase):
         model = ForcedConvectionModel()
 
         expected_value = [0.021513079201850624]
-        thermal_resistances = model.get_thermal_resistances(
+        thermal_resistances = model.get_convective_motions(
             tank, mission_section, surface_temperature
         )
         actual_values = [
