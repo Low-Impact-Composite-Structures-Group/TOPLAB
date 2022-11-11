@@ -1,4 +1,5 @@
 
+from abc import abstractmethod
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -14,13 +15,7 @@ class Line:
     marker: None = ""   # Set to None to create with marker
 
 
-@dataclass
-class TwinXFigure:
-    data: list[list[Line]]
-    x_label: str
-    y_labels: list[str]
-    x_ticks: list[float] = None
-    y_ticks: list[list[float]] = None
+class GeneralFigure:
 
     def __post_init__(self):
         self.create_figure_and_axis()
@@ -29,6 +24,81 @@ class TwinXFigure:
         self.format_labels()
         self.format_legend()
 
+    @abstractmethod
+    def create_figure_and_axis(self):
+        ...
+
+    @abstractmethod
+    def plot_data(self):
+        ...
+
+    @abstractmethod
+    def format_ticks(self):
+        ...
+
+    @abstractmethod    
+    def format_labels(self):
+        ...
+
+    @abstractmethod
+    def format_legend(self):
+        ...
+
+    def show(self):
+        plt.show()
+
+
+@dataclass
+class SingleFigure(GeneralFigure):
+    data: list[Line]
+    x_label: str
+    y_label: str
+    x_ticks: list[float] = None
+    y_ticks: list[float] = None
+
+    def create_figure_and_axis(self):
+        self.fig = plt.figure()
+        self.ax1 = self.fig.add_subplot(111)
+        self.ax = [self.ax1]
+        return self.fig, self.ax
+
+    def plot_data(self):
+        self.plots = [
+            self.ax1.plot(
+                line.x_data, 
+                line.y_data,
+                label=line.label,
+                marker=line.marker
+            )[0]
+            for line in self.data
+        ]
+        return self.plots
+
+    def format_ticks(self):
+        if self.x_ticks is not None:
+            self.ax1.set_xlim((self.x_ticks[0], self.x_ticks[-1]))
+            self.ax1.set_xticks(self.x_ticks)
+        if self.y_ticks is not None:
+                self.ax1.set_ylim((self.y_ticks[0], self.y_ticks[-1]))
+                self.ax1.set_yticks(self.y_ticks)
+        self.ax1.grid()
+
+    def format_labels(self):
+        self.ax1.set_xlabel(self.x_label)
+        self.ax1.set_ylabel(self.y_label)
+
+    def format_legend(self):
+        labs = [l.get_label() for l in self.plots]
+        self.ax1.legend(self.plots, labs, loc=0)
+
+
+@dataclass
+class TwinXFigure(GeneralFigure):
+    data: list[list[Line]]
+    x_label: str
+    y_labels: list[str]
+    x_ticks: list[float] = None
+    y_ticks: list[list[float]] = None
 
     def create_figure_and_axis(self):
         self.fig = plt.figure()
@@ -70,9 +140,6 @@ class TwinXFigure:
                     ax.set_ylim((y_ticks[0], y_ticks[-1]))
                     ax.set_yticks(y_ticks)
         self.ax1.grid()
-
-    def show(self):
-        self.fig.show()
 
 
 def main():
