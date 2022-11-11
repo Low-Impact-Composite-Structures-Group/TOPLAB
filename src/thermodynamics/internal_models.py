@@ -8,7 +8,6 @@ from src.thermodynamics.heat_transfer_modes import (GasPhaseConvection,
                                                     NaturalConvection,
                                                     RohsenowNaturalConvection)
 from src.thermodynamics.thermal_resistances import (ParallelResistances,
-                                                    Resistance,
                                                     ThermalResistance)
 
 
@@ -104,7 +103,7 @@ class InternalModel(Protocol):
         gas_resistance = self.create_gas_resistance(
             tank, tank_state, surface_temperature
         )
-        return [liquid_resistance, gas_resistance]
+        return [*liquid_resistance, gas_resistance]
 
     def create_gas_resistance(
         self,
@@ -131,7 +130,7 @@ class InternalModel(Protocol):
         tank: FuelTank,
         tank_state: TankState,
         surface_temperature: float
-    ) -> Resistance:
+    ) -> list[ThermalResistance]:
         ...
 
 
@@ -142,7 +141,7 @@ class SingleZoneModel(InternalModel):
         tank: FuelTank,
         tank_state: TankState,
         surface_temperature: float
-    ) -> Resistance:
+    ) -> list[ThermalResistance]:
         liquid_convection = LiquidPhaseConvection(
             tank_state.hydrogen.liquid,
             tank_state.fuel_height,
@@ -154,7 +153,7 @@ class SingleZoneModel(InternalModel):
                 tank_state.fuel_height
             )
         )
-        return liquid_resistance
+        return [liquid_resistance]
 
 
 class ThreeZoneModel(InternalModel):
@@ -164,7 +163,7 @@ class ThreeZoneModel(InternalModel):
         tank: FuelTank,
         tank_state: TankState,
         surface_temperature: float
-    ) -> Resistance:
+    ) -> list[ThermalResistance]:
         convective_motions = self.create_convective_motions(
             tank, tank_state, surface_temperature
         )
@@ -172,15 +171,10 @@ class ThreeZoneModel(InternalModel):
         resistances = [
             ThermalResistance(
                 convection.heat_transfer_coefficient, surface
-            ).value
+            )
             for convection, surface in zip(convective_motions, surfaces)
         ]
-        equivalent_resistance = Resistance(
-            ParallelResistances().compute_equivalent_resistance(
-                resistances
-            )
-        )
-        return equivalent_resistance
+        return resistances
 
     def create_surfaces(
         self,
