@@ -18,6 +18,7 @@ RADIATION_EMITTANCE = 0.95
 
 from abc import abstractmethod
 from dataclasses import dataclass
+import math
 from typing import Protocol
 
 
@@ -223,6 +224,62 @@ class NaturalSphereConvection(NaturalConvection):
                 1 + (0.469 / self.medium.prantl_number) ** (9 / 16)
             ) ** (4 / 9)
         )
+
+
+class RohsenowNaturalConvection(NaturalConvection):
+
+    @property
+    def nussult_number(self) -> float:
+        m = 10
+        return (self.nussult_l ** m + self.nussult_t ** m) ** (1 / m)
+
+    @property
+    def nussult_l(self):
+        return 2 * self.f / math.log(1 + 2 * self.f / self.nussult_T)
+
+    @property
+    def nussult_t(self):
+        return self.c_barred_l * self.rayleigh_number ** (1 / 3)
+
+    @property
+    def f(self):
+        return 1 - 0.13 / (self.nussult_T ** (0.16))
+
+    @property
+    def nussult_T(self):
+        return 0.772 * self.c_barred_l * self.rayleigh_number ** (1 / 4)
+
+    @property
+    def c_barred_l(self):
+        return (
+            0.671 / (
+                1 + (0.492 / self.medium.prantl_number) ** (9 / 16)
+            ) ** (4 / 9)
+        )
+
+
+class ChurchillNaturalConvection(NaturalConvection):
+
+    @property
+    def nussult_number(self) -> float:
+        return math.sqrt(
+            0.825
+            + (
+                0.387
+                * self.rayleigh_number ** (1 / 6)
+            ) / (
+                1 + (
+                    0.437 / self.medium.prantl_number
+                ) ** (9 / 16)
+            ) ** (8 / 27)
+        )
+
+
+class FujiiNaturalConvection(NaturalConvection):
+
+    @property
+    def nussult_number(self) -> float:
+        return 0.56 * self.rayleigh_number ** (1 / 4)
 
 
 def main():

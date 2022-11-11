@@ -4,8 +4,11 @@ from abc import abstractmethod
 from typing import Protocol
 
 from src.thermodynamics.heat_transfer_modes import (GasPhaseConvection,
-                                                    LiquidPhaseConvection)
+                                                    LiquidPhaseConvection,
+                                                    NaturalConvection,
+                                                    RohsenowNaturalConvection)
 from src.thermodynamics.thermal_resistances import (ParallelResistances,
+                                                    Resistance,
                                                     ThermalResistance)
 
 
@@ -14,12 +17,28 @@ class FuelTank(Protocol):
     characteristic_height: float
     surface_area: float
 
-    @abstractmethod
     def compute_fuel_wetted_surface(self, fuel_height: float) -> float:
         ...
 
-    @abstractmethod
     def compute_gas_wetted_surface(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_1_length(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_2_length(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_3_length(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_1_area(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_2_area(self, fuel_height: float) -> float:
+        ...
+
+    def compute_zone_3_area(self, fuel_height: float) -> float:
         ...
 
 
@@ -112,7 +131,7 @@ class InternalModel(Protocol):
         tank: FuelTank,
         tank_state: TankState,
         surface_temperature: float
-    ) -> ThermalResistance:
+    ) -> Resistance:
         ...
 
 
@@ -123,7 +142,7 @@ class SingleZoneModel(InternalModel):
         tank: FuelTank,
         tank_state: TankState,
         surface_temperature: float
-    ) -> ThermalResistance:
+    ) -> Resistance:
         liquid_convection = LiquidPhaseConvection(
             tank_state.hydrogen.liquid,
             tank_state.fuel_height,
@@ -136,6 +155,71 @@ class SingleZoneModel(InternalModel):
             )
         )
         return liquid_resistance
+
+
+class ThreeZoneModel(InternalModel):
+
+    def create_liquid_resistance(
+        self,
+        tank: FuelTank,
+        tank_state: TankState,
+        surface_temperature: float
+    ) -> Resistance:
+        convective_motions = self.create_convective_motions(
+            tank, tank_state, surface_temperature
+        )
+        surfaces = self.create_surfaces(tank, tank_state)
+        resistances = [
+            ThermalResistance(
+                convection.heat_transfer_coefficient, surface
+            ).value
+            for convection, surface in zip(convective_motions, surfaces)
+        ]
+        equivalent_resistance = Resistance(
+            ParallelResistances().compute_equivalent_resistance(
+                resistances
+            )
+        )
+        return equivalent_resistance
+
+    def create_surfaces(
+        self,
+        tank: FuelTank,
+        tank_state: TankState
+    ) -> list[float]:
+        surfaces = [
+            tank.compute_zone_1_area(tank_state.fuel_height),
+            tank.compute_zone_2_area(tank_state.fuel_height),
+            tank.compute_zone_3_area(tank_state.fuel_height)
+        ]
+
+        return surfaces
+
+    def create_convective_motions(
+        self,
+        tank: FuelTank,
+        tank_state: TankState,
+        surface_temperature: float
+    ) -> list[NaturalConvection]:
+        convective_motions = [
+            RohsenowNaturalConvection(
+                tank_state.hydrogen.liquid,
+                tank.compute_zone_1_length(tank_state.fuel_height),
+                surface_temperature
+            ),
+            RohsenowNaturalConvection(
+                tank_state.hydrogen.liquid,
+                tank.compute_zone_2_length(tank_state.fuel_height),
+                surface_temperature
+            ),
+            RohsenowNaturalConvection(
+                tank_state.hydrogen.liquid,
+                tank.compute_zone_3_length(tank_state.fuel_height),
+                surface_temperature
+            )
+        ]
+        
+        return convective_motions
 
 
 def main():
