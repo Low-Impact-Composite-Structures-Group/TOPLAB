@@ -43,7 +43,7 @@ class MaxPressure(StoppingCriterion):
         return fuel_tank_state.pressure >= target_state.max_pressure
 
 
-class IsEmpty(StoppingCriterion):
+class TankIsEmpty(StoppingCriterion):
 
     def is_met(
         self, fuel_tank_state: FuelTankState, _: TargetState
@@ -51,7 +51,7 @@ class IsEmpty(StoppingCriterion):
         return fuel_tank_state.fill <= EMPTY_LIMIT
 
 
-class IsFull(StoppingCriterion):
+class TankIsFull(StoppingCriterion):
 
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
@@ -59,7 +59,7 @@ class IsFull(StoppingCriterion):
         return fuel_tank_state.fill >= 1
 
 
-class TargetFillIsReached(StoppingCriterion):
+class TargetFillReached(StoppingCriterion):
 
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState

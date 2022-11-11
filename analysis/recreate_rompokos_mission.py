@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from plotting.plot_tank_states import plot_tank_fill, plot_thermo_mechanical_loading
 from src.dynamics.dynamic_analysis import AnalyseMissionSection
 from src.dynamics.dynamic_models import DynamicModelFactory
-from src.dynamics.stopping_criteria import IsEmpty
+from src.dynamics.stopping_criteria import TankIsEmpty
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.mission.mission import Mission
 from src.multistep_methods.linear_multistep_methods import EulerMethod
@@ -37,7 +37,7 @@ def perform_analysis():
     tank = CylindricalTankSphericalCaps.rompokos()
 
     # Define the stopping criteria for the fuel tank
-    stopping_criteria = [IsEmpty()]
+    stopping_criteria = [TankIsEmpty()]
 
     # Define the target conditions
     target_conditions = TargetState(
