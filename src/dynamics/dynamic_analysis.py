@@ -189,13 +189,6 @@ class AnalyseMissionSection:
         )
         return self.last_tank_state
  
-    def phase_change(self):
-        if len(self.tank_states) >= 2:
-            return (
-                self.last_tank_state.phase != self.tank_states[-2].phase
-            )
-        return False
-
     def compute_new_pressure(self) -> float:
         pressure_derivatives = [
             state.derivatives.pressure
@@ -233,15 +226,12 @@ class AnalyseMissionSection:
 
         for _ in range(self.timesteps):
 
-            # Define the new tank state
             self.set_up_new_tank_state(
                 self.compute_new_pressure(),
                 self.compute_new_temperature(),
                 self.compute_new_fill()
             )
-            
-            # Check if one of the stopping criteria has been met, if so,
-            # exit the iteration and return the tank states
+
             if self.stopping_criterion_is_met():
                 return self.tank_states
 
@@ -249,6 +239,13 @@ class AnalyseMissionSection:
 
         return self.tank_states
 
+    def stopping_criterion_is_met(self) -> bool:
+        for criterion in self.stopping_criteria:
+            if criterion.is_met(
+                self.last_tank_state, self.target_conditions
+            ):
+                return True
+        return False
 
 def main():
     pass
