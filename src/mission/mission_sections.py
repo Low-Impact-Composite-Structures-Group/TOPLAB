@@ -18,6 +18,13 @@ class FuelFlow:
 class OutFlow(FuelFlow):
     phase: str
 
+    @classmethod
+    def rompokos_cruise(cls, phase: str):
+        full_fuel_flow = - 0.384104551391600    # Estimated from paper
+        throttle = 0.2                          # Estimated from paper
+        fuel_flow = full_fuel_flow * throttle
+        return cls(fuel_flow, phase)
+
 
 @dataclass
 class InFlow(FuelFlow):
