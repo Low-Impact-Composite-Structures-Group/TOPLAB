@@ -52,18 +52,6 @@ class InternalModel(Protocol):
             ]
         )
 
-    @abstractmethod
-    def get_thermal_resistances(
-        self,
-        tank: FuelTank,
-        tank_state: TankState,
-        surface_temperature: float
-    ) -> list[ThermalResistance]:
-        ...
-
-
-class SingleZoneModel(InternalModel):
-	
     def get_thermal_resistances(
         self,
         tank: FuelTank,
@@ -117,6 +105,18 @@ class SingleZoneModel(InternalModel):
             )
         )
         return gas_resistance
+
+    @abstractmethod
+    def create_liquid_resistance(
+        self,
+        tank: FuelTank,
+        tank_state: TankState,
+        surface_temperature: float
+    ) -> ThermalResistance:
+        ...
+
+
+class SingleZoneModel(InternalModel):
 
     def create_liquid_resistance(
         self,
