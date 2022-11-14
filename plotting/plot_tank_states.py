@@ -46,6 +46,35 @@ def plot_tank_loads(
         y_ticks=y_ticks,
     )
 
+def plot_tank_temperatures(
+    tank_states: list[list[TankState]],
+    labels: list[str],
+    timestep: float = 60,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            [
+                i * timestep * SECONDS_TO_HOURS
+                for i, _ in enumerate(row)
+            ],
+            [
+                state.temperature
+                for state in row
+            ],
+            label
+        )
+        for row, label in zip(tank_states, labels)
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Temperature [K]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
 
 def plot_thermo_mechanical_loading(
     tank_states: list[TankState],
