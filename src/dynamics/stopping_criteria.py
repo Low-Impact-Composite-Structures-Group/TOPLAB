@@ -75,6 +75,22 @@ class TargetMassReached(StoppingCriterion):
         return fuel_tank_state.fuel_mass >= target_state.mass
 
 
+class LowerPressureReached(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.pressure <= target_state.min_pressure
+
+
+class MaxPressureReached(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.pressure >= target_state.max_pressure
+
+
 def main():
     pass
 
