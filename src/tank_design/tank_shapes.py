@@ -42,6 +42,7 @@ class StructuralModelFactory(Protocol):
 
 
 class TankSection(ABC):
+    material: Material
 
     @property
     @abstractmethod
@@ -84,21 +85,23 @@ class TankSection(ABC):
     def compute_mass(
         self,
         structural_model_factory: StructuralModelFactory,
-        material: Material,
         pressure: float
     ) -> float:
         model = structural_model_factory.get_structural_model(
-            self, material
+            self, self.material
         )
-        thickness = model.compute_thickness(self, material, pressure)
+        thickness = model.compute_thickness(
+            self, self.material, pressure
+        )
         volume = self.surface_area * thickness
-        mass = volume * material.density
+        mass = volume * self.material.density
         return mass
 
 @dataclass
 class CylindricalBody(TankSection):
     radius: float
     length: float
+    material: Material
 
     def __post_init__(self):
         self.type = "cylinder"
@@ -167,6 +170,7 @@ class CylindricalBody(TankSection):
 @dataclass
 class SphericalEndCap(TankSection):
     radius: float
+    material: Material
 
     def __post_init__(self):
         self.type = "spherical_end_cap"
@@ -199,6 +203,7 @@ class SphericalEndCap(TankSection):
 
 class Tank:
     sections: list[TankSection]
+    material: Material
 
     def set_sections(
         self, sections: list[TankSection]
@@ -301,21 +306,21 @@ class Tank:
     def compute_mass(
         self,
         structural_model_factory: StructuralModelFactory,
-        material: Material,
         pressure: float
     ) -> float:
         return sum([
             section.compute_mass(
-                structural_model_factory, material, pressure
+                structural_model_factory, pressure
             )
             for section in self.sections
         ])
     
-    
+
 @dataclass
 class CylindricalTankSphericalCaps(Tank):
     radius: float
     total_length: float
+    material: Material
 
     def __post_init__(self):
         self.create_body()
@@ -351,7 +356,9 @@ class CylindricalTankSphericalCaps(Tank):
         Returns:
             CylindricalBody: Body of the fuel tank.
         """
-        self.body = CylindricalBody(self.radius, self.body_length)
+        self.body = CylindricalBody(
+            self.radius, self.body_length, self.material
+        )
         return self.body
 
     def create_end_cap(self) -> SphericalEndCap:
@@ -360,7 +367,9 @@ class CylindricalTankSphericalCaps(Tank):
         Returns:
             SphericalEndCap: End cap of the fuel tank.
         """
-        self.end_cap = SphericalEndCap(self.radius)
+        self.end_cap = SphericalEndCap(
+            self.radius, self.material
+        )
         return self.end_cap
     
     @property
@@ -596,13 +605,15 @@ class CylindricalTankSphericalCaps(Tank):
 @dataclass
 class SphericalTank(Tank):
     radius: float
+    material: Material
 
     def __post_init__(self) -> None:
         self.create_sections()
 
     def create_sections(self) -> list[TankSection]:
         self.sections = [
-            SphericalEndCap(self.radius), SphericalEndCap(self.radius)
+            SphericalEndCap(self.radius, self.material),
+            SphericalEndCap(self.radius, self.material)
         ]
         return self.sections
 
