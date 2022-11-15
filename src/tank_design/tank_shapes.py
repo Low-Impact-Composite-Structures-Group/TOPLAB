@@ -13,8 +13,32 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
+
+
+class Material(Protocol):
+    density: float
+
+
+class StructuralModel(Protocol):
+
+    def compute_thickness(
+        self,
+        tank_section: TankSection,
+        material: Material,
+        pressure: float
+    ) -> float:
+        ...
+
+
+class StructuralModelFactory(Protocol):
+
+    def get_structural_model(
+        self, tank_section: TankSection, material: Material
+    ) -> StructuralModel:
+        ...
 
 
 class TankSection(ABC):
@@ -57,11 +81,27 @@ class TankSection(ABC):
         """
         ...
     
+    def compute_mass(
+        self,
+        structural_model_factory: StructuralModelFactory,
+        material: Material,
+        pressure: float
+    ) -> float:
+        model = structural_model_factory.get_structural_model(
+            self, material
+        )
+        thickness = model.compute_thickness(self, material, pressure)
+        volume = self.surface_area * thickness
+        mass = volume * material.density
+        return mass
 
 @dataclass
 class CylindricalBody(TankSection):
     radius: float
     length: float
+
+    def __post_init__(self):
+        self.type = "cylinder"
 
     @property
     def surface_area(self) -> float:
@@ -127,6 +167,9 @@ class CylindricalBody(TankSection):
 @dataclass
 class SphericalEndCap(TankSection):
     radius: float
+
+    def __post_init__(self):
+        self.type = "spherical_end_cap"
 
     @property
     def surface_area(self) -> float:
@@ -255,6 +298,19 @@ class Tank:
         fuel_surface = self.compute_fuel_wetted_surface(fuel_height)
         return self.surface_area - fuel_surface
 
+    def compute_mass(
+        self,
+        structural_model_factory: StructuralModelFactory,
+        material: Material,
+        pressure: float
+    ) -> float:
+        return sum([
+            section.compute_mass(
+                structural_model_factory, material, pressure
+            )
+            for section in self.sections
+        ])
+    
     
 @dataclass
 class CylindricalTankSphericalCaps(Tank):
