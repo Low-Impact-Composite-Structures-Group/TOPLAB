@@ -8,12 +8,13 @@ from src.dynamics.dynamic_analysis import AnalyseMissionSection
 from src.dynamics.dynamic_models import DynamicModelFactory
 from src.dynamics.stopping_criteria import TankIsEmpty
 from src.insulation.foam_insulations import ConstantFoamInsulation
+from src.materials.materials import Metal
 from src.mission.mission import Mission
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
-from src.thermodynamics.tank_states import InitialState, TargetState
+from src.thermodynamics.tank_states import InitialState, TankStates, TargetState
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 
@@ -34,7 +35,7 @@ def perform_analysis():
     )
 
     # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.rompokos()
+    tank = CylindricalTankSphericalCaps.rompokos(Metal.aluminum(), pressure)
 
     # Define the stopping criteria for the fuel tank
     stopping_criteria = [TankIsEmpty()]
@@ -69,7 +70,7 @@ def perform_analysis():
     timestep = 60
     multistep_method = EulerMethod(timestep)
 
-    tank_states: list[TankState] = list()
+    tank_states = TankStates(list(), timestep)
     for mission_section in Mission.rompokos().sections:
         analysis = AnalyseMissionSection(
             tank,
@@ -80,21 +81,21 @@ def perform_analysis():
             multistep_method,
             dynamic_model_factory,
             thermodynamic_model,
-            heat_flux_factor=heat_flux_factor
+            heat_flux_factor
         )
 
-        tank_states += analysis.analyse_mission_section()
+        for state in analysis.perform_analysis().states:
+            tank_states.add_tank_state(state)
         initial_conditions = InitialState(
-            tank_states[-1].pressure,
-            tank_states[-1].temperature,
-            tank_states[-1].fill 
+            tank_states.last_pressure,
+            tank_states.last_temperature,
+            tank_states.last_state.fill 
         )
     y1ticks = [i / 10 for i in range(14, 23)]
     y2ticks = [i / 10 for i in range(210, 251, 5)]
     xticks = [i for i in range(0, 25, 4)]
     plot_thermo_mechanical_loading(
         tank_states,
-        timestep,
         xticks,
         y1ticks,
         y2ticks
@@ -103,10 +104,8 @@ def perform_analysis():
     y2ticks = [i for i in range(0, 101, 20)]
     plot_tank_fill(
         tank_states,
-        timestep,
         xticks,
         y1ticks,
-        y2ticks
     )
     plt.show()
 
