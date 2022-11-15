@@ -143,6 +143,10 @@ class TankStates:
         return self.states[-1]
 
     @property
+    def first_state(self):
+        return self.states[0]
+
+    @property
     def pressures_in_bar(self):
         return [
             pressure * PASCAL_TO_BAR for pressure in self.pressures
