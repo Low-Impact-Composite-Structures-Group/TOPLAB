@@ -68,6 +68,7 @@ class Insulation(Protocol):
 @dataclass
 class FoamInsulation(Insulation):
     thickness: float
+    density: float
 
     def compute_heat_transfer_coefficient(
         self,
@@ -128,8 +129,9 @@ class ConstantFoamInsulation(FoamInsulation):
         Returns:
             _type_: Foam insulation
         """
+        density = None
         thermal_conductivity = 0.0046
-        return cls(thickness, thermal_conductivity)
+        return cls(thickness, density, thermal_conductivity)
 
     @classmethod
     def rohacell(
@@ -145,10 +147,8 @@ class ConstantFoamInsulation(FoamInsulation):
             _type_: Foam insulation
         """
         thermal_conductivity = 0.015
-        # density = 51.1
-        # foam = cls(thermal_conductivity)
-        # foam.density = density
-        return cls(thickness, thermal_conductivity)
+        density = 51.1
+        return cls(thickness, density, thermal_conductivity)
 
 
 @dataclass
