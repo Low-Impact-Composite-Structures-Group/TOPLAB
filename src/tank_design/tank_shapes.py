@@ -588,7 +588,9 @@ class CylindricalTankSphericalCaps(Tank):
         return self.radius * (1 - np.cos(np.pi / 4))
 
     @classmethod
-    def rompokos(cls) -> CylindricalTankSphericalCaps:
+    def rompokos(
+        cls, material: Material, operating_pressure: float
+    ) -> CylindricalTankSphericalCaps:
         """Method to create the tank as used by Rompokos.
 
         Returns:
@@ -601,7 +603,9 @@ class CylindricalTankSphericalCaps(Tank):
         tank_length = 19.1              # [m]
         tank_outer_radius = tank_outer_diameter / 2
         tank_inner_radius = tank_outer_radius - insulation_thickness
-        tank  = cls(tank_inner_radius, tank_length)
+        tank  = cls(
+            tank_inner_radius, tank_length, material, operating_pressure
+        )
         return tank
 
     @classmethod
