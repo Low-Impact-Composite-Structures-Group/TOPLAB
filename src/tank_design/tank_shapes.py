@@ -243,11 +243,9 @@ class Tank:
         ])
 
     def set_operating_pressure(self, pressure: float):
-        print(self.structural_mass)
         self.operating_pressure = pressure
         for section in self.sections:
             section.set_operating_pressure(pressure)
-        print(self.structural_mass)
         return self.operating_pressure
 
     @property
