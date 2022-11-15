@@ -17,8 +17,11 @@ class FuelTank(Protocol):
     ...
 
 
-class InitialState(Protocol):
-    ...
+@dataclass
+class InitialState:
+    pressure: float
+    temperature: float
+    fill: float
 
 
 class Insulation(Protocol):
@@ -41,54 +44,91 @@ class TargetState:
     mass: float
 
 
-def liquid_draining_analysis(
-    tank: FuelTank,
-    initial_state: InitialState,
-    fuel_flow: FuelFlow,
-    insulation: Insulation,
-    timestep: float = 60,
+@dataclass
+class LiquidDrainingAnalysis:
+    tank: FuelTank
+    fuel_flow: FuelFlow
+    insulation: Insulation
+
+    initial_pressure: float = 140e3
+    initial_fill: float = 0.97
+    timestep: float = 60
     heat_flux_factor: float = 1
-) -> list[TankState]:
 
-    # Assumptions about the mission section
-    duration = 60e6
-    altitude = 10e3
-    mach_number = 0.85
-    mission_section = MissionSection(
-        duration,
-        [fuel_flow],
-        altitude,
-        mach_number
-    )
+    def __post_init__(self):
+        self.stopping_criteria = [TankIsEmpty()]
+        self.define_initial_state()
+        self.define_mission_section()
+        self.define_target_conditions()
+        self.perform_analysis()
 
-    # Define the stopping criteria for the fuel tank
-    stopping_criteria = [TankIsEmpty()]
+    def define_initial_state(self) -> InitialState:
+        initial_temperature = None
+        self.initial_state = InitialState(
+            self.initial_pressure,
+            initial_temperature,
+            self.initial_fill
+        )
 
-    # Define the target conditions
-    target_conditions = TargetState(
-        max_pressure=None,
-        min_pressure=None,
-        temperature=None,
-        fill=None,
-        mass=None
-    )
+        return self.initial_state
 
-    analysis = AnalyseMissionSection(
-        tank,
-        initial_state,
-        mission_section,
-        stopping_criteria,
-        target_conditions,
-        EulerMethod(timestep),
-        DynamicModelFactory(),
-        ThermodynamicModel(
-            SingleZoneModel(),
-            ForcedConvectionModel(),
-            insulation
-        ),
-        heat_flux_factor=heat_flux_factor
-    )
-    return analysis.analyse_mission_section()
+    def define_mission_section(self):
+        duration = 60e6
+        altitude = 10e3
+        mach_number = 0.85
+        self.mission_section = MissionSection(
+            duration,
+            [self.fuel_flow],
+            altitude,
+            mach_number
+        )
+
+        return self.mission_section
+
+    def define_target_conditions(self):
+        self.target_conditions = TargetState(
+            max_pressure=None,
+            min_pressure=None,
+            temperature=None,
+            fill=None,
+            mass=None
+        )
+
+    def perform_analysis(self):
+        analysis = AnalyseMissionSection(
+            self.tank,
+            self.initial_state,
+            self.mission_section,
+            self.stopping_criteria,
+            self.target_conditions,
+            EulerMethod(self.timestep),
+            DynamicModelFactory(),
+            ThermodynamicModel(
+                SingleZoneModel(),
+                ForcedConvectionModel(),
+                self.insulation
+            ),
+            heat_flux_factor=self.heat_flux_factor
+        )
+        self.tank_states = analysis.analyse_mission_section()
+        
+        return self.target_conditions
+
+    @property
+    def pressures(self):
+        return [state.pressure for state in self.tank_states]
+
+    @property
+    def temperatures(self):
+        return [state.temperature for state in self.tank_states]
+
+    @property
+    def max_pressure(self):
+        return max(self.pressures)
+
+    @property
+    def min_temperature(self):
+        return min(self.temperatures)
 
 
 def gas_draining_analysis(
