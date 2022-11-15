@@ -220,7 +220,12 @@ class AnalyseMissionSection:
             / self.tank.volume
             * self.multistep_method.timestep
         )
-        return round(new_fill, 3)
+        # This line is added, as the step may be such that a negative 
+        # fill is obtained. To avoid this the fill is simply set to 0
+        if new_fill < 0:
+            print(f"Negative fill value: {new_fill}. Fill forced to 0")
+            return 0
+        return new_fill
         
     def analyse_mission_section(self) -> list[TankState]:
 
@@ -246,6 +251,9 @@ class AnalyseMissionSection:
             ):
                 return True
         return False
+
+
+
 
 def main():
     pass
