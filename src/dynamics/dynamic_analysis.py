@@ -188,7 +188,9 @@ class AnalyseMissionSection:
         self.tank_states.last_state.set_thermal_capacity(
             self.tank.compute_thermal_capacity(temperatures[0])
         )
-        self.tank_states.last_state.set_heat_flux(heat_flux)
+        self.tank_states.last_state.set_heat_flux(
+            heat_flux * self.heat_flux_factor
+        )
         dynamic_model = self.dynamic_model_factory.get_dynamic_model(
             self.tank_states.last_state, self.target_conditions
         )
