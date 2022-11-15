@@ -253,8 +253,6 @@ class AnalyseMissionSection:
         return False
 
 
-
-
 def main():
     pass
 
