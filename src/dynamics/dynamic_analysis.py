@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.thermodynamics.tank_states import InitialState, TankState, TargetState
+from src.thermodynamics.tank_states import (InitialState, TankState,
+                                            TankStates, TargetState)
+
+# The thermal capacity of the tank depends on the mass of the tank, as
+# such this needs to be iterated as the operating pressure of the 
+# tank is refined. Here the maximum amount of iterations are defined
+# and the percentage change in capacity of the tank
+MAX_THERMAL_CAPACITY_ITERATIONS = 5
+THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
 
 
 class FuelTank(Protocol):
@@ -15,6 +23,9 @@ class FuelTank(Protocol):
         ...
 
     def compute_thermal_capacity(self, temperature: float) -> float:
+        ...
+
+    def set_operating_pressure(self, pressure: float) -> float:
         ...
 
 
@@ -125,8 +136,10 @@ class AnalyseMissionSection:
 
     heat_flux_factor: float = 1.0
 
-    def __post_init__(self) -> None:
-        self.tank_states = TankStates(list())
+    def define_tank_states(self):
+        self.tank_states = TankStates(
+            list(), self.multistep_method.timestep
+        )
         self.set_up_new_tank_state(
             self.initial.pressure,
             self.initial.temperature,
@@ -236,12 +249,41 @@ class AnalyseMissionSection:
     def stopping_criterion_is_met(self) -> bool:
         for criterion in self.stopping_criteria:
             if criterion.is_met(
-                self.last_tank_state, self.target_conditions
+                self.tank_states.last_state, self.target_conditions
             ):
                 return True
         return False
 
+    def thermal_capacity_has_converged(self) -> bool:
+        old_thermal_capacity = self.tank.compute_thermal_capacity(
+            self.tank_states.average_temperature
+        )
+        self.tank.set_operating_pressure(self.tank_states.max_pressure)
+        new_thermal_capacity = self.tank.compute_thermal_capacity(
+            self.tank_states.average_temperature
+        )
+        percentage_change = (
+            (old_thermal_capacity - new_thermal_capacity)
+            / old_thermal_capacity * 100
+        )
+        if abs(percentage_change) <= THERMAL_CAPACITY_THRESHOLD:
+            return True
+        return False
 
+    def perform_analysis(self):
+
+        for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
+            self.define_tank_states()
+            self.analyse_mission_section()
+            if self.thermal_capacity_has_converged():
+                print(
+                    f"Thermal capacity has converged in {i} iterations"
+                )
+                return self.tank_states
+        
+        raise ValueError("Thermal capacity has failed to converge...")
+
+    
 def main():
     pass
 

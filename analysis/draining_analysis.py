@@ -35,6 +35,7 @@ class FuelFlow(Protocol):
 class TankState(Protocol):
     ...
 
+
 @dataclass
 class TargetState:
     max_pressure: float
@@ -60,7 +61,6 @@ class LiquidDrainingAnalysis:
         self.define_initial_state()
         self.define_mission_section()
         self.define_target_conditions()
-        self.perform_analysis()
 
     def define_initial_state(self) -> InitialState:
         initial_temperature = None
@@ -94,7 +94,7 @@ class LiquidDrainingAnalysis:
             mass=None
         )
 
-    def perform_analysis(self):
+    def drain_tank(self):
         analysis = AnalyseMissionSection(
             self.tank,
             self.initial_state,
@@ -110,25 +110,9 @@ class LiquidDrainingAnalysis:
             ),
             heat_flux_factor=self.heat_flux_factor
         )
-        self.tank_states = analysis.analyse_mission_section()
+        self.tank_states = analysis.perform_analysis()
         
-        return self.target_conditions
-
-    @property
-    def pressures(self):
-        return [state.pressure for state in self.tank_states]
-
-    @property
-    def temperatures(self):
-        return [state.temperature for state in self.tank_states]
-
-    @property
-    def max_pressure(self):
-        return max(self.pressures)
-
-    @property
-    def min_temperature(self):
-        return min(self.temperatures)
+        return self.tank_states
 
 
 def gas_draining_analysis(
