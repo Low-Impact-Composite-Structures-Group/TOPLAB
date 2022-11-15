@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Protocol
 from src.fluids.hydrogen_retrievers import HydrogenRetriever
 
+from statistics import mean
+
 
 class Hydrogen(Protocol):
     liquid: Hydrogen
@@ -13,7 +15,12 @@ class Hydrogen(Protocol):
 
 
 class StateDerivatives(Protocol):
-    ...
+    pressure: float
+    temperature: float
+    gas_mass: float
+    liquid_mass: float
+    venting_mass: float
+    heat_flux: float
 
 
 @dataclass
@@ -110,6 +117,59 @@ class TankState:
     ) -> float:
         self.heat_flux = heat_flux
         return self.heat_flux
+
+
+@dataclass
+class TankStates:
+    states: list[TankState]
+
+    def add_tank_state(self, tank_state: TankState) -> list[TankState]:
+        self.states.append(tank_state)
+        return self.states
+
+    @property
+    def last_state(self):
+        return self.states[-1]
+
+    @property
+    def pressures(self):
+        return [state.pressure for state in self.states]
+
+    @property
+    def temperatures(self):
+        return [state.temperature for state in self.states]
+
+    @property
+    def pressure_derivatives(self):
+        return [state.derivatives.pressure for state in self.states]
+
+    @property
+    def temperature_derivatives(self):
+        return [state.derivatives.temperature for state in self.states]
+
+    @property
+    def initial_temperature(self) -> float:
+        return self.states[0].temperature
+
+    @property
+    def last_pressure(self):
+        return self.last_state.pressure
+
+    @property
+    def last_temperature(self):
+        return self.last_state.temperature
+
+    @property
+    def max_pressure(self):
+        return max(self.pressures)
+
+    @property
+    def average_temperature(self):
+        return mean(self.temperatures)
+
+    @property
+    def min_temperature(self):
+        return min(self.temperatures)
 
 
 def main():

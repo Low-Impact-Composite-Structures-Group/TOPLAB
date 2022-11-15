@@ -126,7 +126,7 @@ class AnalyseMissionSection:
     heat_flux_factor: float = 1.0
 
     def __post_init__(self) -> None:
-        self.tank_states: list[TankState] = list()
+        self.tank_states = TankStates(list())
         self.set_up_new_tank_state(
             self.initial.pressure,
             self.initial.temperature,
@@ -140,17 +140,15 @@ class AnalyseMissionSection:
             self.multistep_method.timestep
         )
 
-    @property
-    def last_tank_state(self) -> TankState:
-        return self.tank_states[-1]
-
     def define_fuel_flows(self) -> list[FuelFlow]:
         fuel_flows = [
             fuel_flow
             if fuel_flow.mass_flow > 0 else
             FuelFlow(
                 fuel_flow.mass_flow,
-                self.last_tank_state.hydrogen.get_phase(fuel_flow.phase)
+                self.tank_states.last_state.hydrogen.get_phase(
+                    fuel_flow.phase
+                )
             )
             for fuel_flow in self.mission_section.fuel_flows
         ]
@@ -159,7 +157,7 @@ class AnalyseMissionSection:
     def set_up_new_tank_state(
         self, pressure: float, temperature: float, fill: float
     ) -> TankState:
-        self.tank_states.append(
+        self.tank_states.add_tank_state(
             TankState(
                 temperature,
                 pressure,
@@ -168,55 +166,47 @@ class AnalyseMissionSection:
                 self.tank.volume
             )
         )
-        return self.last_tank_state
+        return self.tank_states.last_state
     
     def compute_state_derivatives(self):
         heat_flux, temperatures = self.thermal_model.compute_heat_flux(
-            self.tank, self.last_tank_state, self.mission_section
+            self.tank, self.tank_states.last_state, self.mission_section
         )
-        self.last_tank_state.set_thermal_capacity(
+        self.tank_states.last_state.set_thermal_capacity(
             self.tank.compute_thermal_capacity(temperatures[0])
         )
-        self.last_tank_state.set_heat_flux(heat_flux)
+        self.tank_states.last_state.set_heat_flux(heat_flux)
         dynamic_model = self.dynamic_model_factory.get_dynamic_model(
-            self.last_tank_state, self.target_conditions
+            self.tank_states.last_state, self.target_conditions
         )
-        self.last_tank_state.set_state_derivatives(
+        self.tank_states.last_state.set_state_derivatives(
             dynamic_model.compute_state_derivatives(
-                self.last_tank_state,
+                self.tank_states.last_state,
                 self.define_fuel_flows()
             )
         )
-        return self.last_tank_state
+        return self.tank_states.last_state
  
     def compute_new_pressure(self) -> float:
-        pressure_derivatives = [
-            state.derivatives.pressure
-            for state in self.tank_states
-        ]
         new_pressure = self.multistep_method.compute_new_value(
-            pressure_derivatives,
-            self.tank_states[-1].pressure
+            self.tank_states.pressure_derivatives,
+            self.tank_states.last_pressure
         )
         return new_pressure
 
     def compute_new_temperature(self) -> float:
-        temperature_derivatives = [
-            state.derivatives.temperature
-            for state in self.tank_states
-        ]
         return self.multistep_method.compute_new_value(
-            temperature_derivatives,
-            self.tank_states[-1].temperature
+            self.tank_states.temperature_derivatives,
+            self.tank_states.last_temperature
         )
 
     def compute_new_fill(self) -> float:
-        if self.last_tank_state.derivatives.liquid_mass == 0:
-            return self.last_tank_state.fill
+        if self.tank_states.last_state.derivatives.liquid_mass == 0:
+            return self.tank_states.last_state.fill
         new_fill = (
-            self.last_tank_state.fill
-            + self.last_tank_state.derivatives.liquid_mass
-            / self.last_tank_state.hydrogen.liquid.density
+            self.tank_states.last_state.fill
+            + self.tank_states.last_state.derivatives.liquid_mass
+            / self.tank_states.last_state.hydrogen.liquid.density
             / self.tank.volume
             * self.multistep_method.timestep
         )
@@ -227,7 +217,7 @@ class AnalyseMissionSection:
             return 0
         return new_fill
         
-    def analyse_mission_section(self) -> list[TankState]:
+    def analyse_mission_section(self) -> TankStates:
 
         for _ in range(self.timesteps):
 
@@ -239,7 +229,6 @@ class AnalyseMissionSection:
 
             if self.stopping_criterion_is_met():
                 return self.tank_states
-
             self.compute_state_derivatives()
 
         return self.tank_states
