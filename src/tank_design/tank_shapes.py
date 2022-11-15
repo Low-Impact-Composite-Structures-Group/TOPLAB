@@ -25,10 +25,16 @@ STRUCTURAL_MODEL_FACTORY = StructuralModelFactory()
 class Material(Protocol):
     density: float
 
+    def determine_specific_heat(self, temperature: float) -> float:
+        ...
+
 
 class TankSection(ABC):
     material: Material
     operating_pressure: float
+
+    def __post_init__(self):
+        self.define_structural_model()
 
     def define_structural_model(self):
         self.structural_model = (
@@ -49,6 +55,14 @@ class TankSection(ABC):
     @property
     def structural_mass(self):
         return self.structural_volume * self.material.density
+
+    def compute_thermal_capacity(
+        self, temperature: float
+    ) -> float:
+        return (
+            self.structural_mass 
+            * self.material.determine_specific_heat(temperature)
+        )
 
     def set_operating_pressure(self, pressure: float) -> float:
         self.operating_pressure = pressure
@@ -102,7 +116,7 @@ class CylindricalBody(TankSection):
 
     def __post_init__(self):
         self.type = "cylinder"
-        self.define_structural_model()
+        super().__post_init__()
 
     @property
     def surface_area(self) -> float:
@@ -223,11 +237,9 @@ class Tank:
     def compute_thermal_capacity(
         self, temperature: float
     ) -> float:
-        print("Thermal capacity of tank is to be implemented")
-        return 0
         return sum([
-            solid.mass * solid.determine_specific_heat(temperature)
-            for solid in self.solids
+            section.compute_thermal_capacity(temperature)
+            for section in self.sections
         ])
 
     def set_operating_pressure(self, pressure: float):
