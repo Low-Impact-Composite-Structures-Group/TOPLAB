@@ -17,32 +17,42 @@ from typing import Protocol
 
 import numpy as np
 
+from src.tank_design.structural_models import StructuralModelFactory
+
+STRUCTURAL_MODEL_FACTORY = StructuralModelFactory()
+
 
 class Material(Protocol):
     density: float
 
 
-class StructuralModel(Protocol):
-
-    def compute_thickness(
-        self,
-        tank_section: TankSection,
-        material: Material,
-        pressure: float
-    ) -> float:
-        ...
-
-
-class StructuralModelFactory(Protocol):
-
-    def get_structural_model(
-        self, tank_section: TankSection, material: Material
-    ) -> StructuralModel:
-        ...
-
-
 class TankSection(ABC):
     material: Material
+    operating_pressure: float
+
+    def define_structural_model(self):
+        self.structural_model = (
+            STRUCTURAL_MODEL_FACTORY.get_structural_model(self)
+        )
+        return self.structural_model
+
+    @property
+    def thickness(self):
+        return self.structural_model.compute_thickness(
+            self, self.operating_pressure
+        )
+
+    @property
+    def structural_volume(self):
+        return self.surface_area * self.thickness
+
+    @property
+    def structural_mass(self):
+        return self.structural_volume * self.material.density
+
+    def set_operating_pressure(self, pressure: float) -> float:
+        self.operating_pressure = pressure
+        return self.operating_pressure
 
     @property
     @abstractmethod
@@ -82,29 +92,17 @@ class TankSection(ABC):
         """
         ...
     
-    def compute_mass(
-        self,
-        structural_model_factory: StructuralModelFactory,
-        pressure: float
-    ) -> float:
-        model = structural_model_factory.get_structural_model(
-            self, self.material
-        )
-        thickness = model.compute_thickness(
-            self, self.material, pressure
-        )
-        volume = self.surface_area * thickness
-        mass = volume * self.material.density
-        return mass
 
 @dataclass
 class CylindricalBody(TankSection):
     radius: float
     length: float
     material: Material
+    operating_pressure: float
 
     def __post_init__(self):
         self.type = "cylinder"
+        self.define_structural_model()
 
     @property
     def surface_area(self) -> float:
@@ -171,9 +169,11 @@ class CylindricalBody(TankSection):
 class SphericalEndCap(TankSection):
     radius: float
     material: Material
+    operating_pressure: float
 
     def __post_init__(self):
         self.type = "spherical_end_cap"
+        self.define_structural_model()
 
     @property
     def surface_area(self) -> float:
@@ -204,6 +204,7 @@ class SphericalEndCap(TankSection):
 class Tank:
     sections: list[TankSection]
     material: Material
+    operating_pressure: float
 
     def set_sections(
         self, sections: list[TankSection]
@@ -229,6 +230,14 @@ class Tank:
             for solid in self.solids
         ])
 
+    def set_operating_pressure(self, pressure: float):
+        print(self.structural_mass)
+        self.operating_pressure = pressure
+        for section in self.sections:
+            section.set_operating_pressure(pressure)
+        print(self.structural_mass)
+        return self.operating_pressure
+
     @property
     @abstractmethod
     def characteristic_height(self):
@@ -244,6 +253,18 @@ class Tank:
         return sum([
             section.volume
             for section in self.sections
+        ])
+
+    @property
+    def structural_volume(self):
+        return sum([
+            section.structural_volume for section in self.sections
+        ])
+
+    @property
+    def structural_mass(self):
+        return sum([
+            section.structural_mass for section in self.sections
         ])
     
     @property
@@ -303,24 +324,13 @@ class Tank:
         fuel_surface = self.compute_fuel_wetted_surface(fuel_height)
         return self.surface_area - fuel_surface
 
-    def compute_mass(
-        self,
-        structural_model_factory: StructuralModelFactory,
-        pressure: float
-    ) -> float:
-        return sum([
-            section.compute_mass(
-                structural_model_factory, pressure
-            )
-            for section in self.sections
-        ])
     
-
 @dataclass
 class CylindricalTankSphericalCaps(Tank):
     radius: float
     total_length: float
     material: Material
+    operating_pressure: float
 
     def __post_init__(self):
         self.create_body()
@@ -357,7 +367,10 @@ class CylindricalTankSphericalCaps(Tank):
             CylindricalBody: Body of the fuel tank.
         """
         self.body = CylindricalBody(
-            self.radius, self.body_length, self.material
+            self.radius,
+            self.body_length,
+            self.material,
+            self.operating_pressure
         )
         return self.body
 
@@ -368,7 +381,7 @@ class CylindricalTankSphericalCaps(Tank):
             SphericalEndCap: End cap of the fuel tank.
         """
         self.end_cap = SphericalEndCap(
-            self.radius, self.material
+            self.radius, self.material, self.operating_pressure
         )
         return self.end_cap
     
@@ -606,6 +619,7 @@ class CylindricalTankSphericalCaps(Tank):
 class SphericalTank(Tank):
     radius: float
     material: Material
+    operating_pressure: float
 
     def __post_init__(self) -> None:
         self.create_sections()

@@ -4,14 +4,16 @@ from abc import abstractmethod
 from typing import Protocol
 
 
-class TankSection(Protocol):
-    radius: float
-    type: str
-
 
 class Material(Protocol):
     failure_stress: float
     type: float
+
+
+class TankSection(Protocol):
+    radius: float
+    type: str
+    material: Material
 
 
 class StructuralModel(Protocol):
@@ -20,7 +22,6 @@ class StructuralModel(Protocol):
     def compute_thickness(
         self,
         tank_section: TankSection,
-        material: Material,
         pressure: float
     ) -> float:
         ...
@@ -31,10 +32,12 @@ class MetalSphericalEndCap(StructuralModel):
     def compute_thickness(
         self,
         tank_section: TankSection,
-        material: Material,
         pressure: float
     ) -> float:
-        return pressure * tank_section.radius / material.failure_stress
+        return (
+            pressure * tank_section.radius
+            / tank_section.material.failure_stress
+        )
 
 
 class MetalCylinder(StructuralModel):
@@ -42,27 +45,29 @@ class MetalCylinder(StructuralModel):
     def compute_thickness(
         self,
         tank_section: TankSection,
-        material: Material,
         pressure: float
     ) -> float:
-        return pressure * tank_section.radius / material.failure_stress
+        return (
+            pressure * tank_section.radius
+            / tank_section.material.failure_stress
+        )
 
 
 class StructuralModelFactory:
 
     def get_structural_model(
-        self, tank_section: TankSection, material: Material
+        self, tank_section: TankSection
     ) -> StructuralModel:
-        if material.type == "metal":
+        if tank_section.material.type == "metal":
             if tank_section.type == "cylinder":
                 return MetalCylinder()
             if tank_section.type == "spherical_end_cap":
                 return MetalSphericalEndCap()
-        if material.type == "composite":
+        if tank_section.material.type == "composite":
             ...
         raise ValueError(
-            f"{material.type} not supported material type for " \
-                "structural models"
+            f"{tank_section.material.type} and {tank_section.type}" \
+                "not supported in StructuralModelFactory"
         )
 
 
