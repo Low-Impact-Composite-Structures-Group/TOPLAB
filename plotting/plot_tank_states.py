@@ -8,32 +8,23 @@ SECONDS_TO_HOURS = 1 / 60 ** 2
 PASCAL_TO_BAR = 1e-5 
 
 
-class TankState(Protocol):
-    pressure: float
-    temperature: float
-    fill: float
-    liquid_mass: float
-    gas_mass: float
-    fuel_mass: float
+class TankStates(Protocol):
+    pressures: list[float]
+    temperatures: list[float]
+    timesteps_in_hours: list[float]
+    pressures_in_bar: list[float]
 
 
 def plot_tank_loads(
-    tank_states: list[list[TankState]],
+    tank_states: list[TankStates],
     labels: list[str],
-    timestep: float = 60,
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
     data = [
         Line(
-            [
-                i * timestep * SECONDS_TO_HOURS
-                for i, _ in enumerate(row)
-            ],
-            [
-                state.pressure * PASCAL_TO_BAR
-                for state in row
-            ],
+            row.timesteps_in_hours,
+            row.pressures_in_bar,
             label
         )
         for row, label in zip(tank_states, labels)
@@ -47,22 +38,15 @@ def plot_tank_loads(
     )
 
 def plot_tank_temperatures(
-    tank_states: list[list[TankState]],
+    tank_states: list[TankStates],
     labels: list[str],
-    timestep: float = 60,
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
     data = [
         Line(
-            [
-                i * timestep * SECONDS_TO_HOURS
-                for i, _ in enumerate(row)
-            ],
-            [
-                state.temperature
-                for state in row
-            ],
+            row.timesteps_in_hours,
+            row.temperatures,
             label
         )
         for row, label in zip(tank_states, labels)
@@ -77,28 +61,23 @@ def plot_tank_temperatures(
 
 
 def plot_thermo_mechanical_loading(
-    tank_states: list[TankState],
-    timestep: float,
+    tank_states: TankStates,
     x_ticks: list[float] = None,
     y1ticks: list[float] = None,
     y2ticks: list[float] = None
 ):
-    # Unpack values for plotting
-    pressures = [
-        state.pressure * PASCAL_TO_BAR
-        for state in tank_states
-    ]
-    temperatures = [
-        state.temperature
-        for state in tank_states
-    ]
-    times = [
-        i * timestep * SECONDS_TO_HOURS
-        for i, _ in enumerate(pressures)
-    ]
+    times = tank_states.timesteps_in_hours
     data = [
-        [Line(times, pressures, "Pressure")],
-        [Line(times, temperatures, "Temperatures")]
+        [Line(
+            times,
+            tank_states.pressures_in_bar,
+            "Pressure"
+        )],
+        [Line(
+            times,
+            tank_states.temperatures,
+            "Temperatures"
+        )]
     ]
     return TwinXFigure(
         data,
@@ -110,42 +89,19 @@ def plot_thermo_mechanical_loading(
 
 
 def plot_tank_fill(
-    tank_states: list[TankState],
-    timestep: float,
+    tank_states: TankStates,
     x_ticks: list[float] = None,
     y1ticks: list[float] = None,
     y2ticks: list[float] = None
 ) -> None:
-
-    # Unpack data from tank states
-    liquid_mass = [
-        state.liquid_mass
-        for state in tank_states
-    ]
-    gas_mass = [
-        state.gas_mass
-        for state in tank_states
-    ]
-    total_mass = [
-        state.fuel_mass
-        for state in tank_states
-    ]
-    fill = [
-        state.fill * 100
-        for state in tank_states
-    ]
-    times = [
-        i * timestep * SECONDS_TO_HOURS
-        for i, _ in enumerate(tank_states)
-    ]
-
+    times = tank_states.timesteps_in_hours
     data = [
         [
-            Line(times, liquid_mass, "Liquid"),
-            Line(times, gas_mass, "Gas"),
-            Line(times, total_mass, "Total")
+            Line(times, tank_states.liquid_masses, "Liquid"),
+            Line(times, tank_states.gas_masses, "Gas"),
+            Line(times, tank_states.total_masses, "Total")
         ], [
-            Line(times, fill, "Fill")
+            Line(times, tank_states.fills, "Fill")
         ]
     ]
     x_label = "Time [hour]"

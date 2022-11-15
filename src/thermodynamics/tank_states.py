@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from statistics import mean
 from typing import Protocol
+
 from src.fluids.hydrogen_retrievers import HydrogenRetriever
 
-from statistics import mean
+SECONDS_TO_HOURS = 1 / 60 ** 2
+PASCAL_TO_BAR = 1e-5 
 
 
 class Hydrogen(Protocol):
@@ -122,14 +125,28 @@ class TankState:
 @dataclass
 class TankStates:
     states: list[TankState]
+    timestep: float
 
     def add_tank_state(self, tank_state: TankState) -> list[TankState]:
         self.states.append(tank_state)
         return self.states
 
     @property
+    def timesteps_in_hours(self):
+        return [
+            i * self.timestep * SECONDS_TO_HOURS
+            for i, _ in enumerate(self.pressures)
+        ]
+
+    @property
     def last_state(self):
         return self.states[-1]
+
+    @property
+    def pressures_in_bar(self):
+        return [
+            pressure * PASCAL_TO_BAR for pressure in self.pressures
+        ]
 
     @property
     def pressures(self):
@@ -170,6 +187,45 @@ class TankStates:
     @property
     def min_temperature(self):
         return min(self.temperatures)
+
+    @property
+    def hydrogens(self) -> list[Hydrogen]:
+        return [state.hydrogen for state in self.states]
+
+    @property
+    def fills(self) -> list[float]:
+        return [state.fill for state in self.states]
+
+    @property
+    def volumes(self) -> list[float]:
+        return [state.volume for state in self.states]
+
+    @property
+    def liquid_masses(self) -> list[float]:
+        return [
+            fill * volume * hydrogen.liquid.density
+            for fill, volume, hydrogen in zip(
+                self.fills, self.volumes, self.hydrogens
+            )
+        ]
+
+    @property
+    def gas_masses(self) -> list[float]:
+        return [
+            (1 - fill) * volume * hydrogen.gas.density
+            for fill, volume, hydrogen in zip(
+                self.fills, self.volumes, self.hydrogens
+            )
+        ]
+
+    @property
+    def total_masses(self):
+        return [
+            liquid_mass + gas_mass
+            for liquid_mass, gas_mass in zip(
+                self.liquid_masses, self.gas_masses
+            )
+        ]
 
 
 def main():
