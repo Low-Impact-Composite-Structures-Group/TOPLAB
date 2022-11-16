@@ -70,8 +70,14 @@ def perform_analysis():
     timestep = 60
     multistep_method = EulerMethod(timestep)
 
+    # Define the mission
+    mission = Mission.small_medium_range("liquid")
+
     tank_states = TankStates(list(), timestep)
-    for mission_section in Mission.rompokos().sections:
+    # The index is used to remove the first tank state of mission
+    # section that are not the first, to avoid doubles
+    i = 0  
+    for mission_section in mission.sections:
         analysis = AnalyseMissionSection(
             tank,
             initial_conditions,
@@ -83,8 +89,8 @@ def perform_analysis():
             thermodynamic_model,
             heat_flux_factor
         )
-
-        for state in analysis.perform_analysis().states:
+        for state in analysis.perform_analysis().states[i:]:
+            i = 1
             tank_states.add_tank_state(state)
         initial_conditions = InitialState(
             tank_states.last_pressure,
