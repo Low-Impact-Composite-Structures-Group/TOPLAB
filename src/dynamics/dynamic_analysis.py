@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from src.mission.mission import Mission
 
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
@@ -123,101 +124,120 @@ class FuelFlow:
     hydrogen: Hydrogen
 
 
-@dataclass
-class AnalyseMissionSection:
-    tank: FuelTank
-    initial: InitialState
-    mission_section: MissionSection
-    stopping_criteria: list[StoppingCriterion]
-    target_conditions: TargetState
-    multistep_method: MultistepMethod
-    dynamic_model_factory: DynamicModelFactory
-    thermal_model: ThermodynamicModel
+class MissionSectionAnalysis:
 
-    heat_flux_factor: float = 1.0
+    @classmethod
+    def initialise_tank_states(
+        cls,
+        initial_state: InitialState,
+        tank: FuelTank,
+        timestep: float
+    ) -> TankStates:
+        initial_state = TankState(
+            initial_state.temperature,
+            initial_state.pressure,
+            initial_state.fill,
+            tank.compute_fuel_height(
+            tank.volume * initial_state.fill
+            ),
+            tank.volume
+        )
+        return TankStates([initial_state], timestep)
 
-    def define_tank_states(self):
-        self.tank_states = TankStates(
-            list(), self.multistep_method.timestep
-        )
-        self.set_up_new_tank_state(
-            self.initial.pressure,
-            self.initial.temperature,
-            self.initial.fill
-        )
-        self.compute_state_derivatives()
-    
-    @property
-    def timesteps(self) -> int:
-        return self.mission_section.number_of_timesteps(
-            self.multistep_method.timestep
-        )
-
-    def define_fuel_flows(self) -> list[FuelFlow]:
-        fuel_flows = [
+    @staticmethod
+    def define_fuel_flows(
+        fuel_flows: list[FuelFlow | OutFlow], tank_state: TankState
+    ) -> list[FuelFlow]:
+        return [
             fuel_flow
-            if fuel_flow.mass_flow > 0 else
-            FuelFlow(
+            if fuel_flow.mass_flow > 0
+            else FuelFlow(
                 fuel_flow.mass_flow,
-                self.tank_states.last_state.hydrogen.get_phase(
-                    fuel_flow.phase
-                )
+                tank_state.hydrogen.get_phase(fuel_flow.phase)
             )
-            for fuel_flow in self.mission_section.fuel_flows
+            for fuel_flow in fuel_flows
         ]
-        return fuel_flows
 
-    def set_up_new_tank_state(
-        self, pressure: float, temperature: float, fill: float
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank: FuelTank,
+        thermal_model: ThermodynamicModel,
+        tank_state: TankState,
+        mission_section: MissionSection,
+        dynamic_model_factory: DynamicModelFactory,
+        target_conditions: TargetState,
+        heat_flux_factor: float
     ) -> TankState:
-        self.tank_states.add_tank_state(
-            TankState(
-                temperature,
-                pressure,
-                fill,
-                self.tank.compute_fuel_height(self.tank.volume * fill),
-                self.tank.volume
-            )
+        heat_flux, temperatures = thermal_model.compute_heat_flux(
+            tank, tank_state, mission_section
         )
-        return self.tank_states.last_state
-    
-    def compute_state_derivatives(self):
-        heat_flux, temperatures = self.thermal_model.compute_heat_flux(
-            self.tank, self.tank_states.last_state, self.mission_section
+        dynamic_model = dynamic_model_factory.get_dynamic_model(
+            tank_state, target_conditions
         )
-        dynamic_model = self.dynamic_model_factory.get_dynamic_model(
-            self.tank_states.last_state, self.target_conditions
-        )
-        self.tank_states.last_state.compute_state_derivatives(
+        tank_state.compute_state_derivatives(
             dynamic_model,
-            self.define_fuel_flows(),
-            heat_flux * self.heat_flux_factor,
-            self.tank.compute_thermal_capacity(temperatures[0])
+            cls.define_fuel_flows(
+                mission_section.fuel_flows,
+                tank_state
+            ),
+            heat_flux * heat_flux_factor,
+            tank.compute_thermal_capacity(temperatures[0])
         )
-        return self.tank_states.last_state
- 
-    def compute_new_pressure(self) -> float:
-        new_pressure = self.multistep_method.compute_new_value(
-            self.tank_states.pressure_derivatives,
-            self.tank_states.last_pressure
-        )
+        return tank_state
+   
+    @staticmethod
+    def stopping_criterion_is_met(
+        stopping_criteria: list[StoppingCriterion],
+        current_state: TankState,
+        target_state: TargetState
+    ) -> bool:
+        for criterion in stopping_criteria:
+            if criterion.is_met(
+                current_state, target_state
+            ):
+                return True
+        return False
+
+    @classmethod
+    def compute_new_temperature(
+        cls,
+        multistep_method: MultistepMethod,
+        tank_states: TankStates
+    ) -> float:
+        new_temperature = multistep_method.compute_new_value(
+                tank_states.temperature_derivatives,
+                tank_states.last_temperature
+            )
+        
+        return new_temperature
+
+    @classmethod
+    def compute_new_pressure(
+        cls,
+        multistep_method: MultistepMethod,
+        tank_states: TankStates
+    ) -> float:
+        new_pressure = multistep_method.compute_new_value(
+                tank_states.pressure_derivatives,
+                tank_states.last_pressure
+            )
+        
         return new_pressure
 
-    def compute_new_temperature(self) -> float:
-        return self.multistep_method.compute_new_value(
-            self.tank_states.temperature_derivatives,
-            self.tank_states.last_temperature
-        )
-
-    def compute_new_fill(self) -> float:
-        if self.tank_states.last_state.derivatives.liquid_mass == 0:
-            return self.tank_states.last_state.fill
+    @staticmethod
+    def compute_new_fill(
+        last_state: TankState,
+        timestep: float
+    ) -> float:
+        if last_state.derivatives.liquid_mass == 0:
+            return last_state.fill
         new_fill = (
-            self.tank_states.last_state.fill
-            + self.tank_states.last_state.derivatives.liquid_mass
-            / self.tank_states.last_state.hydrogen.liquid.density
-            / self.tank.volume
-            * self.multistep_method.timestep
+            last_state.fill
+            + last_state.derivatives.liquid_mass
+            / last_state.hydrogen.liquid.density
+            / last_state.volume
+            * timestep
         )
         # This line is added, as the step may be such that a negative 
         # fill is obtained. To avoid this the fill is simply set to 0
@@ -225,59 +245,141 @@ class AnalyseMissionSection:
             print(f"Negative fill value: {new_fill}. Fill forced to 0")
             return 0
         return new_fill
-        
-    def analyse_mission_section(self) -> TankStates:
+   
+    @classmethod
+    def analyse_section(
+        cls,
+        tank: FuelTank,
+        initial: InitialState,
+        mission_section: MissionSection,
+        stopping_criteria: list[StoppingCriterion],
+        target_conditions: TargetState,
+        multistep_method: MultistepMethod,
+        dynamic_model_factory: DynamicModelFactory,
+        thermal_model: ThermodynamicModel,
+        heat_flux_factor: float
+    ) -> TankStates:
 
-        for _ in range(self.timesteps):
+        tank_states = cls.initialise_tank_states(
+            initial,
+            tank,
+            multistep_method.timestep
+        )
 
-            self.set_up_new_tank_state(
-                self.compute_new_pressure(),
-                self.compute_new_temperature(),
-                self.compute_new_fill()
+        steps = mission_section.number_of_timesteps(
+            multistep_method.timestep
+        )
+        for _ in range(steps):
+
+            cls.compute_state_derivatives(
+                tank,
+                thermal_model,
+                tank_states.last_state,
+                mission_section,
+                dynamic_model_factory,
+                target_conditions,
+                heat_flux_factor
             )
 
-            if self.stopping_criterion_is_met():
-                return self.tank_states
-            self.compute_state_derivatives()
+            new_fill = cls.compute_new_fill(
+                tank_states.last_state,
+                multistep_method.timestep
+            )
+            tank_states.add_tank_state(
+                TankState(
+                    cls.compute_new_temperature(
+                        multistep_method, tank_states
+                    ),
+                    cls.compute_new_pressure(
+                        multistep_method, tank_states
+                    ),
+                    new_fill,
+                    tank.compute_fuel_height(
+                        tank.volume * new_fill
+                    ),
+                    tank.volume
+                )
+            )
 
-        return self.tank_states
-
-    def stopping_criterion_is_met(self) -> bool:
-        for criterion in self.stopping_criteria:
-            if criterion.is_met(
-                self.tank_states.last_state, self.target_conditions
+            if cls.stopping_criterion_is_met(
+                stopping_criteria,
+                tank_states.last_state,
+                target_conditions
             ):
-                return True
-        return False
+                return tank_states
 
-    def thermal_capacity_has_converged(self) -> bool:
-        old_thermal_capacity = self.tank.compute_thermal_capacity(
-            self.tank_states.average_temperature
+        return tank_states
+
+
+class MissionAnalysis:
+
+    @classmethod
+    def perform_analysis(
+        cls,
+        tank: FuelTank,
+        initial_state: InitialState,
+        mission: Mission,
+        stopping_criteria: list[StoppingCriterion],
+        target_conditions: TargetState,
+        multistep_method: MultistepMethod,
+        dynamic_model_factory: DynamicModelFactory,
+        thermal_model: ThermodynamicModel,
+        heat_flux_factor: float
+    ) -> TankStates:
+
+        # Iterate till the thermal capacity has converge
+        for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
+
+            # Define initial state of the tank
+            initial = initial_state
+            tank_states = TankStates(list(), multistep_method.timestep)
+
+            for mission_section in mission.sections:
+
+                tank_states += MissionSectionAnalysis().analyse_section(
+                    tank,
+                    initial,
+                    mission_section,
+                    stopping_criteria,
+                    target_conditions,
+                    multistep_method,
+                    dynamic_model_factory,
+                    thermal_model,
+                    heat_flux_factor
+                )
+
+                initial = InitialState(
+                    tank_states.last_pressure,
+                    tank_states.last_temperature,
+                    tank_states.last_fill
+                )
+
+            # Check for convergence in the thermal capacity of the tank
+            if cls.thermal_capacity_has_converged(tank, tank_states):
+                print(f"Thermal capacity converged in {i} iterations")
+                return tank_states
+        raise ValueError("Thermal capacity has failed to converge")
+
+    @classmethod
+    def thermal_capacity_has_converged(
+        cls, tank: FuelTank, tank_states: TankStates
+    ) -> bool:
+
+        # Compute old thermal capacity
+        old = tank.compute_thermal_capacity(
+            tank_states.average_temperature
         )
-        self.tank.set_operating_pressure(self.tank_states.max_pressure)
-        new_thermal_capacity = self.tank.compute_thermal_capacity(
-            self.tank_states.average_temperature
+
+        # Update thermal capacity 
+        tank.set_operating_pressure(tank_states.max_pressure)
+        new = tank.compute_thermal_capacity(
+            tank_states.average_temperature
         )
-        percentage_change = (
-            (old_thermal_capacity - new_thermal_capacity)
-            / old_thermal_capacity * 100
-        )
-        if abs(percentage_change) <= THERMAL_CAPACITY_THRESHOLD:
+
+        # Compute percentage change and verify convergence
+        if abs((old - new) / old) * 100 <= THERMAL_CAPACITY_THRESHOLD:
             return True
         return False
-
-    def perform_analysis(self):
-
-        for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
-            self.define_tank_states()
-            self.analyse_mission_section()
-            if self.thermal_capacity_has_converged():
-                print(
-                    f"Thermal capacity has converged in {i} iterations"
-                )
-                return self.tank_states
-        
-        raise ValueError("Thermal capacity has failed to converge...")
 
     
 def main():
