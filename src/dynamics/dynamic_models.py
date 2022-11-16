@@ -19,7 +19,7 @@ from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
 
 
 class TargetConditions(Protocol):
-    ...
+    pressure: float
 
 
 class Hydrogen(Protocol):
@@ -54,6 +54,7 @@ class TankState(Protocol):
     fuel_mass: float
     tank_thermal_capacity: float
     phase: str
+    pressure: float
 
 
 @dataclass
@@ -404,12 +405,87 @@ class TwoPhaseModel(DynamicModel):
         b = [[0], [y2], [y3], [y4]]
         return b
 
-    @property
-    def added_heat_flux(self) -> float:
+    @classmethod
+    def added_heat_flux(cls) -> float:
         return 0
 
-    @property
-    def venting_mass(self) -> float:
+    @classmethod
+    def venting_mass(cls) -> float:
+        return 0
+
+
+class TwoPhaseLimitLowerPressureModel(DynamicModel):
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        return StateDerivatives(
+            cls.compute_pressure_derivative(),
+            cls.compute_temperature_derivative(),
+            cls.compute_gas_mass_derivative(
+                tank_state.hydrogen, fuel_flows
+            ),
+            cls.compute_liquid_mass_derivative(
+                tank_state.hydrogen, fuel_flows
+            ),
+            cls.compute_venting_mass(),
+            cls.compute_required_heat_flux(
+                tank_state.hydrogen, fuel_flows, tank_state.heat_flux
+            )
+        )
+
+    @classmethod
+    def compute_required_heat_flux(
+        cls,
+        hydrogen: TwoPhaseHydrogen,
+        fuel_flows: list[FuelFlow],
+        heat_flux: float
+    ) -> float:
+        t1 = hydrogen.liquid.enthalpy * cls.compute_liquid_mass_derivative(
+            hydrogen, fuel_flows
+        )
+        t2 = hydrogen.gas.enthalpy * cls.compute_gas_mass_derivative(
+            hydrogen, fuel_flows
+        )
+        t3 = sum([
+            flow.mass_flow * flow.hydrogen.enthalpy
+            for flow in fuel_flows
+        ])
+        return - (t1 + t2 + t3 - heat_flux)
+
+    @staticmethod
+    def compute_liquid_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, fuel_flows: list[FuelFlow]
+    ) -> float:
+        return (
+            sum([flow.mass_flow for flow in fuel_flows]) / (
+                1 - hydrogen.gas.density / hydrogen.liquid.density
+            )
+        )
+
+    @staticmethod
+    def compute_gas_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, fuel_flows: list[FuelFlow]
+    ) -> float:
+        return (
+            sum([flow.mass_flow for flow in fuel_flows]) / (
+                1 - hydrogen.liquid.density / hydrogen.gas.density
+            )
+        )
+
+    @staticmethod
+    def compute_pressure_derivative() -> float:
+        return 0
+
+    @staticmethod
+    def compute_temperature_derivative() -> float:
+        return 0
+
+    @staticmethod
+    def compute_venting_mass() -> float:
         return 0
 
 
@@ -469,6 +545,8 @@ class DynamicModelFactory:
         target_conditions: TargetConditions
     ) -> DynamicModel:
         if tank_state.phase == "twophase":
+            if tank_state.pressure <= target_conditions.pressure:
+                return TwoPhaseLimitLowerPressureModel
             return TwoPhaseModel
         return SinglePhaseModel
 
