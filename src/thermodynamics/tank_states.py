@@ -131,6 +131,16 @@ class TankStates:
     states: list[TankState]
     timestep: float
 
+    def __add__(self, other: TankStates) -> TankStates:
+        if len(self.states) == 0:
+            self.states = other.states
+            return self
+        if self.states[-1] == other.states[0]:
+            self.states += other.states[1:]
+            return self
+        self.states += other.states
+        return self
+
     def add_tank_state(self, tank_state: TankState) -> list[TankState]:
         self.states.append(tank_state)
         return self.states
