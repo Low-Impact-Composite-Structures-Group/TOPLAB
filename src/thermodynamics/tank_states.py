@@ -249,6 +249,16 @@ class TankStates:
             )
         ]
 
+    @property
+    def state_derivatives(self):
+        return [state.derivatives for state in self.states[:-1]]
+
+    @property
+    def required_fluxes(self):
+        return [
+            derivative.heat_flux
+            for derivative in self.state_derivatives
+        ]
 
 def main():
     pass
