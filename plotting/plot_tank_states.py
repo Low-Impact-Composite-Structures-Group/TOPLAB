@@ -13,6 +13,7 @@ class TankStates(Protocol):
     temperatures: list[float]
     timesteps_in_hours: list[float]
     pressures_in_bar: list[float]
+    required_fluxes: list[float]
 
 
 def plot_tank_loads(
@@ -33,6 +34,28 @@ def plot_tank_loads(
         data,
         "Time [hour]",
         "Pressure [bar]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
+def plot_required_flux(
+    tank_states: list[TankStates],
+    labels: list[str],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            row.timesteps_in_hours[:-1],
+            row.required_fluxes,
+            label
+        )
+        for row, label in zip(tank_states, labels)
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Flux [W]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
