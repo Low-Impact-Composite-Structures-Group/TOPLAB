@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from src.mission.mission import Mission
+from src.dynamics.stopping_criteria import TankIsEmpty
+from src.mission.mission import Mission, MissionSection
 
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
@@ -78,19 +79,6 @@ class DynamicModelFactory(Protocol):
 
 class ConvectiveMedium:
     ...
-
-
-class MissionSection(Protocol):
-    duration: float
-    fuel_flows: list[FuelFlow | OutFlow]
-    ambient: ConvectiveMedium
-    flight_speed: float
-
-    def number_of_timesteps(self, timestep: float) -> float:
-        ...
-
-    def final_timestep(self, timestep: float) -> float:
-        ...
 
 
 class StoppingCriterion(Protocol):
@@ -380,6 +368,55 @@ class MissionAnalysis:
         if abs((old - new) / old) * 100 <= THERMAL_CAPACITY_THRESHOLD:
             return True
         return False
+
+
+class DrainingAnalysis:
+
+    @classmethod
+    def perform_analysis(
+        cls,
+        tank: FuelTank,
+        fuel_mass_flow: float,
+        fuel_flow_state: float,
+        initial_state: InitialState,
+        multistep_method: MultistepMethod,
+        dynamic_model_factory: DynamicModelFactory,
+        thermal_model: ThermodynamicModel,
+        heat_flux_factor: float
+    ) -> TankStates:
+
+        # Definition of the mission
+        mission_section = MissionSection.draining(
+            fuel_mass_flow, fuel_flow_state
+        )
+        mission = Mission([mission_section])
+
+        # Definition of stopping criteria
+        stopping_criteria = [TankIsEmpty()]
+
+        # Define the target sate
+        pressure = None
+        temperature = None
+        fill = 0.0
+        mass = None
+        target_conditions = TargetState(
+            pressure,
+            temperature,
+            fill,
+            mass
+        )
+
+        return MissionAnalysis.perform_analysis(
+            tank,
+            initial_state,
+            mission,
+            stopping_criteria,
+            target_conditions,
+            multistep_method,
+            dynamic_model_factory,
+            thermal_model,
+            heat_flux_factor
+        )
 
     
 def main():
