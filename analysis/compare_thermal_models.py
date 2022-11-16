@@ -2,15 +2,17 @@
 
 from typing import Protocol
 
-from plotting.plot_tank_states import plot_tank_fill, plot_tank_loads, plot_thermo_mechanical_loading
-from src.dynamics.dynamic_analysis import AnalyseMissionSection
+from plotting.plot_tank_states import plot_tank_loads
+from src.dynamics.dynamic_analysis import MissionAnalysis
 from src.dynamics.dynamic_models import DynamicModelFactory
 from src.dynamics.stopping_criteria import TankIsEmpty
 from src.insulation.foam_insulations import ConstantFoamInsulation
+from src.materials.materials import Metal
 from src.mission.mission import Mission
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
-from src.thermodynamics.external_models import ForcedConvectionModel, NaturalConvectionModel
+from src.thermodynamics.external_models import (ForcedConvectionModel,
+                                                NaturalConvectionModel)
 from src.thermodynamics.internal_models import SingleZoneModel, ThreeZoneModel
 from src.thermodynamics.tank_states import InitialState, TargetState
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
@@ -33,7 +35,8 @@ def perform_analysis():
     )
 
     # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.rompokos()
+    material  = Metal.aluminum()
+    tank = CylindricalTankSphericalCaps.rompokos(material, pressure)
 
     # Define the stopping criteria for the fuel tank
     stopping_criteria = [TankIsEmpty()]
@@ -81,39 +84,29 @@ def perform_analysis():
         )
     ]
 
-    data = list()
-    for model in thermal_models:
-        tank_states: list[TankState] = list()
-        initial_conditions = InitialState(
-            pressure, temperature, fill
+    mission = Mission.rompokos()
+    data = [
+        MissionAnalysis.perform_analysis(
+            tank,
+            initial_conditions,
+            mission,
+            stopping_criteria,
+            target_conditions,
+            multistep_method,
+            dynamic_model_factory,
+            model,
+            heat_flux_factor
         )
-        for mission_section in Mission.rompokos().sections:
-            analysis = AnalyseMissionSection(
-                tank,
-                initial_conditions,
-                mission_section,
-                stopping_criteria,
-                target_conditions,
-                multistep_method,
-                dynamic_model_factory,
-                model,
-                heat_flux_factor=heat_flux_factor
-            )
+        for model in thermal_models
+    ]
+        
 
-            tank_states += analysis.analyse_mission_section()
-            initial_conditions = InitialState(
-                tank_states[-1].pressure,
-                tank_states[-1].temperature,
-                tank_states[-1].fill 
-            )
-        data.append(tank_states)
     yticks = [i / 10 for i in range(14, 63, 2)]
     yticks = None
     xticks = [i for i in range(0, 25, 4)]
     fig = plot_tank_loads(
         data,
         ["Single Zone", "Three Zone", "Natural"],
-        timestep,
         x_ticks=xticks,
         y_ticks=yticks
     )
