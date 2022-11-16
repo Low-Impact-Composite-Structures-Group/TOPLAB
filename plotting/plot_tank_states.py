@@ -8,6 +8,11 @@ SECONDS_TO_HOURS = 1 / 60 ** 2
 PASCAL_TO_BAR = 1e-5 
 
 
+class Performances(Protocol):
+    volumetric_efficiency: float
+    gravimetric_efficiency: float
+
+
 class TankStates(Protocol):
     pressures: list[float]
     temperatures: list[float]
@@ -78,6 +83,42 @@ def plot_tank_temperatures(
         data,
         "Time [hour]",
         "Temperature [K]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
+
+def plot_tank_efficiencies(
+    performances: list[Performances],
+    x_data: list[str],
+    x_label: str,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            x_data,
+            [
+                performance.gravimetric_efficiency 
+                for performance in performances
+            ],
+            "Gravimetric",
+            marker=None
+        ),
+        Line(
+            x_data,
+            [
+                performance.volumetric_efficiency 
+                for performance in performances
+            ],
+            "Volumetric",
+            marker=None
+        )
+    ]
+    return SingleFigure(
+        data,
+        x_label,
+        "Efficiency [-]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
