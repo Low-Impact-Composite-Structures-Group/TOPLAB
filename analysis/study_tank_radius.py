@@ -29,6 +29,9 @@ def perform_analysis():
     # Define fuel flow
     fuel_flow = OutFlow.rompokos_cruise("liquid")
 
+    # Define the minimum pressure of the tank
+    min_pressure = 1.3e5
+
     # Define tank dimensions
     body_length = 5
     radii = [1.0, 1.5, 2.0, 2.5]
@@ -43,13 +46,18 @@ def perform_analysis():
             insulation,
             fuel_flow.mass_flow,
             fuel_flow.phase,
-            initial_state
+            initial_state,
+            min_pressure
         ).tank_states
         for radius in radii
     ]
 
-    fig1 = plot_tank_loads(data, labels)
-    fig2 = plot_tank_temperatures(data, labels)
+    xticks = list(range(0, 31, 5))
+    yticks = list(range(0, 11, 2))
+    fig1 = plot_tank_loads(data, labels, xticks, yticks)
+    yticks = list(range(20, 33, 2))
+    fig2 = plot_tank_temperatures(data, labels, xticks, yticks)
+    yticks = list(range(0, 12001, 2000))
     fig3 = plot_tank_fill(data[-1])
 
     fig1.show()

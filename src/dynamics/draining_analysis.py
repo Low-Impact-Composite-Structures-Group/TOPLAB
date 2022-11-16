@@ -37,6 +37,7 @@ class AnalyseCylindricalTank:
         fuel_mass_flow: float,
         fuel_phase_flow: float,
         initial_state: InitialState,
+        min_pressure: float,
         timestep: float = 60,
     ) -> TankPerformance:
         tank = cls.create_tank(
@@ -48,6 +49,7 @@ class AnalyseCylindricalTank:
             fuel_phase_flow,
             insulation,
             initial_state,
+            min_pressure,
             timestep
         )
         
@@ -60,6 +62,7 @@ class AnalyseCylindricalTank:
         fuel_phase_flow: float,
         insulation: Insulation,
         initial_state: InitialState,
+        min_pressure: float,
         timestep: float
     ) -> TankStates:
 
@@ -82,6 +85,7 @@ class AnalyseCylindricalTank:
             fuel_mass_flow,
             fuel_phase_flow,
             initial_state,
+            min_pressure,
             multistep_method,
             dynamic_model_factory,
             thermal_model,

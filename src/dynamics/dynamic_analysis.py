@@ -379,6 +379,7 @@ class DrainingAnalysis:
         fuel_mass_flow: float,
         fuel_flow_state: float,
         initial_state: InitialState,
+        min_pressure: float,
         multistep_method: MultistepMethod,
         dynamic_model_factory: DynamicModelFactory,
         thermal_model: ThermodynamicModel,
@@ -395,12 +396,11 @@ class DrainingAnalysis:
         stopping_criteria = [TankIsEmpty()]
 
         # Define the target sate
-        pressure = None
         temperature = None
         fill = 0.0
         mass = None
         target_conditions = TargetState(
-            pressure,
+            min_pressure,
             temperature,
             fill,
             mass
