@@ -1,4 +1,5 @@
 
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -60,6 +61,18 @@ class MissionSection:
                 "Ensure that the duration is a multiple of the step."
             )
         return int(self.duration // timestep)
+
+    @classmethod
+    def draining(
+        cls, fuel_mass_flow, fuel_flow_state
+    ) -> MissionSection:
+        duration = 60e10
+        altitude = 10e3
+        mach_number = 0.8
+        fuel_flows = [OutFlow(fuel_mass_flow, fuel_flow_state)]
+        return cls(
+            duration, fuel_flows, altitude, mach_number
+        )
 
 
 def main():
