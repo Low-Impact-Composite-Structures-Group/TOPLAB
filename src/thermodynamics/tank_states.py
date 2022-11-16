@@ -195,6 +195,10 @@ class TankStates:
         return self.last_state.temperature
 
     @property
+    def last_fill(self):
+        return self.last_state.fill
+
+    @property
     def max_pressure(self):
         return max(self.pressures)
 
