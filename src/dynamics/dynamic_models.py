@@ -225,8 +225,8 @@ class TwoPhaseModel(DynamicModel):
             x[1][0],
             x[2][0],
             x[3][0],
-            cls.venting_mass,
-            cls.added_heat_flux
+            cls.venting_mass(),
+            cls.added_heat_flux()
         )
 
     @staticmethod
