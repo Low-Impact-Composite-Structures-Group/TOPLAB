@@ -640,8 +640,12 @@ class SphericalTank(Tank):
 
     def create_sections(self) -> list[TankSection]:
         self.sections = [
-            SphericalEndCap(self.radius, self.material),
-            SphericalEndCap(self.radius, self.material)
+            SphericalEndCap(
+                self.radius, self.material, self.operating_pressure
+            ),
+            SphericalEndCap(
+                self.radius, self.material, self.operating_pressure
+            )
         ]
         return self.sections
 
@@ -655,11 +659,19 @@ class SphericalTank(Tank):
         return 0
 
     @classmethod
-    def lin(cls) -> SphericalTank:
+    def lin(
+        cls, 
+        material: Material, 
+        operating_pressure: float
+    ) -> SphericalTank:
         tank_volume = 52
         def radius_from_volume(volume: float) -> float:
             return (volume * 3 / 4 / math.pi) ** (1 / 3)
-        return cls(radius_from_volume(tank_volume))
+        return cls(
+            radius_from_volume(tank_volume),
+            material,
+            operating_pressure
+        )
 
 
 def bisection_method(

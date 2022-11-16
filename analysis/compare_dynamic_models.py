@@ -10,6 +10,7 @@ import numpy as np
 import plotting.plot_style
 from src.dynamics.dynamic_models import DynamicModel, LinModel, TwoPhaseModel
 from src.fluids.hydrogen_retrievers import TwoPhaseRequester
+from src.materials.materials import Metal
 from src.tank_design.tank_shapes import SphericalTank
 
 DAY_IN_HOURS = 24
@@ -146,7 +147,9 @@ def define_tank_state(
     return TankState(
         fill=fill_percentage,
         heat_flux=heat_flux,
-        volume=SphericalTank.lin().volume,
+        volume=SphericalTank.lin(
+            Metal.aluminum(), pressure
+        ).volume,
         hydrogen=hydrogen
     )
 
