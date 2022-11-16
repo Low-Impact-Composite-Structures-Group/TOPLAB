@@ -26,6 +26,17 @@ class StateDerivatives(Protocol):
     heat_flux: float
 
 
+class FuelFlow(Protocol):
+    ...
+
+
+class DynamicModel(Protocol):
+
+    def compute_state_derivatives(
+        self, tank_sate: TankState, fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        ...
+
 @dataclass
 class InitialState:
     pressure: float
@@ -100,26 +111,19 @@ class TankState:
         )
         return self.hydrogen
 
-    def set_state_derivatives(
+    def compute_state_derivatives(
         self,
-        state_derivatives: StateDerivatives
-    ) -> StateDerivatives:
-        self.derivatives = state_derivatives
-        return self.derivatives
-
-    def set_thermal_capacity(
-        self,
+        dynamic_model: DynamicModel,
+        fuel_flows: list[FuelFlow],
+        heat_flux: float,
         tank_thermal_capacity: float
-    ) -> float:
-        self.tank_thermal_capacity = tank_thermal_capacity
-        return self.tank_thermal_capacity
-
-    def set_heat_flux(
-        self,
-        heat_flux: float
-    ) -> float:
+    ) -> StateDerivatives:
         self.heat_flux = heat_flux
-        return self.heat_flux
+        self.tank_thermal_capacity = tank_thermal_capacity
+        self.derivatives = dynamic_model.compute_state_derivatives(
+            self, fuel_flows
+        )
+        return self.derivatives
 
 
 @dataclass
