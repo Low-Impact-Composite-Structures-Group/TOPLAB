@@ -545,8 +545,9 @@ class DynamicModelFactory:
         target_conditions: TargetConditions
     ) -> DynamicModel:
         if tank_state.phase == "twophase":
-            if tank_state.pressure <= target_conditions.pressure:
-                return TwoPhaseLimitLowerPressureModel
+            if target_conditions.pressure is not None:
+                if tank_state.pressure <= target_conditions.pressure:
+                    return TwoPhaseLimitLowerPressureModel
             return TwoPhaseModel
         return SinglePhaseModel
 
