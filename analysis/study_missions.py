@@ -14,7 +14,7 @@ from src.insulation.foam_insulations import ConstantFoamInsulation
 def perform_analysis():
 
     # Define type of fuel flow
-    fuel_phase_flow = "liquid"
+    fuel_phase_flow = "gas"
 
     # Define the mission
     missions = [
@@ -30,6 +30,9 @@ def perform_analysis():
     fill = 0.97
     initial_state = InitialState(pressure, temperature, fill)
 
+    # Define minimum pressure in the case og gas phase draining
+    min_pressure = 1.1e5
+
     # Define required fuel
     fuel_masses = [mission.required_fuel for mission in missions]
     initial_fuel = initial_state.get_hydrogen_properties()
@@ -39,7 +42,10 @@ def perform_analysis():
     ]
 
     # Define tank
-    tank_volumes = [1.2 * fuel_volume for fuel_volume in fuel_volumes]
+    VOLUME_MARGIN = 1.15
+    tank_volumes = [
+        VOLUME_MARGIN * fuel_volume for fuel_volume in fuel_volumes
+    ]
     tank_radius = 1.0
     tank_lengths = [
         CylindricalTankSphericalCaps.length_from_radius_and_volume(
@@ -63,7 +69,9 @@ def perform_analysis():
     insulation_thickness = 8e-2
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
     stopping_criteria = []
-    target_conditions = TargetState(1.1e5, None, None, None)
+    target_conditions = TargetState(
+        None, min_pressure, None, None, None
+    )
     timestep = 60
     multistep_method = EulerMethod(timestep)
     dynamic_model_factory = DynamicModelFactory()
