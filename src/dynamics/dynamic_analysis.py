@@ -273,6 +273,7 @@ class MissionSectionAnalysis:
                 tank_states.last_state,
                 multistep_method.timestep
             )
+            print(new_fill)
             tank_states.add_tank_state(
                 TankState(
                     cls.compute_new_temperature(
@@ -396,10 +397,12 @@ class DrainingAnalysis:
         stopping_criteria = [TankIsEmpty()]
 
         # Define the target sate
+        max_pressure = None
         temperature = None
-        fill = 0.0
+        fill = None
         mass = None
         target_conditions = TargetState(
+            max_pressure,
             min_pressure,
             temperature,
             fill,

@@ -86,7 +86,7 @@ def perform_analysis():
     insulation_thickness = 8e-2
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
     stopping_criteria = []
-    target_conditions = TargetState(None, None, None, None)
+    target_conditions = TargetState(None, None, None, None, None)
     timestep = 60
     multistep_method = EulerMethod(timestep)
     dynamic_model_factory = DynamicModelFactory()

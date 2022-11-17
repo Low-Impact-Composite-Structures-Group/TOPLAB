@@ -52,7 +52,8 @@ class InitialState:
 
 @dataclass
 class TargetState:
-    pressure: float
+    max_pressure: float
+    min_pressure: float
     temperature: float
     fill: float
     mass: float

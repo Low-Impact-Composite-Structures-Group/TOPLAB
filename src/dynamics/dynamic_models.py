@@ -19,7 +19,7 @@ from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
 
 
 class TargetConditions(Protocol):
-    pressure: float
+    min_pressure: float
 
 
 class Hydrogen(Protocol):
@@ -545,8 +545,8 @@ class DynamicModelFactory:
         target_conditions: TargetConditions
     ) -> DynamicModel:
         if tank_state.phase == "twophase":
-            if target_conditions.pressure is not None:
-                if tank_state.pressure <= target_conditions.pressure:
+            if target_conditions.min_pressure is not None:
+                if tank_state.pressure <= target_conditions.min_pressure:
                     return TwoPhaseLimitLowerPressureModel
             return TwoPhaseModel
         return SinglePhaseModel
