@@ -22,6 +22,7 @@ class FuelTankState(Protocol):
     pressure: float
     fill: float
     fuel_mass: float
+    phase: str
 
 
 class StoppingCriterion(Protocol):
@@ -46,9 +47,22 @@ class MaxPressure(StoppingCriterion):
 class TankIsEmpty(StoppingCriterion):
 
     def is_met(
-        self, fuel_tank_state: FuelTankState, _: TargetState
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fill <= EMPTY_LIMIT
+        
+        return (
+            fuel_tank_state.fill <= EMPTY_LIMIT 
+            and fuel_tank_state.phase == "twophase"
+        )
+
+
+class NoFuelMass(StoppingCriterion):
+
+    def is_met(
+        self, fuel_tank_state: FuelTankState, target_state: TargetState
+    ) -> bool:
+        return fuel_tank_state.fuel_mass <= target_state.mass
+
 
 
 class TankIsFull(StoppingCriterion):
