@@ -628,6 +628,14 @@ class CylindricalTankSphericalCaps(Tank):
         tank = cls(tank_radius, tank_length)
         return tank
 
+    @staticmethod
+    def length_from_radius_and_volume(
+        radius: float, volume: float
+    ) -> float:
+        num = volume - 4 / 3 * math.pi * radius ** 3
+        den = math.pi * radius ** 2
+        return num / den
+        
 
 @dataclass
 class SphericalTank(Tank):
