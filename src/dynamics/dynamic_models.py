@@ -14,12 +14,12 @@ from typing import Protocol, Union
 import numpy as np
 import numpy.typing as npt
 
-from src.fluids.hydrogen_retrievers import TwoPhaseRequester
 from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
 
 
 class TargetConditions(Protocol):
     min_pressure: float
+    max_pressure: float
 
 
 class Hydrogen(Protocol):
@@ -488,6 +488,71 @@ class TwoPhaseLimitLowerPressureModel(DynamicModel):
     def compute_venting_mass() -> float:
         return 0
 
+
+class SinglePhaseLimitLowerPressureModel(DynamicModel):
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
+            tank_state.phase, fuel_flows
+        )
+        dT_dt = cls.compute_temperature_derivative(tank_state, fuel_flows)
+        return StateDerivatives(
+            cls.compute_pressure_derivative(),
+            dT_dt,
+            dMg_dt,
+            dMl_dt,
+            cls.compute_venting_mass(),
+            cls.compute_required_heat_flux(tank_state, dT_dt)
+        )
+
+    @staticmethod
+    def compute_pressure_derivative():
+        return 0
+
+    @staticmethod
+    def compute_temperature_derivative(
+        tank_state: TankState, fuel_flows: list[FuelFlow]
+    ) -> float:
+        num = (
+            tank_state.hydrogen.density
+            * sum([flow.mass_flow for flow in fuel_flows])
+            / tank_state.fuel_mass
+        )
+        den = tank_state.hydrogen.dRho_dT
+        return num / den
+
+    @staticmethod
+    def define_liquid_and_mass_derivatives(
+        tank_phase: str, fuel_flows: list[FuelFlow]
+    ):
+        if tank_phase == "gas":
+            return sum([flow.mass_flow for flow in fuel_flows]), 0
+        if tank_phase == "liquid":
+            return 0, sum([flow.mass_flow for flow in fuel_flows])
+        raise ValueError(
+            f"{tank_phase} not supported in single phase model"
+        )
+
+    @classmethod
+    def compute_venting_mass(cls):
+        return 0
+
+    @classmethod
+    def compute_required_heat_flux(
+        cls, tank_state: TankState, temperature_derivative: float
+    ) -> float:
+        fac1 = (
+            tank_state.tank_thermal_capacity
+            + tank_state.fuel_mass * tank_state.hydrogen.dH_dT
+        )
+        return (
+            fac1 * temperature_derivative - tank_state.heat_flux
+        )
 
 class LinModel(DynamicModel):
 
