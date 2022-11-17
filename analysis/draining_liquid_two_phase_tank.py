@@ -17,6 +17,9 @@ def perform_analysis():
         pressure, temperature, fill
     )
 
+    # Define the minimum pressure
+    min_pressure = 10e5
+
     # Define insulation and thermal model
     thickness = 4e-2
     insulation = ConstantFoamInsulation.rohacell(thickness)
@@ -41,7 +44,8 @@ def perform_analysis():
                 insulation,
                 fuel_flow.mass_flow,
                 fuel_flow.phase,
-                initial_state
+                initial_state,
+                min_pressure
             )
             row.append(tank_performance)
         tanks.append(row)
