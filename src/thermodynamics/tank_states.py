@@ -43,6 +43,12 @@ class InitialState:
     temperature: float
     fill: float
 
+    def get_hydrogen_properties(self) -> Hydrogen:
+        self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
+            self.pressure, self.temperature
+        )
+        return self.hydrogen
+
 
 @dataclass
 class TargetState:
