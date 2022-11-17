@@ -124,6 +124,27 @@ def plot_tank_efficiencies(
     )
 
 
+def plot_general_properties(
+    data: list[list[float]],
+    labels: list[float],
+    x_data: list[float],
+    x_label: str,
+    y_label: str,
+    xticks: list[float] = None,
+    yticks: list[float] = None
+):
+    data = [
+        Line(
+            x_data, row, label, marker=None
+        )
+        for row, label in zip(data, labels)
+    ]
+    return SingleFigure(
+        data, x_label, y_label, x_ticks=xticks, y_ticks=yticks,
+    )
+
+
+
 def plot_thermo_mechanical_loading(
     tank_states: TankStates,
     x_ticks: list[float] = None,
