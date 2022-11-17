@@ -41,39 +41,51 @@ class Efficiency(Protocol):
 class GravimetricEfficiency(Efficiency):
     initial_state: TankState
 
+    number_of_tanks: int = 1
+
     @property
     def efficiency(self) -> float:
         return self.fuel_mass / (self.fuel_mass + self.system_mass)
 
     @property
     def fuel_mass(self) -> float:
-        return self.initial_state.fuel_mass
+        return self.initial_state.fuel_mass * self.number_of_tanks
 
     @property
     def system_mass(self) -> float:
-        return self.tank.structural_mass + self.insulation_mass
+        return (
+            self.tank.structural_mass * self.number_of_tanks
+            + self.insulation_mass
+        )
 
     @property
     def insulation_mass(self):
         return (
             self.insulation_volume
             * self.insulation.density
+            * self.number_of_tanks
         )
 
     
 @dataclass
 class VolumetricEfficiency(Efficiency):
 
+    number_of_tanks: int = 1
+
     @property
     def efficiency(self) -> float:
-        return self.tank.volume / self.system_volume
+        return (
+            self.tank.volume * self.number_of_tanks / self.system_volume
+        )
     
     @property
     def system_volume(self):
         return (
-            self.tank.volume
-            + self.tank.structural_volume
-            + self.insulation_volume
+            (
+                self.tank.volume
+                + self.tank.structural_volume
+                + self.insulation_volume
+            ) * self.number_of_tanks
         )
 
 
