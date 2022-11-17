@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
-from src.dynamics.stopping_criteria import TankIsEmpty
+from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
 from src.mission.mission import Mission, MissionSection
 
 from src.thermodynamics.tank_states import (InitialState, TankState,
@@ -16,7 +16,7 @@ from src.thermodynamics.tank_states import (InitialState, TankState,
 # and the percentage change in capacity of the tank
 MAX_THERMAL_CAPACITY_ITERATIONS = 5
 THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
-
+LOWER_MASS_LIMIT = 500   
 
 class FuelTank(Protocol):
     volume: float
@@ -273,7 +273,6 @@ class MissionSectionAnalysis:
                 tank_states.last_state,
                 multistep_method.timestep
             )
-            print(new_fill)
             tank_states.add_tank_state(
                 TankState(
                     cls.compute_new_temperature(
@@ -394,13 +393,13 @@ class DrainingAnalysis:
         mission = Mission([mission_section])
 
         # Definition of stopping criteria
-        stopping_criteria = [TankIsEmpty()]
+        stopping_criteria = [NoFuelMass(), TankIsEmpty()]
 
         # Define the target sate
         max_pressure = None
         temperature = None
         fill = None
-        mass = None
+        mass = LOWER_MASS_LIMIT
         target_conditions = TargetState(
             max_pressure,
             min_pressure,
