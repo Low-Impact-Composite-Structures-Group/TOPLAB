@@ -34,7 +34,7 @@ def perform_analysis():
 
     # Define tank dimensions
     body_length = 5
-    radii = [0.25, 0.75, 1.25, 1.75, 2.25]
+    radii = [i / 100 for i in range(25, 276, 25)]
     labels = [f'{radius} m' for radius in radii]
 
     # Perform the analysis
