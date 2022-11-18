@@ -6,11 +6,11 @@ from src.dynamics.dynamic_analysis import DrainingAnalysis
 from src.dynamics.dynamic_models import DynamicModelFactory
 from src.efficiencies.tank_performance import TankPerformance
 from src.multistep_methods.linear_multistep_methods import EulerMethod
-from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
+from src.tank_design.tank_shapes import (CylindricalTankSphericalCaps,
+                                         SphericalTank)
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
-
 
 
 class TankStates(Protocol):
@@ -96,6 +96,10 @@ class AnalyseCylindricalTank:
     def create_tank(
         radius, body_length, material, operating_pressure
     ) -> CylindricalTankSphericalCaps:
+        if body_length == 0:
+            return SphericalTank(
+                radius, material, operating_pressure
+            )
         return CylindricalTankSphericalCaps(
             radius,
             body_length + 2 * radius,
