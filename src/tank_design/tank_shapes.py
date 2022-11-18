@@ -643,6 +643,24 @@ class SphericalTank(Tank):
     material: Material
     operating_pressure: float
 
+    @property
+    def diameter(self):
+        return 2 * self.radius
+
+    @property
+    def characteristic_height(self):
+        return self.diameter
+
+    @property
+    def characteristic_length(self):
+        return self.diameter
+
+    @property
+    def exposed_surface(self):
+        # It should be null; however to avoid zero division it is set
+        # really small
+        return 1e-13
+
     def __post_init__(self) -> None:
         self.create_sections()
 
@@ -661,10 +679,6 @@ class SphericalTank(Tank):
         return bisection_method(
             self.radius * 2, 0, fuel_volume, self.compute_fuel_volume
         )
-
-    def compute_thermal_capacity(self, temperature: float) -> float:
-        print("Thermal capacity of the tank is to be implemented")
-        return 0
 
     @classmethod
     def lin(
