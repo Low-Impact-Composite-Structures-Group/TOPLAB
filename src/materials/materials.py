@@ -103,15 +103,25 @@ class Metal(Material):
 
 @dataclass
 class Composite(Material):
+    winding_angle: float
 
     def __post_init__(self):
         self.type = "composite"
 
     @classmethod
-    def carbon(cls):
+    def carbon(cls, winding_angle: float):
+        # Values from internet and master thesis
+        failure_stress = 2560E6
+        density = 1580
         specific_temperature = 1500
         molecular_weight = 12.01
-        return None
+        return cls(
+            failure_stress, 
+            density, 
+            specific_temperature,
+            molecular_weight,
+            winding_angle
+        )
 
 
 
