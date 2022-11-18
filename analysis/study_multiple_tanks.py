@@ -1,5 +1,4 @@
 
-import matplotlib.pyplot as plt
 from src.efficiencies.efficiency_computers import GravimetricEfficiency, VolumetricEfficiency
 from plotting.plot_tank_states import plot_general_properties
 from src.thermodynamics.internal_models import SingleZoneModel
@@ -9,7 +8,7 @@ from src.dynamics.dynamic_models import DynamicModelFactory
 from src.mission.mission import Mission
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
-from src.materials.materials import Metal
+from src.materials.materials import Composite
 from src.thermodynamics.tank_states import InitialState, TargetState
 from src.dynamics.dynamic_analysis import MissionAnalysis
 from src.insulation.foam_insulations import ConstantFoamInsulation
@@ -24,7 +23,7 @@ def perform_analysis():
     fuel_phase_flow = "liquid"
 
     # Define the mission
-    mission =  Mission.large_passenger_aircraft(fuel_phase_flow)
+    mission =  Mission.regional(fuel_phase_flow)
     missions = list()
     for no_of_tanks in number_of_tanks:
         sections = list()
@@ -71,7 +70,8 @@ def perform_analysis():
         ]
         for lengths_row in tank_lengths
     ]
-    material = Metal.aluminum()
+    # material = Metal.aluminum()
+    material = Composite.carbon(55)
     tanks = [
         [
             CylindricalTankSphericalCaps(
