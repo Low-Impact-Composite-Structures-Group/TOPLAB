@@ -1,6 +1,6 @@
 
 
-from analysis.study_tank_radius import perform_analysis
+from analysis.study_missions import perform_analysis
 
 
 def main():

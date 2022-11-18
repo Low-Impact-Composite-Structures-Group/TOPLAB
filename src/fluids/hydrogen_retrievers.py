@@ -9,13 +9,20 @@ Hydrogen Storage in Civil Aviation PhD
 Victor Kees Poorte, 2022
 """
 
-
+import os
 from abc import abstractmethod
 from typing import Protocol, Union
 
 from CoolProp.CoolProp import PropsSI, PhaseSI
+import CoolProp.CoolProp as CP
 
 from src.fluids.convective_mediums import Hydrogen, TwoPhaseHydrogen
+
+path = os.getcwd() + "/src/fluids/refprop/"
+CP.set_config_string(CP.ALTERNATIVE_REFPROP_PATH, path)
+
+
+HYDROGEN_FLUID = "REFPROP::PARAHYD"
 
 
 class HydrogenRequester(Protocol):
@@ -67,7 +74,7 @@ class SinglePhaseRequester(HydrogenRequester):
     have to be passed in the Hydrogen dataclass.
     """
 
-    fluid = "hydrogen"
+    fluid = HYDROGEN_FLUID
 
     properties = [
         "T", "P", "D", "V", "C", "L", "H", "U", "A", "d(D)/d(P)|T", 
@@ -196,7 +203,7 @@ class PhaseRequester():
     hydrogen. To do this the get_fluid_phase method can be used.
     """
 
-    fluid = "hydrogen"
+    fluid = HYDROGEN_FLUID
 
     def get_fluid_phase(
         self, temperature: float, pressure: float
