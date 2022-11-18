@@ -4,15 +4,17 @@ import matplotlib.pyplot as plt
 from typing import Protocol
 
 
-class TankStates(Protocol):
+class TankPerformance(Protocol):
     volume: float
     gravimetric_efficiency: float
     volumetric_efficiency: float
 
+
 def plot_geometric_study(
     radii: list[float],
     body_lengths: list[float],
-    tanks: list[list[TankStates]]
+    tanks: list[list[TankPerformance]],
+    levels: list[float] = None
 ):
     X, Y = np.meshgrid(body_lengths, radii)
 
@@ -31,9 +33,12 @@ def plot_geometric_study(
     ]
 
     fig, ax = plt.subplots()
-    graf_effs = ax.contourf(X, Y, gravimetric_efficiencies)
+    graf_effs = ax.contourf(
+        X, Y, gravimetric_efficiencies, levels=levels
+    )
     cbar = fig.colorbar(graf_effs)
     cbar.set_label("Gravimetric efficiency [-]")
+    cbar.set_ticks(levels)
     voll_effs = ax.contour(
         X, Y, volumetric_efficiencies, 10,
         colors="black", linestyles="dashed"
@@ -52,8 +57,14 @@ def plot_geometric_study(
         vol_lines.legend_elements()[0][0]
     ]
     labels = ["Vol. eff. [-]", r"Tank vol. [m$^3$]"]
-    # plt.legend(lines, labels, loc="south outside")
-    plt.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, -0.25),
-          fancybox=True,ncol=5)
-    plt.tight_layout()
+    plt.legend(
+        lines,
+        labels,
+        loc='upper center',
+        bbox_to_anchor=(0.5, -0.12),
+        fancybox=True,
+        ncol=5
+    )
+    fig.tight_layout()
     plt.show()
+    return fig
