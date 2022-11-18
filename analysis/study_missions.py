@@ -14,7 +14,7 @@ from src.insulation.foam_insulations import ConstantFoamInsulation
 def perform_analysis():
 
     # Define type of fuel flow
-    fuel_phase_flow = "gas"
+    fuel_phase_flow = "liquid"
 
     # Define the mission
     missions = [
