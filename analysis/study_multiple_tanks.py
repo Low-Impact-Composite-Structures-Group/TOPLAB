@@ -1,5 +1,5 @@
 
-from src.efficiencies.efficiency_computers import GravimetricEfficiency, VolumetricEfficiency
+from src.efficiencies.efficiency_computers import GravimetricEfficiency, SquareVolumetricEfficiency, VolumetricEfficiency
 from plotting.plot_tank_states import plot_general_properties
 from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.external_models import ForcedConvectionModel
@@ -116,20 +116,20 @@ def perform_analysis():
     grav_effs = [
         [
             GravimetricEfficiency(
-                tank, insulation, tank_states.first_state, no_tanks
+                tank, insulation, tank_states.first_state
             ).efficiency
             for tank_states, tank in zip(data_row, tank_row)
         ]
-        for data_row, tank_row, no_tanks in
-        zip(data, tanks, number_of_tanks)
+        for data_row, tank_row in
+        zip(data, tanks)
     ]
 
     vol_effs = [
         [
-            VolumetricEfficiency(tank, insulation,no_tanks).efficiency
+            SquareVolumetricEfficiency(tank, insulation).efficiency
             for tank in row
         ]
-        for row, no_tanks in zip(tanks, number_of_tanks)
+        for row in tanks
     ]
 
     xlabel = "Tank Radius [m]"
