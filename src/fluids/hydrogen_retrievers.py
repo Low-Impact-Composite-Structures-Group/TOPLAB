@@ -22,7 +22,8 @@ path = os.getcwd() + "/src/fluids/refprop/"
 CP.set_config_string(CP.ALTERNATIVE_REFPROP_PATH, path)
 
 
-HYDROGEN_FLUID = "REFPROP::PARAHYD"
+HYDROGEN_FLUID = "REFPROP::PARAHYD" # To be use with Refprop (i84 chip)
+HYDROGEN_FLUID = "hydrogen"         # To be used with Coolprop (M1 chip)
 
 
 class HydrogenRequester(Protocol):
