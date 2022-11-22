@@ -91,11 +91,26 @@ class SquareVolumetricEfficiency(VolumetricEfficiency):
 
     @property
     def system_volume(self):
-        return (
-            ((self.tank.radius + self.insulation.thickness) * 2) ** 2
-            * self.tank.total_length
-        )
+        return self.effective_area * self.tank.total_length
 
+    @property
+    def effective_area(self):
+        return self.effective_diameter ** 2
+
+    @property
+    def effective_diameter(self):
+        return self.effective_radius * 2
+
+    @property
+    def effective_radius(self):
+        return self.tank.radius + self.insulation.thickness
+
+
+class HexagonVolumetricEfficiency(SquareVolumetricEfficiency):
+
+    @property
+    def effective_area(self):
+        return 2 * (3) ** (1 / 3) * self.effective_radius ** 2
 
 
 def main():
