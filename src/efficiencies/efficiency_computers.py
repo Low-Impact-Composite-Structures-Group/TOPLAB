@@ -8,6 +8,8 @@ from typing import Protocol
 
 class FuelTank(Protocol):
     volume: float
+    radius: float
+    total_length: float
     surface_area: float
     structural_mass: float
     structural_volume: float
@@ -87,6 +89,30 @@ class VolumetricEfficiency(Efficiency):
                 + self.insulation_volume
             ) * self.number_of_tanks
         )
+
+
+@dataclass
+class SquareVolumetricEfficiency(Efficiency):
+
+    number_of_tanks: int = 1
+
+    @property
+    def efficiency(self) -> float:
+        return (
+            self.tank.volume * self.number_of_tanks / self.system_volume
+        )
+    
+    @property
+    def system_volume(self):
+        return self.effective_body_volume * self.number_of_tanks
+
+    @property
+    def effective_body_volume(self):
+        return (
+            ((self.tank.radius + self.insulation.thickness) * 2) ** 2
+            * self.tank.total_length
+        )
+
 
 
 def main():
