@@ -614,7 +614,7 @@ class CylindricalTankSphericalCaps(Tank):
         tank_radius = 0.25                      # [m]
         tank_body_length = 0.43570335168670493  # [m]
         tank_length = tank_body_length + 2 * tank_radius
-        tank = cls(tank_radius, tank_length)
+        tank = cls(tank_radius, tank_length, None, None)
         # solids = [Solid.aluminum(12), Solid.carbon(50)]
         # tank.set_solids(solids)
         return tank

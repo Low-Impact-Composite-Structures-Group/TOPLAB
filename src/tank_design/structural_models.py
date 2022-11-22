@@ -132,6 +132,8 @@ class StructuralModelFactory:
     def get_structural_model(
         self, tank_section: TankSection
     ) -> StructuralModel:
+        if tank_section.material is None:
+            return None
         if tank_section.material.type == "metal":
             if tank_section.type == "cylinder":
                 return MetalCylinder()
