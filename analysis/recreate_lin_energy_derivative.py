@@ -47,8 +47,11 @@ def perform_analysis():
 
 
 def main():
-    pass
+    perform_analysis()
 
 
 if __name__ == "__main__":
     main()
+
+
+# End
