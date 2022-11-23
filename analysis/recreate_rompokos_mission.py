@@ -3,19 +3,14 @@ from typing import Protocol
 
 import matplotlib.pyplot as plt
 
-from plotting.plot_tank_states import plot_tank_fill, plot_thermo_mechanical_loading
-from src.dynamics.dynamic_analysis import MissionAnalysis
-from src.dynamics.dynamic_models import DynamicModelFactory
-from src.dynamics.stopping_criteria import TankIsEmpty
+from facades.analysis_facades import (InitialConditions, MissionAnalysisFacade,
+                                      OperatingEnvelope, TankDimensions)
+from plotting.plot_tank_states import (plot_tank_fill,
+                                       plot_thermo_mechanical_loading)
 from src.insulation.foam_insulations import ConstantFoamInsulation
-from src.materials.materials import Metal
+from src.materials.materials import Composite
 from src.mission.mission import Mission
-from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
-from src.thermodynamics.external_models import ForcedConvectionModel
-from src.thermodynamics.internal_models import SingleZoneModel
-from src.thermodynamics.tank_states import InitialState, TargetState
-from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 
 def perform_analysis():
@@ -24,61 +19,39 @@ def perform_analysis():
     pressure = 1.4e5
     temperature = None
     fill = 0.95
-    initial_conditions = InitialState(
+    initial_conditions = InitialConditions(
         pressure, temperature, fill
     )
 
     # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.rompokos(
-        Metal.aluminum(), pressure
+    tank = CylindricalTankSphericalCaps.rompokos(None, None)
+    tank_dimensions = TankDimensions(
+        tank.radius, tank.body_length
     )
 
-    # Define the stopping criteria for the fuel tank
-    stopping_criteria = [TankIsEmpty()]
+    # Define the tank material
+    winding_angle = 55
+    material = Composite.carbon(winding_angle)
 
     # Define the target conditions
-    target_conditions = TargetState(
-        pressure=10e5,
-        temperature=None,
-        fill=0.0,
-        mass=None
-    )
+    operating_envelope = OperatingEnvelope(None, None, None)
 
     # Define insulation and thermodynamic model
     insulation_thickens = 8e-2
     insulation = ConstantFoamInsulation.polyvinylchloride(
         insulation_thickens
     )
-    thermodynamic_model = ThermodynamicModel(
-        SingleZoneModel(),
-        ForcedConvectionModel(),
-        insulation
-    )
-
-    # Define the dynamic model factory
-    dynamic_model_factory = DynamicModelFactory()
-
-    # Define the heat flux factory, which is to be used to account for
-    # extra losses
-    heat_flux_factor = 1
-
-    # Time integration and steps
-    timestep = 60
-    multistep_method = EulerMethod(timestep)
 
     # Define the mission
     mission = Mission.rompokos()
 
-    tank_states = MissionAnalysis.perform_analysis(
-        tank,
-        initial_conditions,
+    tank_performance = MissionAnalysisFacade.analyse(
+        tank_dimensions,
+        material,
+        insulation,
         mission,
-        stopping_criteria,
-        target_conditions,
-        multistep_method,
-        dynamic_model_factory,
-        thermodynamic_model,
-        heat_flux_factor
+        initial_conditions,
+        operating_envelope
     )
 
     y1ticks = [i / 10 for i in range(14, 23)]
@@ -86,7 +59,7 @@ def perform_analysis():
     xticks = [i for i in range(0, 25, 4)]
 
     plot_thermo_mechanical_loading(
-        tank_states,
+        tank_performance.tank_states,
         xticks,
         y1ticks,
         y2ticks
@@ -94,7 +67,7 @@ def perform_analysis():
     y1ticks = [i for i in range(0, int(10001), int(2e3))]
     y2ticks = [i for i in range(0, 101, 20)]
     plot_tank_fill(
-        tank_states,
+        tank_performance.tank_states,
         xticks,
         y1ticks,
     )
@@ -102,7 +75,7 @@ def perform_analysis():
 
 
 def main():
-    pass
+    perform_analysis()
 
 
 if __name__ == "__main__":
