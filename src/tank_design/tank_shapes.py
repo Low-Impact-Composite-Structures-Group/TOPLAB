@@ -696,6 +696,23 @@ class SphericalTank(Tank):
         )
 
 
+class TankFactory():
+
+    @staticmethod
+    def create_tank(
+        radius: float,
+        body_length: float,
+        material: Material,
+        operating_pressure: float
+    ) -> Tank:
+        if body_length == 0:
+            return SphericalTank(radius, material, operating_pressure)
+        total_length = 2 * radius + body_length
+        return CylindricalTankSphericalCaps(
+            radius, total_length, material, operating_pressure
+        )
+
+
 def bisection_method(
     high: float, low: float, target: float, function
 ) -> float:
