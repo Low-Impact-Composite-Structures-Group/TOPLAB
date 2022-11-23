@@ -51,6 +51,13 @@ class OperatingEnvelope:
     min_temperature: float
 
 
+@dataclass
+class InitialConditions:
+    pressure: float
+    temperature: float
+    fill: float
+
+
 class AnalysisFacade(Protocol):
 
     @classmethod
@@ -103,6 +110,15 @@ class AnalysisFacade(Protocol):
             INTERNAL_MODEL, EXTERNAL_MODEL, insulation
         )
 
+    @staticmethod
+    def _define_initial_state(
+        initial_conditions: InitialConditions
+    ) -> InitialState:
+        return InitialState(
+            initial_conditions.pressure,
+            initial_conditions.temperature,
+            initial_conditions.fill
+        )
 
 class DrainingAnalysisFacade(AnalysisFacade):
     
@@ -114,9 +130,10 @@ class DrainingAnalysisFacade(AnalysisFacade):
         insulation: Insulation,
         fuel_mass_flow: float,
         fuel_flow_state: float,
-        initial_state: InitialState,
+        initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope
     ) -> TankPerformance:
+        initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
             tank_dimensions, material, operating_envelope, initial_state 
         )
@@ -159,9 +176,10 @@ class MissionAnalysisFacade(AnalysisFacade):
         material: Material,
         insulation: Insulation,
         mission: Mission,
-        initial_state: InitialState,
+        initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope
     ) -> TankPerformance:
+        initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
         tank_dimensions, material, operating_envelope, initial_state 
         )

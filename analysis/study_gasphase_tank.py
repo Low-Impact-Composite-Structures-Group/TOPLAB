@@ -1,10 +1,10 @@
 
 
 from analysis.study_tank_geometry import analyse_tank
+from src.facades.analysis_facades import InitialConditions
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
-from src.thermodynamics.tank_states import InitialState
 
 
 def perform_analysis():
@@ -13,7 +13,7 @@ def perform_analysis():
     pressure = 300e5
     temperature = 70
     fill = 0.0
-    initial_state = InitialState(
+    initial_state = InitialConditions(
         pressure, temperature, fill
     )
 

@@ -2,12 +2,11 @@
 
 from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures)
-from src.facades.analysis_facades import (DrainingAnalysisFacade,
+from src.facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                           OperatingEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Metal
 from src.mission.mission_sections import OutFlow
-from src.thermodynamics.tank_states import InitialState
 
 
 def perform_analysis():
@@ -16,7 +15,7 @@ def perform_analysis():
     pressure = 140e3
     temperature = None
     fill = 0.97
-    initial_state = InitialState(
+    initial_state = InitialConditions(
         pressure, temperature, fill
     )
 
