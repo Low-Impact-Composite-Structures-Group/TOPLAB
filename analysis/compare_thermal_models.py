@@ -18,12 +18,6 @@ from src.thermodynamics.tank_states import InitialState, TargetState
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 
-class TankState(Protocol):
-    pressure: float
-    temperature: float
-    fill: float
-
-
 def perform_analysis():
 
     # Define the state of the fuel tank
@@ -43,7 +37,8 @@ def perform_analysis():
 
     # Define the target conditions
     target_conditions = TargetState(
-        pressure=10e5,
+        max_pressure=None,
+        min_pressure=None,
         min_temperature=None,
         fill=0.0,
         mass=None
@@ -101,8 +96,7 @@ def perform_analysis():
     ]
         
 
-    yticks = [i / 10 for i in range(14, 63, 2)]
-    yticks = None
+    yticks = [i / 10 for i in range(14, 25, 2)]
     xticks = [i for i in range(0, 25, 4)]
     fig = plot_tank_loads(
         data,
@@ -114,7 +108,7 @@ def perform_analysis():
     
 
 def main():
-    pass
+    perform_analysis()
 
 
 if __name__ == "__main__":
