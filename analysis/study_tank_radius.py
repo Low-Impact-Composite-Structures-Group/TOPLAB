@@ -2,7 +2,8 @@
 
 from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures)
-from src.dynamics.draining_analysis import AnalyseCylindricalTank
+from src.facades.analysis_facades import (DrainingAnalysisFacade,
+                                          OperatingEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Metal
 from src.mission.mission_sections import OutFlow
@@ -35,20 +36,24 @@ def perform_analysis():
     # Define tank dimensions
     body_length = 5
     radii = [i / 100 for i in range(25, 276, 25)]
-    radii = [1.5]
     labels = [f'{radius} m' for radius in radii]
 
     # Perform the analysis
     performances = [
-        AnalyseCylindricalTank.analyse_tank(
-            radius,
-            body_length,
+        DrainingAnalysisFacade.analyse(
+            TankDimensions(
+                radius, body_length
+            ),
             tank_material,
             insulation,
             fuel_flow.mass_flow,
             fuel_flow.phase,
             initial_state,
-            min_pressure
+            OperatingEnvelope(
+                None,
+                min_pressure,
+                None
+            )
         )
         for radius in radii
     ]
@@ -63,8 +68,19 @@ def perform_analysis():
     y2ticks = [i / 10 for i in range(0, 11, 2)]
     fig3 = plot_tank_fill(data[-1], xticks, y1ticks, y2ticks)
     xticks = [i / 100 for i in range(0, 301, 50)]
-    yticks = [i / 100 for i in range(77, 101, 5)]
+    yticks = [i / 100 for i in range(70, 101, 5)]
     fig4 = plot_tank_efficiencies(
         performances, radii, "Radius [m]", xticks, yticks
     )
     fig1.show()
+
+
+def main():
+    perform_analysis()
+
+
+if __name__ == "__main__":
+    main()
+
+
+# End
