@@ -57,6 +57,52 @@ class AnalysisFacade(Protocol):
     def analyse(cls) -> TankPerformance:
         ...
 
+    @classmethod
+    def _define_tank(
+        cls,
+        tank_dimensions: TankDimensions,
+        material: Material,
+        target_state: OperatingEnvelope,
+        initial_state: InitialState
+    ) -> Tank:
+        return TankFactory.create_tank(
+            tank_dimensions.radius,
+            tank_dimensions.body_length,
+            material,
+            cls._define_operating_pressure(target_state, initial_state)
+        )
+
+    @staticmethod
+    def _define_operating_pressure(
+        target_state: TargetState,
+        initial_state: InitialState
+    ) -> float:
+        if target_state.max_pressure is not None:
+            return target_state.max_pressure
+        return initial_state.pressure
+
+    @staticmethod
+    def _define_target_conditions(
+        operating_envelope: OperatingEnvelope
+    ) -> TargetState:
+        fill = None
+        target_conditions = TargetState(
+            operating_envelope.max_pressure,
+            operating_envelope.min_pressure,
+            operating_envelope.min_temperature,
+            fill,
+            LOWER_MASS_LIMIT
+        )
+        return target_conditions
+
+    @staticmethod
+    def _define_thermal_model(
+        insulation: Insulation
+    ) -> ThermodynamicModel:
+        return ThermodynamicModel(
+            INTERNAL_MODEL, EXTERNAL_MODEL, insulation
+        )
+
 
 class DrainingAnalysisFacade(AnalysisFacade):
     
@@ -86,30 +132,6 @@ class DrainingAnalysisFacade(AnalysisFacade):
             HEAT_FLUX_FACTOR
         )
         return TankPerformance(tank, insulation, tank_states)
-    
-    @classmethod
-    def _define_tank(
-        cls,
-        tank_dimensions: TankDimensions,
-        material: Material,
-        target_state: OperatingEnvelope,
-        initial_state: InitialState
-    ) -> Tank:
-        return TankFactory.create_tank(
-            tank_dimensions.radius,
-            tank_dimensions.body_length,
-            material,
-            cls._define_operating_pressure(target_state, initial_state)
-        )
-
-    @staticmethod
-    def _define_operating_pressure(
-        target_state: TargetState,
-        initial_state: InitialState
-    ) -> float:
-        if target_state.max_pressure is not None:
-            return target_state.max_pressure
-        return initial_state.pressure
 
     @staticmethod
     def _define_mission(
@@ -124,30 +146,10 @@ class DrainingAnalysisFacade(AnalysisFacade):
         return Mission(mission_sections)
 
     @staticmethod
-    def _define_target_conditions(
-        operating_envelope: OperatingEnvelope
-    ) -> TargetState:
-        fill = None
-        target_conditions = TargetState(
-            operating_envelope.max_pressure,
-            operating_envelope.min_pressure,
-            operating_envelope.min_temperature,
-            fill,
-            LOWER_MASS_LIMIT
-        )
-        return target_conditions
-
-    @staticmethod
     def _define_stopping_criteria() -> list[StoppingCriterion]:
         return [NoFuelMass(), TankIsEmpty()]
 
-    @staticmethod
-    def _define_thermal_model(
-        insulation: Insulation
-    ) -> ThermodynamicModel:
-        return ThermodynamicModel(
-            INTERNAL_MODEL, EXTERNAL_MODEL, insulation
-        )
+
 
 
 def main():
