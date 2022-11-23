@@ -203,7 +203,7 @@ def plot_reference(
 """Main function."""
 
 def main():
-    pass
+    perform_analysis()
 
 
 if __name__ == "__main__":
