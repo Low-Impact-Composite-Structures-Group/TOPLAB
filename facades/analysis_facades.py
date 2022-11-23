@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from src.dynamics.dynamic_analysis import MissionAnalysis
-from src.dynamics.dynamic_models import DynamicModelFactory
-from src.dynamics.stopping_criteria import (NoFuelMass, StoppingCriterion,
+from src.dynamics.dynamic_models import DynamicModelFactory, SwitchCaseFactory
+from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached, MaxPressure, MaxPressureReached, NoFuelMass, StoppingCriterion,
                                             TankIsEmpty, TargetFillReached,
                                             TargetMassReached)
 from src.efficiencies.tank_performance import TankPerformance
@@ -14,7 +14,7 @@ from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import Tank, TankFactory
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
-from src.thermodynamics.tank_states import InitialState, TargetState
+from src.thermodynamics.tank_states import InitialState, TankStates, TargetState
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -259,6 +259,94 @@ class FillingAnalysisFacade(AnalysisFacade):
             target_conditions.fuel_mass
         )
         return target_conditions
+
+
+class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
+
+    @classmethod
+    def analyse(
+        cls,
+        tank_dimensions: TankDimensions,
+        material: Material,
+        insulation: Insulation,
+        fuel_mass_flow: float,
+        initial_conditions: InitialConditions,
+        operating_envelope: OperatingEnvelope
+    ) -> TankPerformance:
+
+        # Define the initial state and the fuel tank
+        initial_state = cls._define_initial_state(initial_conditions)
+        tank = cls._define_tank(
+            tank_dimensions, material, operating_envelope, initial_state 
+        )
+        
+        # Set up iterations
+        tank_states = TankStates(list(), MULTISTEP_METHOD.timestep)
+        max_changes = 100
+        for _ in range(max_changes):
+            
+            # Compute new tank states
+            tank_states += MissionAnalysis.perform_analysis(
+                tank,
+                initial_state,
+                cls._define_mission(
+                    fuel_mass_flow,
+                    cls._define_flow_state(
+                        operating_envelope, tank_states
+                    )
+                ),
+                cls._define_stopping_criteria(),
+                cls._define_target_conditions(operating_envelope),
+                MULTISTEP_METHOD,
+                SwitchCaseFactory(),
+                cls._define_thermal_model(insulation),
+                HEAT_FLUX_FACTOR
+            )
+            
+            # Verify if tank has been drained
+            if cls._tank_is_drained(tank_states):
+                return TankPerformance(tank, insulation, tank_states)
+            
+            # Update the initial state for the new iteration
+            initial_state = cls._define_initial_state(
+                tank_states.last_state
+            )
+        
+        raise ValueError(
+            "Exceeded maximum iterations is switch drain analysis..."
+        )
+
+    @classmethod
+    def _tank_is_drained(
+        cls, tank_states: TankStates
+    ) -> bool:
+        return (
+            tank_states.last_state.fuel_mass <= LOWER_MASS_LIMIT
+            or tank_states.last_fill < EMPTY_LIMIT
+        )
+
+    @classmethod
+    def _define_flow_state(
+        cls,
+        operating_envelope: OperatingEnvelope,
+        tank_states: TankStates
+    ) -> str:
+        if len(tank_states.states) == 0:
+            return "liquid"
+        if tank_states.last_pressure < operating_envelope.min_pressure:
+            return "liquid"
+        elif tank_states.last_pressure > operating_envelope.max_pressure:
+            return "gas"
+        ValueError("Tank state out of bound for operating envelope...")
+
+    @classmethod
+    def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
+        return [
+            NoFuelMass(),
+            TankIsEmpty(),
+            MaxPressureReached(),
+            LowerPressureReached()
+        ]
 
 
 def main():

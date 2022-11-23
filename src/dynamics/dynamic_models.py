@@ -656,6 +656,16 @@ class SinglePhaseFactory:
         return SinglePhaseModel
 
 
+class SwitchCaseFactory:
+
+    def get_dynamic_model(
+        self,
+        tank_state: TankState,
+        target_conditions: OperatingEnvelope
+    ) -> DynamicModel:
+        return TwoPhaseModel
+
+
 def main():
     pass
 
