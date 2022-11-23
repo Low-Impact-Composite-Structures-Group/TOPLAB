@@ -44,7 +44,7 @@ def perform_analysis():
     # Define the target conditions
     target_conditions = TargetState(
         pressure=10e5,
-        temperature=None,
+        min_temperature=None,
         fill=0.0,
         mass=None
     )
