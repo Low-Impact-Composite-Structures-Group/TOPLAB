@@ -233,6 +233,7 @@ class TankStates:
     def liquid_masses(self) -> list[float]:
         return [
             fill * volume * hydrogen.liquid.density
+            if fill != 0 else 0
             for fill, volume, hydrogen in zip(
                 self.fills, self.volumes, self.hydrogens
             )
