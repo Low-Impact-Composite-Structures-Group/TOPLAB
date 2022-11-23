@@ -150,6 +150,37 @@ class DrainingAnalysisFacade(AnalysisFacade):
         return [NoFuelMass(), TankIsEmpty()]
 
 
+class MissionAnalysisFacade(AnalysisFacade):
+
+    @classmethod
+    def analyse(
+        cls,
+        tank_dimensions: TankDimensions,
+        material: Material,
+        insulation: Insulation,
+        mission: Mission,
+        initial_state: InitialState,
+        operating_envelope: OperatingEnvelope
+    ) -> TankPerformance:
+        tank = cls._define_tank(
+        tank_dimensions, material, operating_envelope, initial_state 
+        )
+        tank_states = MissionAnalysis.perform_analysis(
+            tank,
+            initial_state,
+            mission,
+            cls._define_stopping_criteria(),
+            cls._define_target_conditions(operating_envelope),
+            MULTISTEP_METHOD,
+            DYNAMIC_MODEL_FACTORY,
+            cls._define_thermal_model(insulation),
+            HEAT_FLUX_FACTOR
+        )
+        return TankPerformance(tank, insulation, tank_states)
+
+    @classmethod
+    def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
+        return list()
 
 
 def main():
