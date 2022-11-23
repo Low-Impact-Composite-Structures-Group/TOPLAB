@@ -3,7 +3,7 @@
 from typing import Protocol
 
 from plotting.plot_geometric_study import plot_geometric_study
-from src.facades.analysis_facades import (DrainingAnalysisFacade,
+from facades.analysis_facades import (DrainingAnalysisFacade,
                                           OperatingEnvelope, TankDimensions)
 
 
