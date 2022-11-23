@@ -54,7 +54,7 @@ class InitialState:
 class TargetState:
     max_pressure: float
     min_pressure: float
-    temperature: float
+    min_temperature: float
     fill: float
     mass: float
 
