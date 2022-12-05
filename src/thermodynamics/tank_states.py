@@ -30,6 +30,13 @@ class FuelFlow(Protocol):
     ...
 
 
+class Tank(Protocol):
+    volume: float
+
+    def compute_fuel_height(self, fuel_volume: float):
+        ...
+
+
 class DynamicModel(Protocol):
 
     def compute_state_derivatives(
@@ -43,11 +50,22 @@ class InitialState:
     temperature: float
     fill: float
 
+    def __post_init__(self):
+        self.hydrogen = self.get_hydrogen_properties()
+
     def get_hydrogen_properties(self) -> Hydrogen:
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
         return self.hydrogen
+
+    def compute_fuel_mass(self, tank_volume: float) -> float:
+        if self.fill == 0.0 or self.fill == 1.0:
+            return self.hydrogen.density * tank_volume
+        return tank_volume * (
+            self.fill * self.hydrogen.liquid.density
+            + (1 - self.fill) * self.hydrogen.gas.density
+        )
 
 
 @dataclass
@@ -61,11 +79,14 @@ class TargetState:
 
 @dataclass
 class TankState:
+    tank: Tank
     temperature: float
     pressure: float
-    fill: float
-    fuel_height: float
-    volume: float
+    fuel_mass: float
+
+    @property
+    def volume(self):
+        return self.tank.volume
         
     @property
     def liquid_mass(self) -> float:
@@ -82,10 +103,25 @@ class TankState:
             * (1 - self.fill)
             * self.hydrogen.gas.density
         )
-        
+
     @property
-    def fuel_mass(self) -> float:
-        return self.gas_mass + self.liquid_mass
+    def fill(self):
+        if self.phase == "gas":
+            return 0.0
+        if self.phase == "liquid":
+            return 1.0
+        return (
+            (self.fuel_mass / self.volume - self.hydrogen.gas.density)
+            / (self.hydrogen.liquid.density - self.hydrogen.gas.density)
+        )
+    
+    @property
+    def fuel_volume(self):
+        return self.fill * self.volume
+
+    @property
+    def fuel_height(self):
+        return self.tank.compute_fuel_height(self.fuel_volume)
     
     @property
     def is_full(self):

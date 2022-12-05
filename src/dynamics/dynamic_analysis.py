@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
+from src.fluids.hydrogen_retrievers import HydrogenRetriever
 from src.mission.mission import Mission, MissionSection
 
 from src.thermodynamics.tank_states import (InitialState, TankState,
@@ -122,13 +123,10 @@ class MissionSectionAnalysis:
         timestep: float
     ) -> TankStates:
         initial_state = TankState(
+            tank,
             initial_state.temperature,
             initial_state.pressure,
-            initial_state.fill,
-            tank.compute_fuel_height(
-            tank.volume * initial_state.fill
-            ),
-            tank.volume
+            initial_state.compute_fuel_mass(tank.volume)
         )
         return TankStates([initial_state], timestep)
 
@@ -213,26 +211,24 @@ class MissionSectionAnalysis:
         
         return new_pressure
 
-    @staticmethod
-    def compute_new_fill(
-        last_state: TankState,
-        timestep: float
+    @classmethod
+    def compute_new_mass(
+        cls,
+        timestep: float,
+        tank_states: TankStates
     ) -> float:
-        if last_state.derivatives.liquid_mass == 0:
-            return last_state.fill
-        new_fill = (
-            last_state.fill
-            + last_state.derivatives.liquid_mass
-            / last_state.hydrogen.liquid.density
-            / last_state.volume
-            * timestep
-        )
-        # This line is added, as the step may be such that a negative 
-        # fill is obtained. To avoid this the fill is simply set to 0
-        if new_fill < 0:
-            print(f"Negative fill value: {new_fill}. Fill forced to 0")
-            return 0
-        return new_fill
+        print(tank_states.last_state.fuel_mass)
+        print(tank_states.last_state.derivatives.liquid_mass)
+        print(tank_states.last_state.derivatives.gas_mass)
+        new_mass = (
+                tank_states.last_state.fuel_mass
+                + (
+                    tank_states.last_state.derivatives.liquid_mass
+                    + tank_states.last_state.derivatives.gas_mass
+                ) * timestep
+            )
+        print(new_mass)
+        return new_mass
    
     @classmethod
     def analyse_section(
@@ -257,6 +253,7 @@ class MissionSectionAnalysis:
         steps = mission_section.number_of_timesteps(
             multistep_method.timestep
         )
+        
         for _ in range(steps):
 
             cls.compute_state_derivatives(
@@ -269,26 +266,20 @@ class MissionSectionAnalysis:
                 heat_flux_factor
             )
 
-            new_fill = cls.compute_new_fill(
-                tank_states.last_state,
-                multistep_method.timestep
-            )
             tank_states.add_tank_state(
                 TankState(
+                    tank,
                     cls.compute_new_temperature(
                         multistep_method, tank_states
                     ),
                     cls.compute_new_pressure(
                         multistep_method, tank_states
                     ),
-                    new_fill,
-                    tank.compute_fuel_height(
-                        tank.volume * new_fill
-                    ),
-                    tank.volume
+                    cls.compute_new_mass(
+                        multistep_method.timestep, tank_states
+                    )
                 )
             )
-
             if cls.stopping_criterion_is_met(
                 stopping_criteria,
                 tank_states.last_state,
