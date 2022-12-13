@@ -190,6 +190,7 @@ class VariableFoamInsulation(FoamInsulation):
         ):
             if first:
                 if target_temperature < temperature:
+                    return conductivity
                     raise ValueError(
                         "Temperature too cold for foam data..."
                     )
@@ -200,7 +201,8 @@ class VariableFoamInsulation(FoamInsulation):
 
     @classmethod
     def rohacell(cls, thickness: float) -> VariableFoamInsulation:
-        return cls(thickness, "rohacell")
+        density = 51.1
+        return cls(thickness, density, "rohacell")
 
     @classmethod
     def polyurethane(cls, thickness: float) -> VariableFoamInsulation:
