@@ -661,6 +661,10 @@ class SphericalTank(Tank):
         # really small
         return 1e-13
 
+    @property
+    def body_length(self):
+        return 0
+
     def __post_init__(self) -> None:
         self.create_sections()
 
