@@ -217,9 +217,6 @@ class MissionSectionAnalysis:
         timestep: float,
         tank_states: TankStates
     ) -> float:
-        print(tank_states.last_state.fuel_mass)
-        print(tank_states.last_state.derivatives.liquid_mass)
-        print(tank_states.last_state.derivatives.gas_mass)
         new_mass = (
                 tank_states.last_state.fuel_mass
                 + (
@@ -227,7 +224,6 @@ class MissionSectionAnalysis:
                     + tank_states.last_state.derivatives.gas_mass
                 ) * timestep
             )
-        print(new_mass)
         return new_mass
    
     @classmethod
