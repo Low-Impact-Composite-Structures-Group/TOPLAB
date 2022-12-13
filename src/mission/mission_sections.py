@@ -26,6 +26,12 @@ class OutFlow(FuelFlow):
         fuel_flow = full_fuel_flow * throttle
         return cls(fuel_flow, phase)
 
+    @classmethod
+    def SMR_cruise(cls, phase: str):
+        fuel_flow = -0.21
+        return cls(fuel_flow, phase)
+
+
 
 @dataclass
 class InFlow(FuelFlow):
