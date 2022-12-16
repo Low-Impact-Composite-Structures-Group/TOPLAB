@@ -1,4 +1,5 @@
 
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -140,6 +141,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
         initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope
     ) -> TankPerformance:
+        print(tank_dimensions, datetime.now().strftime("%H:%M:%S"))
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
             tank_dimensions, material, operating_envelope, initial_state 
