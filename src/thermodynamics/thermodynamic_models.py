@@ -216,7 +216,7 @@ class ThermodynamicModel:
 
     @staticmethod
     def temperatures_have_converged(
-        old_temperatures: list, new_temperatures: list, threshold=0.1
+        old_temperatures: list, new_temperatures: list, threshold=1.0
     ) -> bool:
         """Verify if the temperatures have converged in the iterative
         process.
