@@ -104,7 +104,16 @@ class ForcedConvectionModel(ExternalModel):
             exposed_convection.heat_transfer_coefficient,
             tank.exposed_surface
         )
-        return [exposed_resistance]
+        spheres_convection = NaturalSphereConvection(
+            mission_section.ambient,
+            tank.characteristic_height,
+            surface_temperature
+        )
+        spheres_convection = ThermalResistance(
+            spheres_convection.heat_transfer_coefficient,
+            tank.surface_area - tank.exposed_surface
+        )
+        return [exposed_resistance, spheres_convection]
 
 
 class NaturalConvectionModel(ExternalModel):
