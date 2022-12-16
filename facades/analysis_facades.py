@@ -1,12 +1,15 @@
 
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
-from src.dynamics.dynamic_analysis import MissionAnalysis
+from src.dynamics.dynamic_analysis import (MissionAnalysis,
+                                           SwitchMissionAnalysis)
 from src.dynamics.dynamic_models import DynamicModelFactory, SwitchCaseFactory
-from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached, MaxPressure, MaxPressureReached, NoFuelMass, StoppingCriterion,
-                                            TankIsEmpty, TargetFillReached,
+from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached,
+                                            MaxPressureReached, NoFuelMass,
+                                            StoppingCriterion, TankIsEmpty,
+                                            TargetFillReached,
                                             TargetMassReached)
 from src.efficiencies.tank_performance import TankPerformance
 from src.mission.mission import Mission
@@ -15,7 +18,8 @@ from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import Tank, TankFactory
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
-from src.thermodynamics.tank_states import InitialState, TankStates, TargetState
+from src.thermodynamics.tank_states import (InitialState, TankStates,
+                                            TargetState)
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -288,7 +292,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
         for _ in range(max_changes):
             
             # Compute new tank states
-            tank_states += MissionAnalysis.perform_analysis(
+            tank_states += SwitchMissionAnalysis.perform_analysis(
                 tank,
                 initial_state,
                 cls._define_mission(

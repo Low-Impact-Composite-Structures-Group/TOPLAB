@@ -331,7 +331,6 @@ class MissionAnalysis:
 
             # Check for convergence in the thermal capacity of the tank
             if cls.thermal_capacity_has_converged(tank, tank_states):
-                print(f"Thermal capacity converged in {i} iterations")
                 return tank_states
         raise ValueError("Thermal capacity has failed to converge")
 
@@ -355,6 +354,49 @@ class MissionAnalysis:
         if abs((old - new) / old) * 100 <= THERMAL_CAPACITY_THRESHOLD:
             return True
         return False
+
+
+class SwitchMissionAnalysis:
+
+    @classmethod
+    def perform_analysis(
+        cls,
+        tank: FuelTank,
+        initial_state: InitialState,
+        mission: Mission,
+        stopping_criteria: list[StoppingCriterion],
+        target_conditions: TargetState,
+        multistep_method: MultistepMethod,
+        dynamic_model_factory: DynamicModelFactory,
+        thermal_model: ThermodynamicModel,
+        heat_flux_factor: float
+    ) -> TankStates:
+
+        # Define initial state of the tank
+        initial = initial_state
+        tank_states = TankStates(list(), multistep_method.timestep)
+
+        for mission_section in mission.sections:
+
+            tank_states += MissionSectionAnalysis().analyse_section(
+                tank,
+                initial,
+                mission_section,
+                stopping_criteria,
+                target_conditions,
+                multistep_method,
+                dynamic_model_factory,
+                thermal_model,
+                heat_flux_factor
+            )
+
+            initial = InitialState(
+                tank_states.last_pressure,
+                tank_states.last_temperature,
+                tank_states.last_fill
+            )
+
+        return tank_states
 
 
 class DrainingAnalysis:
