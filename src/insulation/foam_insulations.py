@@ -70,6 +70,12 @@ class FoamInsulation(Insulation):
     thickness: float
     density: float
 
+    def compute_volume(self, surface_area: float) -> float:
+        return self.thickness * surface_area
+
+    def compute_mass(self, surface_area: float) -> float:
+        return self.compute_volume(surface_area) * self.density
+
     def compute_heat_transfer_coefficient(
         self,
         thermal_conductivity: float,
@@ -190,7 +196,6 @@ class VariableFoamInsulation(FoamInsulation):
         ):
             if first:
                 if target_temperature < temperature:
-                    return conductivity
                     raise ValueError(
                         "Temperature too cold for foam data..."
                     )
@@ -206,7 +211,8 @@ class VariableFoamInsulation(FoamInsulation):
 
     @classmethod
     def polyurethane(cls, thickness: float) -> VariableFoamInsulation:
-        return cls(thickness, "polyurethane")
+        density = None
+        return cls(thickness, density, "polyurethane")
 
 
 def main():

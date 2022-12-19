@@ -22,7 +22,8 @@ class TestFoamInsulation(unittest.TestCase):
     )
     def setUp(self) -> None:
         self.thickness = 4e-2
-        self.insulation = FoamInsulation(self.thickness)
+        self.density = 55.5
+        self.insulation = FoamInsulation(self.thickness, self.density)
 
     def test_compute_heat_transfer_coefficient(self):
         
@@ -35,14 +36,31 @@ class TestFoamInsulation(unittest.TestCase):
         )
         self.assertAlmostEqual(expected_value, actual_value)
 
+    def test_compute_volume(self):
+        surface_area = 85.5
+        expected_value = self.insulation.thickness * surface_area
+        actual_value = self.insulation.compute_volume(surface_area)
+        self.assertEqual(expected_value, actual_value)
+
+    def test_compute_mass(self):
+        surface_area = 85.5
+        expected_value = (
+            self.insulation.thickness
+            * surface_area
+            * self.insulation.density
+        )
+        actual_value = self.insulation.compute_mass(surface_area)
+        self.assertEqual(expected_value, actual_value)
+
 
 class TestConstantFoamInsulation(unittest.TestCase):
 
     def setUp(self) -> None:
         self.thickness = 4e-2
+        self.density = 55.5
         self.thermal_conductivity = 0.0046
         self.insulation = ConstantFoamInsulation(
-            self.thickness, self.thermal_conductivity
+            self.thickness, self.density, self.thermal_conductivity
         )
     
     def test_compute_thermal_conductivity(self):
@@ -100,8 +118,11 @@ class TestVariableFoamInsulation(unittest.TestCase):
 
     def setUp(self) -> None:
         self.thickness = 4e-2
+        self.density = 55.55
         name = "rohacell"
-        self.foam = VariableFoamInsulation(self.thickness, name)
+        self.foam = VariableFoamInsulation(
+            self.thickness, self.density, name
+        )
     
     def test_load_foam_data(self):
 
