@@ -3,13 +3,19 @@ import unittest
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from src.efficiencies.efficiency_computers import Efficiency, GravimetricEfficiency, HexagonVolumetricEfficiency, SquareVolumetricEfficiency, VolumetricEfficiency
+from src.efficiencies.efficiency_computers import GravimetricEfficiencyComputer, GravimetricEfficiency, HexagonVolumetricEfficiency, SquareVolumetricEfficiency, VolumetricEfficiency
 
 
 @dataclass
 class Insulation:
     thickness: float
     density: float
+
+    def compute_volume(self, surface_area: float) -> float:
+        return self.thickness * surface_area
+
+    def compute_mass(self, surface_area: float) -> float:
+        return self.compute_volume(surface_area) * self.density
 
     @classmethod
     def test_insulation(cls):
@@ -63,58 +69,17 @@ class Tank:
         )
 
 
-class TestEfficiency(unittest.TestCase):
-
-    @patch.multiple(
-        "src.efficiencies.efficiency_computers.Efficiency",
-        __abstractmethods__=set()
-    )
-    def setUp(self):
-
-        @dataclass
-        class Computer(Efficiency):
-            ...
-        
-        self.computer = Computer(
-            Tank.test_tank(), Insulation.test_insulation()
-        )
-
-    def test_insulation_volume(self):
-        tank = Tank.test_tank()
-        insulation = Insulation.test_insulation()
-
-        expected_value = tank.surface_area * insulation.thickness
-        actual_value = self.computer.insulation_volume
-        self.assertEqual(expected_value, actual_value)
-
-
 class TestGravimetricEfficiency(unittest.TestCase):
 
-    @patch.multiple(
-        "src.efficiencies.efficiency_computers.Efficiency",
-        __abstractmethods__=set()
-    )
     def setUp(self):
 
         self.tank = Tank.test_tank()
         self.insulation = Insulation.test_insulation()
         self.initial_state = InitialState.test_initial_state()
         
-        self.computer = GravimetricEfficiency(
-            self.tank,
-            self.insulation,
-            self.initial_state
-        )
+        self.computer = GravimetricEfficiency()
 
-    def test_insulation_mass(self):
-        insulation_volume = (
-            self.tank.surface_area * self.insulation.thickness
-        )
-        expected_value = insulation_volume * self.insulation.density
-        actual_value = self.computer.insulation_mass
-        self.assertEqual(expected_value, actual_value)
-
-    def test_system_mass(self):
+    def test_compute_system_mass(self):
         expected_value = (
             self.tank.structural_mass + (
                 self.insulation.density
@@ -122,15 +87,12 @@ class TestGravimetricEfficiency(unittest.TestCase):
                 * self.insulation.thickness
             )
         )
-        actual_value = self.computer.system_mass
+        actual_value = self.computer.compute_system_mass(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
-    def test_fuel_mass(self):
-        expected_value = self.initial_state.fuel_mass
-        actual_value = self.computer.fuel_mass
-        self.assertEqual(expected_value, actual_value)
-
-    def test_efficiency(self):
+    def test_compute_efficiency(self):
         system_mass = (
             self.tank.structural_mass + (
                 self.insulation.density
@@ -142,7 +104,9 @@ class TestGravimetricEfficiency(unittest.TestCase):
             self.initial_state.fuel_mass
             / (system_mass + self.initial_state.fuel_mass)
         )
-        actual_value = self.computer.efficiency
+        actual_value = self.computer.compute_efficiency(
+            self.tank, self.insulation, self.initial_state
+        )
         self.assertEqual(expected_value, actual_value)
 
 
@@ -153,34 +117,30 @@ class TestVolumetricEfficiency(unittest.TestCase):
         self.insulation = Insulation.test_insulation()
         self.initial_state = InitialState.test_initial_state()
         
-        self.computer = VolumetricEfficiency(
-            self.tank,
-            self.insulation
-        )
+        self.computer = VolumetricEfficiency()
 
-    def test_system_volume(self):
+    def test_compute_system_volume(self):
 
         expected_value = (
             self.tank.volume
             + self.tank.surface_area * self.insulation.thickness
             + self.tank.structural_volume
         )
-        actual_value = self.computer.system_volume
+        actual_value = self.computer.compute_system_volume(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
-    def test_fuel_volume(self):
-        expected_value = self.tank.volume
-        actual_value = self.computer.fuel_volume
-        self.assertEqual(expected_value, actual_value)
-
-    def test_efficiency(self):
+    def test_compute_efficiency(self):
         system_volume = (
             self.tank.volume
             + self.tank.surface_area * self.insulation.thickness
             + self.tank.structural_volume
         )
         expected_value = self.tank.volume / system_volume
-        actual_value = self.computer.efficiency
+        actual_value = self.computer.compute_efficiency(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
 
@@ -191,30 +151,31 @@ class TestSquareVolumetricEfficiency(unittest.TestCase):
         self.insulation = Insulation.test_insulation()
         self.initial_state = InitialState.test_initial_state()
         
-        self.computer = SquareVolumetricEfficiency(
-            self.tank,
-            self.insulation
-        )
+        self.computer = SquareVolumetricEfficiency()
 
-    def test_effective_radius(self):
+    def test_compute_effective_radius(self):
         expected_value = (
             self.tank.thickness
             + self.tank.radius
             + self.insulation.thickness
         )
-        actual_value = self.computer.effective_radius
+        actual_value = self.computer.compute_effective_radius(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
-    def test_effective_diameter(self):
+    def test_compute_effective_diameter(self):
         expected_value = (
             self.tank.thickness
             + self.tank.radius
             + self.insulation.thickness
         ) * 2
-        actual_value = self.computer.effective_diameter
+        actual_value = self.computer.compute_effective_diameter(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
-    def test_effective_area(self):
+    def test_compute_effective_area(self):
         expected_value = (
             (
                 self.tank.thickness
@@ -222,10 +183,12 @@ class TestSquareVolumetricEfficiency(unittest.TestCase):
                 + self.insulation.thickness
             ) * 2
         ) ** 2
-        actual_value = self.computer.effective_area
+        actual_value = self.computer.compute_effective_area(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
-    def test_system_volume(self):
+    def test_compute_system_volume(self):
         effective_area = (
             (
                 self.tank.thickness
@@ -234,7 +197,9 @@ class TestSquareVolumetricEfficiency(unittest.TestCase):
             ) * 2
         ) ** 2
         expected_value = (effective_area * self.tank.total_length)
-        actual_value = self.computer.system_volume
+        actual_value = self.computer.compute_system_volume(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
 
 
@@ -245,10 +210,7 @@ class TestHexagonVolumetricEfficiency(unittest.TestCase):
         self.insulation = Insulation.test_insulation()
         self.initial_state = InitialState.test_initial_state()
         
-        self.computer = HexagonVolumetricEfficiency(
-            self.tank,
-            self.insulation
-        )
+        self.computer = HexagonVolumetricEfficiency()
 
     def test_effective_area(self):
         effective_radius = (
@@ -258,12 +220,10 @@ class TestHexagonVolumetricEfficiency(unittest.TestCase):
         )
         a = 2 * effective_radius * math.tan(math.pi / 12)
         expected_value = 3 * math.sqrt(3) / 2 * a ** 2
-        actual_value = self.computer.effective_area
+        actual_value = self.computer.compute_effective_area(
+            self.tank, self.insulation
+        )
         self.assertEqual(expected_value, actual_value)
-
-
-
-
 
 
 if __name__ == "__main__":

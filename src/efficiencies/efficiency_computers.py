@@ -1,9 +1,8 @@
 
 
 
-from abc import abstractmethod
-from dataclasses import dataclass
 import math
+from abc import abstractmethod
 from typing import Protocol
 
 
@@ -21,103 +20,133 @@ class Insulation(Protocol):
     density: float
     thickness: float
 
+    @abstractmethod
+    def compute_mass(self, surface_area: float) -> float:
+        ...
+
+    @abstractmethod
+    def compute_volume(self, surface_area: float) -> float:
+        ...
+
 
 class TankState(Protocol):
     fuel_mass: float
 
 
-@dataclass
-class Efficiency(Protocol):
-    tank: FuelTank
-    insulation: Insulation
+class GravimetricEfficiencyComputer(Protocol):
 
-    @property
     @abstractmethod
-    def efficiency(self) -> float:
+    def compute_efficiency(
+        self,
+        tank: FuelTank,
+        insulation: Insulation,
+        initial_state: TankState
+    ) -> float:
         ...
-    
-    @property
-    def insulation_volume(self):
-        return self.insulation.thickness * self.tank.surface_area
 
 
-@dataclass
-class GravimetricEfficiency(Efficiency):
-    initial_state: TankState
+class GravimetricEfficiency(GravimetricEfficiencyComputer):
 
-    @property
-    def efficiency(self) -> float:
-        return self.fuel_mass / (self.fuel_mass + self.system_mass)
+    def compute_efficiency(
+        self,
+        tank: FuelTank,
+        insulation: Insulation,
+        initial_state: TankState
+    ) -> float:
+        fuel_mass = initial_state.fuel_mass
+        system_mass = self.compute_system_mass(tank, insulation)
+        
+        return fuel_mass / (fuel_mass + system_mass)
 
-    @property
-    def fuel_mass(self) -> float:
-        return self.initial_state.fuel_mass
-
-    @property
-    def system_mass(self) -> float:
+    def compute_system_mass(
+        self, tank: FuelTank, insulation: Insulation
+    ) -> float:
+        
         return (
-            self.tank.structural_mass
-            + self.insulation_mass
-        )
-
-    @property
-    def insulation_mass(self):
-        return (
-            self.insulation_volume
-            * self.insulation.density
-        )
-
-    
-@dataclass
-class VolumetricEfficiency(Efficiency):
-
-    @property
-    def efficiency(self) -> float:
-        return self.fuel_volume / self.system_volume
-
-    @property
-    def fuel_volume(self):
-        return self.tank.volume
-    
-    @property
-    def system_volume(self):
-        return (
-            self.tank.volume
-            + self.tank.structural_volume
-            + self.insulation_volume
+            tank.structural_mass
+            + insulation.compute_mass(tank.surface_area)
         )
 
 
-@dataclass
+class VolumetricEfficiencyComputer(Protocol):
+
+    @abstractmethod
+    def compute_efficiency(
+        self, tank: FuelTank, insulation: Insulation
+    ) -> float:
+        ...
+
+    
+class VolumetricEfficiency(VolumetricEfficiencyComputer):
+
+    def compute_efficiency(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ) -> float:
+        fuel_volume = tank.volume
+        system_volume = self.compute_system_volume(tank, insulation)
+        
+        return fuel_volume / system_volume
+    
+    def compute_system_volume(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
+        return (
+            tank.volume
+            + tank.structural_volume
+            + insulation.compute_volume(tank.surface_area)
+        )
+
+
 class SquareVolumetricEfficiency(VolumetricEfficiency):
 
-    @property
-    def system_volume(self):
-        return self.effective_area * self.tank.total_length
+    def compute_system_volume(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
 
-    @property
-    def effective_area(self):
-        return self.effective_diameter ** 2
-
-    @property
-    def effective_diameter(self):
-        return self.effective_radius * 2
-
-    @property
-    def effective_radius(self):
         return (
-            self.tank.radius
-            + self.insulation.thickness
-            + self.tank.thickness
+            self.compute_effective_area(tank, insulation)
+            * tank.total_length
         )
+
+    def compute_effective_area(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
+
+        return self.compute_effective_diameter(tank, insulation) ** 2
+
+    def compute_effective_diameter(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
+        return self.compute_effective_radius(tank, insulation) * 2
+
+    def compute_effective_radius(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
+        return tank.radius + insulation.thickness + tank.thickness
 
 
 class HexagonVolumetricEfficiency(SquareVolumetricEfficiency):
 
-    @property
-    def effective_area(self):
-        a = 2 * self.effective_radius * math.tan(math.pi / 12)
-        return 3 * (3) ** (1 / 2) * a ** 2 / 2
+    def compute_effective_area(
+        self,
+        tank: FuelTank,
+        insulation: Insulation
+    ):
+        radius = self.compute_effective_radius(tank, insulation)
+        a = 2 * radius * math.tan(math.pi / 12)
+        return 3 * math.sqrt(3) * a ** 2 / 2
 
 
 def main():

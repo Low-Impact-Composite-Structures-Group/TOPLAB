@@ -4,8 +4,8 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.efficiencies.efficiency_computers import (GravimetricEfficiency,
-                                                   VolumetricEfficiency)
+from src.efficiencies.efficiency_computers import (GravimetricEfficiency, GravimetricEfficiencyComputer,
+                                                   VolumetricEfficiency, VolumetricEfficiencyComputer)
 
 
 class FuelTank(Protocol):
@@ -30,18 +30,19 @@ class TankPerformance:
     insulation: Insulation
     tank_states: TankStates
 
+    volumetric_computer: VolumetricEfficiencyComputer = VolumetricEfficiency
+    gravimetric_computer: GravimetricEfficiencyComputer = GravimetricEfficiency
+
     @property
     def volumetric_efficiency(self):
-        return (
-            VolumetricEfficiency(self.tank, self.insulation).efficiency
+        return self.volumetric_computer.compute_efficiency(
+            self.tank, self.insulation
         )
 
     @property
     def gravimetric_efficiency(self):
-        return (
-            GravimetricEfficiency(
-                self.tank, self.insulation, self.tank_states.first_state
-            ).efficiency
+        return self.gravimetric_computer.compute_efficiency(
+            self.tank, self.insulation, self.tank_states.first_state
         )
 
     @property
