@@ -3,6 +3,7 @@
 
 from abc import abstractmethod
 from dataclasses import dataclass
+import math
 from typing import Protocol
 
 
@@ -13,6 +14,7 @@ class FuelTank(Protocol):
     surface_area: float
     structural_mass: float
     structural_volume: float
+    thickness: float
 
 
 class Insulation(Protocol):
@@ -103,14 +105,19 @@ class SquareVolumetricEfficiency(VolumetricEfficiency):
 
     @property
     def effective_radius(self):
-        return self.tank.radius + self.insulation.thickness
+        return (
+            self.tank.radius
+            + self.insulation.thickness
+            + self.tank.thickness
+        )
 
 
 class HexagonVolumetricEfficiency(SquareVolumetricEfficiency):
 
     @property
     def effective_area(self):
-        return 2 * (3) ** (1 / 3) * self.effective_radius ** 2
+        a = 2 * self.effective_radius * math.tan(math.pi / 12)
+        return 3 * (3) ** (1 / 2) * a ** 2 / 2
 
 
 def main():
