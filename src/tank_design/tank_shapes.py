@@ -620,12 +620,16 @@ class CylindricalTankSphericalCaps(Tank):
         return tank
         
     @classmethod
-    def example(cls) -> CylindricalTankSphericalCaps:
+    def example(
+        cls, material: Material, operating_pressure: float
+    ) -> CylindricalTankSphericalCaps:
         # Define tank properties
         tank_body_length = 4.0      # [m]
         tank_radius = 1.25          # [m]
         tank_length = tank_body_length + 2 * tank_radius
-        tank = cls(tank_radius, tank_length)
+        tank = cls(
+            tank_radius, tank_length, material, operating_pressure
+        )
         return tank
 
     @staticmethod

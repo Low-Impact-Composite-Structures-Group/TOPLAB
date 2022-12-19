@@ -1,15 +1,25 @@
 import math
 import unittest
 
-from src.tank_design.tank_shapes import CylindricalBody, CylindricalTankSphericalCaps, SphericalEndCap, SphericalTank, Tank, bisection_method
+from src.materials.materials import Metal
+from src.tank_design.tank_shapes import (CylindricalBody,
+                                         CylindricalTankSphericalCaps,
+                                         SphericalEndCap, SphericalTank, Tank,
+                                         bisection_method)
 
 
 class TestCylindricalBody(unittest.TestCase):
 
     def setUp(self) -> None:
+        radius = 2.5
+        length = 6.5
+        material = Metal.aluminum()
+        operating_pressure = 300e5
         self.cylinder = CylindricalBody(
-            radius=2.5,
-            length=6.5
+            radius,
+            length,
+            material,
+            operating_pressure
         )
 
     def test_volume(self):
@@ -121,7 +131,12 @@ class TestCylindricalBody(unittest.TestCase):
 class TestSphericalEndCap(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.end_cap = SphericalEndCap(radius=2.5)
+        radius = 2.5
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+        self.end_cap = SphericalEndCap(
+            radius, material, operating_pressure
+        )
     
     def test_surface_area(self):
 
@@ -207,8 +222,14 @@ class TestTank(unittest.TestCase):
     def setUp(self) -> None:
         radius = 2.5
         length = 6.5
-        self.end_cap = SphericalEndCap(radius)
-        self.body = CylindricalBody(radius, length)
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+        self.end_cap = SphericalEndCap(
+            radius, material, operating_pressure
+        )
+        self.body = CylindricalBody(
+            radius, length, material, operating_pressure
+        )
         tank_sections = [self.end_cap, self.body, self.end_cap]
         self.tank = Tank()
         self.tank.set_sections(tank_sections)
@@ -272,8 +293,10 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
         self.radius = 2.5
         body_length = 6.5
         total_length = body_length + 2 * self.radius
+        material = Metal.aluminum()
+        operating_pressure = 300e3
         self.tank = CylindricalTankSphericalCaps(
-            self.radius, total_length
+            self.radius, total_length, material, operating_pressure
         )
     
     def test_compute_fuel_height(self):
@@ -480,15 +503,25 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
 
     def test_rompokos(self):
 
-        CylindricalTankSphericalCaps.rompokos()
+        material = Metal.aluminum()
+        operating_pressure = 300e3
+        CylindricalTankSphericalCaps.rompokos(
+            material, operating_pressure
+        )
 
     def test_ahluwalia(self):
 
+        material = Metal.aluminum()
+        operating_pressure = 300e3
         CylindricalTankSphericalCaps.ahluwalia()
 
     def test_example(self):
 
-        CylindricalTankSphericalCaps.example()
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+        CylindricalTankSphericalCaps.example(
+            material, operating_pressure
+        )
 
 
 class TestSphericalTank(unittest.TestCase):
@@ -496,7 +529,9 @@ class TestSphericalTank(unittest.TestCase):
     def test_compute_fuel_height(self):
 
         radius = 2.5
-        tank = SphericalTank(radius)
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+        tank = SphericalTank(radius, material, operating_pressure)
         fuel_volume = tank.volume / 2
         expected_value = radius
         actual_value = tank.compute_fuel_height(fuel_volume)
@@ -504,7 +539,9 @@ class TestSphericalTank(unittest.TestCase):
 
     def test_lin(self):
 
-        SphericalTank.lin()
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+        SphericalTank.lin(material, operating_pressure)
 
 
 class TestFindValue(unittest.TestCase):
