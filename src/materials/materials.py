@@ -49,7 +49,7 @@ class Material:
         
         # Verify if the estimated error of the integral is not too large
         if abs(error_estimate) > 1e-5:
-            raise ValueError(
+            raise StopIteration(
                 "Error estimate in integral above 1e-5."
                 + f"\nError: {error_estimate}"
             )
