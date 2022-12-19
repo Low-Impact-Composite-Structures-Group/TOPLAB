@@ -70,7 +70,7 @@ class MissionSection:
 
     @classmethod
     def draining(
-        cls, fuel_mass_flow, fuel_flow_state
+        cls, fuel_mass_flow: float, fuel_flow_state: str
     ) -> MissionSection:
         duration = 60e10
         altitude = 10e3

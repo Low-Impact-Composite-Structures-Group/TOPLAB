@@ -1,6 +1,21 @@
 import unittest
 
-from src.mission.mission_sections import MissionSection
+from src.mission.mission_sections import MissionSection, OutFlow
+
+
+class TestOutFlow(unittest.TestCase):
+
+    def test_rompokos_cruise(self):
+
+        expected_value = -0.3841045513916 * 0.2
+        actual_value = OutFlow.rompokos_cruise("test").mass_flow
+        self.assertEqual(expected_value, actual_value)
+
+    def test_SMR_cruise(self):
+
+        expected_value = -0.21
+        actual_value = OutFlow.SMR_cruise("test").mass_flow
+        self.assertEqual(expected_value, actual_value)
 
 
 class TestMissionSection(unittest.TestCase):
@@ -49,6 +64,11 @@ class TestMissionSection(unittest.TestCase):
         )
         self.assertTrue(message in str(context.exception))
 
+    def test_draining(self):
+        expected_value = 0.8
+        mission_section = MissionSection.draining(88.8, "liquid")
+        actual_value = mission_section.mach_number
+        self.assertEqual(expected_value, actual_value)
 
 
 if __name__ == "__main__":
