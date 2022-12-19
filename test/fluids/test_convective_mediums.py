@@ -144,6 +144,10 @@ class TestHydrogen(unittest.TestCase):
         message = "Hydrogen not in liquid phase"
         self.assertTrue(message in str(context.exception))
 
+    def test_get_phase(self):
+        expected_value = self.medium
+        actual_value = self.medium.get_phase("")
+        self.assertEqual(expected_value, actual_value)
 
 class TestTwoPhaseHydrogen(unittest.TestCase):
 
@@ -202,6 +206,30 @@ class TestTwoPhaseHydrogen(unittest.TestCase):
         expected_value = 0 
         actual_value = self.two_phase_medium.heat_of_evaporation
         self.assertEqual(expected_value, actual_value)
+
+    def test_phase(self):
+        expected_value = "twophase"
+        actual_value = self.two_phase_medium.phase
+        self.assertEqual(expected_value, actual_value)
+
+    def test_get_phase(self):
+        expected_value = self.two_phase_medium.gas
+        actual_value = self.two_phase_medium.get_phase("gas")
+        self.assertEqual(expected_value, actual_value)
+
+        expected_value = self.two_phase_medium.liquid
+        actual_value = self.two_phase_medium.get_phase("liquid")
+        self.assertEqual(expected_value, actual_value)
+    
+        phase = "test"
+        with self.assertRaises(ValueError) as context:
+            self.two_phase_medium.get_phase(phase)
+        self.assertTrue(
+            f"'{phase}' is an unsupported phase..."
+            in str(context.exception)
+        )
+
+
 
 
 if __name__ == "__main__":
