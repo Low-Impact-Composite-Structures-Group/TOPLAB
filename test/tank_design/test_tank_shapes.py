@@ -1,26 +1,84 @@
 import math
 import unittest
+from unittest.mock import patch
 
 from src.materials.materials import Metal
+from src.tank_design.structural_models import MetalCylinder
 from src.tank_design.tank_shapes import (CylindricalBody,
                                          CylindricalTankSphericalCaps,
-                                         SphericalEndCap, SphericalTank, Tank,
+                                         SphericalEndCap, SphericalTank, Tank, TankFactory, TankSection,
                                          bisection_method)
 
 
 class TestCylindricalBody(unittest.TestCase):
 
     def setUp(self) -> None:
-        radius = 2.5
-        length = 6.5
-        material = Metal.aluminum()
-        operating_pressure = 300e5
+        self.radius = 2.5
+        self.length = 6.5
+        self.material = Metal.aluminum()
+        self.operating_pressure = 300e5
         self.cylinder = CylindricalBody(
-            radius,
-            length,
-            material,
-            operating_pressure
+            self.radius,
+            self.length,
+            self.material,
+            self.operating_pressure
         )
+
+    def test_define_structural_model(self):
+
+        structural_model = self.cylinder.define_structural_model()
+        self.assertIsInstance(structural_model, MetalCylinder)
+
+    def test_thickness(self):
+
+        expected_value = (
+            self.operating_pressure * self.radius
+            / self.material.failure_stress
+        )
+        actual_value = self.cylinder.thickness
+        self.assertEqual(expected_value, actual_value)
+
+    def test_structural_volume(self):
+
+        thickness = (
+            self.operating_pressure * self.radius
+            / self.material.failure_stress
+        )
+        expected_value = thickness * self.cylinder.surface_area
+        actual_value = self.cylinder.structural_volume
+        self.assertEqual(expected_value, actual_value)
+
+    def test_structural_mass(self):
+        thickness = (
+            self.operating_pressure * self.radius
+            / self.material.failure_stress
+        )
+        volume = thickness * self.cylinder.surface_area        
+        expected_value = volume * self.material.density
+        actual_value = self.cylinder.structural_mass
+        self.assertEqual(expected_value, actual_value)
+
+    def test_compute_thermal_capacity(self):
+
+        temperature = 150
+        material_capacity = self.material.determine_specific_heat(
+            temperature
+        )
+        expected_value = (
+            self.cylinder.structural_mass * material_capacity
+        )
+        actual_value = self.cylinder.compute_thermal_capacity(
+            temperature
+        )
+        self.assertEqual(expected_value, actual_value)
+
+    def test_set_operating_pressure(self):
+
+        pressure = 123.3
+        self.cylinder.set_operating_pressure(pressure)
+        expected_value = pressure
+        actual_value = self.cylinder.operating_pressure
+        self.assertEqual(expected_value, actual_value)
 
     def test_volume(self):
 
@@ -286,6 +344,37 @@ class TestTank(unittest.TestCase):
             expected_value
         )
 
+    def test_compute_thermal_capacity(self):
+        temp = 250.0
+        end_cap_capacity = self.end_cap.compute_thermal_capacity(temp)
+        body_capacity = self.body.compute_thermal_capacity(temp)
+        expected_value = 2 * end_cap_capacity + body_capacity
+        actual_value = self.tank.compute_thermal_capacity(temp)
+        self.assertEqual(expected_value, actual_value)
+
+    def test_set_operating_pressure(self):
+        pressure = 123.5e6
+        self.tank.set_operating_pressure(pressure)
+        expected_value = pressure
+        for section in self.tank.sections:
+            actual_value = section.operating_pressure
+            self.assertEqual(expected_value, actual_value)
+
+    def test_structural_volume(self):
+        expected_value = (
+            self.end_cap.structural_volume * 2
+            + self.body.structural_volume
+        )
+        actual_value = self.tank.structural_volume
+        self.assertAlmostEqual(expected_value, actual_value)
+
+    def test_structural_mass(self):
+        expected_value = (
+            self.end_cap.structural_mass * 2
+            + self.body.structural_mass
+        )
+        actual_value = self.tank.structural_mass
+        self.assertEqual(expected_value, actual_value)
 
 class TestCylindricalTankSphericalCaps(unittest.TestCase):
 
@@ -513,7 +602,9 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
 
         material = Metal.aluminum()
         operating_pressure = 300e3
-        CylindricalTankSphericalCaps.ahluwalia()
+        CylindricalTankSphericalCaps.ahluwalia(
+            material, operating_pressure
+        )
 
     def test_example(self):
 
@@ -523,8 +614,32 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
             material, operating_pressure
         )
 
+    def test_length_from_radius_and_volume(self):
+
+        radius = 2.5
+        length = 10
+        total_length = length + 2 * radius
+        tank = CylindricalTankSphericalCaps(
+            radius, total_length, Metal.aluminum(), 1e3
+        )
+        actual_value = (
+            CylindricalTankSphericalCaps.length_from_radius_and_volume(
+                radius, tank.volume
+            )
+        )
+        expected_value = length
+        self.assertEqual(expected_value, actual_value)
+
 
 class TestSphericalTank(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.radius = 2.5
+        self.material = Metal.aluminum()
+        self.operating_pressure = 300e5
+        self.tank = SphericalTank(
+            self.radius, self.material, self.operating_pressure
+        )
 
     def test_compute_fuel_height(self):
 
@@ -542,6 +657,59 @@ class TestSphericalTank(unittest.TestCase):
         material = Metal.aluminum()
         operating_pressure = 300e5
         SphericalTank.lin(material, operating_pressure)
+
+    def test_diameter(self):
+
+        expected_value = self.radius * 2
+        actual_value = self.tank.diameter
+        self.assertEqual(expected_value, actual_value)
+
+    def test_characteristic_height(self):
+
+        expected_value = self.radius * 2
+        actual_value = self.tank.characteristic_height
+        self.assertEqual(expected_value, actual_value)
+
+    def test_characteristic_length(self):
+
+        expected_value = 2 * self.radius
+        actual_value = self.tank.characteristic_length
+        self.assertEqual(expected_value, actual_value)
+
+    def test_body_length(self):
+
+        expected_value = 0
+        actual_value = self.tank.body_length
+        self.assertEqual(expected_value, actual_value)
+
+    def test_exposed_surface(self):
+
+        expected_value = 0
+        actual_value = self.tank.exposed_surface
+        self.assertAlmostEqual(expected_value, actual_value)
+
+
+class TestTankFactory(unittest.TestCase):
+
+    def test_create_tank(self):
+
+        radius = 2.5
+        material = Metal.aluminum()
+        operating_pressure = 300e5
+
+        # Sphere case
+        length = 0
+        tank = TankFactory().create_tank(
+            radius, length, material, operating_pressure
+        )
+        self.assertIsInstance(tank, SphericalTank)
+
+        # Cylindrical case
+        length = 8.5
+        tank = TankFactory().create_tank(
+            radius, length, material, operating_pressure
+        )
+        self.assertIsInstance(tank, CylindricalTankSphericalCaps)
 
 
 class TestFindValue(unittest.TestCase):

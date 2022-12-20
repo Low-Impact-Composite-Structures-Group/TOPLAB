@@ -25,6 +25,7 @@ STRUCTURAL_MODEL_FACTORY = StructuralModelFactory()
 class Material(Protocol):
     density: float
 
+    @abstractmethod
     def determine_specific_heat(self, temperature: float) -> float:
         ...
 
@@ -609,14 +610,16 @@ class CylindricalTankSphericalCaps(Tank):
         return tank
 
     @classmethod
-    def ahluwalia(cls) -> CylindricalTankSphericalCaps:
+    def ahluwalia(
+        cls, material: Material, operating_pressure: float
+    ) -> CylindricalTankSphericalCaps:
         # Define tank properties
         tank_radius = 0.25                      # [m]
         tank_body_length = 0.43570335168670493  # [m]
         tank_length = tank_body_length + 2 * tank_radius
-        tank = cls(tank_radius, tank_length, None, None)
-        # solids = [Solid.aluminum(12), Solid.carbon(50)]
-        # tank.set_solids(solids)
+        tank = cls(
+            tank_radius, tank_length, material, operating_pressure
+        )
         return tank
         
     @classmethod

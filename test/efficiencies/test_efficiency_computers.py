@@ -1,9 +1,11 @@
 import math
 import unittest
 from dataclasses import dataclass
-from unittest.mock import patch
 
-from src.efficiencies.efficiency_computers import GravimetricEfficiencyComputer, GravimetricEfficiency, HexagonVolumetricEfficiency, SquareVolumetricEfficiency, VolumetricEfficiency
+from src.efficiencies.efficiency_computers import (GravimetricEfficiency,
+                                                   HexagonVolumetricEfficiency,
+                                                   SquareVolumetricEfficiency,
+                                                   VolumetricEfficiency)
 
 
 @dataclass
