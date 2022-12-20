@@ -1,9 +1,8 @@
 
 
-from abc import abstractmethod
 import math
+from abc import abstractmethod
 from typing import Protocol
-
 
 
 class Material(Protocol):
@@ -58,8 +57,6 @@ class MetalCylinder(StructuralModel):
         )
 
 
-
-
 class CompositeModel(StructuralModel):
 
     @staticmethod
@@ -78,14 +75,13 @@ class CompositeModel(StructuralModel):
         material: CompositeMaterial
     ) -> float:
         return (
-            cls.hoop_stress(pressure, radius)
+            cls.meridional_stress(pressure, radius)
             / material.failure_stress
-            / math.cos(math.radians(material.winding_angle)) ** 2
+            / math.cos(material.winding_angle) ** 2
         )
 
 
-
-class CompositeEndCap(CompositeModel):
+class CompositeSphericalEndCap(CompositeModel):
 
     def compute_thickness(
         self,
@@ -122,7 +118,7 @@ class CompositeCylinder(CompositeModel):
         num = (
             cls.hoop_stress(pressure, radius)
             - cls.meridional_stress(pressure, radius)
-            * math.tan(math.radians(material.winding_angle)) ** 2
+            * math.tan(material.winding_angle) ** 2
         )
         return num / material.failure_stress
 
@@ -133,7 +129,9 @@ class StructuralModelFactory:
         self, tank_section: TankSection
     ) -> StructuralModel:
         if tank_section.material is None:
-            return None
+            raise ValueError(
+                "Tank section has no material.."
+            )
         if tank_section.material.type == "metal":
             if tank_section.type == "cylinder":
                 return MetalCylinder()
@@ -143,7 +141,7 @@ class StructuralModelFactory:
             if tank_section.type == "cylinder":
                 return CompositeCylinder()
             if tank_section.type == "spherical_end_cap":
-                return CompositeEndCap()
+                return CompositeSphericalEndCap()
         raise ValueError(
             f"{tank_section.material.type} and {tank_section.type}" \
                 "not supported in StructuralModelFactory"
