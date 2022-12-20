@@ -1,12 +1,17 @@
 from __future__ import annotations
+import math
 
 import unittest
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from src.thermodynamics.heat_transfer_modes import (GRAVITATIONAL_ACCELERATION, STEPHAN_BOLTZMANN_CONSTANT,
-                                                    ForcedConvection, GasPhaseConvection, LiquidPhaseConvection,
-                                                    NaturalConvection, Radiation)
+from src.thermodynamics.heat_transfer_modes import (GRAVITATIONAL_ACCELERATION,
+                                                    STEPHAN_BOLTZMANN_CONSTANT, ChurchillNaturalConvection,
+                                                    ForcedConvection, FujiiNaturalConvection,
+                                                    GasPhaseConvection,
+                                                    LiquidPhaseConvection,
+                                                    NaturalConvection, NaturalCylinderConvection, NaturalSphereConvection,
+                                                    Radiation, RohsenowNaturalConvection)
 
 
 @dataclass
@@ -21,7 +26,7 @@ class ConvectiveMedium:
     temperature: float
 
     @classmethod
-    def example(cls) -> ConvectiveMedium:
+    def test_medium(cls) -> ConvectiveMedium:
         return cls(
             thermal_conductivity=5,
             dynamic_viscosity=15,
@@ -38,7 +43,7 @@ class TestRadiation(unittest.TestCase):
 
     def test_heat_transfer_coefficient(self):
 
-        medium = ConvectiveMedium.example()
+        medium = ConvectiveMedium.test_medium()
         ambient_temp = medium.temperature
         skin_temp = 200
         emittance = 0.95
@@ -56,7 +61,6 @@ class TestRadiation(unittest.TestCase):
         self.assertEqual(expected_value, actual_value)
 
 
-
 class TestNaturalConvection(unittest.TestCase):
 
     def setUp(self) -> None:
@@ -66,7 +70,7 @@ class TestNaturalConvection(unittest.TestCase):
         self.dummy_nussult = dummy
         self.convective_length = 0.5
         self.surface_temperature = 300
-        self.medium = ConvectiveMedium.example()
+        self.medium = ConvectiveMedium.test_medium()
 
         class ConcreteNaturalConvection(NaturalConvection):
 
@@ -86,7 +90,7 @@ class TestNaturalConvection(unittest.TestCase):
         actual_value = self.convection.heat_transfer_coefficient
         expected_value = (
             self.dummy_nussult
-            * ConvectiveMedium.example().thermal_conductivity
+            * ConvectiveMedium.test_medium().thermal_conductivity
             / self.convective_length
         )
         self.assertEqual(expected_value, actual_value)
@@ -122,7 +126,7 @@ class TestNaturalConvection(unittest.TestCase):
 class TestForcedConvection(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.medium = ConvectiveMedium.example()
+        self.medium = ConvectiveMedium.test_medium()
         self.dimension = 5
         self.surface_temperature = 300
         self.velocity = 3
@@ -168,7 +172,7 @@ class TestLiquidPhaseConvection(unittest.TestCase):
     def test_nussult_number(self):
 
         convection = LiquidPhaseConvection(
-            ConvectiveMedium.example(), None, None
+            ConvectiveMedium.test_medium(), None, None
         )
         expected_value = 0.10345354477
         actual_value = convection.nussult_number
@@ -187,7 +191,162 @@ class TestGasPhaseConvection(unittest.TestCase):
         self.assertAlmostEqual(expected_value, actual_value)
 
 
+class TestNaturalSphereConvection(unittest.TestCase):
+
+    def test_nussult_number(self):
+        medium = ConvectiveMedium.test_medium()
+        dimension = 0.5
+        temperature = 333
+        convection = NaturalSphereConvection(
+                    medium, dimension, temperature
+                )
+        expected_value = (
+            2 
+            + (
+                0.589 * convection.rayleigh_number ** (1/4)
+                / (
+                    1 + (
+                        0.469 / medium.prantl_number
+                    ) ** (9/16)
+                ) ** (4/9)
+            )
+        )
+        actual_value = convection.nussult_number
+        self.assertEqual(expected_value, actual_value)
+
+
+class TestNaturalCylinderConvection(unittest.TestCase):
+
+    def test_nussult_number(self):
+        medium = ConvectiveMedium.test_medium()
+        dimension = 0.5
+        temperature = 333
+        convection = NaturalCylinderConvection(
+                    medium, dimension, temperature
+                )
+        expected_value = (
+            0.6 
+            + (
+                0.387 * convection.rayleigh_number ** (1/6)
+                / (
+                    1 + (
+                        0.559 / medium.prantl_number
+                    ) ** (9/16)
+                ) ** (8/27)
+            )
+        ) ** 2
+        actual_value = convection.nussult_number
+        self.assertEqual(expected_value, actual_value)
+
+
+class TestRohsenowNaturalConvection(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.medium = ConvectiveMedium.test_medium()
+        self.dimension = 0.5
+        self.temperature = 333
+        self.convection = RohsenowNaturalConvection(
+            self.medium, self.dimension, self.temperature
+        )
+
+    def test_c_barred_l(self):
+        expected_value = (
+            0.671 / (
+                1 + (
+                    0.492 / self.medium.prantl_number
+                ) ** (9 / 16)
+            ) ** (4 / 9)
+        )
+        actual_value = self.convection.c_barred_l
+        self.assertEqual(expected_value, actual_value)
+
+    def test_nussult_T(self):
+        expected_value = (
+            0.772
+            * self.convection.c_barred_l
+            * self.convection.rayleigh_number ** (1 / 4)
+        )
+        actual_value = self.convection.nussult_T
+        self.assertEqual(expected_value, actual_value)
+
+    def test_f(self):
+        expected_value = (
+            1 - (0.13 / self.convection.nussult_T ** (0.16))
+        )
+        actual_value = self.convection.f
+        self.assertEqual(expected_value, actual_value)
+
+    def test_nussult_l(self):
+        expected_value = (
+            2 * self.convection.f
+            / math.log(
+                1 + 2 * self.convection.f / self.convection.nussult_T
+            )
+        )
+        actual_value = self.convection.nussult_l
+        self.assertEqual(expected_value, actual_value)
+
+    def test_nussult_t(self):
+        expected_value = (
+            self.convection.c_barred_l
+            * self.convection.rayleigh_number ** (1 / 3)
+        )
+        actual_value = self.convection.nussult_t
+        self.assertEqual(expected_value, actual_value)
+
+    def test_nussult_number(self):
+        m = 10
+        expected_value = (
+            self.convection.nussult_l ** m 
+            + self.convection.nussult_t ** m
+        ) ** (1 / m)
+        actual_value = self.convection.nussult_number
+        self.assertEqual(expected_value, actual_value)
+
+
+class TestChurchillNaturalConvection(unittest.TestCase):
+
+    def test_nussult_number(self):
+
+        medium = ConvectiveMedium.test_medium()
+        dimension = 0.5
+        temperature = 333
+        convection = ChurchillNaturalConvection(
+                    medium, dimension, temperature
+                )
+        expected_value = math.sqrt(
+            0.825 + (
+                (
+                    0.387 * convection.rayleigh_number ** (1 / 6)
+                ) / (
+                    1 + (
+                        0.437 / medium.prantl_number
+                    ) ** (9 / 16)
+                ) ** (8 / 27)
+            )
+        )
+        actual_value = convection.nussult_number
+        self.assertEqual(expected_value, actual_value)
+
+
+class TestFujiiNaturalConvection(unittest.TestCase):
+
+    def test_nussult_number(self):
+
+        medium = ConvectiveMedium.test_medium()
+        dimension = 0.5
+        temperature = 333
+        convection = FujiiNaturalConvection(
+                    medium, dimension, temperature
+                )
+        expected_value = 0.56 * convection.rayleigh_number ** (1 / 4)
+        actual_value = convection.nussult_number
+        self.assertEqual(expected_value, actual_value)
+
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 # End
