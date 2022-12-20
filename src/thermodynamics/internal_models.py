@@ -15,28 +15,36 @@ class FuelTank(Protocol):
     characteristic_length: float
     characteristic_height: float
     surface_area: float
-
+    
+    @abstractmethod
     def compute_fuel_wetted_surface(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_gas_wetted_surface(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_1_length(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_2_length(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_3_length(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_1_area(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_2_area(self, fuel_height: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_zone_3_area(self, fuel_height: float) -> float:
         ...
 
@@ -83,9 +91,9 @@ class InternalModel(Protocol):
             )]
         # Full liquid tank
         if tank_state.is_full:
-            return [self.create_liquid_resistance(
+            return self.create_liquid_resistance(
                 tank, tank_state, surface_temperature
-            )]
+            )
         # Partial gas partial liquid tank 
         return self.create_two_phase_thermal_resistances(
             tank, tank_state, surface_temperature
