@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+from abc import abstractmethod
 
 from dataclasses import dataclass
 from statistics import mean
@@ -33,16 +34,19 @@ class FuelFlow(Protocol):
 class Tank(Protocol):
     volume: float
 
+    @abstractmethod
     def compute_fuel_height(self, fuel_volume: float):
         ...
 
 
 class DynamicModel(Protocol):
 
+    @abstractmethod
     def compute_state_derivatives(
         self, tank_sate: TankState, fuel_flows: list[FuelFlow]
     ) -> StateDerivatives:
         ...
+
 
 @dataclass
 class InitialState:
@@ -142,7 +146,9 @@ class TankState:
 
     def __post_init__(self) -> None:
         self.get_hydrogen_properties()
+        self.complete_state_properties()
 
+    def complete_state_properties(self):
         if self.pressure is None:
             self.pressure = self.hydrogen.pressure
         if self.temperature is None:
@@ -279,6 +285,7 @@ class TankStates:
     def gas_masses(self) -> list[float]:
         return [
             (1 - fill) * volume * hydrogen.gas.density
+            if fill < 1 else 0
             for fill, volume, hydrogen in zip(
                 self.fills, self.volumes, self.hydrogens
             )
@@ -303,6 +310,7 @@ class TankStates:
             derivative.heat_flux
             for derivative in self.state_derivatives
         ]
+
 
 def main():
     pass
