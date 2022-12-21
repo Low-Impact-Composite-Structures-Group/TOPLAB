@@ -1,6 +1,53 @@
+from dataclasses import dataclass
 import unittest
 import numpy as np
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
+
+
+@dataclass
+class MissionSection:
+    temperature: float
+
+
+@dataclass
+class TankState:
+    temperature: float
+
+
+class FuelTank:
+    ...
+
+
+class Insulation:
+    
+    def compute_thermal_resistances(
+        self,
+        temperatures: list[float],
+        tank: FuelTank
+    ) -> list[float]:
+        return [8.5] * 12
+
+
+class InternalModel:
+
+    def compute_equivalent_resistance(
+        self,
+        tank: FuelTank,
+        tank_state: TankState,
+        surface_temperature: float
+    ) -> float:
+        return 11.11
+
+
+class ExternalModel():
+
+    def compute_equivalent_resistance(
+        self,
+        tank: FuelTank,
+        mission_section: MissionSection,
+        surface_temperature: float
+    ) -> float:
+        return 11.89
 
 
 class TestThermodynamicModel(unittest.TestCase):
@@ -78,7 +125,7 @@ class TestThermodynamicModel(unittest.TestCase):
 
         temps_1 = [0, 1, 2.2]
         temps_2 = [0, 1, 2]
-        self.assertFalse(
+        self.assertTrue(
             ThermodynamicModel.temperatures_have_converged(
                 temps_1, temps_2
             )
@@ -176,6 +223,21 @@ class TestThermodynamicModel(unittest.TestCase):
         )
         for expected, actual in zip(expected_value, actual_value):
             self.assertAlmostEqual(expected, actual)
+
+    def test_compute_heat_flux(self):
+        
+        tank_temperature = 25.0
+        ambient_temperature = 300.15
+        model = ThermodynamicModel(
+            InternalModel(), ExternalModel(), Insulation()
+        )
+        expected_value = 2.2011999999999996
+        actual_value, _ = model.compute_heat_flux(
+            FuelTank(),
+            TankState(tank_temperature),
+            MissionSection(ambient_temperature)
+        )
+        self.assertEqual(expected_value, actual_value)
 
 
 if __name__ == "__main__":
