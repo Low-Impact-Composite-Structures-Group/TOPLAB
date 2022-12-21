@@ -83,12 +83,11 @@ class DynamicModel(Protocol):
 
 class SinglePhaseModel(DynamicModel):
     
-    @classmethod
     def compute_state_derivatives(
-        cls, tank_state: TankState, fuel_flows: list[FuelFlow]
+        self, tank_state: TankState, fuel_flows: list[FuelFlow]
     ) -> StateDerivatives:
-        dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
-        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
+        dP_dt, dT_dt = self.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
+        dMg_dt, dMl_dt = self.define_liquid_and_mass_derivatives(
             tank_state.phase, fuel_flows[0].mass_flow
         )
         return StateDerivatives(
@@ -96,8 +95,8 @@ class SinglePhaseModel(DynamicModel):
             dT_dt,
             dMg_dt,
             dMl_dt,
-            cls.venting_mass,
-            cls.added_heat_flux
+            self.venting_mass,
+            self.added_heat_flux
         )
 
     @classmethod
@@ -451,7 +450,7 @@ class TwoPhaseLimitLowerPressureModel(DynamicModel):
             hydrogen, fuel_flows
         )
         t3 = sum([
-            flow.mass_flow * flow.hydrogen.enthalpy
+            - flow.mass_flow * flow.hydrogen.enthalpy
             for flow in fuel_flows
         ])
         return - (t1 + t2 + t3 - heat_flux)
@@ -529,7 +528,7 @@ class SinglePhaseLimitLowerPressureModel(DynamicModel):
     @staticmethod
     def define_liquid_and_mass_derivatives(
         tank_phase: str, fuel_flows: list[FuelFlow]
-    ):
+    ) -> tuple[float, float]:
         if tank_phase == "gas":
             return sum([flow.mass_flow for flow in fuel_flows]), 0
         if tank_phase == "liquid":
@@ -553,6 +552,7 @@ class SinglePhaseLimitLowerPressureModel(DynamicModel):
         return (
             fac1 * temperature_derivative - tank_state.heat_flux
         )
+
 
 class LinModel(DynamicModel):
 
@@ -585,7 +585,7 @@ class LinModel(DynamicModel):
         )
         factor1 = energy_derivative / tank_state.volume
         term2 = sum([
-            fuel_flow.mass_flow * hydrogen.heat_of_evaporation
+            fuel_flow.mass_flow * fuel_flow.hydrogen.enthalpy
             for fuel_flow in fuel_flows
         ])
         factor2 = (
@@ -601,69 +601,6 @@ class LinModel(DynamicModel):
             hydrogen, fill
         )
 
-
-class DynamicModelFactory:
-
-    def get_dynamic_model(
-        self,
-        tank_state: TankState,
-        target_conditions: OperatingEnvelope
-    ) -> DynamicModel:
-        if tank_state.phase == "twophase":
-            return TwoPhaseFactory().get_dynamic_model(
-                tank_state, target_conditions
-            )
-        return SinglePhaseFactory().get_dynamic_model(
-            tank_state, target_conditions
-        )
-
-
-class TwoPhaseFactory:
-
-    def get_dynamic_model(
-        self,
-        tank_state: TankState,
-        target_conditions: OperatingEnvelope
-    ) -> DynamicModel:
-        if (
-            target_conditions.min_pressure is None
-            and target_conditions.max_pressure is None
-        ):
-            return TwoPhaseModel
-        if target_conditions.min_pressure is not None:
-            if tank_state.pressure <= target_conditions.min_pressure:
-                return TwoPhaseLimitLowerPressureModel
-        return TwoPhaseModel
-
-
-class SinglePhaseFactory:
-
-    def get_dynamic_model(
-        self,
-        tank_state: TankState,
-        target_conditions: OperatingEnvelope
-    ) -> DynamicModel:
-        if (
-            target_conditions.min_pressure is None
-            and target_conditions.max_pressure is None
-        ):
-            return SinglePhaseModel
-        if (
-            target_conditions.min_pressure is not None
-            and target_conditions.min_pressure >= tank_state.pressure
-        ):
-            return SinglePhaseLimitLowerPressureModel
-        return SinglePhaseModel
-
-
-class SwitchCaseFactory:
-
-    def get_dynamic_model(
-        self,
-        tank_state: TankState,
-        target_conditions: OperatingEnvelope
-    ) -> DynamicModel:
-        return TwoPhaseModel
 
 
 def main():
