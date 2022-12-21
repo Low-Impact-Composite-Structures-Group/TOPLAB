@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
-from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
-from src.fluids.hydrogen_retrievers import HydrogenRetriever
-from src.mission.mission import Mission, MissionSection
 
+from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
+from src.mission.mission import Mission, MissionSection
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
 
@@ -22,12 +22,15 @@ LOWER_MASS_LIMIT = 500
 class FuelTank(Protocol):
     volume: float
 
+    @abstractmethod
     def compute_fuel_height(self, fuel_volume: float) -> float:
         ...
-
+    
+    @abstractmethod
     def compute_thermal_capacity(self, temperature: float) -> float:
         ...
-
+    
+    @abstractmethod
     def set_operating_pressure(self, pressure: float) -> float:
         ...
 
@@ -49,6 +52,7 @@ class StateDerivatives(Protocol):
 class MultistepMethod(Protocol):
     timestep: float
 
+    @abstractmethod
     def compute_new_value(
         self,
         derivatives: list[float],
@@ -60,6 +64,7 @@ class MultistepMethod(Protocol):
 class DynamicModel(Protocol):
 
     @classmethod
+    @abstractmethod
     def compute_state_derivatives(
         cls,
         tank_state: TankState,
@@ -70,6 +75,7 @@ class DynamicModel(Protocol):
 
 class DynamicModelFactory(Protocol):
 
+    @abstractmethod
     def get_dynamic_model(
         self,
         tank_state: TankState,
@@ -84,6 +90,7 @@ class ConvectiveMedium:
 
 class StoppingCriterion(Protocol):
 
+    @abstractmethod
     def is_met(
         self,
         tank_state: TankState,
@@ -94,6 +101,7 @@ class StoppingCriterion(Protocol):
 
 class ThermodynamicModel(Protocol):
 
+    @abstractmethod
     def compute_heat_flux(
         self,
         tank: FuelTank,
