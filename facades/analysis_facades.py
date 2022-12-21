@@ -5,7 +5,8 @@ from typing import Protocol
 
 from src.dynamics.dynamic_analysis import (MissionAnalysis,
                                            SwitchMissionAnalysis)
-from src.dynamics.dynamic_models import DynamicModelFactory, SwitchCaseFactory
+from src.dynamics.dynamic_model_factories import (DynamicModelFactory,
+                                                  SwitchCaseFactory)
 from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached,
                                             MaxPressureReached, NoFuelMass,
                                             StoppingCriterion, TankIsEmpty,
