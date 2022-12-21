@@ -4,12 +4,6 @@ from typing import Protocol
 EMPTY_LIMIT = 0.01  # A lower limit to define when the tank is empty
 
 
-class InitialState(Protocol):
-    pressure: float
-    temperature: float
-    fill: float
-
-
 class TargetState(Protocol):
     max_pressure: float
     min_pressure: float
@@ -62,7 +56,6 @@ class NoFuelMass(StoppingCriterion):
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
         return fuel_tank_state.fuel_mass <= target_state.mass
-
 
 
 class TankIsFull(StoppingCriterion):
