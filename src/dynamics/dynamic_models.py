@@ -83,11 +83,12 @@ class DynamicModel(Protocol):
 
 class SinglePhaseModel(DynamicModel):
     
+    @classmethod
     def compute_state_derivatives(
-        self, tank_state: TankState, fuel_flows: list[FuelFlow]
+        cls, tank_state: TankState, fuel_flows: list[FuelFlow]
     ) -> StateDerivatives:
-        dP_dt, dT_dt = self.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
-        dMg_dt, dMl_dt = self.define_liquid_and_mass_derivatives(
+        dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
+        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
             tank_state.phase, fuel_flows[0].mass_flow
         )
         return StateDerivatives(
@@ -95,8 +96,8 @@ class SinglePhaseModel(DynamicModel):
             dT_dt,
             dMg_dt,
             dMl_dt,
-            self.venting_mass,
-            self.added_heat_flux
+            cls.compute_venting_mass(),
+            cls.compute_added_heat_flux()
         )
 
     @classmethod
@@ -189,12 +190,12 @@ class SinglePhaseModel(DynamicModel):
             )
         )
 
-    @property
-    def venting_mass(self):
+    @classmethod
+    def compute_venting_mass(cls):
         return 0
 
-    @property
-    def added_heat_flux(self):
+    @classmethod
+    def compute_added_heat_flux(cls):
         return 0
 
     @staticmethod
