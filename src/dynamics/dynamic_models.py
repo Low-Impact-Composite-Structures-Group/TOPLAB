@@ -549,7 +549,7 @@ class SinglePhaseLimitLowerPressureModel(DynamicModel):
             tank_state.tank_thermal_capacity
             + tank_state.fuel_mass * tank_state.hydrogen.dH_dT
         )
-        return (
+        return - (
             fac1 * temperature_derivative - tank_state.heat_flux
         )
 
