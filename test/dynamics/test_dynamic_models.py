@@ -413,7 +413,7 @@ class TestSinglePhaseModel(unittest.TestCase):
     def test_venting_mass(self):
 
         expected_value = 0
-        actual_value = self.dynamic_model.venting_mass
+        actual_value = self.dynamic_model.compute_venting_mass
         self.assertEqual(expected_value, actual_value)
 
     def test_added_heat_flux(self):
