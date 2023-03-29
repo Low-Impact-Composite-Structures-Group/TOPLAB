@@ -4,8 +4,12 @@ from typing import Protocol
 
 from plotting.figures import Line, SingleFigure, TwinXFigure
 
+
+import numpy as np
+
 SECONDS_TO_HOURS = 1 / 60 ** 2
-PASCAL_TO_BAR = 1e-5 
+PASCAL_TO_BAR = 1e-5
+TO_MEGA = 1e-6
 
 
 class Performances(Protocol):
@@ -43,6 +47,7 @@ def plot_tank_loads(
         y_ticks=y_ticks,
     )
 
+
 def plot_required_flux(
     tank_states: list[TankStates],
     labels: list[str],
@@ -52,7 +57,7 @@ def plot_required_flux(
     data = [
         Line(
             row.timesteps_in_hours[:-1],
-            row.required_fluxes,
+            np.array(row.required_fluxes) * (-TO_MEGA),
             label
         )
         for row, label in zip(tank_states, labels)
@@ -60,7 +65,7 @@ def plot_required_flux(
     return SingleFigure(
         data,
         "Time [hour]",
-        "Flux [W]",
+        "Flux [MW]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
