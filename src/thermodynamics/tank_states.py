@@ -302,7 +302,12 @@ class TankStates:
 
     @property
     def state_derivatives(self):
-        return [state.derivatives for state in self.states[:-1]]
+        return [
+            state.derivatives
+            if hasattr(state, "derivatives")
+            else self.states[i-1].derivatives
+            for i, state in enumerate(self.states[:-1])
+        ]
 
     @property
     def required_fluxes(self):
