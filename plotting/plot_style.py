@@ -14,6 +14,14 @@ import matplotlib.pyplot as plt
 from cycler import cycler
 
 
+FONT_SIZE = 11          # [pt]
+FIGURE_WIDTH = 10.0     # [cm]
+FIGURE_HEIGHT = 8.8     # [cm]
+
+
+CM2INCH = 0.393701
+
+
 class MyCycler(object):
 
     def __init__(self) -> None:
@@ -44,7 +52,10 @@ class MyCycler(object):
         )
 
 
-plt.rcParams.update({'font.size': 14})
+plt.rcParams.update({'font.size': FONT_SIZE})
+plt.rcParams["figure.figsize"] = (
+    FIGURE_WIDTH * CM2INCH, FIGURE_HEIGHT * CM2INCH
+)
 plt.rc("axes", prop_cycle=MyCycler().get_cycler())
 
 

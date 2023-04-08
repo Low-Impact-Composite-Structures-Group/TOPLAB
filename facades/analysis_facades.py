@@ -181,6 +181,60 @@ class DrainingAnalysisFacade(AnalysisFacade):
         return [NoFuelMass(), TankIsEmpty()]
 
 
+@dataclass
+class ParallelDrainingAnalysis(AnalysisFacade):
+    radius: float
+    body_length: float
+    material: Material
+    insulation: Insulation
+    fuel_mass_flow: float
+    fuel_phase_flow: str
+    initial_state: InitialConditions
+    operating_envelope: OperatingEnvelope
+
+    def __post_init__(self):
+        self.tank = self._define_tank(
+            TankDimensions(self.radius, self.body_length),
+            self.material,
+            self.operating_envelope,
+            self.initial_state
+        )
+
+
+    def analyse(self):
+        tank_states = MissionAnalysis.perform_analysis(
+            self.tank,
+            self.initial_state,
+            self._define_mission(
+                self.fuel_mass_flow, self.fuel_phase_flow
+            ),
+            self._define_stopping_criteria(),
+            self._define_target_conditions(self.operating_envelope),
+            MULTISTEP_METHOD,
+            DYNAMIC_MODEL_FACTORY,
+            self._define_thermal_model(self.insulation),
+            HEAT_FLUX_FACTOR
+        )
+
+        return tank_states.max_pressure
+
+    @staticmethod
+    def _define_mission(
+        fuel_mass_flow: float,
+        fuel_flow_state: float
+    ) -> Mission:
+        mission_sections = [
+            MissionSection.draining(
+                fuel_mass_flow, fuel_flow_state
+            )
+        ]
+        return Mission(mission_sections)
+
+    @staticmethod
+    def _define_stopping_criteria() -> list[StoppingCriterion]:
+        return [NoFuelMass(), TankIsEmpty()]
+
+
 class MissionAnalysisFacade(AnalysisFacade):
 
     @classmethod

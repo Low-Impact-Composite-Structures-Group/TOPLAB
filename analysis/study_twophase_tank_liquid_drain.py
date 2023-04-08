@@ -1,10 +1,11 @@
+import numpy
 
-
-from analysis.study_tank_geometry import analyse_tank
+from analysis.study_tank_geometry_parallel import analyse_tank
 from src.insulation.foam_insulations import VariableFoamInsulation
 from src.materials.materials import Composite, Metal
 from src.mission.mission_sections import OutFlow
 from facades.analysis_facades import InitialConditions
+from src.thermodynamics.tank_states import InitialState
 
 
 def perform_analysis():
@@ -16,7 +17,7 @@ def perform_analysis():
     pressure = 1.5e5
     temperature = None
     fill = 0.97
-    initial_state = InitialConditions(
+    initial_state = InitialState(
         pressure, temperature, fill
     )
 
@@ -25,7 +26,7 @@ def perform_analysis():
     insulation = VariableFoamInsulation.rohacell(thickness)
 
     # Define the material of the tank
-    winding_angle = 55
+    winding_angle = numpy.deg2rad(55)
     material = Composite.carbon(winding_angle)
     # material = Metal.aluminum()
 
@@ -40,6 +41,7 @@ def perform_analysis():
 
     # Define the levels for the contour plot
     levels = [i / 100 for i in range(50, 96, 5)]
+    levels = [i / 100 for i in range(72, 99, 2)]
 
     for no_of_tanks in [1]:
         performances = analyse_tank(

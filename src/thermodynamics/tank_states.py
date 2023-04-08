@@ -125,6 +125,8 @@ class TankState:
 
     @property
     def fuel_height(self):
+        if self.fuel_volume <= 0:
+            return 0
         return self.tank.compute_fuel_height(self.fuel_volume)
     
     @property

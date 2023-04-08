@@ -23,6 +23,7 @@ class GeneralFigure:
         self.format_ticks()
         self.format_labels()
         self.format_legend()
+        self.fig.tight_layout()
 
     @abstractmethod
     def create_figure_and_axis(self):
