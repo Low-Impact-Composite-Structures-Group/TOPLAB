@@ -24,18 +24,15 @@ def perform_analysis():
     labels = ["REG", "SMR", "LPA"]
 
     # Define the initial state of the tank
-    pressure = 1.4e5
-    temperature = None
-    fill = 0.97
-    # pressure = 300e5
-    # temperature = 60
-    # fill = 0.0
+    pressure = 300e5
+    temperature = 70
+    fill = 0.0
     initial_state = InitialState(pressure, temperature, fill)
 
     # Define operating window of the pressure vessel
-    # min_pressure = 50e5
-    # min_temperature = 40
-    min_pressure = 1.1e5
+    min_temperature = 40
+    min_pressure = 15e5
+    # min_pressure = None
     min_temperature = None
     operating_window = OperatingEnvelope(
         max_pressure=None,
@@ -47,18 +44,16 @@ def perform_analysis():
     fuel_masses = [mission.required_fuel for mission in missions]
     initial_fuel = initial_state.get_hydrogen_properties()
     fuel_volumes = [
-        fuel_mass / initial_fuel.liquid.density
+        fuel_mass / initial_fuel.density
         for fuel_mass in fuel_masses
     ]
-    # fuel_volumes = [
-    #     fuel_mass / initial_fuel.density
-    #     for fuel_mass in fuel_masses
-    # ]
 
     # Define tank dimensions, based on the required fuel volume
     VOLUME_MARGIN = 1.15
     tank_radii = [
-        2.8, 4.1, 5.6
+        2.8,
+        4.1,
+        5.6
     ]
     tanks_dimensions = [
         TankDimensions(
@@ -71,7 +66,7 @@ def perform_analysis():
     ]
 
     # Things required for the analysis
-    insulation_thickness = 8e-2
+    insulation_thickness = 4e-2
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
     # Define the material of the tank
@@ -96,12 +91,9 @@ def perform_analysis():
         print("Volumetric Efficiency\t:", mission.volumetric_efficiency)
 
     time_ticks = list(range(0, 13, 2))
-    # pressure_ticks = [i/10 for i in range(10, 56, 5)]
-    # temp_ticks = [i/10 for i in range(200, 281, 10)]
-    # flux_ticks = [i/10 for i in range(0, 21, 4)]
     pressure_ticks = [i for i in range(0, 401, 50)]
-    temp_ticks = [i for i in range(0, 401, 50)]
-    flux_ticks = [i/10 for i in range(0, 71, 10)]
+    temp_ticks = [i for i in range(0, 101, 20)]
+    flux_ticks = [i/100 for i in range(0, 101, 10)]
     mass_ticks = list(range(0, 50001, 10000))
     fill_ticks = [i/10 for i in range(0, 11, 2)]
     fig = plot_tank_loads(

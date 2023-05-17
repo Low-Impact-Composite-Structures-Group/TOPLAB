@@ -1,6 +1,6 @@
 
 
-from analysis.quick import perform_analysis
+from analysis.study_missions_gas import perform_analysis
 
 
 def main():
