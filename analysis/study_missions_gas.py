@@ -9,6 +9,9 @@ from src.mission.mission import Mission
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 from src.thermodynamics.tank_states import InitialState
 
+def radius_from_volume_sphere(volume: float) -> float:
+    return (3 * volume / (4 * math.pi)) ** (1/3)
+
 
 def perform_analysis():
 
@@ -32,7 +35,6 @@ def perform_analysis():
     # Define operating window of the pressure vessel
     min_temperature = 40
     min_pressure = 15e5
-    # min_pressure = None
     min_temperature = None
     operating_window = OperatingEnvelope(
         max_pressure=None,
@@ -43,23 +45,28 @@ def perform_analysis():
     # Define required fuel
     fuel_masses = [mission.required_fuel for mission in missions]
     initial_fuel = initial_state.get_hydrogen_properties()
+    VOLUME_MARGIN = 1.15
     fuel_volumes = [
-        fuel_mass / initial_fuel.density
+        fuel_mass / initial_fuel.density * VOLUME_MARGIN
         for fuel_mass in fuel_masses
     ]
 
     # Define tank dimensions, based on the required fuel volume
-    VOLUME_MARGIN = 1.15
+    fuselage_radii = [
+        2.8, 4.1, 5.6
+    ]
     tank_radii = [
-        2.8,
-        4.1,
-        5.6
+        radius_from_volume_sphere(fuel_volume)
+        if radius_from_volume_sphere(fuel_volume) <= fuselage_radius
+        else fuselage_radius
+        for fuselage_radius, fuel_volume
+        in zip(fuselage_radii, fuel_volumes)
     ]
     tanks_dimensions = [
         TankDimensions(
             tank_radius,
             CylindricalTankSphericalCaps.length_from_radius_and_volume(
-                tank_radius, VOLUME_MARGIN * fuel_volume
+                tank_radius, fuel_volume
             )
         )
         for fuel_volume, tank_radius in zip(fuel_volumes, tank_radii)
