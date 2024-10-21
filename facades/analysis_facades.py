@@ -24,7 +24,7 @@ from src.thermodynamics.tank_states import (InitialState, TankStates,
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
-LOWER_MASS_LIMIT = 500
+LOWER_MASS_LIMIT = 500 # TODO: find suitable lower limit
 
 
 # Factories and constants to be used in the analysis
@@ -178,7 +178,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
 
     @staticmethod
     def _define_stopping_criteria() -> list[StoppingCriterion]:
-        return [NoFuelMass(), TankIsEmpty()]
+        return [NoFuelMass(), TankIsEmpty()] # TODO: incorporate distance travelled as a stopping criterion
 
 
 @dataclass
