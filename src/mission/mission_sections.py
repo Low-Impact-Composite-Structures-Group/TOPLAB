@@ -31,6 +31,11 @@ class OutFlow(FuelFlow):
         fuel_flow = -0.21
         return cls(fuel_flow, phase)
 
+    @classmethod
+    def fly_eco(cls, phase: str):
+        fuel_flow = -0.2 #placeholder value
+        return cls(fuel_flow, phase)
+
 
 
 @dataclass
@@ -59,7 +64,7 @@ class MissionSection:
     @property
     def flight_speed(self) -> float:
         return self.ambient.speed_of_sound * self.mach_number
-    
+
     def number_of_timesteps(self, timestep: float) -> float:
         if self.duration % timestep != 0:
             raise ValueError(
