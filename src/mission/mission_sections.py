@@ -32,7 +32,7 @@ class OutFlow(FuelFlow):
         return cls(fuel_flow, phase)
 
     @classmethod
-    def fly_eco(cls, phase: str):
+    def fly_eco_cruise(cls, phase: str):
         fuel_flow = -0.2 #placeholder value
         return cls(fuel_flow, phase)
 
