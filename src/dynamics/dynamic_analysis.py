@@ -12,12 +12,12 @@ from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
 
 # The thermal capacity of the tank depends on the mass of the tank, as
-# such this needs to be iterated as the operating pressure of the 
+# such this needs to be iterated as the operating pressure of the
 # tank is refined. Here the maximum amount of iterations are defined
 # and the percentage change in capacity of the tank
 MAX_THERMAL_CAPACITY_ITERATIONS = 5
 THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
-LOWER_MASS_LIMIT = 500   
+LOWER_MASS_LIMIT = 500
 
 class FuelTank(Protocol):
     volume: float
@@ -25,11 +25,11 @@ class FuelTank(Protocol):
     @abstractmethod
     def compute_fuel_height(self, fuel_volume: float) -> float:
         ...
-    
+
     @abstractmethod
     def compute_thermal_capacity(self, temperature: float) -> float:
         ...
-    
+
     @abstractmethod
     def set_operating_pressure(self, pressure: float) -> float:
         ...
@@ -179,7 +179,7 @@ class MissionSectionAnalysis:
             tank.compute_thermal_capacity(temperatures[0])
         )
         return tank_state
-   
+
     @staticmethod
     def stopping_criterion_is_met(
         stopping_criteria: list[StoppingCriterion],
@@ -203,7 +203,7 @@ class MissionSectionAnalysis:
                 tank_states.temperature_derivatives,
                 tank_states.last_temperature
             )
-        
+
         return new_temperature
 
     @classmethod
@@ -216,7 +216,7 @@ class MissionSectionAnalysis:
                 tank_states.pressure_derivatives,
                 tank_states.last_pressure
             )
-        
+
         return new_pressure
 
     @classmethod
@@ -233,7 +233,7 @@ class MissionSectionAnalysis:
                 ) * timestep
             )
         return new_mass
-   
+
     @classmethod
     def analyse_section(
         cls,
@@ -257,7 +257,7 @@ class MissionSectionAnalysis:
         steps = mission_section.number_of_timesteps(
             multistep_method.timestep
         )
-        
+
         for _ in range(steps):
 
             cls.compute_state_derivatives(
@@ -352,7 +352,7 @@ class MissionAnalysis:
             tank_states.average_temperature
         )
 
-        # Update thermal capacity 
+        # Update thermal capacity
         tank.set_operating_pressure(tank_states.max_pressure)
         new = tank.compute_thermal_capacity(
             tank_states.average_temperature
@@ -457,7 +457,7 @@ class DrainingAnalysis:
             heat_flux_factor
         )
 
-    
+
 def main():
     pass
 
