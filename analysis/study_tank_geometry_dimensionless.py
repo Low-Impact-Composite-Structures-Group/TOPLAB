@@ -5,14 +5,14 @@ from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                           OperatingEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
-from src.materials.materials import Metal
+from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
 
 
 def perform_analysis():
 
     # Define the initial state of the tank
-    pressure = 140e3
+    pressure = 140e3 # [Pa]
     temperature = None
     fill = 0.97
     initial_state = InitialConditions(
@@ -20,19 +20,36 @@ def perform_analysis():
     )
 
     # Define insulation and thermal model
-    thickness = 4e-2
+    thickness = 4e-2 # [m]
     insulation = ConstantFoamInsulation.rohacell(thickness)
 
     # Define tank material
-    tank_material = Metal.aluminum()
+    winding_angle = 55.0 # [degrees] placeholder value
+    tank_material = Composite.carbon(winding_angle)
 
     # Define fuel flow
-    fuel_flow = OutFlow.rompokos_cruise("liquid")
+    fuel_flow = OutFlow.fly_eco_cruise("liquid")
 
     # Define the minimum pressure of the tank
-    min_pressure = 1.3e5
+    min_pressure = 1.3e5 # [Pa]
 
     # Define tank dimensions
+    # See Winnefeld paper for a visual key corresponding to these dimensions
+    # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
+    # NB: lambda is replaced with chi
+
+    l_t = 7 # [m] length of entire tank
+    l_s = 5 # [m] length of shell section
+    a = 1 # [m] horizontal axis of elliptical shell cross-section
+    b = 1 # [m] length of endcap in axial direction
+    c = 1 # [m] vertical axis of elliptical shell cross-section
+
+    chi = l_s / l_t
+    phi = a/c
+    psi = b/c
+
+
+
     body_length = 5
     radii = [i / 100 for i in range(25, 276, 25)]
     labels = [f'{radius} m' for radius in radii]
@@ -49,7 +66,7 @@ def perform_analysis():
             fuel_flow.phase,
             initial_state,
             OperatingEnvelope(
-                None,
+                None, # TODO: define max pressure relating to the tank material and geometry
                 min_pressure,
                 None
             )
