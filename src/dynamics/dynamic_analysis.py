@@ -310,7 +310,7 @@ class MissionAnalysis:
         heat_flux_factor: float
     ) -> TankStates:
 
-        # Iterate till the thermal capacity has converge
+        # Iterate till the thermal capacity has converged
         for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
 
             # Define initial state of the tank
@@ -456,6 +456,8 @@ class DrainingAnalysis:
             thermal_model,
             heat_flux_factor
         )
+
+ # TODO: add refuelling class here
 
 
 def main():
