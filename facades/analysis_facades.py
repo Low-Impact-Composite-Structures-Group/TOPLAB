@@ -67,7 +67,7 @@ class InitialConditions:
 @dataclass
 class TargetConditions:
     fuel_mass: float
-    fill: float 
+    fill: float
 
 
 class AnalysisFacade(Protocol):
@@ -134,7 +134,7 @@ class AnalysisFacade(Protocol):
 
 
 class DrainingAnalysisFacade(AnalysisFacade):
-    
+
     @classmethod
     def analyse(
         cls,
@@ -149,7 +149,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
         print(tank_dimensions, datetime.now().strftime("%H:%M:%S"))
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-            tank_dimensions, material, operating_envelope, initial_state 
+            tank_dimensions, material, operating_envelope, initial_state
         )
         tank_states = MissionAnalysis.perform_analysis(
             tank,
@@ -249,7 +249,7 @@ class MissionAnalysisFacade(AnalysisFacade):
     ) -> TankPerformance:
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-        tank_dimensions, material, operating_envelope, initial_state 
+        tank_dimensions, material, operating_envelope, initial_state
         )
         tank_states = MissionAnalysis.perform_analysis(
             tank,
@@ -286,7 +286,7 @@ class FillingAnalysisFacade(AnalysisFacade):
         MULTISTEP_METHOD.timestep = 1
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-        tank_dimensions, material, operating_envelope, initial_state 
+        tank_dimensions, material, operating_envelope, initial_state
         )
         tank_states = MissionAnalysis.perform_analysis(
             tank,
@@ -338,14 +338,14 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
         # Define the initial state and the fuel tank
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-            tank_dimensions, material, operating_envelope, initial_state 
+            tank_dimensions, material, operating_envelope, initial_state
         )
-        
+
         # Set up iterations
         tank_states = TankStates(list(), MULTISTEP_METHOD.timestep)
         max_changes = 100
         for _ in range(max_changes):
-            
+
             # Compute new tank states
             tank_states += SwitchMissionAnalysis.perform_analysis(
                 tank,
@@ -363,16 +363,16 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
                 cls._define_thermal_model(insulation),
                 HEAT_FLUX_FACTOR
             )
-            
+
             # Verify if tank has been drained
             if cls._tank_is_drained(tank_states):
                 return TankPerformance(tank, insulation, tank_states)
-            
+
             # Update the initial state for the new iteration
             initial_state = cls._define_initial_state(
                 tank_states.last_state
             )
-        
+
         raise ValueError(
             "Exceeded maximum iterations is switch drain analysis..."
         )
@@ -416,6 +416,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+
 
 # End
