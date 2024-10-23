@@ -61,7 +61,7 @@ class TankSection(ABC):
         self, temperature: float
     ) -> float:
         return (
-            self.structural_mass 
+            self.structural_mass
             * self.material.determine_specific_heat(temperature)
         )
 
@@ -83,7 +83,7 @@ class TankSection(ABC):
 
     @abstractmethod
     def compute_volume_section(self, fuel_height: float) -> float:
-        """Method to compute the volume section of the fuel, for the 
+        """Method to compute the volume section of the fuel, for the
         given height of the fuel.
 
         Args:
@@ -96,7 +96,7 @@ class TankSection(ABC):
 
     @abstractmethod
     def compute_wetted_surface(self, fuel_height: float) -> float:
-        """Method to compute the wetted surface by the fuel for the 
+        """Method to compute the wetted surface by the fuel for the
         given fuel height.
 
         Args:
@@ -106,7 +106,7 @@ class TankSection(ABC):
             float: Wetted area by the fuel for the provided height.
         """
         ...
-    
+
 
 @dataclass
 class CylindricalBody(TankSection):
@@ -122,7 +122,7 @@ class CylindricalBody(TankSection):
     @property
     def surface_area(self) -> float:
         return 2 * np.pi * self.radius * self.length
-    
+
     @property
     def volume(self) -> float:
         return np.pi * self.radius ** 2 * self.length
@@ -152,7 +152,7 @@ class CylindricalBody(TankSection):
             fuel_height (float): Height of the fuel in the tank.
 
         Raises:
-            ValueError: Raises ValueError when the provided fuel height 
+            ValueError: Raises ValueError when the provided fuel height
             is larger than the diameter of the fuel tank.
 
         Returns:
@@ -197,7 +197,7 @@ class SphericalEndCap(TankSection):
     @property
     def volume(self) -> float:
         return 2 * np.pi * self.radius ** 3 / 3
-    
+
     def compute_volume_section(self, fuel_height: float) -> float:
         if fuel_height < 0:
             raise ValueError("Negative fuel height...")
@@ -234,7 +234,7 @@ class Tank:
         """
         self.sections = sections
         return self.sections
-        
+
     def compute_thermal_capacity(
         self, temperature: float
     ) -> float:
@@ -277,7 +277,7 @@ class Tank:
         return sum([
             section.structural_mass for section in self.sections
         ])
-    
+
     @property
     def surface_area(self) -> float:
         return sum([
@@ -293,7 +293,7 @@ class Tank:
 
     @abstractmethod
     def compute_fuel_height(self, fuel_volume: float) -> float:
-        """Method to compute at which height the fuel reaches in the 
+        """Method to compute at which height the fuel reaches in the
         tank. This is required in the computation of the heat transfer
         modes.
 
@@ -335,7 +335,7 @@ class Tank:
         fuel_surface = self.compute_fuel_wetted_surface(fuel_height)
         return self.surface_area - fuel_surface
 
-    
+
 @dataclass
 class CylindricalTankSphericalCaps(Tank):
     radius: float
@@ -358,7 +358,7 @@ class CylindricalTankSphericalCaps(Tank):
             section.volume
             for section in self.sections
         ])
-    
+
     @property
     def diameter(self):
         return self.radius * 2
@@ -395,7 +395,7 @@ class CylindricalTankSphericalCaps(Tank):
             self.radius, self.material, self.operating_pressure
         )
         return self.end_cap
-    
+
     @property
     def exposed_surface(self) -> float:
         return self.body.surface_area
@@ -415,7 +415,7 @@ class CylindricalTankSphericalCaps(Tank):
         return bisection_method(
             self.radius * 2, 0, fuel_volume, self.compute_fuel_volume
         )
-    
+
     def compute_fuel_area_zones(self, fuel_height: float) -> list[float]:
         """Method to compute the areas of the zones as used in Rompokos
         (2018). This is required to compute the heat transfer
@@ -441,8 +441,8 @@ class CylindricalTankSphericalCaps(Tank):
         ]
 
     def compute_zone_1_area(self, fuel_height: float) -> float:
-        """Method to compute area section 1 of the fuel tank. This is 
-        the upper part of the fuel tank. Dive into Figure 9 of 
+        """Method to compute area section 1 of the fuel tank. This is
+        the upper part of the fuel tank. Dive into Figure 9 of
         Winnefeld 2018 for better understanding.
 
         Args:
@@ -456,7 +456,7 @@ class CylindricalTankSphericalCaps(Tank):
         total_zone_1_area = self.compute_fuel_wetted_surface(
             self.outer_segment
         )
-        # This is the upper part not filled by the fuel which needs to 
+        # This is the upper part not filled by the fuel which needs to
         # be removed from the total zone 1 area
         remove_upper_area = self.compute_fuel_wetted_surface(
             self.diameter - fuel_height
@@ -464,8 +464,8 @@ class CylindricalTankSphericalCaps(Tank):
         return total_zone_1_area - remove_upper_area
 
     def compute_zone_2_area(self, fuel_height: float) -> float:
-        """Method to compute area section 2 of the fuel tank. This is 
-        the lower part of the fuel tank. Dive into Figure 9 of 
+        """Method to compute area section 2 of the fuel tank. This is
+        the lower part of the fuel tank. Dive into Figure 9 of
         Winnefeld 2018 for better understanding.
 
         Args:
@@ -487,8 +487,8 @@ class CylindricalTankSphericalCaps(Tank):
         ])
 
     def compute_zone_3_area(self, fuel_height: float) -> float:
-        """Method to compute area section 3 of the fuel tank. This is 
-        the vertical part of the fuel tank. Dive into Figure 9 of 
+        """Method to compute area section 3 of the fuel tank. This is
+        the vertical part of the fuel tank. Dive into Figure 9 of
         Winnefeld 2018 for better understanding.
 
         Args:
@@ -576,9 +576,9 @@ class CylindricalTankSphericalCaps(Tank):
 
     @property
     def outer_segment(self) -> float:
-        """Method to compute the small segment of that is included 
+        """Method to compute the small segment of that is included
         between the square enclosed in a circle and the circle itself.
-        This is required for the fuel zone computations. For a better 
+        This is required for the fuel zone computations. For a better
         understanding dive into the paper of Winnefeld published in
         2018.
 
@@ -621,7 +621,7 @@ class CylindricalTankSphericalCaps(Tank):
             tank_radius, tank_length, material, operating_pressure
         )
         return tank
-        
+
     @classmethod
     def example(
         cls, material: Material, operating_pressure: float
@@ -642,7 +642,7 @@ class CylindricalTankSphericalCaps(Tank):
         num = volume - 4 / 3 * math.pi * radius ** 3
         den = math.pi * radius ** 2
         return num / den
-        
+
 
 @dataclass
 class SphericalTank(Tank):
@@ -693,8 +693,8 @@ class SphericalTank(Tank):
 
     @classmethod
     def lin(
-        cls, 
-        material: Material, 
+        cls,
+        material: Material,
         operating_pressure: float
     ) -> SphericalTank:
         tank_volume = 52
@@ -727,7 +727,7 @@ class TankFactory():
 def bisection_method(
     high: float, low: float, target: float, function
 ) -> float:
-    """Bisection method to find the inputs required to obtain the target 
+    """Bisection method to find the inputs required to obtain the target
     value of the given function. In this module it is used to compute
     the height of the fuel in the tank, for a given fuel volume.
 
@@ -738,7 +738,7 @@ def bisection_method(
         function (_type_): Function to be used to compute the new value.
 
     Raises:
-        ValueError: When the maximum amount of iterations (100) is 
+        ValueError: When the maximum amount of iterations (100) is
         reached, a ValueError is risen.
 
     Returns:
@@ -759,12 +759,12 @@ def bisection_method(
             high = mid
         else:
             low = mid
-    
+
     raise StopIteration("Exceeded max iterations.")
 
 
 def main():
-    
+
     pass
 
 
