@@ -1,7 +1,7 @@
-"""This module is used to define the heat transfer modes of that can 
+"""This module is used to define the heat transfer modes of that can
 occur in the fuel tank. This entails convective motions and radiation.
 Different types of convective motions are defined, with the main split
-being passive or forced. The heat transfer modes differ in the 
+being passive or forced. The heat transfer modes differ in the
 computation of the Nussult number, which in turn is required to compute
 the heat transfer coefficient, needed to obtain the thermal resistance.
 
@@ -99,15 +99,15 @@ class NaturalConvection(HeatTransferMode):
 
     @property
     def temperature_delta(self) -> float:
-        """Property to compute the temperature difference between the 
-        convective medium and the surface temperature. Note that the 
+        """Property to compute the temperature difference between the
+        convective medium and the surface temperature. Note that the
         difference is given as an absolute value.
 
         Returns:
             float: Temperature difference
         """
         return abs(self.medium.temperature - self.surface_temperature)
-        
+
 
     @property
     @abstractmethod
@@ -119,7 +119,7 @@ class NaturalConvection(HeatTransferMode):
             float: Nussult number of the convection.
         """
         ...
-    
+
     @property
     def heat_transfer_coefficient(self) -> float:
         if self.characteristic_dimension <= 0:
@@ -144,7 +144,7 @@ class NaturalConvection(HeatTransferMode):
             * self.medium.prantl_number
             / self.medium.kinematic_viscosity
         )
-        
+
 
 @dataclass
 class ForcedConvection(NaturalConvection):
@@ -153,7 +153,7 @@ class ForcedConvection(NaturalConvection):
 
     @property
     def reynolds_number(self) -> float:
-        """Property to define the Reynolds number of the forced 
+        """Property to define the Reynolds number of the forced
         convection.
 
         Returns:
@@ -188,9 +188,9 @@ class LiquidPhaseConvection(NaturalConvection):
 
 
 class GasPhaseConvection(NaturalConvection):
-    """Class to define natural gas convection. The current 
-    implementation is to be used for gas hydrogen convection and is 
-    based on the work of Brewer 1991, and is the method as implemented 
+    """Class to define natural gas convection. The current
+    implementation is to be used for gas hydrogen convection and is
+    based on the work of Brewer 1991, and is the method as implemented
     by Verstraete 2009, and all the other works on hydrogen fuel tanks.
     """
 
