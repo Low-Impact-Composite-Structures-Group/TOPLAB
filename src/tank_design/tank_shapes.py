@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+from scipy.spatial import ConvexHull
 
 from src.tank_design.structural_models import StructuralModelFactory
 
@@ -215,6 +216,127 @@ class SphericalEndCap(TankSection):
         )
         return self.surface_area_section
 
+@dataclass
+class EllipticCylinderBody(TankSection):
+    radius: float # c
+    l_s: float
+    a: float
+    material: Material
+    operating_pressure: float
+
+    def __post_init__(self):
+        self.type = "elliptic_cylinder"
+        super().__post_init__()
+
+    @property
+    def surface_area(self) -> float:
+        # Ramanujan's approximation for the perimeter of an ellipse
+        # xi = (self.a - self.radius)**2 / (self.a + self.radius)**2
+        # perimeter = np.pi * (self.a + self.radius) * (1.0 + 3.0 * xi/ (10.0 + (4.0 - 3.0 * xi)**0.5))
+        # return self.l_s * perimeter
+        return 2 * np.pi * self.radius * self.l_s
+
+    @property
+    def volume(self) -> float:
+        # return np.pi * self.a * self.radius * self.l_s
+        return np.pi * self.radius ** 2 * self.l_s
+
+    def compute_volume_section(self, fuel_height: float) -> float:
+        if fuel_height < 0:
+            raise ValueError("Negative fuel height...")
+        if fuel_height > 2 * self.radius:
+            raise ValueError("Fuel height higher than tank...")
+        self.volume_section = (
+            self.l_s * (
+                (self.radius ** 2 * np.arccos(
+                    (self.radius - fuel_height) / self.radius)
+                )
+                - (self.radius - fuel_height) * (
+                    2 * self.radius *  fuel_height - fuel_height ** 2
+                ) ** (1 / 2)
+            )
+        )
+        return self.volume_section
+
+    def compute_fuel_amplitude_angle(self, fuel_height: float) -> float:
+        """Method to compute the fuel amplitude angle. This is used for
+        the computation of the wetted area by the fuel.
+
+        Args:
+            fuel_height (float): Height of the fuel in the tank.
+
+        Raises:
+            ValueError: Raises ValueError when the provided fuel height
+            is larger than the diameter of the fuel tank.
+
+        Returns:
+            float: Amplitude angle spanned by the fuel in radians.
+        """
+        if fuel_height > 2 * self.radius:
+            raise ValueError("Fuel height larger than diameter...")
+        if fuel_height > self.radius:
+            self.theta = (
+                np.pi / 2
+                + np.arcsin((fuel_height - self.radius) / self.radius)
+            ) * 2
+            return self.theta
+        if fuel_height <= self.radius:
+            self.theta = (
+                np.arccos((self.radius - fuel_height) / self.radius)
+            ) * 2
+            return self.theta
+
+    def compute_wetted_surface(self, fuel_height: float) -> float:
+        self.surface_area_section = (
+            self.compute_fuel_amplitude_angle(fuel_height) * self.radius
+            * self.l_s
+        )
+        return self.surface_area_section
+
+@dataclass
+class EllipsoidalEndCap(TankSection):
+    radius: float # c
+    a: float
+    b: float
+    material: Material
+    operating_pressure: float
+
+    def __post_init__(self):
+        self.type = "ellipsoidal_end_cap"
+        self.define_structural_model()
+
+    @property
+    def surface_area(self) -> float:
+        return  2 * np.pi *  (((self.b*self.a)**1.6 + (self.b*self.radius)**1.6 + (self.a*self.radius)**1.6)/3)**(1/1.6)
+
+    @property
+    def volume(self) -> float:
+        return (2.0/3.0)*np.pi*self.radius *self.a *self.b
+
+    def compute_volume_section(self, fuel_height: float) -> float:
+        if fuel_height < 0:
+            raise ValueError("Negative fuel height...")
+        if fuel_height > self.radius * 2:
+            raise ValueError("Fuel height higher than diameter...")
+
+        self.volume_section = (
+            np.pi/2 * self.a**2 * (fuel_height + self.radius - fuel_height**3/3.0*self.radius**2 - self.radius/3.0)
+        )
+        return self.volume_section
+
+    def compute_wetted_surface(self, fuel_height: float) -> float:
+        # TODO: expose num points to user
+        points = random_points_on_ellipsoid(1000, self.a, self.b, self.radius)
+        wetted_points = filter_points_by_height(points, fuel_height, self.radius)
+        hull = ConvexHull(wetted_points)
+        area = 0.0
+        for simplex in hull.simplices:
+            p1, p2, p3 = wetted_points[simplex]
+            area += triangle_area(p1, p2, p3)
+        self.surface_area_section = (
+            area
+        )
+        return self.surface_area_section
 
 class Tank:
     sections: list[TankSection]
@@ -706,6 +828,94 @@ class SphericalTank(Tank):
             operating_pressure
         )
 
+@dataclass
+class WinnefeldTank(Tank):  # Replace Tank with the actual parent class name if different
+    radius: float
+    total_length: float
+    a: float
+    b: float
+    material: Material
+    operating_pressure: float
+
+    def __post_init__(self):
+        self.create_body()
+        self.create_end_cap()
+        self.create_sections()
+
+    @property
+    def volume(self) -> float:
+        return sum([
+            section.volume
+            for section in self.sections
+        ])
+
+    @property
+    def diameter(self):
+        return self.radius * 2
+
+    @property
+    def body_length(self):
+        return self.total_length - 2 * self.radius
+
+    @property
+    def characteristic_height(self):
+        return self.diameter
+
+    @property
+    def characteristic_length(self):
+        return self.body_length
+
+    def create_body(self) -> EllipticCylinderBody:
+            """Method to create the body of the fuel tank.
+
+            Returns:
+                EllipticCylinderBody: Body of the fuel tank.
+            """
+            self.body = EllipticCylinderBody(
+                self.radius,
+                self.body_length,
+                self.a,
+                self.material,
+                self.operating_pressure
+            )
+            return self.body
+
+    def create_end_cap(self) -> EllipsoidalEndCap:
+            """Method to create the end cap of the fuel tank.
+
+            Returns:
+                EllipsoidalEndCap: End cap of the fuel tank.
+            """
+            self.end_cap = EllipsoidalEndCap(
+                self.radius,
+                self.a,
+                self.b,
+                self.material,
+                self.operating_pressure
+            )
+            return self.end_cap
+
+    @property
+    def exposed_surface(self) -> float:
+        return self.body.surface_area
+
+    def create_sections(self):
+        """Method te create the list with fuel tank sections.
+
+        Returns:
+            _type_: _description_
+        """
+        self.sections: list[TankSection] = [
+            self.end_cap, self.body, self.end_cap
+        ]
+        return self.sections
+
+    def compute_fuel_height(self, fuel_volume: float) -> float:
+        return bisection_method(
+            self.radius * 2, 0.0, fuel_volume, self.compute_fuel_volume
+        )
+
+
 
 class TankFactory():
 
@@ -714,14 +924,23 @@ class TankFactory():
         radius: float,
         body_length: float,
         material: Material,
-        operating_pressure: float
+        operating_pressure: float,
+        a: float = None,
+        b: float = None,
     ) -> Tank:
+        if a is not None and b is not None:
+            # Return a different object if a and b are provided
+            total_length = 2 * b + body_length
+            return WinnefeldTank(radius, total_length,  a, b, material, operating_pressure)
+
         if body_length == 0:
             return SphericalTank(radius, material, operating_pressure)
+
         total_length = 2 * radius + body_length
         return CylindricalTankSphericalCaps(
             radius, total_length, material, operating_pressure
         )
+
 
 
 def bisection_method(
@@ -748,11 +967,13 @@ def bisection_method(
 
     # Define max iterations and desired accuracy
     max_iterations = 100
-    accuracy = 1e-5
+    accuracy = 1e-4
 
     for _ in range(max_iterations):
         mid = (high + low) / 2
         mid_value = function(mid)
+        # print(mid)
+        # print("diff = ", abs(target - mid_value))
         if abs(target - mid_value) < accuracy:
             return mid
         if mid_value > target:
@@ -762,6 +983,26 @@ def bisection_method(
 
     raise StopIteration("Exceeded max iterations.")
 
+def random_points_on_ellipsoid(num_points, a, b, c):
+    cos_theta = np.random.uniform(-1, 1, num_points)
+    phi = np.random.uniform(0, 2 * np.pi, num_points)
+    theta = np.arccos(cos_theta)
+    x = a * np.sin(theta) * np.cos(phi)
+    y = b * np.sin(theta) * np.sin(phi)
+    z = c * np.cos(theta)
+    return np.vstack((x, y, z)).T
+
+def filter_points_by_height(points, h, c):
+    if not (0 <= h <= 2 * c):
+        raise ValueError("Height h must be within the range 0 to 2c.")
+    if h < c:
+        return points[points[:, 2] < -(c-h)]
+    return points[points[:, 2] <= (h-c)]
+
+def triangle_area(p1, p2, p3):
+    side1 = p2 - p1
+    side2 = p3 - p1
+    return 0.5 * np.linalg.norm(np.cross(side1, side2))
 
 def main():
 
