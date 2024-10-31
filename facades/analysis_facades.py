@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, Union
 
 from src.dynamics.dynamic_analysis import (MissionAnalysis,
                                            SwitchMissionAnalysis)
@@ -49,6 +49,10 @@ class TankDimensions:
     radius: float
     body_length: float
 
+@dataclass
+class GenericTankDimensions(TankDimensions):
+    a: float
+    b: float
 
 @dataclass
 class OperatingEnvelope:
@@ -79,17 +83,28 @@ class AnalysisFacade(Protocol):
     @classmethod
     def _define_tank(
         cls,
-        tank_dimensions: TankDimensions,
+        tank_dimensions: Union[TankDimensions, GenericTankDimensions],
         material: Material,
         target_state: OperatingEnvelope,
         initial_state: InitialState
     ) -> Tank:
-        return TankFactory.create_tank(
-            tank_dimensions.radius,
-            tank_dimensions.body_length,
-            material,
-            cls._define_operating_pressure(target_state, initial_state)
-        )
+        # TODO: this is sloppy... find a better way to do this
+        if hasattr(tank_dimensions, 'a') and hasattr(tank_dimensions, 'b'):
+            return TankFactory.create_tank(
+                tank_dimensions.radius,
+                tank_dimensions.body_length,
+                material,
+                cls._define_operating_pressure(target_state, initial_state),
+                tank_dimensions.a,
+                tank_dimensions.b
+            )
+        else:
+            return TankFactory.create_tank(
+                tank_dimensions.radius,
+                tank_dimensions.body_length,
+                material,
+                cls._define_operating_pressure(target_state, initial_state)
+            )
 
     @staticmethod
     def _define_operating_pressure(
