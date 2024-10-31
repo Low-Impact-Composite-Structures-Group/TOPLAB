@@ -56,6 +56,32 @@ class MetalCylinder(StructuralModel):
             / tank_section.material.failure_stress
         )
 
+class MetalEllipsoidalEndCap(StructuralModel):
+    # TODO : replace with correct calculation for new geometry
+
+    def compute_thickness(
+        self,
+        tank_section: TankSection,
+        pressure: float
+    ) -> float:
+        return (
+            pressure * tank_section.radius
+            / tank_section.material.failure_stress
+        )
+
+
+class MetalEllipticCylinder(StructuralModel):
+    # TODO : replace with correct calculation for new geometry
+    def compute_thickness(
+        self,
+        tank_section: TankSection,
+        pressure: float
+    ) -> float:
+        return (
+            pressure * tank_section.radius
+            / tank_section.material.failure_stress
+        )
+
 
 class CompositeModel(StructuralModel):
 
@@ -122,6 +148,47 @@ class CompositeCylinder(CompositeModel):
         )
         return num / material.failure_stress
 
+class CompositeEllipsoidalEndCap(CompositeModel):
+    # TODO : replace with correct calculation for new geometry
+    def compute_thickness(
+        self,
+        tank_section: TankSection,
+        pressure: float
+    ) -> float:
+        return self.helical_thickness(
+            pressure, tank_section.radius, tank_section.material
+        )
+
+
+class CompositeEllipticCylinder(CompositeModel):
+    # TODO : replace with correct calculation for new geometry
+    def compute_thickness(
+        self,
+        tank_section: TankSection,
+        pressure: float
+    ) -> float:
+        helical = self.helical_thickness(
+            pressure, tank_section.radius, tank_section.material
+        )
+        hoop = self.hoop_thickness(
+            pressure, tank_section.radius, tank_section.material
+        )
+        return helical + hoop
+
+    @classmethod
+    def hoop_thickness(
+        cls,
+        pressure: float,
+        radius: float,
+        material: CompositeMaterial
+    ) -> float:
+        num = (
+            cls.hoop_stress(pressure, radius)
+            - cls.meridional_stress(pressure, radius)
+            * math.tan(material.winding_angle) ** 2
+        )
+        return num / material.failure_stress
+
 
 class StructuralModelFactory:
 
@@ -137,11 +204,19 @@ class StructuralModelFactory:
                 return MetalCylinder()
             if tank_section.type == "spherical_end_cap":
                 return MetalSphericalEndCap()
+            if tank_section.type == "elliptic_cylinder":
+                return MetalEllipticCylinder()
+            if tank_section.type == "ellipsoidal_end_cap":
+                return MetalEllipsoidalEndCap()
         if tank_section.material.type == "composite":
             if tank_section.type == "cylinder":
                 return CompositeCylinder()
             if tank_section.type == "spherical_end_cap":
                 return CompositeSphericalEndCap()
+            if tank_section.type == "elliptic_cylinder":
+                return CompositeEllipticCylinder()
+            if tank_section.type == "ellipsoidal_end_cap":
+                return CompositeEllipsoidalEndCap()
         raise ValueError(
             f"{tank_section.material.type} and {tank_section.type}" \
                 "not supported in StructuralModelFactory"
