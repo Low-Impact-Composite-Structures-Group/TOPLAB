@@ -1,12 +1,13 @@
 
 
-from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures)
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
-                                          OperatingEnvelope, TankDimensions)
+                                          OperatingEnvelope, TankDimensions, GenericTankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
+import numpy as np
 
 
 def perform_analysis():
@@ -36,29 +37,40 @@ def perform_analysis():
     # Define tank dimensions
     # See Winnefeld paper for a visual key corresponding to these dimensions
     # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
-    # NB: lambda is replaced with chi
 
-    l_t = 7 # [m] length of entire tank
-    l_s = 5 # [m] length of shell section
-    a = 1 # [m] horizontal axis of elliptical shell cross-section
-    b = 1 # [m] length of endcap in axial direction
-    c = 1 # [m] vertical axis of elliptical shell cross-section
+    body_length = 5 # [m] length of entire tank, corresponds to l_t in Winnefeld paper
+    # radii = [i / 100 for i in range(25, 276, 25)] # [m] horizontal axis of elliptical shell cross-section, corresponds to a in Winnefeld paper
 
-    chi = l_s / l_t
-    phi = a/c
-    psi = b/c
+    min_radius = 0.2
+    max_radius = 0.3
+    min_b = 0.2
+    max_b = 0.3
+    min_body_length = 3.0
+    max_body_length = 5.0
+    radius_range = (min_radius, max_radius)
+    b_range = (min_b, max_b)
+    body_length_range = (min_body_length, max_body_length)
+    num_samples = 10
+    decimals = 4
+    radii_samples = np.round(np.random.uniform(radius_range[0], radius_range[1], num_samples), decimals)
+    b_samples = np.round(np.random.uniform(b_range[0], b_range[1], num_samples), decimals)
+    body_length_samples = np.round(np.random.uniform(body_length_range[0], body_length_range[1], num_samples), decimals)
 
+    # remainder of dimensions needed for Winnelfeld analysis
+    # l_s = 5 # [m] length of shell section. not presently used since the shell length
+    # can be deduced from the body length and endcap lengths
 
+    labels = [f'{radius} m' for radius in radii_samples]
 
-    body_length = 5
-    radii = [i / 100 for i in range(25, 276, 25)]
-    labels = [f'{radius} m' for radius in radii]
 
     # Perform the analysis
     performances = [
         DrainingAnalysisFacade.analyse(
-            TankDimensions(
-                radius, body_length
+            GenericTankDimensions(
+                # NB: for now, quantity a is set to the same value as the radius (c)
+                # This is because the EllipticCylinderBody does not yet support partial
+                # volume calculations with elliptic cross sections
+                radius, body_length, radius, radius
             ),
             tank_material,
             insulation,
@@ -71,24 +83,22 @@ def perform_analysis():
                 None
             )
         )
-        for radius in radii
+         for radius, b, body_length in zip(radii_samples, b_samples, body_length_samples)
     ]
     data = [performance.tank_states for performance in performances]
 
-    xticks = list(range(0, 31, 5))
-    yticks = list(range(0, 11, 2))
-    fig1 = plot_tank_loads(data, labels, xticks, yticks)
-    yticks = list(range(20, 33, 2))
-    fig2 = plot_tank_temperatures(data, labels, xticks, yticks)
-    y1ticks = list(range(0, 12001, 2000))
-    y2ticks = [i / 10 for i in range(0, 11, 2)]
-    fig3 = plot_tank_fill(data[-1], xticks, y1ticks, y2ticks)
-    xticks = [i / 100 for i in range(0, 301, 50)]
-    yticks = [i / 100 for i in range(70, 101, 5)]
-    fig4 = plot_tank_efficiencies(
-        performances, radii, "Radius [m]", xticks, yticks
-    )
+    # compute psi
+    psi_values = [radius / b for radius, b in zip(radii_samples, b_samples)]
+
+    fig1 = plot_tank_loads(data, labels, None, None)
+    fig2 = plot_tank_temperatures(data, labels, None, None)
+    fig3 = plot_tank_fill(data[-1], None, None, None)
+    fig4 = plot_tank_efficiencies_scatter(performances, psi_values, "psi (c/b) [m/m]", None, None)
+
     fig1.show()
+    fig2.show()
+    fig3.show()
+    fig4.show()
 
 
 def main():
