@@ -122,6 +122,8 @@ class NaturalConvection(HeatTransferMode):
 
     @property
     def heat_transfer_coefficient(self) -> float:
+        if self.characteristic_dimension is None:
+            raise ValueError("characteristic_dimension is not set")
         if self.characteristic_dimension <= 0:
             return float("inf")
         return (
