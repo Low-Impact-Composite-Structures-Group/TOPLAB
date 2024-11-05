@@ -1,12 +1,13 @@
-
-
 from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank_fill,
-                                       plot_tank_loads, plot_tank_temperatures)
+                                       plot_tank_loads, plot_tank_temperatures, plot_required_flux)
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
-                                          OperatingEnvelope, TankDimensions, GenericTankDimensions)
+                                          OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
+from src.mission.mission import Mission
+from src.thermodynamics.tank_states import InitialState
+from src.tank_design.tank_shapes import WinnefeldTank
 import numpy as np
 
 
@@ -16,7 +17,7 @@ def perform_analysis():
     pressure = 140e3 # [Pa]
     temperature = None
     fill = 0.97
-    initial_state = InitialConditions(
+    initial_state = InitialState(
         pressure, temperature, fill
     )
 
@@ -29,10 +30,25 @@ def perform_analysis():
     tank_material = Composite.carbon(winding_angle)
 
     # Define fuel flow
-    fuel_flow = OutFlow.fly_eco_cruise("liquid")
+    # fuel_flow = OutFlow.fly_eco_cruise("liquid")
+    fuel_flow = "gas"
+
+    mission = Mission.fly_eco_mission(fuel_flow)
 
     # Define the minimum pressure of the tank
     min_pressure = 1.3e5 # [Pa]
+    min_temperature = None
+    operating_window = OperatingEnvelope(
+        max_pressure=None,
+        min_pressure=min_pressure,
+        min_temperature=min_temperature
+    )
+
+    # Define required fuel
+    fuel_mass = mission.required_fuel
+    initial_fuel = initial_state.get_hydrogen_properties()
+    fuel_volume = fuel_mass / initial_fuel.liquid.density
+    VOLUME_MARGIN = 1.15
 
     # Define tank dimensions
     # See Winnefeld paper for a visual key corresponding to these dimensions
@@ -50,14 +66,14 @@ def perform_analysis():
     radius_range = (min_radius, max_radius)
     b_range = (min_b, max_b)
     body_length_range = (min_body_length, max_body_length)
-    num_samples = 10
+    num_samples = 1
     decimals = 4
     radii_samples = np.round(np.random.uniform(radius_range[0], radius_range[1], num_samples), decimals)
     b_samples = np.round(np.random.uniform(b_range[0], b_range[1], num_samples), decimals)
     body_length_samples = np.round(np.random.uniform(body_length_range[0], body_length_range[1], num_samples), decimals)
 
-    # remainder of dimensions needed for Winnelfeld analysis
-    # l_s = 5 # [m] length of shell section. not presently used since the shell length
+    # remainder of dimensions needed for Winnefeld analysis
+    # l_s = 5 # [m]q     length of shell section. not presently used since the shell length
     # can be deduced from the body length and endcap lengths
 
     labels = [f'{radius} m' for radius in radii_samples]
@@ -65,40 +81,64 @@ def perform_analysis():
 
     # Perform the analysis
     performances = [
-        DrainingAnalysisFacade.analyse(
+        MissionAnalysisFacade.analyse(
             GenericTankDimensions(
                 # NB: for now, quantity a is set to the same value as the radius (c)
                 # This is because the EllipticCylinderBody does not yet support partial
                 # volume calculations with elliptic cross sections
-                radius, body_length, radius, radius
-            ),
+                radius,  WinnefeldTank.length_from_radius_b_and_volume(
+                radius, VOLUME_MARGIN * fuel_volume, b), radius, radius),
             tank_material,
             insulation,
-            fuel_flow.mass_flow,
-            fuel_flow.phase,
+            mission,
             initial_state,
-            OperatingEnvelope(
-                None, # TODO: define max pressure relating to the tank material and geometry
-                min_pressure,
-                None
-            )
+            operating_window
         )
-         for radius, b, body_length in zip(radii_samples, b_samples, body_length_samples)
+            for radius, b, in zip(radii_samples, b_samples)
     ]
-    data = [performance.tank_states for performance in performances]
+    # data = [performance.tank_states for performance in performances]
 
     # compute psi
     psi_values = [radius / b for radius, b in zip(radii_samples, b_samples)]
 
-    fig1 = plot_tank_loads(data, labels, None, None)
-    fig2 = plot_tank_temperatures(data, labels, None, None)
-    fig3 = plot_tank_fill(data[-1], None, None, None)
-    fig4 = plot_tank_efficiencies_scatter(performances, psi_values, "psi (c/b) [m/m]", None, None)
+    # fig1 = plot_tank_loads(data, labels, None, None)
+    # fig2 = plot_tank_temperatures(data, labels, None, None)
+    # fig3 = plot_tank_fill(data[-1], None, None, None)
+    # fig4 = plot_tank_efficiencies_scatter(performances, psi_values, "psi (c/b) [m/m]", None, None)
 
-    fig1.show()
-    fig2.show()
-    fig3.show()
-    fig4.show()
+    # fig1.show()
+    # fig2.show()
+    # fig3.show()
+    # fig4.show()
+
+    for performance in performances:
+        print("Gravimetric Efficiency\t:", performance.gravimetric_efficiency)
+        print("Volumetric Efficiency\t:", performance.volumetric_efficiency)
+
+    # Plotting the data
+    fig = plot_tank_loads(
+        [row.tank_states for row in performances],
+        labels
+    )
+    plot_tank_temperatures(
+        [row.tank_states for row in performances],
+        labels
+    )
+    plot_tank_fill(
+        performances[-1].tank_states
+    )
+    plot_required_flux(
+        [row.tank_states for row in performances],
+        labels
+    )
+
+    # Autoscale the axes
+    fig.ax[0].autoscale()
+
+    # Show the figure
+    fig.show()
+
+
 
 
 def main():
