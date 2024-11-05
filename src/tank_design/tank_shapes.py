@@ -915,6 +915,14 @@ class WinnefeldTank(Tank):  # Replace Tank with the actual parent class name if 
             self.radius * 2, 0.0, fuel_volume, self.compute_fuel_volume
         )
 
+    @staticmethod
+    def length_from_radius_b_and_volume(
+        radius: float, volume: float, b: float
+    ) -> float:
+        num = volume - 4 / 3 * math.pi * b * radius ** 2
+        den = math.pi * radius ** 2
+        return num / den
+
 
 
 class TankFactory():
