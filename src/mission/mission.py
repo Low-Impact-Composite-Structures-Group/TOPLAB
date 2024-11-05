@@ -13,7 +13,7 @@ HOURS_TO_SECONDS = MINUTES_TO_SECONDS * 60
 
 # The take and hold times are assumed to be of 20 minutes
 CLIMB_TIME = 5 * MINUTES_TO_SECONDS
-TAKE_OFF_TIME = 20 * MINUTES_TO_SECONDS 
+TAKE_OFF_TIME = 20 * MINUTES_TO_SECONDS
 HOLD_TIME = 20 * MINUTES_TO_SECONDS
 DESCENT_TIME = 20 * MINUTES_TO_SECONDS
 TIME_TO_ALTERNATE_CRUISE = 10 * MINUTES_TO_SECONDS
@@ -77,10 +77,10 @@ class Mission:
                 temperatures
             )
         ]
-        
+
         return cls(mission_sections)
 
-    @classmethod    
+    @classmethod
     def aircraft_mission(
         cls,
         fuel_flow_state: str,
@@ -105,7 +105,7 @@ class Mission:
             "descent_2",
             "landing"
         ]
-        
+
         durations = cls.define_durations(
             cruise_altitude,
             cruise_range,
@@ -115,7 +115,7 @@ class Mission:
         )
         mach_numbers = cls.define_mach_numbers(cruise_mach_number)
         altitudes = cls.define_altitudes(cruise_altitude)
-        
+
         mission_sections = [
             MissionSection(
                 durations[section],
@@ -143,7 +143,7 @@ class Mission:
             "descent_2": cruise_altitude / 2,
             "landing": cruise_altitude / 2
         }
-        
+
         return altitudes
 
     @staticmethod
@@ -161,7 +161,7 @@ class Mission:
             "descent_2": cruise_speed / 2,
             "landing": cruise_speed / 2
         }
-        
+
         return mach_numbers
 
     @classmethod
@@ -190,7 +190,7 @@ class Mission:
             "descent_2": ALTERNATE_DESCENT_TIME,
             "landing": LANDING_TIME
         }
-        
+
         return durations
 
     @staticmethod
