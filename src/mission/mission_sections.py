@@ -49,6 +49,7 @@ class MissionSection:
     fuel_flows: list[FuelFlow]
     altitude: float
     mach_number: float
+    fuel_flow_key: str
 
     ground_temperature: float = None
 
