@@ -17,6 +17,7 @@ from typing import Protocol
 
 import numpy as np
 from scipy.spatial import ConvexHull
+from scipy.integrate import dblquad
 
 from src.tank_design.structural_models import StructuralModelFactory
 
@@ -325,17 +326,18 @@ class EllipsoidalEndCap(TankSection):
         return self.volume_section
 
     def compute_wetted_surface(self, fuel_height: float) -> float:
-        # TODO: expose num points to user
-        points = random_points_on_ellipsoid(1000, self.a, self.b, self.radius)
-        wetted_points = filter_points_by_height(points, fuel_height, self.radius)
-        hull = ConvexHull(wetted_points)
-        area = 0.0
-        for simplex in hull.simplices:
-            p1, p2, p3 = wetted_points[simplex]
-            area += triangle_area(p1, p2, p3)
-        self.surface_area_section = (
-            area
+        h = fuel_height - self.radius
+        theta_h = np.arccos(h / self.radius)
+        # Perform the integration over the segment area below z = h
+        self.surface_area_section, _ = dblquad(
+            surface_element,
+            0,                  # phi limits from 0 to 2pi
+            2 * np.pi,
+            lambda phi: theta_h,  # theta limits from theta_h to pi (below z = h)
+            lambda phi: np.pi,
+            args=(self.a, self.b)
         )
+
         return self.surface_area_section
 
 class Tank:
@@ -992,6 +994,7 @@ def bisection_method(
     raise StopIteration("Exceeded max iterations.")
 
 def random_points_on_ellipsoid(num_points, a, b, c):
+    # deprecated
     cos_theta = np.random.uniform(-1, 1, num_points)
     phi = np.random.uniform(0, 2 * np.pi, num_points)
     theta = np.arccos(cos_theta)
@@ -1001,6 +1004,7 @@ def random_points_on_ellipsoid(num_points, a, b, c):
     return np.vstack((x, y, z)).T
 
 def filter_points_by_height(points, h, c):
+    # deprecated
     if not (0 <= h <= 2 * c):
         raise ValueError("Height h must be within the range 0 to 2c.")
     if h < c:
@@ -1008,9 +1012,33 @@ def filter_points_by_height(points, h, c):
     return points[points[:, 2] <= (h-c)]
 
 def triangle_area(p1, p2, p3):
+    # deprecated
     side1 = p2 - p1
     side2 = p3 - p1
     return 0.5 * np.linalg.norm(np.cross(side1, side2))
+
+# Surface element function for the ellipsoid in spherical coordinates
+def surface_element(theta, phi, a, b):
+    # Compute the parameterized coordinates
+    x = a * np.sin(theta) * np.cos(phi)
+    y = b * np.sin(theta) * np.sin(phi)
+    z = a * np.cos(theta)
+
+    # Partial derivatives with respect to theta
+    x_theta = a * np.cos(theta) * np.cos(phi)
+    y_theta = b * np.cos(theta) * np.sin(phi)
+    z_theta = -a * np.sin(theta)
+
+    # Partial derivatives with respect to phi
+    x_phi = -a * np.sin(theta) * np.sin(phi)
+    y_phi = b * np.sin(theta) * np.cos(phi)
+    z_phi = 0
+
+    # Compute the cross product magnitude for the surface area element
+    cross_product = np.sqrt((y_theta * z_phi - z_theta * y_phi)**2 +
+                            (z_theta * x_phi - x_theta * z_phi)**2 +
+                            (x_theta * y_phi - y_theta * x_phi)**2)
+    return cross_product
 
 def main():
 
