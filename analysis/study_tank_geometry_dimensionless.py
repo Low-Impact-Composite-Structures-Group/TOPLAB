@@ -9,9 +9,13 @@ from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank
 import numpy as np
+import time
 
 
 def perform_analysis():
+
+    # Record the start time
+    start_time = time.time()
 
     # Define the initial state of the tank
     pressure = 140e3 # [Pa]
@@ -31,7 +35,7 @@ def perform_analysis():
 
     # Define fuel flow
     # fuel_flow = OutFlow.fly_eco_cruise("liquid")
-    fuel_flow = "gas"
+    fuel_flow = "liquid"
 
     mission = Mission.fly_eco_mission(fuel_flow)
 
@@ -114,6 +118,13 @@ def perform_analysis():
     for performance in performances:
         print("Gravimetric Efficiency\t:", performance.gravimetric_efficiency)
         print("Volumetric Efficiency\t:", performance.volumetric_efficiency)
+
+    # Record the end time
+    end_time = time.time()
+
+    # Calculate and print the elapsed time
+    elapsed_time = end_time - start_time
+    print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
     # Plotting the data
     fig = plot_tank_loads(
