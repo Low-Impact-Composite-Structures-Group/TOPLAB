@@ -121,7 +121,8 @@ class Mission:
                 durations[section],
                 [OutFlow(fuel_flows[section], fuel_flow_state)],
                 altitudes[section],
-                mach_numbers[section]
+                mach_numbers[section],
+                section
             )
             for section in mission_sections
         ]
