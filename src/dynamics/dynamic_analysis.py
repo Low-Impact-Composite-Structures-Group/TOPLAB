@@ -318,7 +318,8 @@ class MissionAnalysis:
             tank_states = TankStates(list(), multistep_method.timestep)
 
             for mission_section in mission.sections:
-
+                section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
+                print(f"Now calculating mission section {section_string}, thermal iteration index = {i}")
                 tank_states += MissionSectionAnalysis().analyse_section(
                     tank,
                     initial,
@@ -339,6 +340,7 @@ class MissionAnalysis:
 
             # Check for convergence in the thermal capacity of the tank
             if cls.thermal_capacity_has_converged(tank, tank_states):
+                print(f"Thermal capacity has converged with {i} iterations")
                 return tank_states
         raise ValueError("Thermal capacity has failed to converge")
 
