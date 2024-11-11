@@ -67,11 +67,11 @@ class MissionSection:
         return self.ambient.speed_of_sound * self.mach_number
 
     def number_of_timesteps(self, timestep: float) -> float:
-        if self.duration % timestep != 0:
-            raise ValueError(
-                "Invalid timestep and duration combination\n" \
-                "Ensure that the duration is a multiple of the step."
-            )
+        # if self.duration % timestep != 0:
+        #     raise ValueError(
+        #         "Invalid timestep and duration combination\n" \
+        #         "Ensure that the duration is a multiple of the step."
+        #     )
         return int(self.duration // timestep)
 
     @classmethod
