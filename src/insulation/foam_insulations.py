@@ -85,7 +85,7 @@ class FoamInsulation(Insulation):
         return (
             thermal_conductivity / math.log(outer_radius / inner_radius)
         )
-    
+
     def compute_thermal_resistances(
         self,
         temperatures: list[float],
