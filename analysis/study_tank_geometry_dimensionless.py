@@ -10,12 +10,15 @@ from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank
 import numpy as np
 import time
+from scipy.optimize import minimize
 
 
 def perform_analysis():
 
     # Record the start time
     start_time = time.time()
+    # Plotting flag
+    PLOT_ALL = False
 
     # Define the initial state of the tank
     pressure = 140e3 # [Pa]
@@ -51,73 +54,75 @@ def perform_analysis():
     # Define required fuel
     fuel_mass = mission.required_fuel
     initial_fuel = initial_state.get_hydrogen_properties()
+
+    # Get fuel volume
     fuel_volume = fuel_mass / initial_fuel.liquid.density
     VOLUME_MARGIN = 1.15
 
-    # Define tank dimensions
-    # See Winnefeld paper for a visual key corresponding to these dimensions
-    # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
 
-    body_length = 5 # [m] length of entire tank, corresponds to l_t in Winnefeld paper
-    # radii = [i / 100 for i in range(25, 276, 25)] # [m] horizontal axis of elliptical shell cross-section, corresponds to a in Winnefeld paper
+    # List to store the results of each iteration
+    all_performances = []
+    all_tank_states = []
+    all_b = []
+    all_radii = []
 
-    min_radius = 0.2
-    max_radius = 0.3
-    min_b = 0.2
-    max_b = 0.3
-    min_body_length = 3.0
-    max_body_length = 5.0
-    radius_range = (min_radius, max_radius)
-    b_range = (min_b, max_b)
-    body_length_range = (min_body_length, max_body_length)
-    num_samples = 1
-    decimals = 4
-    radii_samples = np.round(np.random.uniform(radius_range[0], radius_range[1], num_samples), decimals)
-    b_samples = np.round(np.random.uniform(b_range[0], b_range[1], num_samples), decimals)
-    body_length_samples = np.round(np.random.uniform(body_length_range[0], body_length_range[1], num_samples), decimals)
-
-    # remainder of dimensions needed for Winnefeld analysis
-    # l_s = 5 # [m]q     length of shell section. not presently used since the shell length
-    # can be deduced from the body length and endcap lengths
-
-    labels = [f'{radius} m' for radius in radii_samples]
-
-
-    # Perform the analysis
-    performances = [
-        MissionAnalysisFacade.analyse(
+    # Define the objective function
+    def objective_function(params):
+        radius, b = params
+        performance = MissionAnalysisFacade.analyse(
             GenericTankDimensions(
-                # NB: for now, quantity a is set to the same value as the radius (c)
-                # This is because the EllipticCylinderBody does not yet support partial
-                # volume calculations with elliptic cross sections
-                radius,  WinnefeldTank.length_from_radius_b_and_volume(
-                radius, VOLUME_MARGIN * fuel_volume, b), radius, radius),
+                radius, WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, b), radius, radius),
             tank_material,
             insulation,
             mission,
             initial_state,
             operating_window
         )
-            for radius, b, in zip(radii_samples, b_samples)
-    ]
-    # data = [performance.tank_states for performance in performances]
+        all_performances.append(performance)
+        all_tank_states.append(performance.tank_states)
+        all_b.append(b)
+        all_radii.append(radius)
+        return -performance.gravimetric_efficiency
+
+    # Initial guess for radius and b
+    initial_guess = [0.1, 0.3]
+
+    # bounds of values taken by radius and b
+    bounds_radius_b=[(0.1, 0.5), (0.1, 1.0)]
+
+    # Perform the optimization
+    result = minimize(objective_function, initial_guess, method='Nelder-Mead', bounds=bounds_radius_b)
+    optimal_radius, optimal_b = result.x
+    print(f'Optimal radius: {optimal_radius}')
+    print(f'Optimal b: {optimal_b}')
+    print(f'Minimized gravimetric efficiency: {-result.fun}')
+
+    # Perform the analysis with the optimized parameters
+    optimal_performance =[ MissionAnalysisFacade.analyse(GenericTankDimensions(
+            optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
+            optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_b), optimal_radius, optimal_radius),
+        tank_material,
+        insulation,
+        mission,
+        initial_state,
+        operating_window)]
+
+    # Listify optimal tank performance
+    optimum = [performance.tank_states for performance in optimal_performance]
 
     # compute psi
-    psi_values = [radius / b for radius, b in zip(radii_samples, b_samples)]
+    # See Winnefeld paper for the definition of psi
+    # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
+    psi_values = [all_radii / all_b for all_radii, all_b in zip(all_radii, all_b)]
+    labels = [f'{psi} [-]' for psi in psi_values]
 
-    # fig1 = plot_tank_loads(data, labels, None, None)
-    # fig2 = plot_tank_temperatures(data, labels, None, None)
-    # fig3 = plot_tank_fill(data[-1], None, None, None)
-    # fig4 = plot_tank_efficiencies_scatter(performances, psi_values, "psi (c/b) [m/m]", None, None)
+    # Create plots for tank loads and efficiencies searched in the optimization
+    tank_loads_fig = plot_tank_loads(optimum, labels, None, None)
+    etas_fig = plot_tank_efficiencies_scatter(all_performances, psi_values, "psi (c/b) [m/m]", None, None)
 
-    # fig1.show()
-    # fig2.show()
-    # fig3.show()
-    # fig4.show()
-
-    for performance in performances:
-        print("Gravimetric Efficiency\t:", performance.gravimetric_efficiency)
-        print("Volumetric Efficiency\t:", performance.volumetric_efficiency)
+    # Show the figures
+    tank_loads_fig.show()
+    etas_fig.show()
 
     # Record the end time
     end_time = time.time()
@@ -126,28 +131,23 @@ def perform_analysis():
     elapsed_time = end_time - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
-    # Plotting the data
-    fig = plot_tank_loads(
-        [row.tank_states for row in performances],
-        labels
-    )
-    plot_tank_temperatures(
-        [row.tank_states for row in performances],
-        labels
-    )
-    plot_tank_fill(
-        performances[-1].tank_states
-    )
-    plot_required_flux(
-        [row.tank_states for row in performances],
-        labels
-    )
 
-    # Autoscale the axes
-    fig.ax[0].autoscale()
+    # Optional plotting
+    if (PLOT_ALL):
+        fig = plot_tank_loads(
+            all_tank_states,
+            labels
+        )
+        plot_tank_temperatures(
+            all_tank_states,
+            labels
+        )
+        plot_tank_fill(
+            all_tank_states[-1]
+        )
 
-    # Show the figure
-    fig.show()
+        # Show the figure
+        fig.show()
 
 
 
