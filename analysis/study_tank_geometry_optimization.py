@@ -20,9 +20,9 @@ def perform_analysis():
     # Record the start time
     start_time = time.time()
     # Plotting flag
-    PLOT_ALL = False
+    PLOT_EXTRA = False
     # Create response surface
-    RESPONSE_SURFACE = False
+    RESPONSE_SURFACE = True
 
     # Define the initial state of the tank
     pressure = 140e3 # [Pa]
@@ -92,57 +92,63 @@ def perform_analysis():
     initial_guess = [0.1, 0.3]
 
     # bounds of values taken by radius and b
-    bounds_radius_b=[(0.1, 0.5), (0.1, 1.0)]
-
-    if not RESPONSE_SURFACE:
-        # Perform the optimization
-        result = minimize(objective_function, initial_guess, method='Nelder-Mead', bounds=bounds_radius_b)
-        optimal_radius, optimal_b = result.x
-        print(f'Optimal radius: {optimal_radius}')
-        print(f'Optimal b: {optimal_b}')
-        print(f'Minimized gravimetric efficiency: {-result.fun}')
+    radius_min = 0.1
+    radius_max = 0.9
+    b_min = 0.1
+    b_max = 0.5
+    bounds_radius_b=[(radius_min, radius_max), (b_min, b_max)]
 
 
-        # Perform the analysis with the optimized parameters
-        optimal_performance =[ MissionAnalysisFacade.analyse(GenericTankDimensions(
-                optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
-                optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_b), optimal_radius, optimal_radius),
-            tank_material,
-            insulation,
-            mission,
-            initial_state,
-            operating_window)]
+    # Perform the optimization
+    result = minimize(objective_function, initial_guess, method='Nelder-Mead', bounds=bounds_radius_b)
+    optimal_radius, optimal_b = result.x
+    print(f'Optimal radius: {optimal_radius}')
+    print(f'Optimal b: {optimal_b}')
+    print(f'Minimized gravimetric efficiency: {-result.fun}')
 
-        # Listify optimal tank performance
-        optimum = [performance.tank_states for performance in optimal_performance]
+    optimal_volumetric_efficiency = [performance.volumetric_efficiency for performance in all_performances]
+    print(f"Max volumetric efficiency = ", max(optimal_volumetric_efficiency))
 
-        # compute psi
-        # See Winnefeld paper for the definition of psi
-        # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
-        psi_values = [all_radii / all_b for all_radii, all_b in zip(all_radii, all_b)]
-        labels = [f'{psi} [-]' for psi in psi_values]
+    # Perform the analysis with the optimized parameters
+    optimal_performance =[ MissionAnalysisFacade.analyse(GenericTankDimensions(
+            optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
+            optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_b), optimal_radius, optimal_radius),
+        tank_material,
+        insulation,
+        mission,
+        initial_state,
+        operating_window)]
 
-        # Create plots for tank loads and efficiencies searched in the optimization
-        tank_loads_fig = plot_tank_loads(optimum, labels, None, None)
-        etas_fig = plot_tank_efficiencies_scatter(all_performances, psi_values, "psi (c/b) [m/m]", None, None)
+    # Listify optimal tank performance
+    optimum = [performance.tank_states for performance in optimal_performance]
 
-        # Show the figures
-        tank_loads_fig.show()
-        etas_fig.show()
+    # compute psi
+    # See Winnefeld paper for the definition of psi
+    # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
+    psi_values = [all_radii / all_b for all_radii, all_b in zip(all_radii, all_b)]
+    labels = [f'{psi} [-]' for psi in psi_values]
 
-    else:
+    # Create plots for tank loads and efficiencies searched in the optimization
+    tank_loads_fig = plot_tank_loads(optimum, labels, None, None)
+    etas_fig = plot_tank_efficiencies_scatter(all_performances, psi_values, "psi (c/b) [m/m]", None, None)
+
+
+    if RESPONSE_SURFACE:
         grid_size = 10
         # Create a grid of radius and b values
-        radius_values = np.linspace(0.1, 0.5, grid_size)
-        b_values = np.linspace(0.1, 1.0, grid_size)
+        radius_values = np.linspace(radius_min, radius_max, grid_size)
+        b_values = np.linspace(b_min, b_max, grid_size)
         radius_grid, b_grid = np.meshgrid(radius_values, b_values)
 
         # Compute gravimetric efficiency for each combination of radius and b
         gravimetric_efficiency_grid = np.zeros_like(radius_grid)
+        volumetric_efficiency_grid = np.zeros_like(radius_grid)
         for i in range(radius_grid.shape[0]):
             for j in range(radius_grid.shape[1]):
                 radius = radius_grid[i, j]
                 b = b_grid[i, j]
+                print(f"Analyzing radius: {radius}, b: {b}")
+                print(f"Case {i * grid_size + j + 1} of {grid_size ** 2}")
                 performance = MissionAnalysisFacade.analyse(GenericTankDimensions(
                     radius, WinnefeldTank.length_from_radius_b_and_volume(
                     radius, VOLUME_MARGIN * fuel_volume, b), radius, radius),
@@ -153,18 +159,46 @@ def perform_analysis():
                     operating_window
                 )
                 gravimetric_efficiency_grid[i, j] = performance.gravimetric_efficiency
+                volumetric_efficiency_grid[i, j] = performance.volumetric_efficiency
 
-        # Plot the surface
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot_surface(radius_grid, b_grid, gravimetric_efficiency_grid, cmap='viridis')
+        # Plot the surfaces
+        fig_ge_surface = plt.figure()
+        ax_ge = fig_ge_surface.add_subplot(111, projection='3d')
+        ax_ge.plot_surface(radius_grid, b_grid, gravimetric_efficiency_grid, cmap='viridis')
+        ax_ge.plot([optimal_radius], [optimal_b], [-result.fun], marker='o', markersize=5, color='r')
 
-        ax.set_xlabel('Radius')
-        ax.set_ylabel('b')
-        ax.set_zlabel('Gravimetric Efficiency')
-        ax.set_title('Gravimetric Efficiency Surface')
+        ax_ge.set_xlabel('Radius')
+        ax_ge.set_ylabel('b')
+        ax_ge.set_zlabel('Gravimetric Efficiency')
+        ax_ge.set_title('Gravimetric Efficiency Response Surface')
 
-        plt.show()
+        ax_ge.text2D(0.05, 0.95, f"Optimal Radius = {optimal_radius:.2f}", transform=ax_ge.transAxes)
+        ax_ge.text2D(0.05, 0.90, f"Optimal b = {optimal_b:.2f}", transform=ax_ge.transAxes)
+        ax_ge.text2D(0.05, 0.85, f"Optimal Gravimetric Efficiency = {-result.fun:.2f}", transform=ax_ge.transAxes)
+
+        fig_ve_surface = plt.figure()
+        ax_ve = fig_ve_surface.add_subplot(111, projection='3d')
+        ax_ve.plot_surface(radius_grid, b_grid, volumetric_efficiency_grid, cmap='viridis')
+
+        ax_ve.set_xlabel('Radius')
+        ax_ve.set_ylabel('b')
+        ax_ve.set_zlabel('Volumetric Efficiency')
+        ax_ve.set_title('Volumetric Efficiency Response Surface')
+
+        ax_ve.text2D(0.05, 0.95, f"Optimal Radius = {optimal_radius:.2f}", transform=ax_ve.transAxes)
+        ax_ve.text2D(0.05, 0.90, f"Optimal b = {optimal_b:.2f}", transform=ax_ve.transAxes)
+        ax_ve.text2D(0.05, 0.85, f"Optimal Volumetric Efficiency = {max(optimal_volumetric_efficiency):.2f}", transform=ax_ve.transAxes)
+
+
+
+
+
+
+     # Show the figures
+    tank_loads_fig.show()
+    etas_fig.show()
+
+    plt.show()
 
     # Record the end time
     end_time = time.time()
@@ -175,8 +209,8 @@ def perform_analysis():
 
 
     # Optional plotting
-    if (PLOT_ALL):
-        fig = plot_tank_loads(
+    if (PLOT_EXTRA):
+        fig_extra = plot_tank_loads(
             all_tank_states,
             labels
         )
@@ -189,7 +223,7 @@ def perform_analysis():
         )
 
         # Show the figure
-        fig.show()
+        fig_extra.show()
 
 
 
