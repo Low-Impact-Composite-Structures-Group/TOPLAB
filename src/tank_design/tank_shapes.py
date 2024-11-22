@@ -239,7 +239,6 @@ class EllipticCylinderBody(TankSection):
 
     @property
     def volume(self) -> float:
-        # return np.pi * self.a * self.radius * self.l_s
         return np.pi * self.radius ** 2 * self.l_s
 
     def compute_volume_section(self, fuel_height: float) -> float:
@@ -319,10 +318,9 @@ class EllipsoidalEndCap(TankSection):
             raise ValueError("Negative fuel height...")
         if fuel_height > self.radius * 2:
             raise ValueError("Fuel height higher than diameter...")
+        x = self.radius - fuel_height
+        self.volume_section = np.pi/2 * self.radius*self.b*(2*self.radius/3.0 - x + x**3/(3.0*self.radius**2))
 
-        self.volume_section = (
-            np.pi/2 * self.a**2 * (fuel_height + self.radius - fuel_height**3/3.0*self.radius**2 - self.radius/3.0)
-        )
         return self.volume_section
 
     def compute_wetted_surface(self, fuel_height: float) -> float:
@@ -831,7 +829,7 @@ class SphericalTank(Tank):
         )
 
 @dataclass
-class WinnefeldTank(Tank):  # Replace Tank with the actual parent class name if different
+class WinnefeldTank(Tank):
     radius: float
     total_length: float
     a: float
@@ -914,7 +912,7 @@ class WinnefeldTank(Tank):  # Replace Tank with the actual parent class name if 
 
     def compute_fuel_height(self, fuel_volume: float) -> float:
         return bisection_method(
-            self.radius * 2, 0.0, fuel_volume, self.compute_fuel_volume
+            self.radius * 2.0, 0.0, fuel_volume, self.compute_fuel_volume
         )
 
     @staticmethod
@@ -939,7 +937,7 @@ class TankFactory():
         b: float = None,
     ) -> Tank:
         if a is not None and b is not None:
-            # Return a different object if a and b are provided
+            # Return a Winnefeld tank object if a and b are provided
             total_length = 2 * b + body_length
             return WinnefeldTank(radius, total_length,  a, b, material, operating_pressure)
 
