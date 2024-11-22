@@ -36,7 +36,7 @@ def perform_analysis():
     thickness = 4e-2 # [m]
     insulation = ConstantFoamInsulation.rohacell(thickness)
 
-    optimal_b = 0.1
+    optimal_psi = 3.0
 
     # Define tank material
     winding_angle = 55.0 # [degrees] placeholder value
@@ -77,7 +77,7 @@ def perform_analysis():
         radius, insulation_thickness = params
         performance = MissionAnalysisFacade.analyse(
             GenericTankDimensions(
-                radius, WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, optimal_b), radius, radius),
+                radius, WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, radius/optimal_psi), radius, radius),
             tank_material,
             ConstantFoamInsulation.rohacell(insulation_thickness),
             mission,
@@ -91,7 +91,7 @@ def perform_analysis():
         return -performance.gravimetric_efficiency
 
     # Initial guess for radius and b
-    initial_guess = [optimal_b, 4.0e-2]
+    initial_guess = [0.1, 4.0e-2]
 
     # bounds of values taken by radius and insulation thickness
     opt_bounds=[(0.1, 0.5), (5.0e-2, 1.0e-1)]
@@ -108,7 +108,7 @@ def perform_analysis():
         # Perform the analysis with the optimized parameters
         optimal_performance =[ MissionAnalysisFacade.analyse(GenericTankDimensions(
                 optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
-                optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_b), optimal_radius, optimal_radius),
+                optimal_radius, VOLUME_MARGIN * fuel_volume, radius/optimal_psi), optimal_radius, optimal_radius),
             tank_material,
             insulation,
             mission,
@@ -135,8 +135,8 @@ def perform_analysis():
     else:
         grid_size = 10
         # Create a grid of radius and b values
-        radius_values = np.linspace(0.1, 0.5, grid_size)
-        thickness_values = np.linspace(5.0e-2, 1.0e-1, grid_size)
+        radius_values = np.linspace(0.1, 0.6, grid_size)
+        thickness_values = np.linspace(2.0e-2, 1.0e-1, grid_size)
         radius_grid, thickness_grid = np.meshgrid(radius_values, thickness_values)
 
         # Compute gravimetric efficiency for each combination of radius and b
@@ -147,7 +147,7 @@ def perform_analysis():
                 thickness = thickness_grid[i, j]
                 performance = MissionAnalysisFacade.analyse(GenericTankDimensions(
                     radius, WinnefeldTank.length_from_radius_b_and_volume(
-                    radius, VOLUME_MARGIN * fuel_volume, optimal_b), radius, radius),
+                    radius, VOLUME_MARGIN * fuel_volume, radius/optimal_psi), radius, radius),
                     tank_material,
                     ConstantFoamInsulation.rohacell(thickness),
                     mission,
