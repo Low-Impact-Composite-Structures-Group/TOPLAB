@@ -199,7 +199,6 @@ def perform_analysis():
     etas_fig.show()
 
 
-
     # Record the end time
     end_time = time.time()
 
