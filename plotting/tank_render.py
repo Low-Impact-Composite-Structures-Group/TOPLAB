@@ -1,44 +1,76 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from scipy.spatial import ConvexHull
 import numpy as np
 
-def plot_ellipsoid_area(points1, points2):
-    """
-    Plot two sets of points on the surface of an ellipsoid in a 3D scatter plot.
 
-    Parameters:
-        points1 (np.ndarray): Array of shape (num_points, 3) containing points on the entire ellipsoid.
-        points2 (np.ndarray): Array of shape (num_points, 3) containing points on the ellipsoid up to a specific height.
-    """
+# Surface element function for the ellipsoid in spherical coordinates
+def surface_element(theta, phi, a, b):
+    # Compute the parameterized coordinates
+    x = a * np.sin(theta) * np.cos(phi)
+    y = b * np.sin(theta) * np.sin(phi)
+    z = a * np.cos(theta)
+
+    # Partial derivatives with respect to theta
+    x_theta = a * np.cos(theta) * np.cos(phi)
+    y_theta = b * np.cos(theta) * np.sin(phi)
+    z_theta = -a * np.sin(theta)
+
+    # Partial derivatives with respect to phi
+    x_phi = -a * np.sin(theta) * np.sin(phi)
+    y_phi = b * np.sin(theta) * np.cos(phi)
+    z_phi = 0
+
+    # Compute the cross product magnitude for the surface area element
+    cross_product = np.sqrt((y_theta * z_phi - z_theta * y_phi)**2 +
+                            (z_theta * x_phi - x_theta * z_phi)**2 +
+                            (x_theta * y_phi - y_theta * x_phi)**2)
+    return cross_product
+
+def plot_open_cylinder(radius, length):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    # Compute and plot the convex hull
-    hull1 = ConvexHull(points1)
-    hull2 = ConvexHull(points2)
-    for simplex in hull1.simplices:
-        triangle = points1[simplex]
-        ax.plot_trisurf(triangle[:, 0], triangle[:, 1], triangle[:, 2], color='gray', alpha=0.1, edgecolor='gray')
-    for simplex in hull2.simplices:
-        triangle = points2[simplex]
-        ax.plot_trisurf(triangle[:, 0], triangle[:, 1], triangle[:, 2], color='blue', alpha=0.5, edgecolor='blue')
+    z = np.linspace(0, length, 100)
+    theta = np.linspace(0, 2 * np.pi, 100)
+    theta_grid, z_grid = np.meshgrid(theta, z)
+    x_grid = radius * np.cos(theta_grid)
+    y_grid = radius * np.sin(theta_grid)
+
+    ax.plot_surface(x_grid, z_grid, y_grid, color='blue', alpha=0.5, rstride=1, cstride=1)
+
+    return ax
+
+def plot_ellipsoid(ax, radius, b, y_offset, top=True):
+    u = np.linspace(0, 2 * np.pi, 100)
+    v = np.linspace(0, np.pi / 2, 100) if top else np.linspace(np.pi / 2, np.pi, 100)
+    u_grid, v_grid = np.meshgrid(u, v)
+    x = radius * np.sin(v_grid) * np.cos(u_grid)
+    z = radius * np.sin(v_grid) * np.sin(u_grid)
+    y = b * np.cos(v_grid) + y_offset
+
+    ax.plot_surface(x, y, z, color='orange', alpha=0.5, rstride=1, cstride=1)
+
+def plot_tank(radius, b, length):
+    ax = plot_open_cylinder(radius, length)
+    plot_ellipsoid(ax, radius, b, 0, top=False)  # Bottom ellipsoid
+    plot_ellipsoid(ax, radius, b, length, top=True)  # Top ellipsoid
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
-    ax.legend()
+    ax.set_title('3D Tank Render')
 
-    # Set the aspect ratio to be equal
-    max_range = np.array([points1[:, 0].max() - points1[:, 0].min(),
-                          points1[:, 1].max() - points1[:, 1].min(),
-                          points1[:, 2].max() - points1[:, 2].min()]).max() / 2.0
-
-    mid_x = (points1[:, 0].max() + points1[:, 0].min()) * 0.5
-    mid_y = (points1[:, 1].max() + points1[:, 1].min()) * 0.5
-    mid_z = (points1[:, 2].max() + points1[:, 2].min()) * 0.5
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range)
+    # Set the aspect ratio to be equal by setting the limits
+    max_range = np.array([radius, length, radius]).max()
+    ax.set_xlim([-max_range, max_range])
+    ax.set_ylim([0, length])
+    ax.set_zlim([-max_range, max_range])
 
     plt.show()
+
+def main():
+    pass
+
+
+if __name__ == "__main__":
+    main()

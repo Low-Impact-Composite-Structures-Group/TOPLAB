@@ -1,8 +1,9 @@
 from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures, plot_required_flux)
+from plotting.tank_render import (plot_tank)
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                           OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
-from src.insulation.foam_insulations import ConstantFoamInsulation, ConstantVacuumInsulation
+from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
 from src.mission.mission import Mission
@@ -22,7 +23,9 @@ def perform_analysis():
     # Plotting flag
     PLOT_EXTRA = False
     # Create response surface
-    RESPONSE_SURFACE = True
+    RESPONSE_SURFACE = False
+    # create 3D rander
+    RENDER_3D = True
 
     # Define the initial state of the tank
     pressure = 140e3 # [Pa]
@@ -86,14 +89,16 @@ def perform_analysis():
         all_tank_states.append(performance.tank_states)
         all_b.append(b)
         all_radii.append(radius)
+        length = WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, b)
+        print(f"Length = {length} m")
         return -performance.gravimetric_efficiency
 
     # Initial guess for radius and b
-    initial_guess = [0.1, 0.3]
+    initial_guess = [1.0, 0.3]
 
     # bounds of values taken by radius and b
-    radius_min = 0.1
-    radius_max = 0.9
+    radius_min = 1.0
+    radius_max = 1.1
     b_min = 0.1
     b_max = 0.5
     bounds_radius_b=[(radius_min, radius_max), (b_min, b_max)]
@@ -189,16 +194,11 @@ def perform_analysis():
         ax_ve.text2D(0.05, 0.90, f"Optimal b = {optimal_b:.2f}", transform=ax_ve.transAxes)
         ax_ve.text2D(0.05, 0.85, f"Optimal Volumetric Efficiency = {max(optimal_volumetric_efficiency):.2f}", transform=ax_ve.transAxes)
 
-
-
-
-
-
      # Show the figures
     tank_loads_fig.show()
     etas_fig.show()
 
-    plt.show()
+
 
     # Record the end time
     end_time = time.time()
@@ -207,9 +207,12 @@ def perform_analysis():
     elapsed_time = end_time - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
+    # Optional 3D render
+    if RENDER_3D:
+        plot_tank(optimal_radius, optimal_b, WinnefeldTank.length_from_radius_b_and_volume(optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_b))
 
     # Optional plotting
-    if (PLOT_EXTRA):
+    if PLOT_EXTRA:
         fig_extra = plot_tank_loads(
             all_tank_states,
             labels
@@ -222,9 +225,8 @@ def perform_analysis():
             all_tank_states[-1]
         )
 
-        # Show the figure
-        fig_extra.show()
-
+    # Show all plots at once
+    plt.show()
 
 
 
