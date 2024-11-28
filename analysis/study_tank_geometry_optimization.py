@@ -3,7 +3,7 @@ from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank
 from plotting.tank_render import (plot_tank)
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                           OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
-from src.insulation.foam_insulations import ConstantFoamInsulation
+from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
 from src.mission.mission import Mission
@@ -24,12 +24,12 @@ def perform_analysis():
     PLOT_EXTRA = False
     # Create response surface
     RESPONSE_SURFACE = False
-    # create 3D rander
+    # create 3D render
     RENDER_3D = True
 
     # Define the initial state of the tank
     pressure = 140e3 # [Pa]
-    temperature = None
+    temperature = None # [K]
     fill = 0.97
     initial_state = InitialState(
         pressure, temperature, fill
@@ -51,7 +51,7 @@ def perform_analysis():
 
     # Define the minimum pressure of the tank
     min_pressure = 1.3e5 # [Pa]
-    min_temperature = None
+    min_temperature = None # [K]
     operating_window = OperatingEnvelope(
         max_pressure=None,
         min_pressure=min_pressure,
@@ -76,6 +76,7 @@ def perform_analysis():
     # Define the objective function
     def objective_function(params):
         radius, b = params
+        length = WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, b)
         performance = MissionAnalysisFacade.analyse(
             GenericTankDimensions(
                 radius, WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, b), radius, radius),
@@ -89,27 +90,26 @@ def perform_analysis():
         all_tank_states.append(performance.tank_states)
         all_b.append(b)
         all_radii.append(radius)
-        length = WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, b)
         print(f"Length = {length} m")
         return -performance.gravimetric_efficiency
 
     # Initial guess for radius and b
-    initial_guess = [1.0, 0.3]
+    initial_guess = [1.5, 0.5]
 
     # bounds of values taken by radius and b
     radius_min = 1.0
-    radius_max = 1.1
-    b_min = 0.1
-    b_max = 0.5
+    radius_max = 2.0
+    b_min = 0.5
+    b_max = 1.0
     bounds_radius_b=[(radius_min, radius_max), (b_min, b_max)]
 
 
     # Perform the optimization
     result = minimize(objective_function, initial_guess, method='Nelder-Mead', bounds=bounds_radius_b)
     optimal_radius, optimal_b = result.x
-    print(f'Optimal radius: {optimal_radius}')
-    print(f'Optimal b: {optimal_b}')
-    print(f'Minimized gravimetric efficiency: {-result.fun}')
+    print(f'Optimal radius: {optimal_radius:.4f} m')
+    print(f'Optimal b: {optimal_b:.4f} m')
+    print(f'Minimized gravimetric efficiency: {-result.fun:.4f}')
 
     optimal_volumetric_efficiency = [performance.volumetric_efficiency for performance in all_performances]
     print(f"Max volumetric efficiency = ", max(optimal_volumetric_efficiency))
@@ -152,7 +152,7 @@ def perform_analysis():
             for j in range(radius_grid.shape[1]):
                 radius = radius_grid[i, j]
                 b = b_grid[i, j]
-                print(f"Analyzing radius: {radius}, b: {b}")
+                print(f"Analyzing radius: {radius:.4f}, b: {b:.4f}")
                 print(f"Case {i * grid_size + j + 1} of {grid_size ** 2}")
                 performance = MissionAnalysisFacade.analyse(GenericTankDimensions(
                     radius, WinnefeldTank.length_from_radius_b_and_volume(
