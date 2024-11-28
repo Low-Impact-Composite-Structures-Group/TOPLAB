@@ -1,8 +1,8 @@
 from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures, plot_required_flux)
-from plotting.tank_render import (plot_tank)
+from plotting.tank_render import plot_tank
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
-                                          OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
+                                      OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
 from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
@@ -14,46 +14,71 @@ import time
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import yaml
+import os
+import json
 
 
 def perform_analysis():
-
     # Record the start time
     start_time = time.time()
-    # Plotting flag
-    PLOT_EXTRA = False
-    # Create response surface
-    RESPONSE_SURFACE = False
-    # create 3D render
-    RENDER_3D = True
 
-    # Define the initial state of the tank
-    pressure = 140e3 # [Pa]
-    temperature = None # [K]
-    fill = 0.97
+    # Get the directory of the current script
+    script_dir = os.path.dirname(__file__)
+    # Construct the path to the YAML file
+    yaml_path = os.path.join(script_dir, 'input.yaml')
+
+    # Load configuration from YAML file
+    with open(yaml_path, 'r') as file:
+        config = yaml.safe_load(file)
+
+    # Extract parameters from the YAML file
+    radius_min = config.get('minimum radius', None)
+    radius_max = config.get('maximum radius', None)
+    thickness_min = config.get('minimum insulation thickness', None)
+    thickness_max = config.get('maximum insulation thickness', None)
+    VOLUME_MARGIN = config.get('volume margin', None)
+    tank_material = config.get('tank material', None)
+    winding_angle_degrees = config.get('winding angle', None)
+    mission_name = config.get('mission', None)
+    fuel_flow = config.get('fuel flow', None)
+    SAVE_RESULTS = config.get('save results', None)
+    PLOT_EXTRA = config.get('plot extra', None)
+    RESPONSE_SURFACE = config.get('response surface', None)
+    RENDER_3D = config.get('render 3D', None)
+    min_pressure = config.get('operating floor pressure', None)
+    min_temperature = config.get('operating floor temperature', None)
+    max_pressure = config.get('operating ceiling pressure', None)
+    initial_pressure = config.get('initial pressure', None)
+    initial_temperature = config.get('initial temperature', None)
+    fill = config.get('fill', None)
+
     initial_state = InitialState(
-        pressure, temperature, fill
+        initial_pressure, initial_temperature, fill
     )
 
-    # Define insulation and thermal model
 
-    # Define tank material
-    winding_angle_degrees = 55.0 # [degrees] placeholder value
-    winding_angle = np.deg2rad(winding_angle_degrees)
+    # Calculate derived parameters
+    initial_guess = [
+        (radius_min + radius_max) / 2,
+        (thickness_min + thickness_max) / 2
+    ]
+
+    bounds_radius_thickness = [
+        (radius_min, radius_max),
+        (thickness_min, thickness_max)
+    ]
+
+    winding_angle = np.radians(winding_angle_degrees)
     tank_material = Composite.carbon(winding_angle)
+    mission = getattr(Mission, mission_name)(fuel_flow)
 
-    fuel_flow = "liquid"
-
-    mission = Mission.fly_eco_mission(fuel_flow)
-
-    # Define the minimum pressure of the tank
-    min_pressure = 1.3e5 # [Pa]
-    min_temperature = None # [K]
     operating_window = OperatingEnvelope(
-        max_pressure=None,
+        max_pressure=max_pressure,
         min_pressure=min_pressure,
         min_temperature=min_temperature
     )
+
 
     # Define required fuel
     fuel_mass = mission.required_fuel
@@ -62,7 +87,6 @@ def perform_analysis():
     # Get fuel volume
     fuel_volume = fuel_mass / initial_fuel.liquid.density
     VOLUME_MARGIN = 1.15
-
 
     # List to store the results of each iteration
     all_performances = []
@@ -93,24 +117,12 @@ def perform_analysis():
         print(f"Gravimetric efficiency = {performance.gravimetric_efficiency}")
         return -performance.gravimetric_efficiency
 
-
-
-    # bounds of values taken by radius and b
-    radius_min = 1.0
-    radius_max = 1.2
-    thickness_min = 1.5e-2
-    thickness_max = 1.0e-1
-    bounds_radius_thickness=[(radius_min, radius_max), (thickness_min, thickness_max)]
-
-    # Initial guess for radius and b
-    initial_guess = [0.5*(radius_min+radius_max), 0.5*(thickness_min+thickness_max)]
-
     # Perform the optimization
     result = minimize(objective_function, initial_guess, method='Nelder-Mead', bounds=bounds_radius_thickness)
     optimal_radius, optimal_thickness = result.x
-    optimal_length = WinnefeldTank.length_from_radius_b_and_volume(optimal_radius, VOLUME_MARGIN * fuel_volume, 0.5*optimal_radius)
+    optimal_length = WinnefeldTank.length_from_radius_b_and_volume(optimal_radius, VOLUME_MARGIN * fuel_volume, 0.5 * optimal_radius)
     print(f'Optimal radius: {optimal_radius:.4f} m')
-    print(f'Optimal b: {0.5*optimal_radius:.4f} m')
+    print(f'Optimal b: {0.5 * optimal_radius:.4f} m')
     print(f'Optimal thickness: {optimal_thickness:.4f} m')
     print(f'Optimal length: {optimal_length:.4f} m')
     print(f'Minimized gravimetric efficiency: {-result.fun:.4f}')
@@ -119,9 +131,9 @@ def perform_analysis():
     print(f"Max volumetric efficiency = ", max(optimal_volumetric_efficiency))
 
     # Perform the analysis with the optimized parameters
-    optimal_performance =[ MissionAnalysisFacade.analyse(GenericTankDimensions(
+    optimal_performance = [MissionAnalysisFacade.analyse(GenericTankDimensions(
             optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
-            optimal_radius, VOLUME_MARGIN * fuel_volume, 0.5*optimal_radius), optimal_radius, 0.5*optimal_radius),
+            optimal_radius, VOLUME_MARGIN * fuel_volume, 0.5 * optimal_radius), optimal_radius, 0.5 * optimal_radius),
         tank_material,
         ConstantFoamInsulation.rohacell(optimal_thickness),
         mission,
@@ -131,15 +143,13 @@ def perform_analysis():
     # Listify optimal tank performance
     optimum = [performance.tank_states for performance in optimal_performance]
 
-    # compute psi
-    # See Winnefeld paper for the definition of psi
-    # "Modelling and Designing Cryogenic Hydrogen Tanks for Future Aircraft Applications (2018)"
-    psi_values = [all_radii / all_thicknesses for all_radii, all_thicknesses in zip(all_radii, all_thicknesses)]
-    labels = [f'{psi} [-]' for psi in psi_values]
+    # Compute zeta
+    zeta_values = [all_radii / all_thicknesses for all_radii, all_thicknesses in zip(all_radii, all_thicknesses)]
+    labels = [f'{zeta} [-]' for zeta in zeta_values]
 
-    # Create plots for tank loads and efficiencies searched in the optimization
+     # Create plots for tank loads and efficiencies searched in the optimization
     tank_loads_fig = plot_tank_loads(optimum, labels, None, None)
-    etas_fig = plot_tank_efficiencies_scatter(all_performances, psi_values, "psi (c/b) [m/m]", None, None)
+    etas_fig = plot_tank_efficiencies_scatter(all_performances, zeta_values, "psi (c/b) [m/m]", None, None)
 
 
     if RESPONSE_SURFACE:
@@ -202,14 +212,27 @@ def perform_analysis():
     tank_loads_fig.show()
     etas_fig.show()
 
+    # Save results if the flag is enabled
+    if SAVE_RESULTS:
+        results_dir = 'results'
+        os.makedirs(results_dir, exist_ok=True)
+        results_file = os.path.join(results_dir, 'results.json')
 
+        results_data = {
+            'optimal_radius': optimal_radius,
+            'optimal_thickness': optimal_thickness,
+            'optimal_length': optimal_length,
+            'minimized_gravimetric_efficiency': -result.fun,
+            'max_volumetric_efficiency': max(optimal_volumetric_efficiency),
+            'zeta_values': zeta_values
+        }
+
+        with open(results_file, 'w') as file:
+            json.dump(results_data, file, indent=4)
 
     # Record the end time
     end_time = time.time()
-
-    # Calculate and print the elapsed time
-    elapsed_time = end_time - start_time
-    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    print(f"Analysis completed in {end_time - start_time:.2f} seconds")
 
     # Optional 3D render
     if RENDER_3D:
@@ -231,7 +254,6 @@ def perform_analysis():
 
     # Show all plots at once
     plt.show()
-
 
 
 def main():

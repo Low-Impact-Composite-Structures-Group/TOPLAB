@@ -1,0 +1,19 @@
+minimum radius: 0.5
+maximum radius: 2.0
+minimum insulation thickness: 0.015
+maximum insulation thickness: 0.1
+volume margin: 1.1
+tank material: 'Composite'
+winding angle: 55.0 #[degrees]
+fuel flow: 'liquid'
+mission: 'fly_eco_mission'
+initial temperature:
+initial pressure: 140000
+operating floor temperature:
+operating floor pressure: 130000
+operating ceiling pressure:
+fill: 0.97
+plot extra: False
+create response surface: False
+3D render: True
+save results: True
