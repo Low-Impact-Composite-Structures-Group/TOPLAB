@@ -38,11 +38,10 @@ def perform_analysis():
     # Define insulation and thermal model
 
     # Define tank material
-    winding_angle = 55.0 # [degrees] placeholder value
+    winding_angle_degrees = 55.0 # [degrees] placeholder value
+    winding_angle = np.deg2rad(winding_angle_degrees)
     tank_material = Composite.carbon(winding_angle)
 
-    # Define fuel flow
-    # fuel_flow = OutFlow.fly_eco_cruise("liquid")
     fuel_flow = "liquid"
 
     mission = Mission.fly_eco_mission(fuel_flow)
@@ -91,14 +90,15 @@ def perform_analysis():
         all_thicknesses.append(thickness)
         all_radii.append(radius)
         print(f"Length = {length} m")
+        print(f"Gravimetric efficiency = {performance.gravimetric_efficiency}")
         return -performance.gravimetric_efficiency
 
 
 
     # bounds of values taken by radius and b
-    radius_min = 0.5
-    radius_max = 1.5
-    thickness_min = 1.0e-2
+    radius_min = 1.0
+    radius_max = 1.2
+    thickness_min = 1.5e-2
     thickness_max = 1.0e-1
     bounds_radius_thickness=[(radius_min, radius_max), (thickness_min, thickness_max)]
 
