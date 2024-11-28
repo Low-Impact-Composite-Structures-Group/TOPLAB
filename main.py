@@ -1,7 +1,6 @@
 
 
-from analysis.study_tank_geometry_optimization import perform_analysis
-
+from analysis.optimization_radius_vs_insulation import perform_analysis
 
 def main():
     perform_analysis()
