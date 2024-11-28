@@ -921,7 +921,10 @@ class WinnefeldTank(Tank):
     ) -> float:
         num = volume - 4 / 3 * math.pi * b * radius ** 2
         den = math.pi * radius ** 2
-        return num / den
+        length = num / den
+        if length < 0:
+            raise ValueError("A tank of this volume is not possible with the given parameters.")
+        return length
 
 
 
