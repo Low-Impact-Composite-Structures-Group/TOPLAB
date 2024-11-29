@@ -1,20 +1,22 @@
-minimum radius: 0.5
-maximum radius: 2.0
-minimum insulation thickness: 0.015
-maximum insulation thickness: 0.1
+minimum radius: 0.5 # [m]
+maximum radius: 1.2 # [m]
+minimum insulation thickness: 0.015 # [m]
+maximum insulation thickness: 0.1 # [m]
 volume margin: 1.1
+psi: 2.0 # psi = radius/b [m/m]
 tank material type: 'Composite'
 tank material: 'carbon'
 winding angle: 55.0 #[degrees]
 fuel flow: 'liquid'
 mission: 'fly_eco_mission'
-initial temperature:
-initial pressure: 140000
-operating floor temperature:
-operating floor pressure: 130000
-operating ceiling pressure:
+initial temperature: # [K]
+initial pressure: 140000 # [Pa]
+operating floor temperature: # [K]
+operating floor pressure: 130000 # [Pa]
+operating ceiling pressure:  # [Pa]
 fill: 0.97
 plot extra: False
-create response surface: False
-3D render: True
+response surface: True
+response surface grid size: 10 # N^2 grid points will be generated
+render 3D: True
 save results: True
