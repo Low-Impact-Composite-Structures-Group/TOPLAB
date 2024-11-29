@@ -244,7 +244,7 @@ def perform_analysis():
     # Save results if the flag is enabled
     if SAVE_RESULTS:
         script_dir = os.path.dirname(__file__)
-        results_dir = os.path.join(script_dir, '..', 'results')
+        results_dir = os.path.join(script_dir, 'results')
         os.makedirs(results_dir, exist_ok=True)
         results_file = os.path.join(results_dir, 'results.json')
 
