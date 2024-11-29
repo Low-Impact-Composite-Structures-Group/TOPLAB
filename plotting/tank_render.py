@@ -65,8 +65,9 @@ def plot_tank(radius, b, length):
     ax.set_xlim([-max_range, max_range])
     ax.set_ylim([0, length])
     ax.set_zlim([-max_range, max_range])
+    ax.set_box_aspect([2*max_range, length, 2*max_range])  # Aspect ratio is 1:1:1
 
-    plt.show()
+    return ax
 
 def main():
     pass
