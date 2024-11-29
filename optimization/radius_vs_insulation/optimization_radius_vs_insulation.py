@@ -38,7 +38,8 @@ def perform_analysis():
     thickness_min = config.get('minimum insulation thickness', None)
     thickness_max = config.get('maximum insulation thickness', None)
     VOLUME_MARGIN = config.get('volume margin', None)
-    tank_material = config.get('tank material', None)
+    tank_material_type = config.get('tank material type', None)
+    tank_material_name = config.get('tank material', None)
     winding_angle_degrees = config.get('winding angle', None)
     mission_name = config.get('mission', None)
     fuel_flow = config.get('fuel flow', None)
@@ -70,7 +71,15 @@ def perform_analysis():
     ]
 
     winding_angle = np.radians(winding_angle_degrees)
-    tank_material = Composite.carbon(winding_angle)
+        # Instantiate the tank material
+    tank_material_class = globals()[tank_material_type]
+    if tank_material_name == 'carbon':
+        tank_material = getattr(tank_material_class, tank_material_name)(winding_angle)
+    else:
+        tank_material = getattr(tank_material_class, tank_material_name)()
+
+    # Define the mission using the string from the input file
+    mission = getattr(Mission, mission_name)(fuel_flow)
     mission = getattr(Mission, mission_name)(fuel_flow)
 
     operating_window = OperatingEnvelope(

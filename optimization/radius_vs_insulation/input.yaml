@@ -3,7 +3,8 @@ maximum radius: 2.0
 minimum insulation thickness: 0.015
 maximum insulation thickness: 0.1
 volume margin: 1.1
-tank material: 'Composite'
+tank material type: 'Composite'
+tank material: 'carbon'
 winding angle: 55.0 #[degrees]
 fuel flow: 'liquid'
 mission: 'fly_eco_mission'
