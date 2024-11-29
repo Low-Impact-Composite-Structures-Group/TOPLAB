@@ -52,6 +52,9 @@ coverage.xml
 .pytest_cache/
 .coveragerc
 
+# Ignore results directories
+results/
+
 # Translations
 *.mo
 *.pot
