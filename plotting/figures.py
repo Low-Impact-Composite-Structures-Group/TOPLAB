@@ -1,4 +1,3 @@
-
 from abc import abstractmethod
 from dataclasses import dataclass
 
@@ -144,6 +143,9 @@ class TwinXFigure(GeneralFigure):
                     ax.set_ylim((y_ticks[0], y_ticks[-1]))
                     ax.set_yticks(y_ticks)
         self.ax1.grid()
+
+    def savefig(self, filename, **kwargs):
+        self.fig.savefig(filename, **kwargs)
 
 
 def main():
