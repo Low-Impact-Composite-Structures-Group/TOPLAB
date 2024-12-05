@@ -1,5 +1,3 @@
-
-
 from typing import Protocol
 
 from plotting.figures import Line, SingleFigure, TwinXFigure
@@ -238,6 +236,75 @@ def plot_tank_fill(
         y_ticks=[y1ticks, y2ticks]
     )
     return fig
+
+
+def plot_single_tank_loads(
+    tank_state: TankStates,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            tank_state.timesteps_in_hours,
+            tank_state.pressures_in_bar,
+            "Pressure"
+        )
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Pressure [bar]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
+
+def plot_single_tank_temperatures(
+    tank_state: TankStates,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    data = [
+        Line(
+            tank_state.timesteps_in_hours,
+            tank_state.temperatures,
+            "Temperature"
+        )
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Temperature [K]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
+
+def plot_single_tank_fill(
+    tank_state: TankStates,
+    x_ticks: list[float] = None,
+    y1ticks: list[float] = None,
+    y2ticks: list[float] = None
+):
+    times = tank_state.timesteps_in_hours
+    data = [
+        [
+            Line(times, tank_state.liquid_masses, "Liquid"),
+            Line(times, tank_state.gas_masses, "Gas"),
+            Line(times, tank_state.total_masses, "Total")
+        ], [
+            Line(times, tank_state.fills, "Fill")
+        ]
+    ]
+    x_label = "Time [hour]"
+    y_labels = ["Fuel Mass [kg]", "Fill [%]"]
+    return TwinXFigure(
+        data,
+        x_label,
+        y_labels,
+        x_ticks=x_ticks,
+        y_ticks=[y1ticks, y2ticks]
+    )
 
 
 def main():
