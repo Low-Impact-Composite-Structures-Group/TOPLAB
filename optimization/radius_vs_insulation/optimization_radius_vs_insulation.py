@@ -98,7 +98,6 @@ def perform_analysis():
 
     # Get fuel volume
     fuel_volume = fuel_mass / initial_fuel.liquid.density
-    VOLUME_MARGIN = 1.15
 
     # List to store the results of each iteration
     all_performances = []
@@ -201,14 +200,15 @@ def perform_analysis():
         fig_ge_surface = plt.figure()
         ax_ge = fig_ge_surface.add_subplot(111, projection='3d')
         ax_ge.plot_surface(radius_grid, thickness_grid, gravimetric_efficiency_grid, cmap='viridis', alpha=0.6)
-        ax_ge.plot([optimal_radius], [optimal_thickness], [-result.fun], marker='o', markersize=5, color='r')
         
         # Plot the optimization path as blue dots and connect them with arrows
         for k in range(len(optimization_path) - 1):
             r1, t1, ge1 = optimization_path[k]
             r2, t2, ge2 = optimization_path[k + 1]
             ax_ge.scatter(r1, t1, ge1, color='blue')  # Blue dot
-            ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', arrow_length_ratio=0.1)
+            ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', mutation_scale=20)
+            
+        ax_ge.plot([optimal_radius], [optimal_thickness], [-result.fun], marker='x', markersize=6, color='r')
 
         ax_ge.set_xlabel('Internal tank radius [m]')
         ax_ge.set_ylabel('Insulation thickness [m]')
@@ -228,8 +228,8 @@ def perform_analysis():
         ax_ve.set_zlabel('Volumetric Efficiency')
         ax_ve.set_title('Volumetric Efficiency Response Surface')
 
-        ax_ve.text2D(0.05, 0.95, f"Optimal Radius = {optimal_radius:.2f}", transform=ax_ve.transAxes)
-        ax_ve.text2D(0.05, 0.90, f"Optimal thickness = {optimal_thickness:.2f}", transform=ax_ve.transAxes)
+        ax_ve.text2D(0.05, 0.95, f"Optimal Radius = {optimal_radius:.2f} m", transform=ax_ve.transAxes)
+        ax_ve.text2D(0.05, 0.90, f"Optimal thickness = {optimal_thickness:.2f} m", transform=ax_ve.transAxes)
         ax_ve.text2D(0.05, 0.85, f"Optimal Volumetric Efficiency = {max(optimal_volumetric_efficiency):.2f}", transform=ax_ve.transAxes)
 
     # Optional 3D render
@@ -273,12 +273,14 @@ def perform_analysis():
 
         with open(results_file, 'w') as file:
             json.dump(results_data, file, indent=4)
-        with open(os.path.join(results_dir, 'fig_ge_surface.pkl'), 'wb') as file:
-            pickle.dump(fig_ge_surface, file)
-        with open(os.path.join(results_dir, 'fig_ve_surface.pkl'), 'wb') as file:
-            pickle.dump(fig_ve_surface, file)
-        with open(os.path.join(results_dir, 'tank_render.pkl'), 'wb') as file:
-            pickle.dump(tank_render, file)
+        if RESPONSE_SURFACE: 
+            with open(os.path.join(results_dir, 'fig_ge_surface.pkl'), 'wb') as file:
+                pickle.dump(fig_ge_surface, file)
+            with open(os.path.join(results_dir, 'fig_ve_surface.pkl'), 'wb') as file:
+                pickle.dump(fig_ve_surface, file)
+        if RENDER_3D:
+            with open(os.path.join(results_dir, 'tank_render.pkl'), 'wb') as file:
+                pickle.dump(tank_render, file)
 
         if PLOT_EXTRA:
             fig_all_tank_loads.savefig(os.path.join(results_dir, "all_tank_loads_plot.png"), dpi=300, bbox_inches='tight')
