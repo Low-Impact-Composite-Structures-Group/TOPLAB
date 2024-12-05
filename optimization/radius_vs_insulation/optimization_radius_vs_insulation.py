@@ -1,5 +1,5 @@
-from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_tank_fill,
-                                       plot_tank_loads, plot_tank_temperatures, plot_required_flux)
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads,
+                                       plot_single_tank_loads, plot_single_tank_temperatures, plot_required_flux)
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                       OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
@@ -107,6 +107,7 @@ def perform_analysis():
     all_radii = []
     all_graveffs = []
     all_vol_effs = []
+    optimization_path = []
 
     # Define the objective function
     def objective_function(params):
@@ -129,6 +130,7 @@ def perform_analysis():
         all_radii.append(radius)
         all_graveffs.append(performance.gravimetric_efficiency)
         all_vol_effs.append(performance.volumetric_efficiency)
+        optimization_path.append((radius, thickness, performance.gravimetric_efficiency))
         print(f"Length = {length:.4f} m")
         print(f"Gravimetric efficiency = {performance.gravimetric_efficiency:.4f}")
         return -performance.gravimetric_efficiency
@@ -198,10 +200,17 @@ def perform_analysis():
         # Plot the surfaces
         fig_ge_surface = plt.figure()
         ax_ge = fig_ge_surface.add_subplot(111, projection='3d')
-        ax_ge.plot_surface(radius_grid, thickness_grid, gravimetric_efficiency_grid, cmap='viridis')
+        ax_ge.plot_surface(radius_grid, thickness_grid, gravimetric_efficiency_grid, cmap='viridis', alpha=0.6)
         ax_ge.plot([optimal_radius], [optimal_thickness], [-result.fun], marker='o', markersize=5, color='r')
+        
+        # Plot the optimization path as blue dots and connect them with arrows
+        for k in range(len(optimization_path) - 1):
+            r1, t1, ge1 = optimization_path[k]
+            r2, t2, ge2 = optimization_path[k + 1]
+            ax_ge.scatter(r1, t1, ge1, color='blue')  # Blue dot
+            ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', arrow_length_ratio=0.1)
 
-        ax_ge.set_xlabel('Radius [m]')
+        ax_ge.set_xlabel('Internal tank radius [m]')
         ax_ge.set_ylabel('Insulation thickness [m]')
         ax_ge.set_zlabel('Gravimetric Efficiency')
         ax_ge.set_title('Gravimetric Efficiency Response Surface')
@@ -214,7 +223,7 @@ def perform_analysis():
         ax_ve = fig_ve_surface.add_subplot(111, projection='3d')
         ax_ve.plot_surface(radius_grid, thickness_grid, volumetric_efficiency_grid, cmap='viridis')
 
-        ax_ve.set_xlabel('Radius [m]')
+        ax_ve.set_xlabel('Internal tank radius [m]')
         ax_ve.set_ylabel('Insulation thickness [m]')
         ax_ve.set_zlabel('Volumetric Efficiency')
         ax_ve.set_title('Volumetric Efficiency Response Surface')
@@ -229,17 +238,17 @@ def perform_analysis():
 
     # Optional plotting
     if PLOT_EXTRA:
-        fig_extra = plot_tank_loads(
-            all_tank_states,
-            labels
+        fig_all_tank_loads = plot_single_tank_loads(
+            optimal_performance[0].tank_states,
         )
-        plot_tank_temperatures(
-            all_tank_states,
-            labels
+        fig_tank_temperatures = plot_single_tank_temperatures(
+            optimal_performance[0].tank_states
         )
-        plot_tank_fill(
-            all_tank_states[-1]
+        fig_tank_fills = plot_single_tank_fill(
+            optimal_performance[0].tank_states
         )
+
+        # fig_req_flux = plot_required_flux(all_tank_states, labels)
 
     # Save results if the flag is enabled
     if SAVE_RESULTS:
@@ -270,6 +279,12 @@ def perform_analysis():
             pickle.dump(fig_ve_surface, file)
         with open(os.path.join(results_dir, 'tank_render.pkl'), 'wb') as file:
             pickle.dump(tank_render, file)
+
+        if PLOT_EXTRA:
+            fig_all_tank_loads.savefig(os.path.join(results_dir, "all_tank_loads_plot.png"), dpi=300, bbox_inches='tight')
+            fig_tank_temperatures.savefig(os.path.join(results_dir, "tank_temperatures_plot.png"), dpi=300, bbox_inches='tight')
+            fig_tank_fills.savefig(os.path.join(results_dir, "tank_fills_plot.png"), dpi=300, bbox_inches='tight')
+            # fig_req_flux.savefig(os.path.join(results_dir, "req_flux_plot.png"), dpi=300, bbox_inches='tight')
 
 
     # Record the end time
