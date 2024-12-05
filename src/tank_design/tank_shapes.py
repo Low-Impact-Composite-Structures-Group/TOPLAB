@@ -319,7 +319,7 @@ class EllipsoidalEndCap(TankSection):
         if fuel_height > self.radius * 2:
             raise ValueError("Fuel height higher than diameter...")
         x = self.radius - fuel_height
-        self.volume_section = np.pi/2 * self.radius*self.b*(2*self.radius/3.0 - x + x**3/(3.0*self.radius**2))
+        self.volume_section = 0.5*np.pi * self.radius*self.b*(2*self.radius/3.0 - x + x**3/(3.0*self.radius**2))
 
         return self.volume_section
 
@@ -335,7 +335,8 @@ class EllipsoidalEndCap(TankSection):
             lambda phi: np.pi,
             args=(self.a, self.b)
         )
-
+        
+        self.surface_area_section /= 2.0
         return self.surface_area_section
 
 class Tank:
@@ -941,8 +942,7 @@ class TankFactory():
     ) -> Tank:
         if a is not None and b is not None:
             # Return a Winnefeld tank object if a and b are provided
-            total_length = 2 * b + body_length
-            return WinnefeldTank(radius, total_length,  a, b, material, operating_pressure)
+            return WinnefeldTank(radius, body_length,  a, b, material, operating_pressure)
 
         if body_length == 0:
             return SphericalTank(radius, material, operating_pressure)
