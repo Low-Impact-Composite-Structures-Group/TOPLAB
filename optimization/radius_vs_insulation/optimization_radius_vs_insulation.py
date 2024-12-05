@@ -206,7 +206,7 @@ def perform_analysis():
             r1, t1, ge1 = optimization_path[k]
             r2, t2, ge2 = optimization_path[k + 1]
             ax_ge.scatter(r1, t1, ge1, color='blue')  # Blue dot
-            ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', mutation_scale=20)
+            ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', arrow_length_ratio=0.1)  # Arrow
             
         ax_ge.plot([optimal_radius], [optimal_thickness], [-result.fun], marker='x', markersize=6, color='r')
 
