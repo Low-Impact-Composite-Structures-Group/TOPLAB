@@ -1,8 +1,8 @@
-minimum radius: 0.5 # [m]
+minimum radius: 1.0 # [m]
 maximum radius: 1.2 # [m]
-minimum insulation thickness: 0.015 # [m]
+minimum insulation thickness: 0.04 # [m]
 maximum insulation thickness: 0.1 # [m]
-volume margin: 1.1
+volume margin: 1.5 # [m^3/m^3]
 psi: 2.0 # psi = radius/b [m/m]
 tank material type: 'Composite'
 tank material: 'carbon'
@@ -15,7 +15,7 @@ operating floor temperature: # [K]
 operating floor pressure: 130000 # [Pa]
 operating ceiling pressure:  # [Pa]
 fill: 0.97
-plot extra: False
+plot extra: True
 response surface: True
 response surface grid size: 10 # N^2 grid points will be generated
 render 3D: True
