@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from abc import abstractmethod
 
@@ -275,32 +274,42 @@ class TankStates:
 
     @property
     def liquid_masses(self) -> list[float]:
-        return [
+        masses = [
             fill * volume * hydrogen.liquid.density
             if fill != 0 else 0
             for fill, volume, hydrogen in zip(
                 self.fills, self.volumes, self.hydrogens
             )
         ]
+        for mass, fill, volume, hydrogen in zip(masses, self.fills, self.volumes, self.hydrogens):
+            if mass < 0:
+                raise ValueError(f"Negative liquid mass detected: mass={mass}, volume={volume}, fill={fill}, density={hydrogen.liquid.density}")
+        return masses
 
     @property
     def gas_masses(self) -> list[float]:
-        return [
+        masses = [
             (1 - fill) * volume * hydrogen.gas.density
             if fill < 1 else 0
             for fill, volume, hydrogen in zip(
                 self.fills, self.volumes, self.hydrogens
             )
         ]
+        for mass, fill, volume, hydrogen in zip(masses, self.fills, self.volumes, self.hydrogens):
+            if mass < 0:
+                raise ValueError(f"Negative gas mass detected: mass={mass}, volume={volume}, fill={fill}, density={hydrogen.gas.density}")
+        return masses
 
     @property
-    def total_masses(self):
-        return [
+    def total_masses(self) -> list[float]:
+        masses = [
             liquid_mass + gas_mass
-            for liquid_mass, gas_mass in zip(
-                self.liquid_masses, self.gas_masses
-            )
+            for liquid_mass, gas_mass in zip(self.liquid_masses, self.gas_masses)
         ]
+        for mass, liquid_mass, gas_mass, fill, volume, hydrogen in zip(masses, self.liquid_masses, self.gas_masses, self.fills, self.volumes, self.hydrogens):
+            if mass < 0:
+                raise ValueError(f"Negative total mass detected: mass={mass}, liquid_mass={liquid_mass}, gas_mass={gas_mass}, volume={volume}, fill={fill}, liquid_density={hydrogen.liquid.density}, gas_density={hydrogen.gas.density}")
+        return masses
 
     @property
     def state_derivatives(self):
