@@ -38,7 +38,7 @@ def plot_open_cylinder(radius, length):
 
     ax.plot_surface(x_grid, z_grid, y_grid, color='blue', alpha=0.5, rstride=1, cstride=1)
 
-    return ax
+    return fig  
 
 def plot_ellipsoid(ax, radius, b, y_offset, top=True):
     u = np.linspace(0, 2 * np.pi, 100)
@@ -51,23 +51,11 @@ def plot_ellipsoid(ax, radius, b, y_offset, top=True):
     ax.plot_surface(x, y, z, color='orange', alpha=0.5, rstride=1, cstride=1)
 
 def plot_tank(radius, b, length):
-    ax = plot_open_cylinder(radius, length)
-    plot_ellipsoid(ax, radius, b, 0, top=False)  # Bottom ellipsoid
-    plot_ellipsoid(ax, radius, b, length, top=True)  # Top ellipsoid
-
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title('3D Tank Render')
-
-    # Set the aspect ratio to be equal by setting the limits
-    max_range = np.array([radius, length, radius]).max()
-    ax.set_xlim([-max_range, max_range])
-    ax.set_ylim([0, length])
-    ax.set_zlim([-max_range, max_range])
-    ax.set_box_aspect([2*max_range, length, 2*max_range])  # Aspect ratio is 1:1:1
-
-    return ax
+    fig = plot_open_cylinder(radius, length)
+    ax = fig.gca(projection='3d')
+    plot_ellipsoid(ax, radius, b, length, top=True)
+    plot_ellipsoid(ax, radius, b, 0, top=False)
+    return fig 
 
 def main():
     pass
