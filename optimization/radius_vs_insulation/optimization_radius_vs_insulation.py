@@ -205,7 +205,7 @@ def perform_analysis():
         for k in range(len(optimization_path) - 1):
             r1, t1, ge1 = optimization_path[k]
             r2, t2, ge2 = optimization_path[k + 1]
-            ax_ge.scatter(r1, t1, ge1, color='blue')  # Blue dot
+            ax_ge.scatter(r1, t1, ge1, color='blue') 
             ax_ge.quiver(r1, t1, ge1, r2 - r1, t2 - t1, ge2 - ge1, color='blue', arrow_length_ratio=0.1)  # Arrow
             
         ax_ge.plot([optimal_radius], [optimal_thickness], [-result.fun], marker='x', markersize=6, color='r')
@@ -247,7 +247,7 @@ def perform_analysis():
         fig_tank_fills = plot_single_tank_fill(
             optimal_performance[0].tank_states
         )
-
+        # TODO: debug required flux functionallity
         # fig_req_flux = plot_required_flux(all_tank_states, labels)
 
     # Save results if the flag is enabled
