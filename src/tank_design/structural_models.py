@@ -92,6 +92,10 @@ class CompositeModel(StructuralModel):
     @staticmethod
     def meridional_stress(pressure: float, radius: float) -> float:
         return pressure * radius / 2
+    
+    @staticmethod
+    def meridional_stress_ellipse(pressure: float, radius: float, b: float) -> float:
+        return pressure * radius  * (1- radius**2/2*b**2)
 
     @classmethod
     def helical_thickness(
@@ -102,6 +106,20 @@ class CompositeModel(StructuralModel):
     ) -> float:
         return (
             cls.meridional_stress(pressure, radius)
+            / material.failure_stress
+            / math.cos(material.winding_angle) ** 2
+        )
+        
+    @classmethod
+    def helical_thickness_ellipse(
+        cls,
+        pressure: float,
+        radius: float,
+        b: float,
+        material: CompositeMaterial
+    ) -> float:
+        return (
+            cls.meridional_stress_ellipse(pressure, radius, b)
             / material.failure_stress
             / math.cos(material.winding_angle) ** 2
         )
@@ -149,14 +167,13 @@ class CompositeCylinder(CompositeModel):
         return num / material.failure_stress
 
 class CompositeEllipsoidalEndCap(CompositeModel):
-    # TODO : replace with correct calculation for new geometry
     def compute_thickness(
         self,
         tank_section: TankSection,
         pressure: float
     ) -> float:
-        return self.helical_thickness(
-            pressure, tank_section.radius, tank_section.material
+        return self.helical_thickness_ellipse(
+            pressure, tank_section.radius, tank_section.radius/2.0, tank_section.material
         )
 
 
