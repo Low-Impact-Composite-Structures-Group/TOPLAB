@@ -17,7 +17,7 @@ from src.mission.mission import Mission
 from src.mission.mission_sections import MissionSection
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import Tank, TankFactory
-from src.thermodynamics.external_models import ForcedConvectionModel
+from src.thermodynamics.external_models import ForcedConvectionModel, NaturalConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.tank_states import (InitialState, TankStates,
                                             TargetState)
@@ -32,7 +32,7 @@ TIMESTEP = 1000
 MULTISTEP_METHOD = EulerMethod(TIMESTEP)
 DYNAMIC_MODEL_FACTORY = DynamicModelFactory()
 INTERNAL_MODEL = SingleZoneModel()
-EXTERNAL_MODEL = ForcedConvectionModel()
+EXTERNAL_MODEL = NaturalConvectionModel()
 HEAT_FLUX_FACTOR = 1
 
 
