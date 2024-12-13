@@ -1,8 +1,8 @@
-minimum radius: 1.0 # [m]
+minimum radius: 0.5 # [m]
 maximum radius: 1.2 # [m]
-minimum insulation thickness: 0.04 # [m]
-maximum insulation thickness: 0.1 # [m]
-volume margin: 1.5 # [m^3/m^3]
+minimum insulation thickness: 0.08 # [m]
+maximum insulation thickness: 0.10 # [m]
+volume margin: 1.7 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
 psi: 2.0 # psi = radius/b [m/m]
 tank material type: 'Composite'
 tank material: 'carbon'

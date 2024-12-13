@@ -142,7 +142,7 @@ def perform_analysis():
     print(f'Optimal b: {optimal_radius/psi:.4f} m')
     print(f'Optimal thickness: {optimal_thickness:.4f} m')
     print(f'Optimal length: {optimal_length:.4f} m')
-    print(f'Minimized gravimetric efficiency: {-result.fun:.4f}')
+    print(f'Maximized gravimetric efficiency: {-result.fun:.4f}')
 
     optimal_volumetric_efficiency = [performance.volumetric_efficiency for performance in all_performances]
     print(f"Max volumetric efficiency = {max(optimal_volumetric_efficiency):.4f}")
@@ -238,17 +238,14 @@ def perform_analysis():
 
     # Optional plotting
     if PLOT_EXTRA:
-        fig_all_tank_loads = plot_single_tank_loads(
-            optimal_performance[0].tank_states,
-        )
         fig_tank_temperatures = plot_single_tank_temperatures(
             optimal_performance[0].tank_states
         )
         fig_tank_fills = plot_single_tank_fill(
             optimal_performance[0].tank_states
         )
-        # TODO: debug required flux functionallity
-        # fig_req_flux = plot_required_flux(all_tank_states, labels)
+        # TODO: debug required flux functionallity. significant refactoring required...
+        # fig_req_flux = plot_single_required_flux(optimal_performance[0].tank_states)
 
     # Save results if the flag is enabled
     if SAVE_RESULTS:
@@ -261,7 +258,7 @@ def perform_analysis():
             'optimal_radius': optimal_radius,
             'optimal_thickness': optimal_thickness,
             'optimal_length': optimal_length,
-            'minimized_gravimetric_efficiency': -result.fun,
+            'maximized_gravimetric_efficiency': -result.fun,
             'max_volumetric_efficiency': max(optimal_volumetric_efficiency),
             'zeta_values': zeta_values,
             'volumetric_efficiencies': all_vol_effs,
@@ -283,7 +280,6 @@ def perform_analysis():
                 pickle.dump(tank_render, file)
 
         if PLOT_EXTRA:
-            fig_all_tank_loads.savefig(os.path.join(results_dir, "all_tank_loads_plot.png"), dpi=300, bbox_inches='tight')
             fig_tank_temperatures.savefig(os.path.join(results_dir, "tank_temperatures_plot.png"), dpi=300, bbox_inches='tight')
             fig_tank_fills.savefig(os.path.join(results_dir, "tank_fills_plot.png"), dpi=300, bbox_inches='tight')
             # fig_req_flux.savefig(os.path.join(results_dir, "req_flux_plot.png"), dpi=300, bbox_inches='tight')
