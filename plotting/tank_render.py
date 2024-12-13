@@ -53,6 +53,19 @@ def plot_ellipsoid(ax, radius, b, y_offset, top=True):
 def plot_tank(radius, b, length):
     fig = plot_open_cylinder(radius, length)
     ax = fig.gca(projection='3d')
+    
+    ax.set_xlabel('X [m]')
+    ax.set_ylabel('Y [m]')
+    ax.set_zlabel('Z [m]')
+    ax.set_title('3D Tank Render')
+
+    # Set the aspect ratio to be equal by setting the limits
+    max_range = np.array([radius, length, radius]).max()
+    ax.set_xlim([-max_range, max_range])
+    ax.set_ylim([0, length])
+    ax.set_zlim([-max_range, max_range])
+    ax.set_box_aspect([2*max_range, length, 2*max_range])  # Aspect ratio is 1:1:1
+    
     plot_ellipsoid(ax, radius, b, length, top=True)
     plot_ellipsoid(ax, radius, b, 0, top=False)
     return fig 
