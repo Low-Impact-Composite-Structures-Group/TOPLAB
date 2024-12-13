@@ -28,7 +28,8 @@ LOWER_MASS_LIMIT = 500 # TODO: find suitable lower limit
 
 
 # Factories and constants to be used in the analysis
-#TODO: refactor to use yaml input for these constants
+#TODO: refactor to use yaml input for these constants using dependency injection
+# to pass the configuration to the classes and functions that need it
 TIMESTEP = 1000
 MULTISTEP_METHOD = EulerMethod(TIMESTEP)
 DYNAMIC_MODEL_FACTORY = DynamicModelFactory()
