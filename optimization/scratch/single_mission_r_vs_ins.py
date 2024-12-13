@@ -14,6 +14,7 @@ import time
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import os
 
 
 
@@ -22,10 +23,10 @@ def perform_analysis():
     start_time = time.time()
     
     
-    optimal_radius = 1.0
+    optimal_radius = 1.03
     optimal_thickness = 0.08
     psi = 2.0
-    VOLUME_MARGIN = 1.5
+    VOLUME_MARGIN = 1.8 
     min_pressure = 1.3e5
     # Define the initial state of the tank
     pressure = 140e3
@@ -76,6 +77,9 @@ def perform_analysis():
     fig_tank_fills = plot_single_tank_fill(
         optimal_performance[0].tank_states
     )
+    fig_tank_pressures = plot_single_tank_loads(
+        optimal_performance[0].tank_states
+    )
     
     # Record the end time
     end_time = time.time()
@@ -86,6 +90,16 @@ def perform_analysis():
     print(f'Optimal length: {optimal_length:.4f} m')
     print(f'Maximized gravimetric efficiency: {optimal_performance[0].gravimetric_efficiency:.4f} [-]')
 
+    script_dir = os.path.dirname(__file__)
+    results_dir = os.path.join(script_dir, 'results')
+    
+    # Create the directory if it does not exist
+    os.makedirs(results_dir, exist_ok=True)
+    
+    fig_tank_temperatures.savefig(os.path.join(results_dir, "tank_temperatures_plot.png"), dpi=400, bbox_inches='tight')
+    fig_tank_fills.savefig(os.path.join(results_dir, "tank_fills_plot.png"), dpi=400, bbox_inches='tight')
+    fig_tank_pressures.savefig(os.path.join(results_dir, "tank_pressures_plot.png"), dpi=400, bbox_inches='tight')
+    
     # Show all plots at once
     plt.show()
 
