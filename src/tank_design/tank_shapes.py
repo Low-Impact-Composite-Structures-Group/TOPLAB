@@ -307,7 +307,8 @@ class EllipsoidalEndCap(TankSection):
 
     @property
     def surface_area(self) -> float:
-        return  2 * np.pi *  (((self.b*self.a)**1.6 + (self.b*self.radius)**1.6 + (self.a*self.radius)**1.6)/3)**(1/1.6)
+        #D. Zwillinger et al. Standard Mathematical Tables and Formulae. 31st ed. CRC Press, 2003
+        return  2 * np.pi * self.radius ** 2 + (np.pi * self.b**2 * self.radius)/np.sqrt(self.radius**2 - self.b**2) * np.log((self.radius + np.sqrt(self.radius**2 - self.b**2))/(self.radius - np.sqrt(self.radius**2 - self.b**2)))
 
     @property
     def volume(self) -> float:
