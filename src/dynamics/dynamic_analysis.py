@@ -340,8 +340,9 @@ class MissionAnalysis:
 
             # Check for convergence in the thermal capacity of the tank
             if cls.thermal_capacity_has_converged(tank, tank_states):
-                print(f"Thermal capacity has converged with {i} iterations")
+                print(f"Thermal capacity has converged with {i+1} iterations")
                 return tank_states
+
         raise ValueError("Thermal capacity has failed to converge")
 
     @classmethod
