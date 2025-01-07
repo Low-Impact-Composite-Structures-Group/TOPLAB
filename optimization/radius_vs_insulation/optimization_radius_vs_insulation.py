@@ -1,5 +1,4 @@
-from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads,
-                                       plot_single_tank_loads, plot_single_tank_temperatures, plot_required_flux)
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux)
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
                                       OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
@@ -148,24 +147,23 @@ def perform_analysis():
     print(f"Max volumetric efficiency = {max(optimal_volumetric_efficiency):.4f}")
 
     # Perform the analysis with the optimized parameters
-    optimal_performance = [MissionAnalysisFacade.analyse(GenericTankDimensions(
+    optimal_performance = MissionAnalysisFacade.analyse(GenericTankDimensions(
             optimal_radius, WinnefeldTank.length_from_radius_b_and_volume(
             optimal_radius, VOLUME_MARGIN * fuel_volume, optimal_radius/psi), optimal_radius, optimal_radius/psi),
         tank_material,
         ConstantFoamInsulation.rohacell(optimal_thickness),
         mission,
         initial_state,
-        operating_window)]
+        operating_window)
 
     # Listify optimal tank performance
-    optimum = [performance.tank_states for performance in optimal_performance]
+    optimum = [optimal_performance.tank_states]
 
     # Compute zeta (zeta = r/t) for each radius and thickness
     zeta_values = [all_radii / all_thicknesses for all_radii, all_thicknesses in zip(all_radii, all_thicknesses)]
-    labels = [f'{zeta} [m/m]' for zeta in zeta_values]
 
      # Create plots for tank loads and efficiencies searched in the optimization
-    tank_loads_fig = plot_tank_loads(optimum, labels, None, None)
+    tank_loads_fig = plot_tank_loads(optimum, ["Internal pressure"], None, None)
     etas_fig = plot_tank_efficiencies_scatter(all_performances, zeta_values, "zeta (r/t) [m/m]", None, None)
 
 
@@ -244,8 +242,8 @@ def perform_analysis():
         fig_tank_fills = plot_single_tank_fill(
             optimal_performance[0].tank_states
         )
-        # TODO: debug required flux functionallity. significant refactoring required...
-        # fig_req_flux = plot_single_required_flux(optimal_performance[0].tank_states)
+       
+        fig_req_flux = plot_single_required_flux(optimal_performance.tank_states)
 
     # Save results if the flag is enabled
     if SAVE_RESULTS:
@@ -282,7 +280,7 @@ def perform_analysis():
         if PLOT_EXTRA:
             fig_tank_temperatures.savefig(os.path.join(results_dir, "tank_temperatures_plot.png"), dpi=300, bbox_inches='tight')
             fig_tank_fills.savefig(os.path.join(results_dir, "tank_fills_plot.png"), dpi=300, bbox_inches='tight')
-            # fig_req_flux.savefig(os.path.join(results_dir, "req_flux_plot.png"), dpi=300, bbox_inches='tight')
+            fig_req_flux.savefig(os.path.join(results_dir, "required_flux_plot.png"), dpi=300, bbox_inches='tight')
 
 
     # Record the end time

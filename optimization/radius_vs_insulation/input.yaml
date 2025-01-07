@@ -15,7 +15,7 @@ operating floor temperature: # [K]
 operating floor pressure: 130000 # [Pa]
 operating ceiling pressure:  # [Pa]
 fill: 0.97
-plot extra: True
+plot extra: False
 response surface: True
 response surface grid size: 10 # N^2 grid points will be generated
 render 3D: True
