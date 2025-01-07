@@ -305,6 +305,30 @@ def plot_single_tank_fill(
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks]
     )
+    
+def plot_single_required_flux(
+    tank_state: TankStates,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+     # Ensure both arrays have the same length
+    min_length = min(len(tank_state.timesteps_in_hours), len(tank_state.required_fluxes))
+    times = tank_state.timesteps_in_hours[:min_length]
+    required_fluxes = tank_state.required_fluxes[:min_length]
+    data = [
+        Line(
+            times,
+            required_fluxes,
+            "Required flux"
+        )
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Heat flux [W]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
 
 
 def main():
