@@ -24,16 +24,18 @@ def perform_analysis():
     initial_conditions = InitialConditions(
         pressure, temperature, fill
     )
-
+    
+    # Define the material of the tank
+    winding_angle = 55
+    material = Composite.carbon(winding_angle)
+    
     # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.ahluwalia()
+    tank = CylindricalTankSphericalCaps.ahluwalia(material, pressure)
     tank_radius = tank.radius
     tank_body = tank.body_length
     tank_dimensions = TankDimensions(tank_radius, tank_body)
 
-    # Define the material of the tank
-    winding_angle = 55
-    material = Composite.carbon(winding_angle)
+
 
     # Define the target conditions
     target_conditions = TargetConditions(
