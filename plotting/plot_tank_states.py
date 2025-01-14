@@ -21,6 +21,9 @@ class TankStates(Protocol):
     timesteps_in_hours: list[float]
     pressures_in_bar: list[float]
     required_fluxes: list[float]
+    fills: list[float]
+    liquid_masses: list[float]
+    gas_masses: list[float]
 
 
 def plot_tank_loads(
@@ -204,6 +207,61 @@ def plot_thermo_mechanical_loading(
     return TwinXFigure(
         data,
         "Time [hour]",
+        ["Pressure [bar]", "Temperature [K]"],
+        x_ticks=x_ticks,
+        y_ticks=[y1ticks, y2ticks],
+    )
+    
+def plot_thermo_mechanical_loading_vs_fill(
+    tank_states: TankStates,
+    x_ticks: list[float] = None,
+    y1ticks: list[float] = None,
+    y2ticks: list[float] = None
+):
+    fills = tank_states.fills
+    data = [
+        [Line(
+            fills,
+            tank_states.pressures_in_bar,
+            "Pressure"
+        )],
+        [Line(
+            fills,
+            tank_states.temperatures,
+            "Temperatures"
+        )]
+    ]
+    return TwinXFigure(
+        data,
+        "Fill [-]",
+        ["Pressure [bar]", "Temperature [K]"],
+        x_ticks=x_ticks,
+        y_ticks=[y1ticks, y2ticks],
+    )
+    
+def plot_thermo_mechanical_loading_vs_mass(
+    tank_states: TankStates,
+    x_ticks: list[float] = None,
+    y1ticks: list[float] = None,
+    y2ticks: list[float] = None
+):
+    # masses = tank_states.liquid_masses + tank_states.gas_masses
+    masses = [liquid + gas for liquid, gas in zip(tank_states.liquid_masses, tank_states.gas_masses)]
+    data = [
+        [Line(
+            masses,
+            tank_states.pressures_in_bar,
+            "Pressure"
+        )],
+        [Line(
+            masses,
+            tank_states.temperatures,
+            "Temperatures"
+        )]
+    ]
+    return TwinXFigure(
+        data,
+        "H2 charged [kg]",
         ["Pressure [bar]", "Temperature [K]"],
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks],
