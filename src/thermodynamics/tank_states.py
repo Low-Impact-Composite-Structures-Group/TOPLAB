@@ -61,10 +61,12 @@ class InitialState:
             self.pressure, self.temperature
         )
         return self.hydrogen
-
+ 
     def compute_fuel_mass(self, tank_volume: float) -> float:
-        if self.fill == 0.0 or self.fill == 1.0:
-            return self.hydrogen.density * tank_volume
+        if self.fill == 0.0:
+            return self.hydrogen.gas.density * tank_volume
+        elif self.fill == 1.0:
+            return self.hydrogen.liquid.density * tank_volume
         return tank_volume * (
             self.fill * self.hydrogen.liquid.density
             + (1 - self.fill) * self.hydrogen.gas.density
