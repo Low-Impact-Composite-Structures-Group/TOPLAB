@@ -113,10 +113,24 @@ class TankState:
             return 0.0
         if self.phase == "liquid":
             return 1.0
-        return (
+        
+        # Ensure that divide by zero is not possible
+        if self.volume == 0:
+            raise ValueError("Volume cannot be zero")
+        
+        # Ensure densities are valid
+        if self.hydrogen.liquid.density <= self.hydrogen.gas.density:
+            raise ValueError("Liquid density must be greater than gas density")
+        
+        fill_value = (
             (self.fuel_mass / self.volume - self.hydrogen.gas.density)
             / (self.hydrogen.liquid.density - self.hydrogen.gas.density)
         )
+         # Ensure fill value is not negative
+        if fill_value < 0:
+            fill_value = 0
+        
+        return fill_value
     
     @property
     def fuel_volume(self):
