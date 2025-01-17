@@ -4,15 +4,16 @@ from plotting.plot_tank_states import plot_general_properties
 from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
-from src.dynamics.dynamic_models import DynamicModelFactory
+from src.dynamics.dynamic_model_factories import DynamicModelFactory
 from src.mission.mission import Mission
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
-from src.materials.materials import Composite
+from src.materials.materials import Composite, Metal
 from src.thermodynamics.tank_states import InitialState, TargetState
 from src.dynamics.dynamic_analysis import MissionAnalysis
 from src.insulation.foam_insulations import ConstantFoamInsulation
 import copy
+import numpy as np
 
 def perform_analysis():
 
@@ -53,6 +54,8 @@ def perform_analysis():
         for no_tanks in number_of_tanks
     ]
     tank_radii = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25]
+    # tank_radii = [0.25, 0.5]
+    # tank_radii = [0.25]
     tank_lengths = [
         [
             CylindricalTankSphericalCaps.length_from_radius_and_volume(
@@ -71,7 +74,7 @@ def perform_analysis():
         for lengths_row in tank_lengths
     ]
     # material = Metal.aluminum()
-    material = Composite.carbon(55)
+    material = Composite.carbon(np.radians(55))
     tanks = [
         [
             CylindricalTankSphericalCaps(
@@ -115,9 +118,7 @@ def perform_analysis():
     ]
     grav_effs = [
         [
-            GravimetricEfficiency(
-                tank, insulation, tank_states.first_state
-            ).efficiency
+            GravimetricEfficiency().compute_efficiency( tank, insulation, tank_states.first_state)
             for tank_states, tank in zip(data_row, tank_row)
         ]
         for data_row, tank_row in
@@ -126,7 +127,7 @@ def perform_analysis():
 
     vol_effs = [
         [
-            SquareVolumetricEfficiency(tank, insulation).efficiency
+            VolumetricEfficiency().compute_efficiency(tank, insulation)
             for tank in row
         ]
         for row in tanks
@@ -155,6 +156,7 @@ def perform_analysis():
         yticks
     )
     fig1.show()
+    fig2.show()
 
 
 def main():
