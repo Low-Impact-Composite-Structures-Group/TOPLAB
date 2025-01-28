@@ -1,26 +1,18 @@
-tank radius: 1.0 # [m]
-insulation thickness: 0.08 # [m]
-maximum insulation thickness: 0.10 # [m]
-volume margin: 1.1 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
-psi: 2.0 # psi = radius/b [m/m]
+tank radius: 2.8 # [m]
+insulation thickness: 0.04 # [m]
+volume margin: 1.15 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
 tank material type: 'Composite'
 tank material: 'carbon'
 head type: 'hemi' # 'se' or 'hemi'
 winding angle: 55.0 #[degrees]
-initial temperature:  # [K]
-initial pressure: 800000 # [Pa]
-start fill: 0.0
-target fill: 0.97
-target mass: 11.0 # [kg] 
-min pressure: # [Pa]
-min temperature: # [K]
-max pressure: 350000 # [Pa]
+initial temperature: 70 # [K]
+initial pressure: 30000000 # [Pa]
+initial fill: 0.0 
+min pressure: 1500000 # [Pa]
+min temperature:  # [K]
+max pressure:  # [Pa]
 max temperature:  # [K]
-refuel duration: 10000 # [s]
-refuel rate: 0.01 # [kg/s]
-refuel altitude: 0.0 # [m]
-refuel mach number: 0.01 
-fuel flow: 'liquid'
-mission: 'fly_eco_mission'
+fuel flow: 'gas'
+mission: 'regional'
 
 

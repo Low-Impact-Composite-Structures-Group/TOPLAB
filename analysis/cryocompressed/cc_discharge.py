@@ -1,12 +1,10 @@
 
 
-from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature)
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux)
 from plotting.tank_render import plot_tank
-from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
-                                      OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
+from facades.analysis_facades import (OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
 from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
 from src.materials.materials import Composite
-from src.mission.mission_sections import OutFlow
 from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
@@ -15,8 +13,10 @@ import numpy as np
 import os
 import time
 import yaml
-from src.mission.mission import Mission
 
+# helper function to ensure computed length is not negative
+def radius_from_volume_sphere(volume: float) -> float:
+    return (3 * volume / (4 * np.pi)) ** (1/3)
 
 def perform_analysis():
 
@@ -41,18 +41,19 @@ def perform_analysis():
     winding_angle_degrees = config.get('winding angle', None)
     mission_name = config.get('mission', None)
     fuel_flow = config.get('fuel flow', None)
-    min_pressure = config.get('operating floor pressure', None)
-    min_temperature = config.get('operating floor temperature', None)
-    max_pressure = config.get('operating ceiling pressure', None)
+    min_pressure = config.get('min pressure', None)
+    min_temperature = config.get('min temperature', None)
+    max_pressure = config.get('max pressure', None)
     initial_pressure = config.get('initial pressure', None)
     initial_temperature = config.get('initial temperature', None)
-    fill = config.get('target fill', None)
+    fill = config.get('initial fill', None)
     head_type = config.get('head type', None)
 
+    # Populate initial state
     initial_state = InitialState(initial_pressure, initial_temperature, fill)
 
     winding_angle = np.radians(winding_angle_degrees)
-        # Instantiate the tank material
+    # Instantiate the tank material
     tank_material_class = globals()[tank_material_type]
     if tank_material_name == 'carbon':
         tank_material = getattr(tank_material_class, tank_material_name)(winding_angle)
@@ -61,16 +62,21 @@ def perform_analysis():
 
     # Define the mission using the string from the input file
     mission = getattr(Mission, mission_name)(fuel_flow)
-    mission = getattr(Mission, mission_name)(fuel_flow)
 
-    operating_window = OperatingEnvelope(max_pressure, min_pressure=min_pressure, min_temperature=min_temperature)
+    # Define operating window
+    operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
 
     # Define required fuel
     fuel_mass = mission.required_fuel
     initial_fuel = initial_state.get_hydrogen_properties()
+    print(f"fuel mass: {fuel_mass}")
 
     # Get fuel volume
-    fuel_volume = fuel_mass / initial_fuel.liquid.density
+    fuel_volume = fuel_mass / initial_fuel.density * VOLUME_MARGIN
+    
+    # Take the radius of the limiting sphere if the volume is too small for a cylinder + hemi head
+    if radius_from_volume_sphere(fuel_volume) <= radius:
+        radius = radius_from_volume_sphere(fuel_volume)
     
     # Instantiate the insulation
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
@@ -78,15 +84,15 @@ def perform_analysis():
     # Calculate the tank length based on SE or Hemi head configuration
     # Instantiate the tank dimensions
     if head_type == 'hemi':
-        length = CylindricalTankSphericalCaps.length_from_radius_and_volume(radius, VOLUME_MARGIN * fuel_volume)
-        tank_dimensions = CylindricalTankSphericalCaps(radius, length, tank_material, initial_pressure)
+        length = CylindricalTankSphericalCaps.length_from_radius_and_volume(radius, fuel_volume)
+        tank_dimensions = TankDimensions(radius, length)
     elif head_type == 'se':
         length = WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, 0.5*radius)
         tank_dimensions = GenericTankDimensions(radius,length , radius, 0.5*radius)
     else:
         raise ValueError(f"Unsupported head type: {head_type}")
     
-    # Print the parameters
+    # Print some parameters
     print(f"Tank length: {length}")
     print(f"Tank radius: {radius}")
     print(f"Fuel volume: {fuel_volume}")
@@ -103,14 +109,8 @@ def perform_analysis():
         operating_window
     )
     
-    # Print the final liquid and gas densities
-    final_liquid_density = performance.tank_states.last_state.hydrogen.liquid.density
-    final_gas_density = performance.tank_states.last_state.hydrogen.gas.density
-    print(f"Final liquid density: {final_liquid_density}")
-    print(f"Final gas density: {final_gas_density}")
 
-    # listify the densities for plotting
-    liquid_densities = [state.hydrogen.liquid.density for state in performance.tank_states.states]
+    # Listify the densities for plotting
     gas_densities = [state.hydrogen.gas.density for state in performance.tank_states.states]
     
     # Print the time taken
@@ -122,7 +122,6 @@ def perform_analysis():
     fig_req_flux = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
     fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, gas_densities)
-    fig_density_vs_temperature_liquid = plot_density_vs_temperature(performance.tank_states, liquid_densities)
     plt.show()
 
 
