@@ -1,14 +1,13 @@
-tank radius: 0.25 # [m]
-tank body length: 0.43570335168670493 # [m]
+tank radius: 1.0 # [m]
 insulation thickness: 0.08 # [m]
 maximum insulation thickness: 0.10 # [m]
-volume margin: 1.7 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
+volume margin: 1.1 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
 psi: 2.0 # psi = radius/b [m/m]
 tank material type: 'Composite'
 tank material: 'carbon'
 head type: 'hemi' # 'se' or 'hemi'
 winding angle: 55.0 #[degrees]
-initial temperature: 50 # [K]
+initial temperature:  # [K]
 initial pressure: 800000 # [Pa]
 start fill: 0.0
 target fill: 0.97
@@ -21,5 +20,7 @@ refuel duration: 10000 # [s]
 refuel rate: 0.01 # [kg/s]
 refuel altitude: 0.0 # [m]
 refuel mach number: 0.01 
+fuel flow: 'liquid'
+mission: 'fly_eco_mission'
 
 
