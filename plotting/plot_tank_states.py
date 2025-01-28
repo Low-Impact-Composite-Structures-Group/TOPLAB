@@ -387,6 +387,30 @@ def plot_single_required_flux(
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
+    
+def plot_density_vs_temperature(
+    tank_state: TankStates,
+    hydrogen_density: list[float],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    
+    data = [
+        Line(
+            tank_state.temperatures,
+            hydrogen_density,
+            "Temperature"
+        )
+    ]
+    return SingleFigure(
+        data,
+        "Temperature [K]",
+        "Density [kg/m^3]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+    
+    
 
 
 def main():
