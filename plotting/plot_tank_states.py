@@ -372,7 +372,7 @@ def plot_single_required_flux(
      # Ensure both arrays have the same length
     min_length = min(len(tank_state.timesteps_in_hours), len(tank_state.required_fluxes))
     times = tank_state.timesteps_in_hours[:min_length]
-    required_fluxes = tank_state.required_fluxes[:min_length]
+    required_fluxes = [flux / -1000 for flux in tank_state.required_fluxes[:min_length]]
     data = [
         Line(
             times,
@@ -383,7 +383,7 @@ def plot_single_required_flux(
     return SingleFigure(
         data,
         "Time [hour]",
-        "Heat flux [W]",
+        "Heat flux [kW]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
