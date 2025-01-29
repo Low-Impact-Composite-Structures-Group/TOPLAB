@@ -111,7 +111,18 @@ def perform_analysis():
     
 
     # Listify the densities for plotting
-    gas_densities = [state.hydrogen.gas.density for state in performance.tank_states.states]
+    densities = []
+    phases = []
+    for state in performance.tank_states.states:
+        phase = state.hydrogen.phase
+        if phase in ["gas", "supercritical"]:
+            density = state.hydrogen.gas.density
+        elif phase in ["liquid", "supercritical_liquid"]:
+            density = state.hydrogen.liquid.density
+        else:
+            raise ValueError(f"Unsupported phase: {phase}")
+        densities.append(density)
+        phases.append(phase)
     
     # Print the time taken
     print(f"Time taken: {time.time() - start_time}")
@@ -121,7 +132,7 @@ def perform_analysis():
     fig_tanK_pressures = plot_single_tank_loads(performance.tank_states)
     fig_req_flux = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
-    fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, gas_densities)
+    fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, densities)
     plt.show()
 
 
