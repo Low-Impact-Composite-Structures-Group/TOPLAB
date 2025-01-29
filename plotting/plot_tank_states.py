@@ -390,12 +390,15 @@ def plot_single_required_flux(
     
 def plot_density_vs_temperature(
     tank_state: TankStates,
+    process_label: str,
     hydrogen_density: list[float],
+    isobar_label: str,
+    isobar_densities: list[float] = None,
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
     fig, ax = plt.subplots()
-    ax.plot(tank_state.temperatures, hydrogen_density, label="Temperature", linestyle='solid', marker="")
+    ax.plot(tank_state.temperatures, hydrogen_density, label=process_label, linestyle='solid', marker="")
     
     # Add an arrow to show the direction wrt time
     mid_index = int(len(tank_state.temperatures) / 2)
@@ -406,6 +409,10 @@ def plot_density_vs_temperature(
         arrowprops=dict(arrowstyle="->", color='black')
     )
     
+     # Plot the isobar densities if provided
+    if isobar_densities is not None:
+        ax.plot(tank_state.temperatures, isobar_densities, label=isobar_label, linestyle='dotted', marker="")
+    
     ax.set_xlabel("Temperature [K]")
     ax.set_ylabel("Density [kg/m^3]")
     if x_ticks:
@@ -413,6 +420,7 @@ def plot_density_vs_temperature(
     if y_ticks:
         ax.set_yticks(y_ticks)
     
+    ax.legend()
     return fig
     
     

@@ -8,6 +8,7 @@ from src.materials.materials import Composite
 from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
+from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -109,10 +110,13 @@ def perform_analysis():
         operating_window
     )
     
+    # Instantiate the SinglePhaseRequester
+    requester = SinglePhaseRequester()
 
     # Listify the densities for plotting
     densities = []
     phases = []
+    density_at_min_p_isobar = []
     for state in performance.tank_states.states:
         phase = state.hydrogen.phase
         if phase in ["gas", "supercritical"]:
@@ -121,9 +125,13 @@ def perform_analysis():
             density = state.hydrogen.liquid.density
         else:
             raise ValueError(f"Unsupported phase: {phase}")
+        
         densities.append(density)
         phases.append(phase)
-    
+        temperature = state.temperature
+        density_at_isobar = SinglePhaseRequester().get_property(min_pressure, temperature, "D")
+        density_at_min_p_isobar.append(density_at_isobar)
+      
     # Print the time taken
     print(f"Time taken: {time.time() - start_time}")
     
@@ -132,7 +140,7 @@ def perform_analysis():
     fig_tanK_pressures = plot_single_tank_loads(performance.tank_states)
     fig_req_flux = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
-    fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, densities)
+    fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, "Discharge", densities, "15 bar isobar", density_at_min_p_isobar)
     plt.show()
 
 
