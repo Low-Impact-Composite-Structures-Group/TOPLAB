@@ -394,21 +394,26 @@ def plot_density_vs_temperature(
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
+    fig, ax = plt.subplots()
+    ax.plot(tank_state.temperatures, hydrogen_density, label="Temperature", linestyle='solid', marker="")
     
-    data = [
-        Line(
-            tank_state.temperatures,
-            hydrogen_density,
-            "Temperature"
-        )
-    ]
-    return SingleFigure(
-        data,
-        "Temperature [K]",
-        "Density [kg/m^3]",
-        x_ticks=x_ticks,
-        y_ticks=y_ticks,
+    # Add an arrow to show the direction wrt time
+    mid_index = int(len(tank_state.temperatures) / 2)
+    ax.annotate(
+        '',
+        xy=(tank_state.temperatures[mid_index + 1], hydrogen_density[mid_index + 1]),
+        xytext=(tank_state.temperatures[mid_index], hydrogen_density[mid_index]),
+        arrowprops=dict(arrowstyle="->", color='black')
     )
+    
+    ax.set_xlabel("Temperature [K]")
+    ax.set_ylabel("Density [kg/m^3]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    return fig
     
     
 
