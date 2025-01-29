@@ -765,7 +765,12 @@ class CylindricalTankSphericalCaps(Tank):
     ) -> float:
         num = volume - 4 / 3 * math.pi * radius ** 3
         den = math.pi * radius ** 2
-        return num / den
+        length = num / den
+        # return 0 length if we have a spherical tank
+        if length < 1.0e-4:
+            return 0.0
+        else: 
+            return length 
 
 
 @dataclass
