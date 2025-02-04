@@ -1,6 +1,7 @@
 tank properties:
-  tank radius: 2.8 # [m]
-  insulation thickness: 0.08 # [m]
+  tank radius: 1.0 # [m]
+  tank length: 2.0 # [m]
+  insulation thickness: 0.04 # [m]
   volume margin: 1.15 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
@@ -17,9 +18,18 @@ discharge:
   fuel flow: 'gas'
   mission: 'regional'
 refueling:
-  mass flow rate: 0.07 # [kg/s]
-  pressure: 40000000 # [Pa]
-  temperature: 240 # [K]
+  mass flow rate: 0.01 # [kg/s]
+  initial pressure: 1500000 # [Pa]
+  initial temperature: 70 # [K]
+  initial fill: 0.0
+  duration: 10000 # [s]
+  altitude: 0.0 # [m]
+  target fill: 0.97
+  target mass: 500 #[kg]
+  mach number: 0.01
+  min pressure: # [Pa]
+  min temperature: # [K]
+  max pressure: 45000000 # [Pa]
 
 
 
