@@ -1,18 +1,25 @@
-tank radius: 2.8 # [m]
-insulation thickness: 0.08 # [m]
-volume margin: 1.15 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
-tank material type: 'Composite'
-tank material: 'carbon'
-head type: 'hemi' # 'se' or 'hemi'
-winding angle: 55.0 #[degrees]
-initial temperature: 54 # [K]
-initial pressure: 40000000 # [Pa]
-initial fill: 0.0 
-min pressure: 1500000 # [Pa]
-min temperature:  # [K]
-max pressure:  # [Pa]
-max temperature:  # [K]
-fuel flow: 'gas'
-mission: 'regional'
+tank properties:
+  tank radius: 2.8 # [m]
+  insulation thickness: 0.08 # [m]
+  volume margin: 1.15 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
+  head type: 'hemi' # 'se' or 'hemi'
+  tank material type: 'Composite'
+  tank material: 'carbon'
+  winding angle: 55.0 #[degrees]
+discharge:  
+  initial temperature: 54 # [K]
+  initial pressure: 40000000 # [Pa]
+  initial fill: 0.0 
+  min pressure: 1500000 # [Pa]
+  min temperature:  # [K]
+  max pressure:  # [Pa]
+  max temperature:  # [K]
+  fuel flow: 'gas'
+  mission: 'regional'
+refueling:
+  mass flow rate: 0.07 # [kg/s]
+  pressure: 40000000 # [Pa]
+  temperature: 240 # [K]
+
 
 

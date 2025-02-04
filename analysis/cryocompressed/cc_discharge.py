@@ -34,21 +34,44 @@ def perform_analysis():
         config = yaml.safe_load(file)
 
     # Extract parameters from the YAML file
-    radius = config.get('tank radius', None)
-    insulation_thickness = config.get('insulation thickness', None)
-    VOLUME_MARGIN = config.get('volume margin', None)
-    tank_material_type = config.get('tank material type', None)
-    tank_material_name = config.get('tank material', None)
-    winding_angle_degrees = config.get('winding angle', None)
-    mission_name = config.get('mission', None)
-    fuel_flow = config.get('fuel flow', None)
-    min_pressure = config.get('min pressure', None)
-    min_temperature = config.get('min temperature', None)
-    max_pressure = config.get('max pressure', None)
-    initial_pressure = config.get('initial pressure', None)
-    initial_temperature = config.get('initial temperature', None)
-    fill = config.get('initial fill', None)
-    head_type = config.get('head type', None)
+    radius = config.get('tank properties', {}).get('tank radius', None)
+    insulation_thickness =config.get('tank properties', {}).get('insulation thickness', None)
+    VOLUME_MARGIN = config.get('tank properties', {}).get('volume margin', None)
+    tank_material_type = config.get('tank properties', {}).get('tank material type', None)
+    tank_material_name = config.get('tank properties', {}).get('tank material', None)
+    winding_angle_degrees = config.get('tank properties', {}).get('winding angle', None)
+    head_type = config.get('tank properties', {}).get('head type', None)
+    mission_name = config.get('discharge', {}).get('mission', None)
+    fuel_flow = config.get('discharge', {}).get('fuel flow', None)
+    min_pressure = config.get('discharge', {}).get('min pressure', None)
+    min_temperature = config.get('discharge', {}).get('min temperature', None)
+    max_pressure = config.get('discharge', {}).get('max pressure', None)
+    initial_pressure = config.get('discharge', {}).get('initial pressure', None)
+    initial_temperature = config.get('discharge', {}).get('initial temperature', None)
+    fill = config.get('discharge', {}).get('initial fill', None)
+    
+    # Check for None values and print them
+    parameters = {
+        'tank radius': radius,
+        'insulation thickness': insulation_thickness,
+        'volume margin': VOLUME_MARGIN,
+        'tank material type': tank_material_type,
+        'tank material': tank_material_name,
+        'winding angle': winding_angle_degrees,
+        'head type': head_type,
+        'mission': mission_name,
+        'fuel flow': fuel_flow,
+        'min pressure': min_pressure,
+        'min temperature': min_temperature,
+        'max pressure': max_pressure,
+        'initial pressure': initial_pressure,
+        'initial temperature': initial_temperature,
+        'initial fill': fill
+    }
+
+    for param, value in parameters.items():
+        if value is None:
+            print(f"Warning: {param} is None")
 
     # Populate initial state
     initial_state = InitialState(initial_pressure, initial_temperature, fill)
