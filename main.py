@@ -1,4 +1,4 @@
-from analysis.cryocompressed.cc_discharge import perform_analysis
+from analysis.cryocompressed.cc_refuel import perform_analysis
 
 def main():
     perform_analysis()
