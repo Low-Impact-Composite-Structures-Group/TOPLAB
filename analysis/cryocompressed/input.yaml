@@ -27,7 +27,7 @@ refueling:
   target fill: 0.97
   target mass: 500 #[kg]
   mach number: 0.01
-  min pressure: # [Pa]
+  min pressure: 1500000 # [Pa]
   min temperature: # [K]
   max pressure: 45000000 # [Pa]
 
