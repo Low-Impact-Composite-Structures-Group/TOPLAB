@@ -1,7 +1,6 @@
 
 
-from plotting.plot_tank_states import plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_thermo_mechanical_loading, plot_tank_fill
-from plotting.tank_render import plot_tank
+from plotting.plot_tank_states import plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature
 from facades.analysis_facades import FillingAnalysisFacade, InitialConditions, OperatingEnvelope, TankDimensions, TargetConditions
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
