@@ -195,7 +195,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
 
     @staticmethod
     def _define_stopping_criteria() -> list[StoppingCriterion]:
-        return [NoFuelMass(), TankIsEmpty()] # TODO: incorporate distance travelled as a stopping criterion
+        return [NoFuelMass(), TankIsEmpty()]
 
 
 @dataclass
@@ -299,8 +299,8 @@ class FillingAnalysisFacade(AnalysisFacade):
         operating_envelope: OperatingEnvelope,
         target_conditions: TargetConditions,
     ) -> TankPerformance:
-        print("Temporary fix, set timestep to 1")
-        MULTISTEP_METHOD.timestep = 1
+        MULTISTEP_METHOD.timestep = 100
+        print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
         tank_dimensions, material, operating_envelope, initial_state
@@ -425,6 +425,58 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
             MaxPressureReached(),
             LowerPressureReached()
         ]
+        
+class DormancyAnalysisFacade(AnalysisFacade):
+
+    @classmethod
+    def analyse(
+        cls,
+        tank_dimensions: TankDimensions,
+        material: Material,
+        insulation: Insulation,
+        mission: Mission,
+        initial_conditions: InitialConditions,
+        operating_envelope: OperatingEnvelope,
+        target_conditions: TargetConditions,
+    ) -> TankPerformance:
+        MULTISTEP_METHOD.timestep = 100
+        print(f"Temporary fix, set timestep to {MULTISTEP_METHOD.timestep}")
+        initial_state = cls._define_initial_state(initial_conditions)
+        tank = cls._define_tank(
+        tank_dimensions, material, operating_envelope, initial_state
+        )
+        tank_states = MissionAnalysis.perform_analysis(
+            tank,
+            initial_state,
+            mission,
+            cls._define_stopping_criteria(),
+            cls._define_target_conditions(
+                operating_envelope, target_conditions
+            ),
+            MULTISTEP_METHOD,
+            DYNAMIC_MODEL_FACTORY,
+            cls._define_thermal_model(insulation),
+            HEAT_FLUX_FACTOR
+        )
+        return TankPerformance(tank, insulation, tank_states)
+
+    @classmethod
+    def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
+        return [MaxPressureReached()]
+
+    @staticmethod
+    def _define_target_conditions(
+        operating_envelope: OperatingEnvelope,
+        target_conditions: TargetConditions
+    ) -> TargetState:
+        target_conditions = TargetState(
+            operating_envelope.max_pressure,
+            operating_envelope.min_pressure,
+            operating_envelope.min_temperature,
+            target_conditions.fill,
+            target_conditions.fuel_mass
+        )
+        return target_conditions
 
 
 def main():
