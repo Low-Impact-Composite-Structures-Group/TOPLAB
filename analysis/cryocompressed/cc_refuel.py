@@ -3,10 +3,9 @@
 from plotting.plot_tank_states import plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_thermo_mechanical_loading, plot_tank_fill
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import FillingAnalysisFacade, InitialConditions, OperatingEnvelope, TankDimensions, TargetConditions
-from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
+from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
-from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester
 from src.mission.mission import Mission
@@ -137,27 +136,37 @@ def perform_analysis():
     
     tank_states = tank_performance.tank_states
 
-    y1ticks = None
-    y2ticks = None
-    xticks = None
-    plot_thermo_mechanical_loading(
-        tank_states,
-        xticks,
-        y1ticks,
-        y2ticks
-    )
-    y1ticks = None
-    y2ticks = None
-    plot_tank_fill(
-        tank_states,
-        xticks,
-        y1ticks,
-        y2ticks
-    )
+    # Listify the densities for plotting
+    densities = []
+    phases = []
+    density_at_min_p_isobar = []
+    for state in tank_performance.tank_states.states:
+        phase = state.hydrogen.phase
+        if phase == 'twophase':
+            density = state.hydrogen.two_phase.density
+        if phase in ["gas", "supercritical"]:
+            density = state.hydrogen.gas.density
+        elif phase in ["liquid", "supercritical_liquid"]:
+            density = state.hydrogen.liquid.density
+        else:
+            raise ValueError(f"Unsupported phase: {phase}")
+        
+        densities.append(density)
+        phases.append(phase)
+        temperature = state.temperature
+        density_at_isobar = SinglePhaseRequester().get_property(min_pressure, temperature, "D")
+        density_at_min_p_isobar.append(density_at_isobar)
+      
+    # Print the time taken
+    print(f"Time taken: {time.time() - start_time}")
+    
+    # Plotting
+    fig_tank_temperatures = plot_single_tank_temperatures(tank_performance.tank_states)
+    fig_tanK_pressures = plot_single_tank_loads(tank_performance.tank_states)
+    fig_req_flux = plot_single_required_flux(tank_performance.tank_states)
+    fig_tank_fill = plot_single_tank_fill(tank_performance.tank_states)
+    fig_density_vs_temperature_gas = plot_density_vs_temperature(tank_performance.tank_states, "Discharge", densities, "15 bar isobar", density_at_min_p_isobar)
     plt.show()
-
-
-
 
 def main():
     perform_analysis()
