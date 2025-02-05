@@ -319,7 +319,10 @@ class MissionAnalysis:
 
             for mission_section in mission.sections:
                 section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
-                print(f"Now calculating mission section {section_string}, thermal iteration index = {i}")
+                if section_string == None:
+                    print(f"Now calculating singular mission section, thermal iteration index = {i}")
+                else: 
+                    print(f"Now calculating mission section {section_string}, thermal iteration index = {i}")
                 tank_states += MissionSectionAnalysis().analyse_section(
                     tank,
                     initial,
