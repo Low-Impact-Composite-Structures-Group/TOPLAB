@@ -30,6 +30,18 @@ refueling:
   min pressure: 1500000 # [Pa]
   min temperature: # [K]
   max pressure: 45000000 # [Pa]
-
+dormancy:  
+  venting flow rate: 0.0000 # [kg/s]
+  initial pressure: 40000000 # [Pa]
+  initial temperature: 55 # [K]
+  initial fill: 0.0
+  duration: 72000 # [s]
+  altitude: 0.0 # [m]
+  target fill: 0.0
+  target mass: 500 #[kg]
+  mach number: 0.01
+  min pressure: 1500000 # [Pa]
+  min temperature: # [K]
+  max pressure: 45000000 # [Pa]
 
 
