@@ -422,9 +422,253 @@ def plot_density_vs_temperature(
     
     ax.legend()
     return fig
-    
-    
 
+def plot_cycle_density_vs_temperature(
+    discharge_states: TankStates,
+    refuel_states: TankStates,
+    dormancy_states: TankStates,
+    discharge_densities: list[float],
+    refuel_densities: list[float],
+    dormancy_densities: list[float],
+    process_labels: list[str],
+    isobar_densities: list[float] = None,
+    isobar_labels: list[str] = None,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    fig, ax = plt.subplots()
+
+    # Plot discharge states
+    ax.plot(discharge_states.temperatures, discharge_densities, 'm-', label=process_labels[0])
+    mid_index = int(len(discharge_states.temperatures)/ 2)
+    ax.annotate('', xy=(discharge_states.temperatures[mid_index + 1], discharge_densities[mid_index + 1]),
+                xytext=(discharge_states.temperatures[mid_index], discharge_densities[mid_index]),
+                arrowprops=dict(arrowstyle="->", color='m'))
+
+    # Plot refuel states
+    ax.plot(refuel_states.temperatures, refuel_densities, 'r-', label=process_labels[1])
+    mid_index = int(len(refuel_states.temperatures)/ 2)
+    ax.annotate('', xy=(refuel_states.temperatures[mid_index + 1], refuel_densities[mid_index + 1]),
+                xytext=(refuel_states.temperatures[mid_index], refuel_densities[mid_index]),
+                arrowprops=dict(arrowstyle="->", color='r'))
+
+    # Plot dormancy states
+    ax.plot(dormancy_states.temperatures, dormancy_densities, 'b-', label=process_labels[2])
+    mid_index = int(len(dormancy_states.temperatures)/ 2)
+    ax.annotate('', xy=(dormancy_states.temperatures[mid_index + 1], dormancy_densities[mid_index + 1]),
+                xytext=(dormancy_states.temperatures[mid_index], dormancy_densities[mid_index]),
+                arrowprops=dict(arrowstyle="->", color='b'))
+
+    # Plot the isobar densities if provided
+    if isobar_densities is not None:
+        ax.plot(discharge_states.temperatures, isobar_densities, label=isobar_labels, linestyle='dotted', marker="")
+
+    ax.set_xlabel("Temperature [K]")
+    ax.set_ylabel("Density [kg/m^3]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    ax.legend()
+    return fig
+
+def plot_cycle_tank_temperature(
+    discharge_states: TankStates,
+    refuel_states: TankStates,
+    dormancy_states: TankStates,
+    process_labels: list[str],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    fig, ax = plt.subplots()
+
+    # Calculate cumulative times
+    discharge_end_time = discharge_states.timesteps_in_hours[-1]
+    refuel_start_time = discharge_end_time
+    refuel_end_time = refuel_start_time + refuel_states.timesteps_in_hours[-1]
+    dormancy_start_time = refuel_end_time
+
+    # Plot discharge states
+    ax.plot(discharge_states.timesteps_in_hours, discharge_states.temperatures, 'm-', label=process_labels[0])
+
+    # Plot refuel states
+    ax.plot([t + refuel_start_time for t in refuel_states.timesteps_in_hours], refuel_states.temperatures, 'r-', label=process_labels[1])
+
+    # Plot dormancy states
+    ax.plot([t + dormancy_start_time for t in dormancy_states.timesteps_in_hours], dormancy_states.temperatures, 'b-', label=process_labels[2])
+
+    # Add vertical lines to indicate mode changes
+    ax.axvline(x=discharge_end_time, color='k', linestyle='--')
+    ax.axvline(x=refuel_end_time, color='k', linestyle='--')
+
+    ax.set_xlabel("Time [hour]")
+    ax.set_ylabel("Temperature [K]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    ax.legend()
+    return fig
+
+def plot_cycle_tank_pressure(
+    discharge_states: TankStates,
+    refuel_states: TankStates,
+    dormancy_states: TankStates,
+    process_labels: list[str],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+
+    fig, ax = plt.subplots()
+
+    # Calculate cumulative times
+    discharge_end_time = discharge_states.timesteps_in_hours[-1]
+    refuel_start_time = discharge_end_time
+    refuel_end_time = refuel_start_time + refuel_states.timesteps_in_hours[-1]
+    dormancy_start_time = refuel_end_time
+
+    # Plot discharge states
+    ax.plot(discharge_states.timesteps_in_hours, [p / 1e5 for p in discharge_states.pressures], 'm-', label=process_labels[0])
+
+    # Plot refuel states
+    ax.plot([t + refuel_start_time for t in refuel_states.timesteps_in_hours], [p / 1e5 for p in refuel_states.pressures], 'r-', label=process_labels[1])
+
+    # Plot dormancy states
+    ax.plot([t + dormancy_start_time for t in dormancy_states.timesteps_in_hours], [p / 1e5 for p in dormancy_states.pressures], 'b-', label=process_labels[2])
+
+    # Add vertical lines to indicate mode changes
+    ax.axvline(x=discharge_end_time, color='k', linestyle='--')
+    ax.axvline(x=refuel_end_time, color='k', linestyle='--')
+
+    ax.set_xlabel("Time [hour]")
+    ax.set_ylabel("Pressure [bar]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    ax.legend()
+    return fig
+
+def plot_cycle_required_flux(
+    discharge_states: TankStates,
+    refuel_states: TankStates,
+    dormancy_states: TankStates,
+    process_labels: list[str],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    fig, ax = plt.subplots()
+
+    # Calculate cumulative times
+    discharge_end_time = discharge_states.timesteps_in_hours[-1]
+    refuel_start_time = discharge_end_time
+    refuel_end_time = refuel_start_time + refuel_states.timesteps_in_hours[-1]
+    dormancy_start_time = refuel_end_time
+
+    # Ensure both arrays have the same length for discharge
+    min_length_discharge = min(len(discharge_states.timesteps_in_hours), len(discharge_states.required_fluxes))
+    discharge_times = discharge_states.timesteps_in_hours[:min_length_discharge]
+    discharge_fluxes = [flux / -1000 for flux in discharge_states.required_fluxes[:min_length_discharge]]
+
+    # Ensure both arrays have the same length for refuel
+    min_length_refuel = min(len(refuel_states.timesteps_in_hours), len(refuel_states.required_fluxes))
+    refuel_times = [t + refuel_start_time for t in refuel_states.timesteps_in_hours[:min_length_refuel]]
+    refuel_fluxes = [flux / -1000 for flux in refuel_states.required_fluxes[:min_length_refuel]]
+
+    # Ensure both arrays have the same length for dormancy
+    min_length_dormancy = min(len(dormancy_states.timesteps_in_hours), len(dormancy_states.required_fluxes))
+    dormancy_times = [t + dormancy_start_time for t in dormancy_states.timesteps_in_hours[:min_length_dormancy]]
+    dormancy_fluxes = [flux / -1000 for flux in dormancy_states.required_fluxes[:min_length_dormancy]]
+
+    # Plot discharge states
+    ax.plot(discharge_times, discharge_fluxes, 'r-', label=process_labels[0])
+
+    # Plot refuel states
+    ax.plot(refuel_times, refuel_fluxes, 'g-', label=process_labels[1])
+
+    # Plot dormancy states
+    ax.plot(dormancy_times, dormancy_fluxes, 'b-', label=process_labels[2])
+
+    # Add vertical lines to indicate mode changes
+    ax.axvline(x=discharge_end_time, color='k', linestyle='--')
+    ax.axvline(x=refuel_end_time, color='k', linestyle='--')
+
+    ax.set_xlabel("Time [hour]")
+    ax.set_ylabel("Heat flux [kW]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    ax.legend()
+    return fig
+
+def plot_cycle_tank_fill(
+    discharge_states: TankStates,
+    refuel_states: TankStates,
+    dormancy_states: TankStates,
+    x_ticks: list[float] = None,
+    y1ticks: list[float] = None,
+):
+    fig, ax = plt.subplots()
+
+    # Calculate cumulative times
+    discharge_end_time = discharge_states.timesteps_in_hours[-1]
+    refuel_start_time = discharge_end_time
+    refuel_end_time = refuel_start_time + refuel_states.timesteps_in_hours[-1]
+    dormancy_start_time = refuel_end_time
+
+    # Ensure both arrays have the same length for discharge
+    min_length_discharge = min(len(discharge_states.timesteps_in_hours), len(discharge_states.liquid_masses), len(discharge_states.gas_masses), len(discharge_states.total_masses), len(discharge_states.fills))
+    discharge_times = discharge_states.timesteps_in_hours[:min_length_discharge]
+    discharge_liquid_masses = discharge_states.liquid_masses[:min_length_discharge]
+    discharge_gas_masses = discharge_states.gas_masses[:min_length_discharge]
+    discharge_total_masses = discharge_states.total_masses[:min_length_discharge]
+
+    # Ensure both arrays have the same length for refuel
+    min_length_refuel = min(len(refuel_states.timesteps_in_hours), len(refuel_states.liquid_masses), len(refuel_states.gas_masses), len(refuel_states.total_masses), len(refuel_states.fills))
+    refuel_times = [t + refuel_start_time for t in refuel_states.timesteps_in_hours[:min_length_refuel]]
+    refuel_liquid_masses = refuel_states.liquid_masses[:min_length_refuel]
+    refuel_gas_masses = refuel_states.gas_masses[:min_length_refuel]
+    refuel_total_masses = refuel_states.total_masses[:min_length_refuel]
+
+    # Ensure both arrays have the same length for dormancy
+    min_length_dormancy = min(len(dormancy_states.timesteps_in_hours), len(dormancy_states.liquid_masses), len(dormancy_states.gas_masses), len(dormancy_states.total_masses), len(dormancy_states.fills))
+    dormancy_times = [t + dormancy_start_time for t in dormancy_states.timesteps_in_hours[:min_length_dormancy]]
+    dormancy_liquid_masses = dormancy_states.liquid_masses[:min_length_dormancy]
+    dormancy_gas_masses = dormancy_states.gas_masses[:min_length_dormancy]
+    dormancy_total_masses = dormancy_states.total_masses[:min_length_dormancy]
+
+    # Plot liquid, gas, and total masses
+    ax.plot(discharge_times, discharge_liquid_masses, 'b-', label='Liquid')
+    ax.plot(discharge_times, discharge_gas_masses, 'r-', label='Gas')
+    ax.plot(discharge_times, discharge_total_masses, 'y-.', label='Total')
+
+    ax.plot(refuel_times, refuel_liquid_masses, 'b-')
+    ax.plot(refuel_times, refuel_gas_masses, 'r-')
+    ax.plot(refuel_times, refuel_total_masses, 'y-.')
+
+    ax.plot(dormancy_times, dormancy_liquid_masses, 'b-')
+    ax.plot(dormancy_times, dormancy_gas_masses, 'r-')
+    ax.plot(dormancy_times, dormancy_total_masses, 'y-.')
+
+    # Add vertical lines to indicate mode changes
+    ax.axvline(x=discharge_end_time, color='k', linestyle='--')
+    ax.axvline(x=refuel_end_time, color='k', linestyle='--')
+
+    ax.set_xlabel("Time [hour]")
+    ax.set_ylabel("Fuel Mass [kg]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y1ticks:
+        ax.set_yticks(y1ticks)
+    
+    ax.legend()
+
+    return fig
 
 def main():
     pass

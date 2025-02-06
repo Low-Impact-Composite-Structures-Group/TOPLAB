@@ -3,7 +3,7 @@ import time
 import numpy as np
 import yaml
 import matplotlib.pyplot as plt
-from plotting.plot_tank_states import plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature
+from plotting.plot_tank_states import plot_cycle_tank_fill, plot_cycle_tank_temperature, plot_cycle_tank_pressure, plot_cycle_required_flux, plot_cycle_density_vs_temperature
 from facades.analysis_facades import OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade, FillingAnalysisFacade,DormancyAnalysisFacade, InitialConditions, TargetConditions
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
@@ -351,51 +351,25 @@ def perform_dormancy_analysis(config):
         operating_window,
         target_conditions
     )
-
-
-    tank_performance = "not implemented"
     
     dormancy_simulation_time = time.time() - start_time
-    
-    
 
     return tank_performance, dormancy_simulation_time
 
-
-def plot_combined_results(discharge_performance, refuel_performance, dormancy_performance):
-    print("Plotting combined results...")
-
-    # Combine and plot the results for temperature, pressure, and fill
-    fig, ax1 = plt.subplots()
-
-    ax1.set_xlabel('Time [hour]')
-    ax1.set_ylabel('Temperature [K]', color='tab:red')
-    ax1.plot(discharge_performance.timesteps_in_hours, discharge_performance.temperatures, 'r-', label='Discharge Temperature')
-    ax1.plot(refuel_performance.timesteps_in_hours, refuel_performance.temperatures, 'r--', label='Refuel Temperature')
-    ax1.plot(dormancy_performance.timesteps_in_hours, dormancy_performance.temperatures, 'r-.', label='Dormancy Temperature')
-    ax1.tick_params(axis='y', labelcolor='tab:red')
-
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('Pressure [bar]', color='tab:blue')
-    ax2.plot(discharge_performance.timesteps_in_hours, discharge_performance.pressures_in_bar, 'b-', label='Discharge Pressure')
-    ax2.plot(refuel_performance.timesteps_in_hours, refuel_performance.pressures_in_bar, 'b--', label='Refuel Pressure')
-    ax2.plot(dormancy_performance.timesteps_in_hours, dormancy_performance.pressures_in_bar, 'b-.', label='Dormancy Pressure')
-    ax2.tick_params(axis='y', labelcolor='tab:blue')
-
-    fig.tight_layout()
-    plt.legend()
-    plt.show()
-
-    # Plot density vs temperature with different colors for each mode
-    plt.figure()
-    plt.plot(discharge_performance.temperatures, discharge_performance.densities, 'r-', label='Discharge')
-    plt.plot(refuel_performance.temperatures, refuel_performance.densities, 'g-', label='Refuel')
-    plt.plot(dormancy_performance.temperatures, dormancy_performance.densities, 'b-', label='Dormancy')
-    plt.xlabel('Temperature [K]')
-    plt.ylabel('Density [kg/m^3]')
-    plt.legend()
-    plt.show()
-
+def extract_densities(tank_performance):
+    densities = []
+    for state in tank_performance.tank_states.states:
+        phase = state.hydrogen.phase
+        if phase == 'twophase':
+            density = state.hydrogen.two_phase.density
+        elif phase in ["gas", "supercritical"]:
+            density = state.hydrogen.gas.density
+        elif phase in ["liquid", "supercritical_liquid"]:
+            density = state.hydrogen.liquid.density
+        else:
+            raise ValueError(f"Unsupported phase: {phase}")
+        densities.append(density)
+    return densities
 
 def perform_analysis():
     config = load_config()
@@ -412,9 +386,19 @@ def perform_analysis():
     print(f"Discharge simulation time: {discharge_simulation_time:.3f} seconds")
     print(f"Refuelling simulation time: {refuelling_simulation_time:.3f} seconds")
     print(f"Dormancy simulation time: {dormancy_simulation_time:.3f} seconds")
-
-    # plot_combined_results(discharge_performance, refuel_performance, dormancy_performance)
-
+    
+    # Plotting
+    discharge_densities = extract_densities(discharge_performance)
+    refuel_densities = extract_densities(refuel_performance)
+    dormancy_densities = extract_densities(dormancy_performance)
+    process_labels = ['Discharge', 'Refuel', 'Dormancy']
+    plot_cycle_density_vs_temperature(discharge_performance.tank_states, refuel_performance.tank_states, dormancy_performance.tank_states, discharge_densities, refuel_densities, dormancy_densities, process_labels)
+    plot_cycle_tank_temperature(discharge_performance.tank_states, refuel_performance.tank_states, dormancy_performance.tank_states, process_labels)
+    plot_cycle_tank_pressure(discharge_performance.tank_states, refuel_performance.tank_states, dormancy_performance.tank_states, process_labels)
+    plot_cycle_required_flux(discharge_performance.tank_states, refuel_performance.tank_states, dormancy_performance.tank_states, process_labels)
+    plot_cycle_tank_fill(discharge_performance.tank_states, refuel_performance.tank_states, dormancy_performance.tank_states) 
+    plt.show()
+    
 def main():
     perform_analysis()
 
