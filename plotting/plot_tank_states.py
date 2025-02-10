@@ -423,6 +423,8 @@ def plot_density_vs_temperature(
     ax.legend()
     return fig
 
+import matplotlib.pyplot as plt
+
 def plot_cycle_density_vs_temperature(
     discharge_states: TankStates,
     refuel_states: TankStates,
@@ -440,24 +442,27 @@ def plot_cycle_density_vs_temperature(
 
     # Plot discharge states
     ax.plot(discharge_states.temperatures, discharge_densities, 'm-', label=process_labels[0])
-    mid_index = int(len(discharge_states.temperatures)/ 2)
-    ax.annotate('', xy=(discharge_states.temperatures[mid_index + 1], discharge_densities[mid_index + 1]),
-                xytext=(discharge_states.temperatures[mid_index], discharge_densities[mid_index]),
-                arrowprops=dict(arrowstyle="->", color='m'))
+    mid_index = int(len(discharge_states.temperatures) / 2)
+    if mid_index + 1 < len(discharge_states.temperatures) and mid_index + 1 < len(discharge_densities):
+        ax.annotate('', xy=(discharge_states.temperatures[mid_index + 1], discharge_densities[mid_index + 1]),
+                    xytext=(discharge_states.temperatures[mid_index], discharge_densities[mid_index]),
+                    arrowprops=dict(arrowstyle="->", color='m'))
 
     # Plot refuel states
     ax.plot(refuel_states.temperatures, refuel_densities, 'r-', label=process_labels[1])
-    mid_index = int(len(refuel_states.temperatures)/ 2)
-    ax.annotate('', xy=(refuel_states.temperatures[mid_index + 1], refuel_densities[mid_index + 1]),
-                xytext=(refuel_states.temperatures[mid_index], refuel_densities[mid_index]),
-                arrowprops=dict(arrowstyle="->", color='r'))
+    mid_index = int(len(refuel_states.temperatures) / 2)
+    if mid_index + 1 < len(refuel_states.temperatures) and mid_index + 1 < len(refuel_densities):
+        ax.annotate('', xy=(refuel_states.temperatures[mid_index + 1], refuel_densities[mid_index + 1]),
+                    xytext=(refuel_states.temperatures[mid_index], refuel_densities[mid_index]),
+                    arrowprops=dict(arrowstyle="->", color='r'))
 
     # Plot dormancy states
     ax.plot(dormancy_states.temperatures, dormancy_densities, 'b-', label=process_labels[2])
-    mid_index = int(len(dormancy_states.temperatures)/ 2)
-    ax.annotate('', xy=(dormancy_states.temperatures[mid_index + 1], dormancy_densities[mid_index + 1]),
-                xytext=(dormancy_states.temperatures[mid_index], dormancy_densities[mid_index]),
-                arrowprops=dict(arrowstyle="->", color='b'))
+    mid_index = int(len(dormancy_states.temperatures) / 2)
+    if mid_index + 1 < len(dormancy_states.temperatures) and mid_index + 1 < len(dormancy_densities):
+        ax.annotate('', xy=(dormancy_states.temperatures[mid_index + 1], dormancy_densities[mid_index + 1]),
+                    xytext=(dormancy_states.temperatures[mid_index], dormancy_densities[mid_index]),
+                    arrowprops=dict(arrowstyle="->", color='b'))
 
     # Plot the isobar densities if provided
     if isobar_densities is not None:
