@@ -4,7 +4,7 @@ import numpy as np
 import yaml
 import matplotlib.pyplot as plt
 from plotting.plot_tank_states import plot_cycle_tank_fill, plot_cycle_tank_temperature, plot_cycle_tank_pressure, plot_cycle_required_flux, plot_cycle_density_vs_temperature
-from facades.analysis_facades import OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade, FillingAnalysisFacade,DormancyAnalysisFacade, InitialConditions, TargetConditions
+from facades.analysis_facades import OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade, FillingAnalysisFacade,DensityAnalysisFacade, InitialConditions, TargetConditions
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
@@ -13,9 +13,7 @@ from src.tank_design.tank_shapes import CylindricalTankSphericalCaps, WinnefeldT
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 from src.mission.mission_sections import InFlow, OutFlow, MissionSection
 
-def radius_from_volume_sphere(volume: float) -> float:
-    return (3 * volume / (4 * np.pi)) ** (1/3)
-
+    
 def load_config():
     script_dir = os.path.dirname(__file__)
     yaml_path = os.path.join(script_dir, 'input.yaml')
@@ -48,6 +46,11 @@ def perform_discharge_analysis(config):
     initial_pressure = config.get('discharge', {}).get('initial pressure', None)
     initial_temperature = config.get('discharge', {}).get('initial temperature', None)
     fill = config.get('discharge', {}).get('initial fill', None)
+    altitude = config.get('discharge', {}).get('altitude', None)
+    mach_number = config.get('discharge', {}).get('mach number', None)
+    duration = config.get('discharge', {}).get('duration', None)
+    phase = config.get('discharge', {}).get('phase', None)
+    throttle = config.get('discharge', {}).get('throttle', None)
     
 
  # Check for None values and print them
@@ -66,7 +69,11 @@ def perform_discharge_analysis(config):
         'max pressure': max_pressure,
         'initial pressure': initial_pressure,
         'initial temperature': initial_temperature,
-        'initial fill': fill
+        'initial fill': fill, 
+        'altitude': altitude,
+        'mach number': mach_number,
+        'duration': duration,
+        'phase': phase
     }
 
     for param, value in parameters.items():
@@ -84,29 +91,29 @@ def perform_discharge_analysis(config):
     else:
         tank_material = getattr(tank_material_class, tank_material_name)()
 
-    # Define the mission using the string from the input file
-    mission = getattr(Mission, mission_name)(fuel_flow)
-
     # Define operating window
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
 
+    # Define the mission
+    mission_section = [Mission.discharge_section(duration, altitude,fuel_flow, throttle, phase, mach_number)]
+    mission = Mission(mission_section)
+    
     # Define required fuel
     fuel_mass = mission.required_fuel
     initial_fuel = initial_state.get_hydrogen_properties()
-    print(f"fuel mass: {fuel_mass}")
-
+    global mass
+    mass = fuel_mass 
+    
+    # to be used in the refuel analysis
     # Get fuel volume
     fuel_volume = fuel_mass / initial_fuel.density * VOLUME_MARGIN
-    
-    # Take the radius of the limiting sphere if the volume is too small for a cylinder + hemi head
-    if radius_from_volume_sphere(fuel_volume) <= radius:
-        radius = radius_from_volume_sphere(fuel_volume)
     
     # Instantiate the insulation
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
     # Calculate the tank length based on SE or Hemi head configuration
     # Instantiate the tank dimensions
+    global length # to be used in the refuel analysis
     if head_type == 'hemi':
         length = CylindricalTankSphericalCaps.length_from_radius_and_volume(radius, fuel_volume)
         tank_dimensions = TankDimensions(radius, length)
@@ -147,24 +154,25 @@ def perform_refuel_analysis(config):
 
     # Extract parameters from the YAML file
     radius = config.get('tank properties', {}).get('tank radius', None)
-    length = config.get('tank properties', {}).get('tank length', None)
     insulation_thickness =config.get('tank properties', {}).get('insulation thickness', None)
     tank_material_type = config.get('tank properties', {}).get('tank material type', None)
     tank_material_name = config.get('tank properties', {}).get('tank material', None)
     winding_angle_degrees = config.get('tank properties', {}).get('winding angle', None)
-    head_type = config.get('tank properties', {}).get('head type', None)
     min_pressure = config.get('refuelling', {}).get('min pressure', None)
     min_temperature = config.get('refuelling', {}).get('min temperature', None)
     max_pressure = config.get('refuelling', {}).get('max pressure', None)
     initial_pressure = config.get('refuelling', {}).get('initial pressure', None)
     initial_temperature = config.get('refuelling', {}).get('initial temperature', None)
     initial_fill = config.get('refuelling', {}).get('initial fill', None)
-    mass_flow = config.get('refuelling', {}).get('mass flow rate', None)
+    fuel_flow = config.get('refuelling', {}).get('fuel flow', None)
     duration = config.get('refuelling', {}).get('duration', None)
     altitude = config.get('refuelling', {}).get('altitude', None)
     mach_number = config.get('refuelling', {}).get('mach number', None)
+    duration = config.get('refuelling', {}).get('duration', None)
+    throttle = config.get('refuelling', {}).get('throttle', None)
+    target_mass = mass
     target_fill = config.get('refuelling', {}).get('target fill', None)
-    target_mass = config.get('refuelling', {}).get('target mass', None) 
+    target_density = config.get('refuelling', {}).get('target density', None)
     
     # Check for None values and print them
     parameters = {
@@ -173,19 +181,20 @@ def perform_refuel_analysis(config):
         'tank material type': tank_material_type,
         'tank material': tank_material_name,
         'winding angle': winding_angle_degrees,
-        'head type': head_type,
         'min pressure': min_pressure,
         'min temperature': min_temperature,
         'max pressure': max_pressure,
         'initial pressure': initial_pressure,
         'initial temperature': initial_temperature,
         'initial fill': initial_fill,
-        'mass flow rate': mass_flow,
+        'mass flow rate': fuel_flow,
         'duration': duration,
         'altitude': altitude,
         'mach number': mach_number,
+        'throttle': throttle,
+        'target mass': target_mass,
         'target fill': target_fill,
-        'target mass': target_mass
+        'target density': target_density
     }
 
     for param, value in parameters.items():
@@ -210,7 +219,7 @@ def perform_refuel_analysis(config):
     tank_dimensions = TankDimensions(radius, tank_body)
 
     # Define the target conditions
-    target_conditions = TargetConditions(target_mass, target_fill)
+    target_conditions = TargetConditions(mass, target_fill, target_density)
     
     # Define operating window
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
@@ -218,22 +227,23 @@ def perform_refuel_analysis(config):
     # Instantiate the insulation
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
-    mission_section = MissionSection(
-            duration,
-            [
-                InFlow(
-                    mass_flow,
-                    SinglePhaseRequester().get_hydrogen_properties(
-                        initial_pressure, initial_temperature
-                    )
-                )
-            ],
-            altitude,
-            mach_number
-        )
-    mission = Mission([mission_section])
+    # Get hydrogen properties
+    hydrogen = SinglePhaseRequester().get_hydrogen_properties(initial_pressure, initial_temperature)
+
+    # Define the mission
+    mission_section = [Mission.refuel_section(duration, altitude, fuel_flow, throttle, mach_number, hydrogen)]
+    mission = Mission(mission_section)
     
-    tank_performance = FillingAnalysisFacade.analyse(
+    # Print some parameters
+    print(f"Tank length: {length}")
+    print(f"Tank radius: {radius}")
+    print(f"Insulation thickness: {insulation_thickness}")
+    print(f"Initial state: {initial_conditions}")
+    print(f"Target conditions: {target_conditions}")
+    print(f"Operating window: {operating_window}")
+    
+    
+    tank_performance = DensityAnalysisFacade.analyse(
         tank_dimensions,
         tank_material,
         insulation,
@@ -261,19 +271,22 @@ def perform_dormancy_analysis(config):
     tank_material_type = config.get('tank properties', {}).get('tank material type', None)
     tank_material_name = config.get('tank properties', {}).get('tank material', None)
     winding_angle_degrees = config.get('tank properties', {}).get('winding angle', None)
-    head_type = config.get('tank properties', {}).get('head type', None)
     min_pressure = config.get('dormancy', {}).get('min pressure', None)
     min_temperature = config.get('dormancy', {}).get('min temperature', None)
     max_pressure = config.get('dormancy', {}).get('max pressure', None)
     initial_pressure = config.get('dormancy', {}).get('initial pressure', None)
     initial_temperature = config.get('dormancy', {}).get('initial temperature', None)
     initial_fill = config.get('dormancy', {}).get('initial fill', None)
-    mass_flow = config.get('dormancy', {}).get('venting flow rate', None)
     duration = config.get('dormancy', {}).get('duration', None)
     altitude = config.get('dormancy', {}).get('altitude', None)
+    mach_number = config.get('dormancy', {}).get('mach number', None) 
+    fuel_flow = config.get('dormancy', {}).get('fuel flow', None)
     mach_number = config.get('dormancy', {}).get('mach number', None)
+    phase = config.get('dormancy', {}).get('phase', None)
+    throttle = config.get('dormancy', {}).get('throttle', None)
+    target_mass = config.get('dormancy', {}).get('target mass', None)
     target_fill = config.get('dormancy', {}).get('target fill', None)
-    target_mass = config.get('dormancy', {}).get('target mass', None) 
+    target_density = config.get('dormancy', {}).get('target density', None)
 
     # Check for None values and print them
     parameters = {
@@ -282,19 +295,23 @@ def perform_dormancy_analysis(config):
         'tank material type': tank_material_type,
         'tank material': tank_material_name,
         'winding angle': winding_angle_degrees,
-        'head type': head_type,
         'min pressure': min_pressure,
         'min temperature': min_temperature,
         'max pressure': max_pressure,
         'initial pressure': initial_pressure,
         'initial temperature': initial_temperature,
         'initial fill': initial_fill,
-        'mass flow rate': mass_flow,
         'duration': duration,
         'altitude': altitude,
         'mach number': mach_number,
+        'fuel flow': fuel_flow,
+        'mach number': mach_number,
+        'phase': phase,
+        'throttle': throttle,
+        'target mass': target_mass,
         'target fill': target_fill,
-        'target mass': target_mass
+        'target density': target_density
+        
     }
 
     for param, value in parameters.items():
@@ -319,7 +336,7 @@ def perform_dormancy_analysis(config):
     tank_dimensions = TankDimensions(radius, tank_body)
 
     # Define the target conditions
-    target_conditions = TargetConditions(target_mass, target_fill)
+    target_conditions = TargetConditions(target_mass, target_fill, target_density)
     
     # Define operating window
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
@@ -327,22 +344,11 @@ def perform_dormancy_analysis(config):
     # Instantiate the insulation
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
-    mission_section = MissionSection(
-            duration,
-            [
-                OutFlow(
-                    mass_flow,
-                    SinglePhaseRequester().get_hydrogen_properties(
-                        initial_pressure, initial_temperature
-                    )
-                )
-            ],
-            altitude,
-            mach_number
-        )
-    mission = Mission([mission_section])
+    # Define the mission
+    mission_section = [Mission.dormancy_section(duration, altitude,fuel_flow, throttle, phase, mach_number)]
+    mission = Mission(mission_section)
     
-    tank_performance = DormancyAnalysisFacade.analyse(
+    tank_performance =DensityAnalysisFacade.analyse(
         tank_dimensions,
         tank_material,
         insulation,

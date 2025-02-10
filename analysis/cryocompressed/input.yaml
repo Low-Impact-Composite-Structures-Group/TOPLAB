@@ -1,47 +1,63 @@
 tank properties:
-  tank radius: 1.0 # [m]
-  tank length: 2.0 # [m]
+  tank radius: 0.27 # [m]
+  tank length: 1.8 # [m]
   insulation thickness: 0.04 # [m]
-  volume margin: 1.15 # [m^3/m^3] #TODO: find a way to guess this so as to avoid negative masses
+  volume margin: 1.05 # [m^3/m^3] 
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
   tank material: 'carbon'
   winding angle: 55.0 #[degrees]
 discharge:  
-  initial temperature: 54 # [K]
+  initial temperature: 53.25 # [K]
   initial pressure: 40000000 # [Pa]
   initial fill: 0.0 
   min pressure: 1500000 # [Pa]
   min temperature:  # [K]
-  max pressure:  # [Pa]
+  max pressure: 45000000 # [Pa]
   max temperature:  # [K]
-  fuel flow: 'gas'
-  mission: 'regional'
-refuelling:
-  mass flow rate: 0.01 # [kg/s]
-  initial pressure: 1500000 # [Pa]
-  initial temperature: 70 # [K]
-  initial fill: 0.0
-  duration: 10000 # [s]
+  fuel flow: 0.001
+  mission: 'discharge_section'
+  mach number: 0.0
   altitude: 0.0 # [m]
-  target fill: 0.97
-  target mass: 500 #[kg]
+  phase: 'gas'
+  duration: 10 # [hr]
+  throttle: 1.0 
+refuelling:
+  initial pressure: 2300000 # [Pa]
+  initial temperature: 80 # [K]
+  initial fill: 0.0
+  altitude: 0.0 # [m]
+  target mass: 30 #[kg]
   mach number: 0.01
   min pressure: 1500000 # [Pa]
-  min temperature: # [K]
+  min temperature: 33 # [K]
   max pressure: 45000000 # [Pa]
+  fuel flow: 0.05 # [kg/s]
+  mission: 'refuel_section'
+  altitude: 0.0 # [m]
+  phase: 'gas'
+  duration: 0.1 # [hr]
+  throttle: 1.0 
+  target fill: 1.0 # [m^3/m^3](default to 1, does not matter for gas)
+  target density: 75.0 # [kg/m^3] 
 dormancy:  
   venting flow rate: 0.0000 # [kg/s]
   initial pressure: 40000000 # [Pa]
-  initial temperature: 55 # [K]
-  initial fill: 0.0
-  duration: 72000 # [s]
+  initial temperature: 70 # [K]
+  initial fill: 0.0 
   altitude: 0.0 # [m]
-  target fill: 0.0
-  target mass: 500 #[kg]
-  mach number: 0.01
   min pressure: 1500000 # [Pa]
-  min temperature: # [K]
+  min temperature: 30 # [K]
   max pressure: 45000000 # [Pa]
+  fuel flow: 0.0 # [kg/s]
+  mission: 'dormancy_section'
+  mach number: 0.01
+  altitude: 0.0 # [m]
+  phase: 'gas'
+  duration: 1.0 # [hr]
+  throttle: 1.0 
+  target mass: 0.001 # [kg] (default to a low value)
+  target fill: 1.0 # [m^3/m^3](default to 1, does not matter for gas)
+  target density: 77.0 # [kg/m^3] 
 
 
