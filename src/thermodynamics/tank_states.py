@@ -80,6 +80,8 @@ class TargetState:
     min_temperature: float
     fill: float
     mass: float
+    density: float = None
+    
 
 
 @dataclass
