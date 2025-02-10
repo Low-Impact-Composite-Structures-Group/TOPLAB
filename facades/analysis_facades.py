@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, Union
@@ -11,7 +10,7 @@ from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached,
                                             MaxPressureReached, NoFuelMass,
                                             StoppingCriterion, TankIsEmpty,
                                             TargetFillReached,
-                                            TargetMassReached)
+                                            TargetMassReached, TargetDensityReached)
 from src.efficiencies.tank_performance import TankPerformance
 from src.mission.mission import Mission
 from src.mission.mission_sections import MissionSection
@@ -74,6 +73,7 @@ class InitialConditions:
 class TargetConditions:
     fuel_mass: float
     fill: float
+    density: float = None
 
 
 class AnalysisFacade(Protocol):
@@ -426,7 +426,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
             LowerPressureReached()
         ]
         
-class DormancyAnalysisFacade(AnalysisFacade):
+class DensityAnalysisFacade(AnalysisFacade):
 
     @classmethod
     def analyse(
@@ -437,22 +437,19 @@ class DormancyAnalysisFacade(AnalysisFacade):
         mission: Mission,
         initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions,
+        target_conditions: TargetConditions  
     ) -> TankPerformance:
-        MULTISTEP_METHOD.timestep = 100
-        print(f"Temporary fix, set timestep to {MULTISTEP_METHOD.timestep}")
+        print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-        tank_dimensions, material, operating_envelope, initial_state
+            tank_dimensions, material, operating_envelope, initial_state
         )
         tank_states = MissionAnalysis.perform_analysis(
             tank,
             initial_state,
             mission,
             cls._define_stopping_criteria(),
-            cls._define_target_conditions(
-                operating_envelope, target_conditions
-            ),
+            cls._define_target_conditions(operating_envelope, target_conditions),
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
             cls._define_thermal_model(insulation),
@@ -462,21 +459,21 @@ class DormancyAnalysisFacade(AnalysisFacade):
 
     @classmethod
     def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
-        return [MaxPressureReached()]
+        return [TargetDensityReached()]
 
     @staticmethod
     def _define_target_conditions(
         operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions
+        target_conditions: TargetConditions 
     ) -> TargetState:
-        target_conditions = TargetState(
+        return TargetState(
             operating_envelope.max_pressure,
             operating_envelope.min_pressure,
             operating_envelope.min_temperature,
             target_conditions.fill,
-            target_conditions.fuel_mass
+            target_conditions.fuel_mass,
+            target_conditions.density  
         )
-        return target_conditions
 
 
 def main():
