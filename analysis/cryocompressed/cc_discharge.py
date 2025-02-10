@@ -49,6 +49,11 @@ def perform_analysis():
     initial_pressure = config.get('discharge', {}).get('initial pressure', None)
     initial_temperature = config.get('discharge', {}).get('initial temperature', None)
     fill = config.get('discharge', {}).get('initial fill', None)
+    altitude = config.get('discharge', {}).get('altitude', None)
+    mach_number = config.get('discharge', {}).get('mach number', None)
+    duration = config.get('discharge', {}).get('duration', None)
+    phase = config.get('discharge', {}).get('phase', None)
+    throttle = config.get('discharge', {}).get('throttle', None)
     
     # Check for None values and print them
     parameters = {
@@ -66,7 +71,11 @@ def perform_analysis():
         'max pressure': max_pressure,
         'initial pressure': initial_pressure,
         'initial temperature': initial_temperature,
-        'initial fill': fill
+        'initial fill': fill,
+        'altitude': altitude,
+        'mach number': mach_number,
+        'duration': duration,
+        'phase': phase
     }
 
     for param, value in parameters.items():
@@ -84,8 +93,9 @@ def perform_analysis():
     else:
         tank_material = getattr(tank_material_class, tank_material_name)()
 
-    # Define the mission using the string from the input file
-    mission = getattr(Mission, mission_name)(fuel_flow)
+    # Define the mission
+    mission_section = [Mission.discharge_section(duration, altitude,fuel_flow, throttle, phase, mach_number)]
+    mission = Mission(mission_section)
 
     # Define operating window
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
@@ -132,9 +142,7 @@ def perform_analysis():
         initial_state,
         operating_window
     )
-    
-    # Instantiate the SinglePhaseRequester
-    requester = SinglePhaseRequester()
+
 
     # Listify the densities for plotting
     densities = []
