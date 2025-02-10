@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
-from src.mission.mission_sections import MissionSection, OutFlow
+from src.mission.mission_sections import MissionSection, OutFlow, InFlow
 
 ASSUMED_TIMESTEP = 60
 
@@ -40,6 +40,44 @@ class Mission:
             for section in self.sections
         ])
 
+    @classmethod
+    def discharge_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, phase: str, mach_number: float) -> MissionSection:
+        return MissionSection(
+            duration * HOURS_TO_SECONDS,
+            [
+                OutFlow(
+                    - throttle * fuel_flow, phase
+                )
+            ],
+            altitude,
+            mach_number,
+            "Discharge"
+        )
+
+    @classmethod
+    def refuel_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, mach_number: float, hydrogen) -> MissionSection:
+        return MissionSection(
+                duration*HOURS_TO_SECONDS,
+                [
+                    InFlow(
+                        throttle*fuel_flow,
+                        hydrogen
+                    )
+                ],
+                altitude,
+                mach_number,
+                "Refuelling"
+            )
+
+    @classmethod
+    def dormancy_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, phase: str, mach_number: float) -> MissionSection:
+        return MissionSection(
+                duration*HOURS_TO_SECONDS,
+                [OutFlow(throttle* fuel_flow, phase)],
+                altitude,
+                mach_number
+            )
+    
     @classmethod
     def rompokos(cls):
 
