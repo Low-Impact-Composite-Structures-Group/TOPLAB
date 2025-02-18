@@ -16,3 +16,4 @@ dependencies:
   - scipy
   - yaml
   - coolprop
+  - optuna
