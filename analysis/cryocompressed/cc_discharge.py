@@ -54,6 +54,7 @@ def perform_analysis():
     duration = config.get('discharge', {}).get('duration', None)
     phase = config.get('discharge', {}).get('phase', None)
     throttle = config.get('discharge', {}).get('throttle', None)
+    mission_type = config.get('discharge', {}).get('mission type', None)
     
     # Check for None values and print them
     parameters = {
@@ -75,7 +76,8 @@ def perform_analysis():
         'altitude': altitude,
         'mach number': mach_number,
         'duration': duration,
-        'phase': phase
+        'phase': phase, 
+        'mission type': mission_type
     }
 
     for param, value in parameters.items():
@@ -94,8 +96,14 @@ def perform_analysis():
         tank_material = getattr(tank_material_class, tank_material_name)()
 
     # Define the mission
-    mission_section = [Mission.discharge_section(duration, altitude,fuel_flow, throttle, phase, mach_number)]
-    mission = Mission(mission_section)
+    if mission_type == 0: # if mission is a single section
+        mission_section = [Mission.discharge_section(duration, altitude,fuel_flow, throttle, phase, mach_number)]
+        mission = Mission(mission_section)
+    elif mission_type == 1: # if mission is a mission comprised of multiple sections
+        mission_class = getattr(Mission, mission_name)
+        mission = mission_class()
+    else:
+        raise ValueError(f"Unsupported mission type: {mission_type}")
 
     # Define operating window
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
@@ -147,7 +155,14 @@ def perform_analysis():
     # Listify the densities for plotting
     densities = []
     phases = []
-    density_at_min_p_isobar = []
+    density_at_15_bar = []
+    density_at_20_bar = []
+    density_at_400_bar = []
+    density_at_500_bar = []
+    density_lists = [density_at_15_bar, density_at_20_bar, density_at_400_bar, density_at_500_bar]
+    pressure_values = [15e5, 20e5, 400e5, 500e5] 
+    isobar_labels = ["15 bar isobar", "20 bar isobar", "400 bar isobar", "500 bar isobar"]
+
     for state in performance.tank_states.states:
         phase = state.hydrogen.phase
         if phase in ["gas", "supercritical"]:
@@ -160,8 +175,9 @@ def perform_analysis():
         densities.append(density)
         phases.append(phase)
         temperature = state.temperature
-        density_at_isobar = SinglePhaseRequester().get_property(min_pressure, temperature, "D")
-        density_at_min_p_isobar.append(density_at_isobar)
+        for pressure, density_list in zip(pressure_values, density_lists):
+            density_at_isobar = SinglePhaseRequester().get_property(pressure, temperature, "D")
+            density_list.append(density_at_isobar)
       
     # Print the time taken
     print(f"Time taken: {time.time() - start_time}")
@@ -171,7 +187,13 @@ def perform_analysis():
     fig_tanK_pressures = plot_single_tank_loads(performance.tank_states)
     fig_req_flux = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
-    fig_density_vs_temperature_gas = plot_density_vs_temperature(performance.tank_states, "Discharge", densities, "15 bar isobar", density_at_min_p_isobar)
+    fig_density_vs_temperature_gas = plot_density_vs_temperature(
+    performance.tank_states,
+    "Discharge",
+    densities,
+    isobar_labels,
+    density_lists
+)
     plt.show()
 
 

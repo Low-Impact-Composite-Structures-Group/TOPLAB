@@ -392,8 +392,8 @@ def plot_density_vs_temperature(
     tank_state: TankStates,
     process_label: str,
     hydrogen_density: list[float],
-    isobar_label: str,
-    isobar_densities: list[float] = None,
+    isobar_labels: list[str],
+    isobar_densities: list[list[float]],
     x_ticks: list[float] = None,
     y_ticks: list[float] = None
 ):
@@ -409,9 +409,10 @@ def plot_density_vs_temperature(
         arrowprops=dict(arrowstyle="->", color='black')
     )
     
-     # Plot the isobar densities if provided
+    # Plot the isobar densities if provided
     if isobar_densities is not None:
-        ax.plot(tank_state.temperatures, isobar_densities, label=isobar_label, linestyle='dotted', marker="")
+        for label, densities in zip(isobar_labels, isobar_densities):
+            ax.plot(tank_state.temperatures, densities, label=label, linestyle='dotted', marker="")
     
     ax.set_xlabel("Temperature [K]")
     ax.set_ylabel("Density [kg/m^3]")
@@ -422,8 +423,6 @@ def plot_density_vs_temperature(
     
     ax.legend()
     return fig
-
-import matplotlib.pyplot as plt
 
 def plot_cycle_density_vs_temperature(
     discharge_states: TankStates,
