@@ -1,6 +1,6 @@
 tank properties:
   tank radius: 0.27 # [m]
-  tank length: 1.8 # [m]
+  tank length: 1.0 # [m]
   insulation thickness: 0.04 # [m]
   volume margin: 1.05 # [m^3/m^3] 
   head type: 'hemi' # 'se' or 'hemi'
@@ -8,7 +8,7 @@ tank properties:
   tank material: 'carbon'
   winding angle: 55.0 #[degrees]
 discharge:  
-  initial temperature: 53.25 # [K]
+  initial temperature: 75.0 # [K]
   initial pressure: 40000000 # [Pa]
   initial fill: 0.0 
   min pressure: 1500000 # [Pa]
@@ -16,7 +16,8 @@ discharge:
   max pressure: 45000000 # [Pa]
   max temperature:  # [K]
   fuel flow: 0.001
-  mission: 'discharge_section'
+  mission: 'triathlon'
+  mission type: 1 # 0 for single-section mission, 1 for multi-section mission
   mach number: 0.0
   altitude: 0.0 # [m]
   phase: 'gas'
@@ -34,6 +35,7 @@ refuelling:
   max pressure: 45000000 # [Pa]
   fuel flow: 0.05 # [kg/s]
   mission: 'refuel_section'
+  mission type: 0 # 0 for single-section mission, 1 for multi-section mission
   altitude: 0.0 # [m]
   phase: 'gas'
   duration: 0.1 # [hr]
@@ -51,6 +53,7 @@ dormancy:
   max pressure: 45000000 # [Pa]
   fuel flow: 0.0 # [kg/s]
   mission: 'dormancy_section'
+  mission type: 0 # 0 for single-section mission, 1 for multi-section mission
   mach number: 0.01
   altitude: 0.0 # [m]
   phase: 'gas'
