@@ -674,6 +674,37 @@ def plot_cycle_tank_fill(
 
     return fig
 
+def plot_mission_mass_flows(
+    mass_flows: list[float],
+    fuel_flow_keys: list[str],
+    durations: list[float],
+    total_duration: float,
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    fig, ax = plt.subplots()
+
+    # Calculate the cumulative durations for the x-axis
+    cumulative_durations = [0] + list(np.cumsum(durations))
+
+    # Plot the mass flows as a step plot with different colors and connecting vertical lines
+    for i in range(len(mass_flows)):
+        ax.hlines(mass_flows[i], cumulative_durations[i], cumulative_durations[i + 1], label=fuel_flow_keys[i], color=f'C{i}')
+        if i < len(mass_flows) - 1:
+            ax.vlines(cumulative_durations[i + 1], mass_flows[i], mass_flows[i + 1], color='black')
+
+    ax.set_xlabel("Mission Duration [min]")
+    ax.set_ylabel("Mass Flow [kg/s]")
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    
+    ax.legend()
+    ax.grid(True)
+    return fig
+
+
 def main():
     pass
 

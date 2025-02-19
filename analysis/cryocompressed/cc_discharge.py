@@ -1,6 +1,6 @@
 
 
-from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux)
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_mission_mass_flows)
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import (OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
 from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
@@ -178,6 +178,14 @@ def perform_analysis():
         for pressure, density_list in zip(pressure_values, density_lists):
             density_at_isobar = SinglePhaseRequester().get_property(pressure, temperature, "D")
             density_list.append(density_at_isobar)
+            
+    # Extract mass_flow, fuel_flow_key, and duration from each MissionSection
+    mass_flows = [-section.fuel_flows[0].mass_flow for section in mission.sections]
+    fuel_flow_keys = [section.fuel_flow_key for section in mission.sections]
+    durations = [section.duration/60 for section in mission.sections]
+
+    # Sum up the durations to get the total mission duration
+    total_duration = sum(durations)
       
     # Print the time taken
     print(f"Time taken: {time.time() - start_time}")
@@ -194,6 +202,7 @@ def perform_analysis():
     isobar_labels,
     density_lists
 )
+    plot_mission_mass_flows(mass_flows, fuel_flow_keys, durations, total_duration)
     plt.show()
 
 
