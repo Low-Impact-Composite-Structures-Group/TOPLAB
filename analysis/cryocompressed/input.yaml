@@ -1,17 +1,16 @@
 tank properties:
-  tank radius: 0.27 # [m]
-  tank length: 1.0 # [m]
+  tank radius: 1.0 # [m]
   insulation thickness: 0.04 # [m]
-  volume margin: 1.05 # [m^3/m^3] 
+  volume margin: 1.2 # [m^3/m^3] 
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
   tank material: 'carbon'
   winding angle: 55.0 #[degrees]
 discharge:  
-  initial temperature: 75.0 # [K]
+  initial temperature: 70.0 # [K]
   initial pressure: 40000000 # [Pa]
   initial fill: 0.0 
-  min pressure: 1500000 # [Pa]
+  min pressure: 2300000 # [Pa]
   min temperature:  # [K]
   max pressure: 45000000 # [Pa]
   max temperature:  # [K]

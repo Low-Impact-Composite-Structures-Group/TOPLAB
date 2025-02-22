@@ -1,5 +1,3 @@
-
-
 from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_mission_mass_flows)
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import (OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
@@ -180,9 +178,14 @@ def perform_analysis():
             density_list.append(density_at_isobar)
             
     # Extract mass_flow, fuel_flow_key, and duration from each MissionSection
-    mass_flows = [-section.fuel_flows[0].mass_flow for section in mission.sections]
+    mass_flows = []
+    for section in mission.sections:
+        if isinstance(section.fuel_flows[0].mass_flow, list):
+            mass_flows.append([abs(flow) for flow in section.fuel_flows[0].mass_flow])
+        else:
+            mass_flows.append([abs(section.fuel_flows[0].mass_flow), abs(section.fuel_flows[0].mass_flow)])
     fuel_flow_keys = [section.fuel_flow_key for section in mission.sections]
-    durations = [section.duration/60 for section in mission.sections]
+    durations = [section.duration / 60 for section in mission.sections]
 
     # Sum up the durations to get the total mission duration
     total_duration = sum(durations)
@@ -192,16 +195,16 @@ def perform_analysis():
     
     # Plotting
     fig_tank_temperatures = plot_single_tank_temperatures(performance.tank_states)
-    fig_tanK_pressures = plot_single_tank_loads(performance.tank_states)
+    fig_tank_pressures = plot_single_tank_loads(performance.tank_states)
     fig_req_flux = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
     fig_density_vs_temperature_gas = plot_density_vs_temperature(
-    performance.tank_states,
-    "Discharge",
-    densities,
-    isobar_labels,
-    density_lists
-)
+        performance.tank_states,
+        "Discharge",
+        densities,
+        isobar_labels,
+        density_lists
+    )
     plot_mission_mass_flows(mass_flows, fuel_flow_keys, durations, total_duration)
     plt.show()
 
