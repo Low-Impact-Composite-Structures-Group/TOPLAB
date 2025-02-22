@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Protocol, Union
 
 from plotting.figures import Line, SingleFigure, TwinXFigure
 
@@ -675,7 +675,7 @@ def plot_cycle_tank_fill(
     return fig
 
 def plot_mission_mass_flows(
-    mass_flows: list[float],
+    mass_flows: list[Union[float, list[float]]],
     fuel_flow_keys: list[str],
     durations: list[float],
     total_duration: float,
@@ -687,11 +687,24 @@ def plot_mission_mass_flows(
     # Calculate the cumulative durations for the x-axis
     cumulative_durations = [0] + list(np.cumsum(durations))
 
-    # Plot the mass flows as a step plot with different colors and connecting vertical lines
+    # Plot the mass flows
     for i in range(len(mass_flows)):
-        ax.hlines(mass_flows[i], cumulative_durations[i], cumulative_durations[i + 1], label=fuel_flow_keys[i], color=f'C{i}')
+        start_time = cumulative_durations[i]
+        end_time = cumulative_durations[i + 1]
+        color = f'C{i % 10}'  # Ensure unique color for each section
+
+        if isinstance(mass_flows[i], list):
+            start_flow, end_flow = mass_flows[i]
+            ax.plot([start_time, end_time], [start_flow, end_flow], label=fuel_flow_keys[i], color=color, linestyle='-', marker=None)
+        else:
+            ax.hlines(mass_flows[i], start_time, end_time, label=fuel_flow_keys[i], color=color, linestyle='-', marker=None)
+
+        # Draw vertical black dotted line for discontinuous transitions
         if i < len(mass_flows) - 1:
-            ax.vlines(cumulative_durations[i + 1], mass_flows[i], mass_flows[i + 1], color='black')
+            next_flow = mass_flows[i + 1][0] if isinstance(mass_flows[i + 1], list) else mass_flows[i + 1]
+            current_end_flow = mass_flows[i][1] if isinstance(mass_flows[i], list) else mass_flows[i]
+            if current_end_flow != next_flow:
+                ax.vlines(end_time, current_end_flow, next_flow, color='black', linestyle='dotted')
 
     ax.set_xlabel("Mission Duration [min]")
     ax.set_ylabel("Mass Flow [kg/s]")
