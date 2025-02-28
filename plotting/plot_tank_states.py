@@ -211,7 +211,7 @@ def plot_thermo_mechanical_loading(
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks],
     )
-    
+
 def plot_thermo_mechanical_loading_vs_fill(
     tank_states: TankStates,
     x_ticks: list[float] = None,
@@ -238,7 +238,7 @@ def plot_thermo_mechanical_loading_vs_fill(
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks],
     )
-    
+
 def plot_thermo_mechanical_loading_vs_mass(
     tank_states: TankStates,
     x_ticks: list[float] = None,
@@ -363,7 +363,7 @@ def plot_single_tank_fill(
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks]
     )
-    
+
 def plot_single_required_flux(
     tank_state: TankStates,
     x_ticks: list[float] = None,
@@ -387,7 +387,42 @@ def plot_single_required_flux(
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )
-    
+
+def plot_heat_flows(
+    tank_state: TankStates,
+    ohex_heats: list[float],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    # Ensure both arrays have the same length
+    min_length = min(len(tank_state.timesteps_in_hours), len(tank_state.required_fluxes), len(ohex_heats))
+    times = tank_state.timesteps_in_hours[:min_length]
+    required_fluxes = [-flux/1000 for flux in tank_state.required_fluxes[:min_length]]
+    ohex_heats = [heats/1000 for heats in ohex_heats[:min_length]]
+
+    data = [
+        Line(
+            times,
+            required_fluxes,
+            "iHEX",
+            color='blue'
+        ),
+        Line(
+            times,
+            ohex_heats,
+            "oHEX",
+            color='orange',
+            style='-'
+        )
+    ]
+    return SingleFigure(
+        data,
+        "Time [hour]",
+        "Heat flux [kW]",
+        x_ticks=x_ticks,
+        y_ticks=y_ticks,
+    )
+
 def plot_density_vs_temperature(
     tank_state: TankStates,
     process_label: str,
@@ -399,7 +434,7 @@ def plot_density_vs_temperature(
 ):
     fig, ax = plt.subplots()
     ax.plot(tank_state.temperatures, hydrogen_density, label=process_label, linestyle='solid', marker="")
-    
+
     # Add an arrow to show the direction wrt time
     mid_index = int(len(tank_state.temperatures) / 2)
     ax.annotate(
@@ -408,19 +443,19 @@ def plot_density_vs_temperature(
         xytext=(tank_state.temperatures[mid_index], hydrogen_density[mid_index]),
         arrowprops=dict(arrowstyle="->", color='black')
     )
-    
+
     # Plot the isobar densities if provided
     if isobar_densities is not None:
         for label, densities in zip(isobar_labels, isobar_densities):
             ax.plot(tank_state.temperatures, densities, label=label, linestyle='dotted', marker="")
-    
+
     ax.set_xlabel("Temperature [K]")
     ax.set_ylabel("Density [kg/m^3]")
     if x_ticks:
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     return fig
 
@@ -473,7 +508,7 @@ def plot_cycle_density_vs_temperature(
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     return fig
 
@@ -512,7 +547,7 @@ def plot_cycle_tank_temperature(
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     return fig
 
@@ -552,7 +587,7 @@ def plot_cycle_tank_pressure(
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     return fig
 
@@ -606,7 +641,7 @@ def plot_cycle_required_flux(
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     return fig
 
@@ -669,7 +704,7 @@ def plot_cycle_tank_fill(
         ax.set_xticks(x_ticks)
     if y1ticks:
         ax.set_yticks(y1ticks)
-    
+
     ax.legend()
 
     return fig
@@ -712,7 +747,7 @@ def plot_mission_mass_flows(
         ax.set_xticks(x_ticks)
     if y_ticks:
         ax.set_yticks(y_ticks)
-    
+
     ax.legend()
     ax.grid(True)
     return fig

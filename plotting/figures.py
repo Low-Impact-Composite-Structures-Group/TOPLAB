@@ -12,6 +12,8 @@ class Line:
     y_data: list[float]
     label: str
     marker: None = ""   # Set to None to create with marker
+    color: str = None,
+    style: str = None
 
 
 class GeneralFigure:
@@ -68,7 +70,9 @@ class SingleFigure(GeneralFigure):
                 line.x_data,
                 line.y_data,
                 label=line.label,
-                marker=line.marker
+                marker=line.marker,
+                color=line.color,
+                linestyle=line.style
             )[0]
             for line in self.data
         ]
