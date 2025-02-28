@@ -12,7 +12,7 @@ class Line:
     y_data: list[float]
     label: str
     marker: None = ""   # Set to None to create with marker
-    color: str = None,
+    color: str = None
     style: str = None
 
 
