@@ -1,4 +1,4 @@
-from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_mission_mass_flows)
+from plotting.plot_tank_states import (plot_tank_efficiencies_scatter, plot_single_tank_fill, plot_tank_loads, plot_single_tank_temperatures, plot_single_required_flux, plot_single_tank_loads, plot_density_vs_temperature, plot_required_flux, plot_mission_mass_flows, plot_heat_flows)
 from plotting.tank_render import plot_tank
 from facades.analysis_facades import (OperatingEnvelope, TankDimensions, GenericTankDimensions, MissionAnalysisFacade)
 from src.insulation.foam_insulations import ConstantFoamInsulation, VariableFoamInsulation
@@ -7,6 +7,8 @@ from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+from CoolProp.CoolProp import PropsSI, PhaseSI
+import CoolProp.CoolProp as CP
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -53,7 +55,9 @@ def perform_analysis():
     phase = config.get('discharge', {}).get('phase', None)
     throttle = config.get('discharge', {}).get('throttle', None)
     mission_type = config.get('discharge', {}).get('mission type', None)
-    
+    outlet_pressure = config.get('discharge', {}).get('outlet pressure', None)
+    outlet_temperature = config.get('discharge', {}).get('outlet temperature', None)
+
     # Check for None values and print them
     parameters = {
         'tank radius': radius,
@@ -74,8 +78,10 @@ def perform_analysis():
         'altitude': altitude,
         'mach number': mach_number,
         'duration': duration,
-        'phase': phase, 
-        'mission type': mission_type
+        'phase': phase,
+        'mission type': mission_type,
+        'outlet pressure': outlet_pressure,
+        'outlet temperature': outlet_temperature
     }
 
     for param, value in parameters.items():
@@ -113,11 +119,11 @@ def perform_analysis():
 
     # Get fuel volume
     fuel_volume = fuel_mass / initial_fuel.density * VOLUME_MARGIN
-    
+
     # Take the radius of the limiting sphere if the volume is too small for a cylinder + hemi head
     if radius_from_volume_sphere(fuel_volume) <= radius:
         radius = radius_from_volume_sphere(fuel_volume)
-    
+
     # Instantiate the insulation
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
@@ -131,14 +137,14 @@ def perform_analysis():
         tank_dimensions = GenericTankDimensions(radius,length , radius, 0.5*radius)
     else:
         raise ValueError(f"Unsupported head type: {head_type}")
-    
+
     # Print some parameters
     print(f"Tank length: {length}")
     print(f"Tank radius: {radius}")
     print(f"Fuel volume: {fuel_volume}")
     print(f"Insulation thickness: {insulation_thickness}")
     print(f"Initial state: {initial_state}")
-    
+
     # perform the mission analysis
     performance = MissionAnalysisFacade.analyse(
         tank_dimensions,
@@ -149,34 +155,41 @@ def perform_analysis():
         operating_window
     )
 
+    # set target enthalpy value from desired output conditions
+    h_out = CP.PropsSI('H', 'P', outlet_pressure, 'T', outlet_temperature, 'PARAHYDROGEN')
+    print(f"Enthalpy at 20 bar and 200 K: {h_out}")
 
     # Listify the densities for plotting
     densities = []
     phases = []
+    enthalpies = []
     density_at_15_bar = []
     density_at_20_bar = []
     density_at_400_bar = []
     density_at_500_bar = []
     density_lists = [density_at_15_bar, density_at_20_bar, density_at_400_bar, density_at_500_bar]
-    pressure_values = [15e5, 20e5, 400e5, 500e5] 
+    pressure_values = [15e5, 20e5, 400e5, 500e5]
     isobar_labels = ["15 bar isobar", "20 bar isobar", "400 bar isobar", "500 bar isobar"]
 
     for state in performance.tank_states.states:
         phase = state.hydrogen.phase
         if phase in ["gas", "supercritical"]:
             density = state.hydrogen.gas.density
+            enthalpy = state.hydrogen.gas.enthalpy
         elif phase in ["liquid", "supercritical_liquid"]:
             density = state.hydrogen.liquid.density
+            enthalpy = state.hydrogen.liquid.enthalpy
         else:
             raise ValueError(f"Unsupported phase: {phase}")
-        
+
         densities.append(density)
         phases.append(phase)
+        enthalpies.append(enthalpy)
         temperature = state.temperature
         for pressure, density_list in zip(pressure_values, density_lists):
             density_at_isobar = SinglePhaseRequester().get_property(pressure, temperature, "D")
             density_list.append(density_at_isobar)
-            
+
     # Extract mass_flow, fuel_flow_key, and duration from each MissionSection
     mass_flows = []
     for section in mission.sections:
@@ -185,14 +198,39 @@ def perform_analysis():
         else:
             mass_flows.append([abs(section.fuel_flows[0].mass_flow), abs(section.fuel_flows[0].mass_flow)])
     fuel_flow_keys = [section.fuel_flow_key for section in mission.sections]
-    durations = [section.duration / 60 for section in mission.sections]
+    durations = [section.duration for section in mission.sections]
+    durations_hrs = [duration / 3600 for duration in durations]
+
+    # Determine the length of enthalpies
+    enthalpies_length = len(enthalpies)
+
+    # Flatten the list of mass_flows to one dimension
+    flattened_mass_flows = [flow for sublist in mass_flows for flow in sublist]
+
+    # Interpolate the mass_flows to match the length of enthalpies
+    total_duration = sum(durations)
+    interpolated_mass_flows = []
+    for i, duration in enumerate(durations):
+        num_points = int(enthalpies_length * (duration / total_duration))
+        start_flow = flattened_mass_flows[2 * i]
+        stop_flow = flattened_mass_flows[2 * i + 1]
+        interpolated_mass_flows.extend(np.linspace(start_flow, stop_flow, num_points))
+
+    # Ensure the interpolated_mass_flows has the same length as enthalpies
+    if len(interpolated_mass_flows) < enthalpies_length:
+        interpolated_mass_flows.extend([interpolated_mass_flows[-1]] * (enthalpies_length - len(interpolated_mass_flows)))
+    elif len(interpolated_mass_flows) > enthalpies_length:
+        interpolated_mass_flows = interpolated_mass_flows[:enthalpies_length]
+
+    # Create a new list called ohex_heat
+    ohex_heat = [(interpolated_mass_flows[i] * (h_out - enthalpies[i])) for i in range(enthalpies_length)]
 
     # Sum up the durations to get the total mission duration
-    total_duration = sum(durations)
-      
+    total_duration = sum(durations_hrs)
+
     # Print the time taken
     print(f"Time taken: {time.time() - start_time}")
-    
+
     # Plotting
     fig_tank_temperatures = plot_single_tank_temperatures(performance.tank_states)
     fig_tank_pressures = plot_single_tank_loads(performance.tank_states)
@@ -206,6 +244,7 @@ def perform_analysis():
         density_lists
     )
     plot_mission_mass_flows(mass_flows, fuel_flow_keys, durations, total_duration)
+    plot_heat_flows(performance.tank_states, ohex_heat)
     plt.show()
 
 

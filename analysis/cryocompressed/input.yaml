@@ -1,15 +1,15 @@
 tank properties:
   tank radius: 1.0 # [m]
   insulation thickness: 0.04 # [m]
-  volume margin: 1.2 # [m^3/m^3] 
+  volume margin: 1.2 # [m^3/m^3]
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
   tank material: 'carbon'
   winding angle: 55.0 #[degrees]
-discharge:  
+discharge:
   initial temperature: 70.0 # [K]
   initial pressure: 40000000 # [Pa]
-  initial fill: 0.0 
+  initial fill: 0.0
   min pressure: 2300000 # [Pa]
   min temperature:  # [K]
   max pressure: 45000000 # [Pa]
@@ -21,7 +21,9 @@ discharge:
   altitude: 0.0 # [m]
   phase: 'gas'
   duration: 10 # [hr]
-  throttle: 1.0 
+  throttle: 1.0
+  outlet pressure: 2000000 # [Pa]
+  outlet temperature: 200 # [K]
 refuelling:
   initial pressure: 2300000 # [Pa]
   initial temperature: 80 # [K]
@@ -38,14 +40,14 @@ refuelling:
   altitude: 0.0 # [m]
   phase: 'gas'
   duration: 0.1 # [hr]
-  throttle: 1.0 
+  throttle: 1.0
   target fill: 1.0 # [m^3/m^3](default to 1, does not matter for gas)
-  target density: 75.0 # [kg/m^3] 
-dormancy:  
+  target density: 75.0 # [kg/m^3]
+dormancy:
   venting flow rate: 0.0000 # [kg/s]
   initial pressure: 40000000 # [Pa]
   initial temperature: 70 # [K]
-  initial fill: 0.0 
+  initial fill: 0.0
   altitude: 0.0 # [m]
   min pressure: 1500000 # [Pa]
   min temperature: 30 # [K]
@@ -57,9 +59,9 @@ dormancy:
   altitude: 0.0 # [m]
   phase: 'gas'
   duration: 1.0 # [hr]
-  throttle: 1.0 
+  throttle: 1.0
   target mass: 0.001 # [kg] (default to a low value)
   target fill: 1.0 # [m^3/m^3](default to 1, does not matter for gas)
-  target density: 77.0 # [kg/m^3] 
+  target density: 77.0 # [kg/m^3]
 
 
