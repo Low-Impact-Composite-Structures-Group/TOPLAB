@@ -386,7 +386,7 @@ def plot_single_required_flux(
         "Heat flux [kW]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
-    )
+    ), required_fluxes
 
 def plot_heat_flows(
     tank_state: TankStates,
