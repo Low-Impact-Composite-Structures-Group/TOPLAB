@@ -1,7 +1,7 @@
 tank properties:
-  tank radius: 1.0 # [m]
+  tank radius: 0.716 # [m]
   insulation thickness: 0.04 # [m]
-  volume margin: 1.2 # [m^3/m^3]
+  volume margin: 1.3 # [m^3/m^3]
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
   tank material: 'carbon'

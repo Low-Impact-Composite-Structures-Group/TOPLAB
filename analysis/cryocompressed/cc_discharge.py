@@ -7,13 +7,14 @@ from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
-from CoolProp.CoolProp import PropsSI, PhaseSI
-import CoolProp.CoolProp as CP
-import matplotlib.pyplot as plt
-import numpy as np
+from CoolProp.CoolProp import PropsSI, PhaseSI # type: ignore
+import CoolProp.CoolProp as CP # type: ignore
+import matplotlib.pyplot as plt # type: ignore
+import numpy as np # type: ignore
 import os
 import time
-import yaml
+import yaml # type: ignore
+import csv
 
 # helper function to ensure computed length is not negative
 def radius_from_volume_sphere(volume: float) -> float:
@@ -113,13 +114,12 @@ def perform_analysis():
     operating_window = OperatingEnvelope(max_pressure, min_pressure, min_temperature)
 
     # Define required fuel
-    fuel_mass = mission.required_fuel
+    fuel_mass = mission.required_fuel*VOLUME_MARGIN
     initial_fuel = initial_state.get_hydrogen_properties()
     print(f"fuel mass: {fuel_mass}")
 
     # Get fuel volume
-    fuel_volume = fuel_mass / initial_fuel.density * VOLUME_MARGIN
-
+    fuel_volume = fuel_mass / initial_fuel.density
     # Take the radius of the limiting sphere if the volume is too small for a cylinder + hemi head
     if radius_from_volume_sphere(fuel_volume) <= radius:
         radius = radius_from_volume_sphere(fuel_volume)
@@ -163,6 +163,7 @@ def perform_analysis():
     densities = []
     phases = []
     enthalpies = []
+    masses = []
     density_at_15_bar = []
     density_at_20_bar = []
     density_at_400_bar = []
@@ -176,6 +177,7 @@ def perform_analysis():
         if phase in ["gas", "supercritical"]:
             density = state.hydrogen.gas.density
             enthalpy = state.hydrogen.gas.enthalpy
+            mass = state.gas_mass
         elif phase in ["liquid", "supercritical_liquid"]:
             density = state.hydrogen.liquid.density
             enthalpy = state.hydrogen.liquid.enthalpy
@@ -185,6 +187,7 @@ def perform_analysis():
         densities.append(density)
         phases.append(phase)
         enthalpies.append(enthalpy)
+        masses.append(mass)
         temperature = state.temperature
         for pressure, density_list in zip(pressure_values, density_lists):
             density_at_isobar = SinglePhaseRequester().get_property(pressure, temperature, "D")
@@ -234,7 +237,7 @@ def perform_analysis():
     # Plotting
     fig_tank_temperatures = plot_single_tank_temperatures(performance.tank_states)
     fig_tank_pressures = plot_single_tank_loads(performance.tank_states)
-    fig_req_flux = plot_single_required_flux(performance.tank_states)
+    fig_req_flux, ihex_heat = plot_single_required_flux(performance.tank_states)
     fig_tank_fill = plot_single_tank_fill(performance.tank_states)
     fig_density_vs_temperature_gas = plot_density_vs_temperature(
         performance.tank_states,
@@ -245,6 +248,15 @@ def perform_analysis():
     )
     plot_mission_mass_flows(mass_flows, fuel_flow_keys, durations, total_duration)
     plot_heat_flows(performance.tank_states, ohex_heat)
+
+        # Save some lists to a CSV file
+    output_csv_path = os.path.join(script_dir, '../../data/results/cc_results/lists.csv')
+    with open(output_csv_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Enthalpies', 'oHEX Heat', 'Mass Flows', 'Masses', 'iHEX Heat'])
+        for enthalpy, ohex, mdot, mass, ihex in zip(enthalpies, ohex_heat, interpolated_mass_flows, masses, ihex_heat):
+            writer.writerow([enthalpy, ohex, mdot, mass, ihex])
+
     plt.show()
 
 
