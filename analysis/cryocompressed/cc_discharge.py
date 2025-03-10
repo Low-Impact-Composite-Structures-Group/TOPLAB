@@ -156,8 +156,9 @@ def perform_analysis():
     )
 
     # set target enthalpy value from desired output conditions
-    h_out = CP.PropsSI('H', 'P', outlet_pressure, 'T', outlet_temperature, 'PARAHYDROGEN')
-    print(f"Enthalpy at 20 bar and 200 K: {h_out}")
+    outlet_pressure_kpa = outlet_pressure / 1e3
+    h_out = CP.PropsSI('H', 'P', outlet_pressure_kpa/100, 'T', outlet_temperature, 'PARAHYDROGEN')
+    print(f"Enthalpy at {outlet_pressure_kpa} kPa and {outlet_temperature} K: {h_out}")
 
     # Listify the densities for plotting
     densities = []
@@ -226,7 +227,8 @@ def perform_analysis():
         interpolated_mass_flows = interpolated_mass_flows[:enthalpies_length]
 
     # Create a new list called ohex_heat
-    ohex_heat = [(interpolated_mass_flows[i] * (h_out - enthalpies[i])) for i in range(enthalpies_length)]
+    time_step = 1000
+    ohex_heat = [(h_out - enthalpies[i])/time_step for i in range(enthalpies_length)]
 
     # Sum up the durations to get the total mission duration
     total_duration = sum(durations_hrs)
