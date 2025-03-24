@@ -133,10 +133,11 @@ class AnalysisFacade(Protocol):
 
     @staticmethod
     def _define_thermal_model(
-        insulation: Insulation
+        insulation: Insulation,
+        constant_heat_flux: float = None  # Optional constant heat flux
     ) -> ThermodynamicModel:
         return ThermodynamicModel(
-            INTERNAL_MODEL, EXTERNAL_MODEL, insulation
+            INTERNAL_MODEL, EXTERNAL_MODEL, insulation, constant_heat_flux=constant_heat_flux
         )
 
     @staticmethod
@@ -262,11 +263,12 @@ class MissionAnalysisFacade(AnalysisFacade):
         insulation: Insulation,
         mission: Mission,
         initial_conditions: InitialConditions,
-        operating_envelope: OperatingEnvelope
+        operating_envelope: OperatingEnvelope,
+        constant_heat_flux: float = None
     ) -> TankPerformance:
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
-        tank_dimensions, material, operating_envelope, initial_state
+            tank_dimensions, material, operating_envelope, initial_state
         )
         tank_states = MissionAnalysis.perform_analysis(
             tank,
@@ -276,7 +278,7 @@ class MissionAnalysisFacade(AnalysisFacade):
             cls._define_target_conditions(operating_envelope),
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
-            cls._define_thermal_model(insulation),
+            cls._define_thermal_model(insulation, constant_heat_flux),
             HEAT_FLUX_FACTOR
         )
         return TankPerformance(tank, insulation, tank_states)
@@ -425,7 +427,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
             MaxPressureReached(),
             LowerPressureReached()
         ]
-        
+
 class DensityAnalysisFacade(AnalysisFacade):
 
     @classmethod
@@ -437,7 +439,7 @@ class DensityAnalysisFacade(AnalysisFacade):
         mission: Mission,
         initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions  
+        target_conditions: TargetConditions
     ) -> TankPerformance:
         print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
         initial_state = cls._define_initial_state(initial_conditions)
@@ -464,7 +466,7 @@ class DensityAnalysisFacade(AnalysisFacade):
     @staticmethod
     def _define_target_conditions(
         operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions 
+        target_conditions: TargetConditions
     ) -> TargetState:
         return TargetState(
             operating_envelope.max_pressure,
@@ -472,7 +474,7 @@ class DensityAnalysisFacade(AnalysisFacade):
             operating_envelope.min_temperature,
             target_conditions.fill,
             target_conditions.fuel_mass,
-            target_conditions.density  
+            target_conditions.density
         )
 
 

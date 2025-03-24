@@ -1,4 +1,3 @@
-
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
@@ -25,7 +24,7 @@ class FuelTank(Protocol):
 
 
 class Insulation(Protocol):
-    
+
     @abstractmethod
     def compute_thermal_resistances(
         self,
@@ -64,9 +63,9 @@ class ThermodynamicModel:
     internal_model: InternalModel
     external_model: ExternalModel
     insulation: Insulation
-
     insulation_layers: int = 12
     max_iterations: int = int(1e3)
+    constant_heat_flux: float = None
 
     def compute_heat_flux(
         self,
@@ -74,14 +73,22 @@ class ThermodynamicModel:
         tank_state: TankState,
         mission_section: MissionSection
     ) -> tuple[float, list]:
-        
+
+        if self.constant_heat_flux is not None:
+            # Use the constant heat flux value
+            heat_flux = self.constant_heat_flux
+            temperatures = self.define_initial_temperatures(
+                tank_state.temperature, mission_section.temperature
+            )
+            return heat_flux, temperatures
+
         temperatures = self.define_initial_temperatures(
             tank_state.temperature, mission_section.temperature
         )
 
         for _ in range(self.max_iterations):
-            
-            # Compute the thermal resistances that are in series in the 
+
+            # Compute the thermal resistances that are in series in the
             # fuel tank
             thermal_resistances = self.compute_thermal_resistances(
                 tank, tank_state, mission_section, temperatures
@@ -108,7 +115,7 @@ class ThermodynamicModel:
                     heat_flux
                 )
             )
-            
+
             # Test convergence
             if self.temperatures_have_converged(
                 temperatures, new_temperatures
@@ -136,9 +143,9 @@ class ThermodynamicModel:
                 tank, mission_section, temperatures[-1]
             )
         ]
-        
+
         return thermal_resistances
-            
+
     def define_initial_temperatures(
         self, fuel_temperature: float, ambient_temperature: float
     ) -> list[float]:
@@ -176,8 +183,8 @@ class ThermodynamicModel:
 
         Args:
             resistances (List[float]): List of all the resistances, note
-            that the first value is the fuel resistance, then goes 
-            through the insulation to the outer wall and the ambient 
+            that the first value is the fuel resistance, then goes
+            through the insulation to the outer wall and the ambient
             resistance.
             fuel_temperature (float): Temperature of the fuel.
             ambient_temperature (float): Ambient temperature.
@@ -199,7 +206,7 @@ class ThermodynamicModel:
         fuel_temperature: float,
         total_resistance: float
     ) -> float:
-        """Static method to compute the total heat flux going into the 
+        """Static method to compute the total heat flux going into the
         fuel tank.
 
         Args:
@@ -222,11 +229,11 @@ class ThermodynamicModel:
         process.
 
         Args:
-            old_temperatures (list): Temperatures of the previous 
+            old_temperatures (list): Temperatures of the previous
             iteration.
-            new_temperatures (list): Temperatures of the new 
+            new_temperatures (list): Temperatures of the new
             iteration.
-            threshold (float, optional): Threshold to define if the 
+            threshold (float, optional): Threshold to define if the
             temperatures have converged. Defaults to 0.1.
 
         Returns:
@@ -241,8 +248,8 @@ class ThermodynamicModel:
     def compute_new_temperatures(
         a_matrix: npt.ArrayLike, y_vector: npt.ArrayLike
     ) -> npt.ArrayLike:
-        """Compute the new temperatures through the thickness of the 
-        fuel tank. This is computed with the normal equation used in 
+        """Compute the new temperatures through the thickness of the
+        fuel tank. This is computed with the normal equation used in
         leased square methods.
 
         Args:

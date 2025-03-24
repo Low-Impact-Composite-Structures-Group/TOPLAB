@@ -10,7 +10,7 @@ discharge:
   initial temperature: 70.0 # [K]
   initial pressure: 40000000 # [Pa]
   initial fill: 0.0
-  min pressure: 2300000 # [Pa]
+  min pressure: 2000000 # [Pa]
   min temperature:  # [K]
   max pressure: 45000000 # [Pa]
   max temperature:  # [K]
@@ -24,6 +24,7 @@ discharge:
   throttle: 1.0
   outlet pressure: 2000000 # [Pa]
   outlet temperature: 200 # [K]
+  constant heat flux: 5.0 # [W/m^2]
 refuelling:
   initial pressure: 2300000 # [Pa]
   initial temperature: 80 # [K]

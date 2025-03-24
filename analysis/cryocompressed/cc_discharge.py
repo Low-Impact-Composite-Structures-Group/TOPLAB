@@ -58,6 +58,7 @@ def perform_analysis():
     mission_type = config.get('discharge', {}).get('mission type', None)
     outlet_pressure = config.get('discharge', {}).get('outlet pressure', None)
     outlet_temperature = config.get('discharge', {}).get('outlet temperature', None)
+    constant_heat_flux = config.get('discharge', {}).get('constant heat flux', None)
 
     # Check for None values and print them
     parameters = {
@@ -82,7 +83,8 @@ def perform_analysis():
         'phase': phase,
         'mission type': mission_type,
         'outlet pressure': outlet_pressure,
-        'outlet temperature': outlet_temperature
+        'outlet temperature': outlet_temperature,
+        'constant heat flux': constant_heat_flux
     }
 
     for param, value in parameters.items():
@@ -132,18 +134,29 @@ def perform_analysis():
     if head_type == 'hemi':
         length = CylindricalTankSphericalCaps.length_from_radius_and_volume(radius, fuel_volume)
         tank_dimensions = TankDimensions(radius, length)
+        total_length = length + 2 * radius
+        tank = CylindricalTankSphericalCaps(radius, total_length, tank_material, max_pressure)
     elif head_type == 'se':
         length = WinnefeldTank.length_from_radius_b_and_volume(radius, VOLUME_MARGIN * fuel_volume, 0.5*radius)
         tank_dimensions = GenericTankDimensions(radius,length , radius, 0.5*radius)
+        tank = WinnefeldTank(radius, length, radius, 0.5 * radius, tank_material, max_pressure)
     else:
         raise ValueError(f"Unsupported head type: {head_type}")
 
     # Print some parameters
-    print(f"Tank length: {length}")
+    print(f"Tank length: {total_length}")
     print(f"Tank radius: {radius}")
     print(f"Fuel volume: {fuel_volume}")
     print(f"Insulation thickness: {insulation_thickness}")
     print(f"Initial state: {initial_state}")
+
+    # Access the surface area of individual sections
+    for section in tank.sections:
+        print(f"Section type: {type(section).__name__}, Surface area: {section.surface_area} m^2")
+
+    # Access the total surface area of the tank
+    total_surface_area = tank.surface_area
+    print(f"Total surface area of the tank: {total_surface_area} m^2")
 
     # perform the mission analysis
     performance = MissionAnalysisFacade.analyse(
@@ -152,12 +165,13 @@ def perform_analysis():
         insulation,
         mission,
         initial_state,
-        operating_window
+        operating_window,
+        constant_heat_flux
     )
 
     # set target enthalpy value from desired output conditions
-    outlet_pressure_kpa = outlet_pressure / 1e3
-    h_out = CP.PropsSI('H', 'P', outlet_pressure_kpa/100, 'T', outlet_temperature, 'PARAHYDROGEN')
+    outlet_pressure_kpa = outlet_pressure / 1000
+    h_out = CP.PropsSI('H', 'P', outlet_pressure_kpa, 'T', outlet_temperature, 'PARAHYDROGEN')
     print(f"Enthalpy at {outlet_pressure_kpa} kPa and {outlet_temperature} K: {h_out}")
 
     # Listify the densities for plotting
@@ -227,8 +241,8 @@ def perform_analysis():
         interpolated_mass_flows = interpolated_mass_flows[:enthalpies_length]
 
     # Create a new list called ohex_heat
-    time_step = 1000
-    ohex_heat = [(h_out - enthalpies[i])/time_step for i in range(enthalpies_length)]
+    # TODO: WHY IS THIS DIVIDED BY 100??
+    ohex_heat = [(h_out - enthalpies[i])/100 for i in range(enthalpies_length)]
 
     # Sum up the durations to get the total mission duration
     total_duration = sum(durations_hrs)
