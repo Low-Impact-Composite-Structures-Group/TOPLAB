@@ -72,6 +72,9 @@ def perform_analysis(constant_heat_flux, results):
     total_length = length + 2 * radius
     tank = CylindricalTankSphericalCaps(radius, total_length, tank_material, max_pressure)
 
+    # Access the total surface area of the tank
+    total_surface_area = tank.surface_area
+
     # Perform the mission analysis
     performance = MissionAnalysisFacade.analyse(
         tank_dimensions,
@@ -148,7 +151,16 @@ def perform_analysis(constant_heat_flux, results):
     results.append({
         'constant_heat_flux': constant_heat_flux,
         'combined_heat': [abs(ohex) + abs(ihex) for ohex, ihex in zip(ohex_heat, ihex_heat)],
-        'total_duration': total_duration
+        'total_duration': total_duration,
+        'tank_length': total_length,
+        'tank_radius': radius,
+        'fuel_volume': fuel_volume,
+        'fuel_mass': fuel_mass,
+        'initial_state': initial_state,
+        'total_surface_area': total_surface_area,
+        'min_tank_pressure': min_pressure,
+        'outlet_pressure': outlet_pressure,
+        'outlet_temperature': outlet_temperature
     })
 
 def main():
@@ -161,6 +173,17 @@ def main():
     for heat_flux in heat_flux_values:
         print(f"Running analysis with constant_heat_flux = {heat_flux} W/m²")
         perform_analysis(heat_flux, results)
+
+    # Print the parameters once before plotting
+    if results:
+        print(f"Tank length: {results[0]['tank_length']}")
+        print(f"Tank radius: {results[0]['tank_radius']}")
+        print(f"Fuel volume: {results[0]['fuel_volume']}")
+        print(f"Fuel mass: {results[0]['fuel_mass']}")
+        print(f"Initial state: {results[0]['initial_state']}")
+        print(f"Total surface area of the tank: {results[0]['total_surface_area']} m^2")
+        print(f"Minimum tank pressure: {results[0]['min_tank_pressure']} Pa")
+        print(f"Outlet pressure: {results[0]['outlet_pressure']} Pa")
 
     # Set color cycle
     plt.rc('axes', prop_cycle=(cycler('color', plt.cm.viridis(np.linspace(0, 1, len(heat_flux_values))))))
