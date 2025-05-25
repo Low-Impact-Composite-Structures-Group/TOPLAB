@@ -399,6 +399,16 @@ def plot_heat_flows(
     times = tank_state.timesteps_in_hours[:min_length]
     required_fluxes = [-flux/1000 for flux in tank_state.required_fluxes[:min_length]]
     ohex_heats = [heats/1000 for heats in ohex_heats[:min_length]]
+    #required_fluxes(ihex) + ohex list to get total heat flow
+    # Ensure both arrays have the same length
+    if len(required_fluxes) != len(ohex_heats):
+        min_length = min(len(required_fluxes), len(ohex_heats))
+        total_heat = required_fluxes[:min_length]
+        ohex_heats = ohex_heats[:min_length]
+        times = times[:min_length]
+    # Create the data for the plot
+    total_heat = [ihex + ohex for ihex, ohex in zip(required_fluxes, ohex_heats)]
+
 
     data = [
         Line(
@@ -413,12 +423,17 @@ def plot_heat_flows(
             "oHEX",
             color='orange',
             style='-'
-        )
+        ),
+        Line(
+            times,
+            total_heat,
+            "Total Thermal Power Required by System",
+            color='green',)
     ]
     return SingleFigure(
         data,
         "Time [hour]",
-        "Heat flux [kW]",
+        "Thermal Power [kW]",
         x_ticks=x_ticks,
         y_ticks=y_ticks,
     )

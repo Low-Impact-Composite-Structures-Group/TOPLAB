@@ -241,8 +241,7 @@ def perform_analysis():
         interpolated_mass_flows = interpolated_mass_flows[:enthalpies_length]
 
     # Create a new list called ohex_heat
-    # TODO: WHY IS THIS DIVIDED BY 100??
-    ohex_heat = [(h_out - enthalpies[i])/100 for i in range(enthalpies_length)]
+    ohex_heat = [(h_out - enthalpies[i])*interpolated_mass_flows[i] for i in range(enthalpies_length)]
 
     # Sum up the durations to get the total mission duration
     total_duration = sum(durations_hrs)
