@@ -157,6 +157,8 @@ def perform_analysis():
     # Access the total surface area of the tank
     total_surface_area = tank.surface_area
     print(f"Total surface area of the tank: {total_surface_area} m^2")
+    # Get heat load from area and constant heat flux
+    constant_heat_flux = constant_heat_flux * total_surface_area
 
     # perform the mission analysis
     performance = MissionAnalysisFacade.analyse(
