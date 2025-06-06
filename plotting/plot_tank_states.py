@@ -755,8 +755,8 @@ def plot_mission_mass_flows(
             current_end_flow = mass_flows[i][1] if isinstance(mass_flows[i], list) else mass_flows[i]
             if current_end_flow != next_flow:
                 ax.vlines(end_time, current_end_flow, next_flow, color='black', linestyle='dotted')
-
-    ax.set_xlabel("Mission Duration [min]")
+    ax.set_title("Mass Flow vs Time")
+    ax.set_xlabel("Mission Duration [s]")
     ax.set_ylabel("Mass Flow [kg/s]")
     if x_ticks:
         ax.set_xticks(x_ticks)
