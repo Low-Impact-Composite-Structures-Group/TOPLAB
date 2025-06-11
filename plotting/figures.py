@@ -98,6 +98,9 @@ class SingleFigure(GeneralFigure):
     def savefig(self, filename, **kwargs):
         self.fig.savefig(filename, **kwargs)
 
+    def set_title(self, title: str):
+        self.ax1.set_title(title)
+
 
 @dataclass
 class TwinXFigure(GeneralFigure):
@@ -150,6 +153,9 @@ class TwinXFigure(GeneralFigure):
 
     def savefig(self, filename, **kwargs):
         self.fig.savefig(filename, **kwargs)
+
+    def set_title(self, title: str):
+        self.ax1.set_title(title)
 
 
 def main():
