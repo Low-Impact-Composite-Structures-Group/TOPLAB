@@ -89,13 +89,18 @@ def perform_analysis():
     )
     tank_performance_1 = tank_performance.tank_states[0]
     tank_performance_2 = tank_performance.tank_states[1]
-
     fig_tank_fill_1 = plot_single_tank_fill(tank_performance_1)
+    fig_tank_fill_1.set_title("Tank 1 Fill Level")
     fig_tank_fill_2 = plot_single_tank_fill(tank_performance_2)
+    fig_tank_fill_2.set_title("Tank 2 Fill Level")
     fig_tank_temperatures_1 = plot_single_tank_temperatures(tank_performance_1)
+    fig_tank_temperatures_1.set_title("Tank 1 Internal Temperature")
     fig_tank_temperatures_2 = plot_single_tank_temperatures(tank_performance_2)
+    fig_tank_temperatures_2.set_title("Tank 2 Internal Temperature")
     fig_tank_pressures_1 = plot_single_tank_loads(tank_performance_1)
+    fig_tank_pressures_1.set_title("Tank 1 Internal Pressure")
     fig_tank_pressures_2 = plot_single_tank_loads(tank_performance_2)
+    fig_tank_pressures_2.set_title("Tank 2 Internal Pressure")
 
     plt.show()
 
