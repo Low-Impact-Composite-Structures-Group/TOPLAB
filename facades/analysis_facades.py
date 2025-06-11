@@ -13,7 +13,7 @@ from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached,
                                             TargetMassReached, TargetDensityReached)
 from src.efficiencies.tank_performance import TankPerformance
 from src.mission.mission import Mission
-from src.mission.mission_sections import MissionSection
+from src.mission.mission_sections import MissionSection, InFlow
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import Tank, TankFactory
 from src.thermodynamics.external_models import ForcedConvectionModel, NaturalConvectionModel
@@ -23,7 +23,7 @@ from src.thermodynamics.tank_states import (InitialState, TankStates,
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
-LOWER_MASS_LIMIT = 500 # TODO: find suitable lower limit
+LOWER_MASS_LIMIT = 1 # TODO: find suitable lower limit
 
 
 # Factories and constants to be used in the analysis
@@ -301,7 +301,7 @@ class FillingAnalysisFacade(AnalysisFacade):
         operating_envelope: OperatingEnvelope,
         target_conditions: TargetConditions,
     ) -> TankPerformance:
-        MULTISTEP_METHOD.timestep = 100
+        MULTISTEP_METHOD.timestep = 10
         print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
@@ -476,6 +476,107 @@ class DensityAnalysisFacade(AnalysisFacade):
             target_conditions.fuel_mass,
             target_conditions.density
         )
+
+class DualTankAnalysisFacade(AnalysisFacade):
+    @classmethod
+    def analyse(
+        cls,
+        tank_dimensions_1: TankDimensions,
+        tank_dimensions_2: TankDimensions,
+        material: Material,
+        insulation: Insulation,
+        mission: Mission,
+        constant_heat_flux: float,
+        initial_conditions_1: InitialConditions,
+        initial_conditions_2: InitialConditions,
+        operating_envelope_1: OperatingEnvelope,
+        operating_envelope_2: OperatingEnvelope,
+        target_conditions: TargetConditions
+    ) -> TankPerformance:
+        print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
+        initial_state_1 = cls._define_initial_state(initial_conditions_1)
+        initial_state_2 = cls._define_initial_state(initial_conditions_2)
+        tank_1 = cls._define_tank(
+            tank_dimensions_1, material, operating_envelope_1, initial_state_1
+        )
+        tank_2 = cls._define_tank(
+            tank_dimensions_2, material, operating_envelope_2, initial_state_2
+        )
+
+        tank_states_1 = TankStates([], MULTISTEP_METHOD.timestep)
+        tank_states_2 = TankStates([], MULTISTEP_METHOD.timestep)
+
+        # Iterate through all mission sections
+        for section in mission.sections:
+            # 1. Solve tank 1 for this section
+            tank_states_1_section = MissionAnalysis.perform_analysis(
+                tank_1,
+                initial_state_1,
+                Mission([section]),
+                cls._define_stopping_criteria(),
+                cls._define_target_conditions(operating_envelope_1),
+                MULTISTEP_METHOD,
+                DYNAMIC_MODEL_FACTORY,
+                cls._define_thermal_model(insulation, constant_heat_flux),
+                HEAT_FLUX_FACTOR
+            )
+
+            # 2. Use tank 1's prescribed outflow as inflow for tank 2
+            # Extract the OutFlow from the section's fuel_flows
+            outflow = next((ff for ff in section.fuel_flows if ff.__class__.__name__ == "OutFlow"), None)
+            if outflow is not None:
+                # Handle both constant and list mass_flow
+                if isinstance(outflow.mass_flow, list):
+                    # If it's a list, use the last value (end of section)
+                    mass_flow = abs(outflow.mass_flow[-1])
+                else:
+                    mass_flow = abs(outflow.mass_flow)
+            else:
+                mass_flow = 0.0
+
+            hydrogen_props = tank_states_1_section.last_state.hydrogen
+            inflow_section = MissionSection(
+                duration=section.duration,
+                fuel_flows=[InFlow(mass_flow, hydrogen_props)],
+                altitude=section.altitude,
+                mach_number=section.mach_number,
+                fuel_flow_key=section.fuel_flow_key,
+                ground_temperature=getattr(section, "ground_temperature", None)
+            )
+
+            # 3. Solve tank 2 for this section, using outflow from tank 1 as inflow
+            tank_states_2_section = MissionAnalysis.perform_analysis(
+                tank_2,
+                initial_state_2,
+                Mission([inflow_section]),
+                cls._define_stopping_criteria(),
+                cls._define_target_conditions(operating_envelope_2),
+                MULTISTEP_METHOD,
+                DYNAMIC_MODEL_FACTORY,
+                cls._define_thermal_model(insulation),
+                HEAT_FLUX_FACTOR
+    )
+
+            # 4. Append results and update initial states for next section
+            tank_states_1 += tank_states_1_section
+            tank_states_2 += tank_states_2_section
+            initial_state_1 = InitialState(
+                tank_states_1.last_pressure,
+                tank_states_1.last_temperature,
+                tank_states_1.last_fill
+            )
+            initial_state_2 = InitialState(
+                tank_states_2.last_pressure,
+                tank_states_2.last_temperature,
+                tank_states_2.last_fill
+            )
+
+        # After all sections, return the performance of both tanks
+        return TankPerformance([tank_1, tank_2], insulation, [tank_states_1, tank_states_2])
+
+    @classmethod
+    def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
+        return list()
 
 
 def main():
