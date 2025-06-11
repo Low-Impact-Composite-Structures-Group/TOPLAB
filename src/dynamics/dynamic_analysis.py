@@ -142,18 +142,31 @@ class MissionSectionAnalysis:
     def define_fuel_flows(
         fuel_flows: List[Union[FuelFlow, OutFlow]], tank_state: TankState, section_iter: int, steps: int
     ) -> List[FuelFlow]:
-        return [
-            FuelFlow(
-                MissionSectionAnalysis.interpolate_mass_flows(fuel_flow.mass_flow, section_iter, steps) if isinstance(fuel_flow.mass_flow, list) else fuel_flow.mass_flow,
-                tank_state.hydrogen.get_phase(fuel_flow.phase)
-            )
-            for fuel_flow in fuel_flows
-        ]
+        flows = []
+        for fuel_flow in fuel_flows:
+            if hasattr(fuel_flow, "phase"):  # OutFlow
+                flows.append(
+                    FuelFlow(
+                        MissionSectionAnalysis.interpolate_mass_flows(fuel_flow.mass_flow, section_iter, steps)
+                        if isinstance(fuel_flow.mass_flow, list) else fuel_flow.mass_flow,
+                        tank_state.hydrogen.get_phase(fuel_flow.phase)
+                    )
+                )
+            elif hasattr(fuel_flow, "hydrogen"):  # InFlow
+                flows.append(
+                    FuelFlow(
+                        fuel_flow.mass_flow,
+                        fuel_flow.hydrogen
+                    )
+                )
+            else:
+                raise AttributeError("Unknown fuel_flow type")
+        return flows
 
     @staticmethod
     def interpolate_mass_flows(mass_flows: list[float], section_iter: int, steps: int) -> float:
         if len(mass_flows) != 2:
-            raise ValueError("Only two mass flows are supported)") 
+            raise ValueError("Only two mass flows are supported)")
         start, end = mass_flows
         return start + (end - start) * section_iter / steps
 
@@ -166,8 +179,8 @@ class MissionSectionAnalysis:
         mission_section: MissionSection,
         dynamic_model_factory: DynamicModelFactory,
         target_conditions: TargetState,
-        heat_flux_factor: float, 
-        section_iter: int = None, 
+        heat_flux_factor: float,
+        section_iter: int = None,
         steps: int = None
     ) -> TankState:
         heat_flux, temperatures = thermal_model.compute_heat_flux(
@@ -266,10 +279,10 @@ class MissionSectionAnalysis:
         steps = mission_section.number_of_timesteps(
             multistep_method.timestep
         )
-        
+
         for section_iter in range(steps):
-            
-            # print(f"Section iteration: {section_iter}") 
+
+            # print(f"Section iteration: {section_iter}")
             cls.compute_state_derivatives(
                 tank,
                 thermal_model,
@@ -277,7 +290,7 @@ class MissionSectionAnalysis:
                 mission_section,
                 dynamic_model_factory,
                 target_conditions,
-                heat_flux_factor, 
+                heat_flux_factor,
                 section_iter,
                 steps
             )
@@ -333,7 +346,7 @@ class MissionAnalysis:
                 section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
                 if section_string == None:
                     print(f"Now calculating singular mission section, thermal iteration index = {i}")
-                else: 
+                else:
                     print(f"Now calculating mission section {section_string}, thermal iteration index = {i}")
                 tank_states += MissionSectionAnalysis().analyse_section(
                     tank,
