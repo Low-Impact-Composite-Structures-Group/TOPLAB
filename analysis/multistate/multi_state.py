@@ -49,30 +49,40 @@ def perform_analysis():
     tank_dimensions_1 = TankDimensions(radius_1, 0.0)
     tank_dimensions_2 = TankDimensions(radius_2, 0.0)
 
-    # Mission and material
-    mission_1 = Mission.triathlon()
+    # get required fuel for tank 2 needed to perform the mission
     mission_2 = Mission.triathlon()
+    total_fuel_mass = mission_2.required_fuel
+    total_duration = sum(section.duration for section in mission_2.sections)
+    altitude = 0
+    mach_number =0
+
+    # Calculate average fuel flow (kg/s)
+    avg_fuel_flow = total_fuel_mass / total_duration
+
+    # Create discharge section for tank 1
+    discharge_section = Mission.discharge_section(
+        duration=total_duration / 3600,  # hours
+        altitude=altitude,
+        fuel_flow=avg_fuel_flow,
+        throttle=1.0,
+        phase="twophase",
+        mach_number=mach_number
+    )
+    # Create inflow section for tank 2
+    mission_1 = Mission([discharge_section])
+
+    # Tank material and insulation
     tank_material = Composite.carbon(np.radians(55))
+
     # TODO: remove dummy insulation; not used since we are applying constant heat load
     insulation_thickness = 0.001  # [m]
     insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
-
 
     initial_state_1 = InitialState(p_init_1, t_init_1, fill_1)
     initial_state_2 = InitialState(p_init_2, t_init_2, fill_2)
 
     operating_window_1 = OperatingEnvelope(p_max_1, p_min_1, t_min_1)
     operating_window_2 = OperatingEnvelope(p_max_2, p_min_2, t_min_2)
-    # print(f"Initial State 1: {initial_state_1}")
-    # print(f"Initial State 2: {initial_state_2}")
-    # print(f"Operating Window 1: {operating_window_1}")
-    # print(f"Operating Window 2: {operating_window_2}")
-
-    # Calculate required fuel and split between tanks
-    fuel_mass_1 = mission_1.required_fuel
-    fuel_mass_2 = mission_2.required_fuel
-    print(f"Required fuel mass for tank 1: {fuel_mass_1} kg")
-    print(f"Required fuel mass for tank 2: {fuel_mass_2} kg")
 
     tank_performance = DualTankAnalysisFacade.analyse(
         tank_dimensions_1,
@@ -85,7 +95,7 @@ def perform_analysis():
         InitialConditions(p_init_2, t_init_2, fill_2),
         operating_window_1,
         operating_window_2,
-        TargetConditions(fuel_mass_2, 0.0)
+        TargetConditions(total_fuel_mass, 0.0)
     )
     tank_performance_1 = tank_performance.tank_states[0]
     tank_performance_2 = tank_performance.tank_states[1]
