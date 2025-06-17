@@ -58,6 +58,7 @@ def perform_analysis():
 
     # Calculate average fuel flow (kg/s)
     avg_fuel_flow = total_fuel_mass / total_duration
+    print(f"Average fuel flow: {avg_fuel_flow:.2f} kg/s")
 
     # Create discharge section for tank 1
     discharge_section = Mission.discharge_section(
@@ -99,19 +100,61 @@ def perform_analysis():
     )
     tank_performance_1 = tank_performance.tank_states[0]
     tank_performance_2 = tank_performance.tank_states[1]
-    fig_tank_fill_1 = plot_single_tank_fill(tank_performance_1)
-    fig_tank_fill_1.set_title("Tank 1 Fill Level")
-    fig_tank_fill_2 = plot_single_tank_fill(tank_performance_2)
-    fig_tank_fill_2.set_title("Tank 2 Fill Level")
-    fig_tank_temperatures_1 = plot_single_tank_temperatures(tank_performance_1)
-    fig_tank_temperatures_1.set_title("Tank 1 Internal Temperature")
-    fig_tank_temperatures_2 = plot_single_tank_temperatures(tank_performance_2)
-    fig_tank_temperatures_2.set_title("Tank 2 Internal Temperature")
-    fig_tank_pressures_1 = plot_single_tank_loads(tank_performance_1)
-    fig_tank_pressures_1.set_title("Tank 1 Internal Pressure")
-    fig_tank_pressures_2 = plot_single_tank_loads(tank_performance_2)
-    fig_tank_pressures_2.set_title("Tank 2 Internal Pressure")
 
+    # Generate figures as before, but don't call plt.show() yet
+    fig_tank_fill_1 = plot_single_tank_fill(tank_performance_1)
+    fig_tank_fill_2 = plot_single_tank_fill(tank_performance_2)
+    fig_tank_temperatures_1 = plot_single_tank_temperatures(tank_performance_1)
+    fig_tank_temperatures_2 = plot_single_tank_temperatures(tank_performance_2)
+    fig_tank_pressures_1 = plot_single_tank_loads(tank_performance_1)
+    fig_tank_pressures_2 = plot_single_tank_loads(tank_performance_2)
+
+    # Collect all axes from the generated figures
+    axes_list = [
+        fig_tank_fill_1.ax[0],         # Row 1, Col 1: Tank 1 Fill Level
+        fig_tank_temperatures_1.ax[0], # Row 1, Col 2: Tank 1 Temperature
+        fig_tank_pressures_1.ax[0],    # Row 1, Col 3: Tank 1 Pressure
+        fig_tank_fill_2.ax[0],         # Row 2, Col 1: Tank 2 Fill Level
+        fig_tank_temperatures_2.ax[0], # Row 2, Col 2: Tank 2 Temperature
+        fig_tank_pressures_2.ax[0],    # Row 2, Col 3: Tank 2 Pressure
+    ]
+    titles = [
+        "Tank 1 Fill Level",
+        "Tank 1 Internal Temperature",
+        "Tank 1 Internal Pressure",
+        "Tank 2 Fill Level",
+        "Tank 2 Internal Temperature",
+        "Tank 2 Internal Pressure",
+    ]
+
+    # Create a new figure with a 2x3 grid
+    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+    axs = axs.flatten()
+
+    for ax_target, ax_source, title in zip(axs, axes_list, titles):
+        # Copy lines and labels from the original axes to the new axes
+        for line in ax_source.get_lines():
+            ax_target.plot(
+                line.get_xdata(), line.get_ydata(),
+                label=line.get_label(),
+                color=line.get_color(),
+                linestyle=line.get_linestyle(),
+                marker=line.get_marker()
+            )
+        ax_target.set_title(title)
+        ax_target.set_xlabel(ax_source.get_xlabel())
+        ax_target.set_ylabel(ax_source.get_ylabel())
+        if ax_source.get_legend():
+            ax_target.legend()
+
+    plt.close(fig_tank_fill_1.fig)
+    plt.close(fig_tank_fill_2.fig)
+    plt.close(fig_tank_temperatures_1.fig)
+    plt.close(fig_tank_temperatures_2.fig)
+    plt.close(fig_tank_pressures_1.fig)
+    plt.close(fig_tank_pressures_2.fig)
+
+    plt.tight_layout()
     plt.show()
 
 
