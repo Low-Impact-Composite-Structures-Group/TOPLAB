@@ -71,13 +71,18 @@ class StateDerivatives:
 
 
 class DynamicModel(Protocol):
-
     @abstractmethod
     def compute_state_derivatives(
         cls,
         tank_state: TankState,
-        fuel_flows: list[FuelFlow]
+        fuel_flows: list[FuelFlow] | None = None, # inflow
+        fuel_flows_out: list[FuelFlow] | None = None # outflow (optional, for backward compatibility)
     ) -> StateDerivatives:
+        """
+        Compute state derivatives for the tank.
+        If only one fuel flow list is provided, it is treated as outflow (for backward compatibility).
+        If both are provided, inflow and outflow are handled separately.
+        """
         ...
 
 
@@ -607,11 +612,11 @@ class SinglePhaseInOutModel(DynamicModel):
 
     @classmethod
     def compute_state_derivatives(
-        cls, tank_state: TankState, fuel_flows: list[FuelFlow]
+        cls, tank_state: TankState, fuel_flow_in: list[FuelFlow], fuel_flow_out: list[FuelFlow]
     ) -> StateDerivatives:
-        dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
+        dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flow_in[0], fuel_flow_out[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
-            tank_state.phase, fuel_flows[0].mass_flow
+            tank_state.phase, fuel_flow_in[0].mass_flow
         )
         return StateDerivatives(
             dP_dt,
@@ -626,7 +631,8 @@ class SinglePhaseInOutModel(DynamicModel):
     def solve_state_equations(
         cls,
         tank_state: TankState,
-        fuel_flow: FuelFlow,
+        fuel_flow_in: FuelFlow,
+        fuel_flow_out: FuelFlow,
         heat_flux: float
     ) -> list[float]:
         a = [
@@ -647,12 +653,14 @@ class SinglePhaseInOutModel(DynamicModel):
                 cls.y1(
                     tank_state.fuel_mass,
                     tank_state.hydrogen,
-                    fuel_flow.mass_flow
+                    fuel_flow_in.mass_flow,
+                    fuel_flow_out.mass_flow
                 )
             ], [
                 cls.y2(
                     tank_state.hydrogen,
-                    fuel_flow,
+                    fuel_flow_in,
+                    fuel_flow_out,
                     heat_flux
                 )
             ]
@@ -694,23 +702,21 @@ class SinglePhaseInOutModel(DynamicModel):
     def y1(
         fuel_mass: float,
         hydrogen: Hydrogen,
-        fuel_mass_flow: float
+        fuel_flow_in: float,
+        fuel_flow_out: float
     ) -> float:
-        return hydrogen.density * fuel_mass_flow / fuel_mass
+        return hydrogen.density * (fuel_flow_in - fuel_flow_out) / fuel_mass
 
     @staticmethod
     def y2(
         tank_hydrogen: Hydrogen,
-        fuel_flow: FuelFlow,
+        fuel_flow_in: FuelFlow,
+        fuel_flow_out: FuelFlow,
         heat_flux: float
     ) -> float:
-        return (
-            heat_flux
-            + fuel_flow.mass_flow * (
-                fuel_flow.hydrogen.enthalpy
-                - tank_hydrogen.enthalpy
-            )
-        )
+        net_mass_flow = fuel_flow_in.mass_flow - fuel_flow_out.mass_flow
+        h_in = fuel_flow_in.hydrogen.enthalpy
+        return heat_flux + net_mass_flow * (h_in - tank_hydrogen.enthalpy)
 
     @classmethod
     def compute_venting_mass(cls):

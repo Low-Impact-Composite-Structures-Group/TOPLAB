@@ -2,7 +2,7 @@ import copy
 import unittest
 from dataclasses import dataclass
 from unittest.mock import patch
-from src.dynamics.dynamic_models import LinModel, SinglePhaseLimitLowerPressureModel, SinglePhaseModel, StateDerivatives, TwoPhaseLimitLowerPressureModel, TwoPhaseModel
+from src.dynamics.dynamic_models import LinModel, SinglePhaseLimitLowerPressureModel, SinglePhaseModel, StateDerivatives, TwoPhaseLimitLowerPressureModel, TwoPhaseModel, SinglePhaseInOutModel
 
 
 @dataclass
@@ -845,6 +845,144 @@ class TestLinModel(unittest.TestCase):
                 actual_value.__getattribute__(attribute)
             )
 
+class TestSinglePhaseInOutModel(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.hydrogen = Hydrogen.test_hydrogen()
+        self.tank_volume = 123.5
+        self.tank_thermal_capacity = 85.85
+        self.fuel_mass = 11.1
+        self.heat_flux = 1001.1
+
+        # Inflow
+        self.inflow_hydrogen = copy.deepcopy(self.hydrogen)
+        self.inflow_hydrogen.enthalpy = 0.55
+        self.inflow_mass_flow = 33.3
+        self.fuel_flow_in = FuelFlow(self.inflow_hydrogen, self.inflow_mass_flow)
+
+        # Outflow
+        self.outflow_hydrogen = copy.deepcopy(self.hydrogen)
+        self.outflow_hydrogen.enthalpy = 0.25
+        self.outflow_mass_flow = 10.0
+        self.fuel_flow_out = FuelFlow(self.outflow_hydrogen, self.outflow_mass_flow)
+
+        gas_mass = 123.5
+        liquid_mass = 0
+        self.tank_state = TankState(
+            self.hydrogen,
+            gas_mass,
+            liquid_mass,
+            self.tank_thermal_capacity,
+            self.tank_volume,
+            self.heat_flux,
+            "gas"
+        )
+
+        self.dynamic_model = SinglePhaseInOutModel()
+
+    def test_a11(self):
+        self.assertEqual(
+            self.dynamic_model.a11(self.hydrogen),
+            self.hydrogen.dRho_dP
+        )
+
+    def test_a12(self):
+        self.assertEqual(
+            self.dynamic_model.a12(self.hydrogen),
+            self.hydrogen.dRho_dT
+        )
+
+    def test_a21(self):
+        fuel_mass = (
+            self.tank_volume
+            * self.hydrogen.density
+        )
+        expected_a21 = (
+            fuel_mass * self.hydrogen.dH_dP
+            - self.tank_volume
+        )
+        self.assertEqual(
+            self.dynamic_model.a21(
+                self.hydrogen, self.tank_volume
+            ),
+            expected_a21
+        )
+
+    def test_a22(self):
+        expected_a22 = (
+            self.tank_thermal_capacity
+            + self.tank_volume
+            * self.hydrogen.density
+            * self.hydrogen.dH_dT
+        )
+        self.assertEqual(
+            expected_a22,
+            self.dynamic_model.a22(
+                self.hydrogen,
+                self.tank_volume,
+                self.tank_thermal_capacity
+            )
+        )
+
+    def test_y1(self):
+        # Pass both mass flows
+        self.dynamic_model.y1(
+            self.fuel_mass, self.hydrogen, self.inflow_mass_flow, self.outflow_mass_flow
+        )
+
+    def test_y2(self):
+        # Pass both FuelFlow objects
+        self.dynamic_model.y2(
+            self.hydrogen, self.fuel_flow_in, self.fuel_flow_out, self.heat_flux
+        )
+
+    # TODO: add actual value for assert
+    def test_solve_equations(self):
+        # Pass both FuelFlow objects
+        self.dynamic_model.solve_state_equations(
+            self.tank_state, self.fuel_flow_in, self.fuel_flow_out, self.heat_flux
+        )
+    # TODO: add actual value for assert
+    def test_venting_mass(self):
+        self.dynamic_model.compute_venting_mass()
+
+    # TODO: add actual value for assert
+    def test_added_heat_flux(self):
+        self.dynamic_model.compute_added_heat_flux()
+
+    def test_define_liquid_and_mass_derivatives(self):
+        net_mass_flow = self.inflow_mass_flow - self.outflow_mass_flow
+
+        tank_phase = "liquid"
+        self.dynamic_model.define_liquid_and_mass_derivatives(
+            tank_phase, net_mass_flow
+        )
+
+        tank_phase = "gas"
+        self.dynamic_model.define_liquid_and_mass_derivatives(
+            tank_phase, net_mass_flow
+        )
+
+        with self.assertRaises(ValueError) as context:
+            self.dynamic_model.define_liquid_and_mass_derivatives(
+                "test", net_mass_flow
+            )
+
+    def test_compute_state_derivatives(self):
+        # Pass both as lists
+        actual_value = self.dynamic_model.compute_state_derivatives(
+            self.tank_state, [self.fuel_flow_in], [self.fuel_flow_out]
+        )
+        # Dummy expected values, just for structure (these are not correct)
+        expected_value = StateDerivatives(
+            1.0,  # pressure
+            2.0,  # temperature
+            3.0,  # liquid_mass
+            4.0,  # gas_mass
+            5.0,  # venting_mass
+            6.0   # heat_flux
+        )
+        self.assertEqual(expected_value, actual_value)
 
 
 if __name__ == "__main__":
