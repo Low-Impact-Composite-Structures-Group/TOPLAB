@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -7,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol, Union, List
 
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
-from src.mission.mission import Mission, MissionSection
+from src.mission.mission import Mission, MissionSection, InFlow
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
 
@@ -134,7 +132,8 @@ class MissionSectionAnalysis:
             tank,
             initial_state.temperature,
             initial_state.pressure,
-            initial_state.compute_fuel_mass(tank.volume)
+            initial_state.compute_fuel_mass(tank.volume),
+            multi_flow=getattr(initial_state, "multi_flow", False)
         )
         return TankStates([initial_state], timestep)
 
@@ -189,31 +188,59 @@ class MissionSectionAnalysis:
         dynamic_model = dynamic_model_factory.get_dynamic_model(
             tank_state, target_conditions
         )
-        tank_state.compute_state_derivatives(
-            dynamic_model,
-            cls.define_fuel_flows(
-                mission_section.fuel_flows,
-                tank_state,
-                section_iter,
-                steps
-            ),
-            heat_flux * heat_flux_factor,
-            tank.compute_thermal_capacity(temperatures[0])
-        )
+
+        # Check if this is a multi-flow scenario
+        if mission_section.has_multiple_flows() and getattr(tank_state, "multi_flow", False):
+            # Multi-flow case
+            inflows = mission_section.get_inflows()
+            outflows = mission_section.get_outflows()
+
+            # Process flows for interpolation if needed
+            processed_inflows = cls.process_flows(inflows, tank_state, section_iter, steps)
+            processed_outflows = cls.process_flows(outflows, tank_state, section_iter, steps)
+
+            tank_state.compute_state_derivatives(
+                dynamic_model,
+                processed_inflows,
+                processed_outflows,
+                heat_flux * heat_flux_factor,
+                tank.compute_thermal_capacity(temperatures[0])
+            )
+        else:
+            # Single flow case (existing logic)
+            tank_state.compute_state_derivatives(
+                dynamic_model,
+                cls.define_fuel_flows(
+                    mission_section.fuel_flows,
+                    tank_state,
+                    section_iter,
+                    steps
+                ),
+                heat_flux * heat_flux_factor,
+                tank.compute_thermal_capacity(temperatures[0])
+            )
+
         return tank_state
 
-    @staticmethod
-    def stopping_criterion_is_met(
-        stopping_criteria: list[StoppingCriterion],
-        current_state: TankState,
-        target_state: TargetState
-    ) -> bool:
-        for criterion in stopping_criteria:
-            if criterion.is_met(
-                current_state, target_state
-            ):
-                return True
-        return False
+    @classmethod
+    def process_flows(cls, flows: list[FuelFlow], tank_state: TankState,
+                     section_iter: int, steps: int) -> list[FuelFlow]:
+        """Process flows for interpolation, similar to define_fuel_flows"""
+        processed = []
+        for flow in flows:
+            if isinstance(flow.mass_flow, list):
+                # Interpolate
+                interpolated_flow = cls.interpolate_mass_flows(
+                    flow.mass_flow, section_iter, steps
+                )
+                # Create new flow with interpolated value
+                if isinstance(flow, InFlow):
+                    processed.append(InFlow(interpolated_flow, flow.hydrogen))
+                else:  # OutFlow
+                    processed.append(OutFlow(interpolated_flow, flow.phase))
+            else:
+                processed.append(flow)
+        return processed
 
     @classmethod
     def compute_new_temperature(
@@ -255,6 +282,18 @@ class MissionSectionAnalysis:
                 ) * timestep
             )
         return new_mass
+    @classmethod
+    def stopping_criterion_is_met(
+        cls,
+        stopping_criteria: list,
+        tank_state: TankState,
+        target_conditions: TargetState
+    ) -> bool:
+        """Check if any stopping criterion is met"""
+        for criterion in stopping_criteria:
+            if criterion.is_met(tank_state, target_conditions):
+                return True
+        return False
 
     @classmethod
     def analyse_section(
@@ -298,15 +337,10 @@ class MissionSectionAnalysis:
             tank_states.add_tank_state(
                 TankState(
                     tank,
-                    cls.compute_new_temperature(
-                        multistep_method, tank_states
-                    ),
-                    cls.compute_new_pressure(
-                        multistep_method, tank_states
-                    ),
-                    cls.compute_new_mass(
-                        multistep_method.timestep, tank_states
-                    )
+                    cls.compute_new_temperature(multistep_method, tank_states),
+                    cls.compute_new_pressure(multistep_method, tank_states),
+                    cls.compute_new_mass(multistep_method.timestep, tank_states),
+                    multi_flow=getattr(tank_states.last_state, "multi_flow", False)
                 )
             )
             if cls.stopping_criterion_is_met(
@@ -363,7 +397,8 @@ class MissionAnalysis:
                 initial = InitialState(
                     tank_states.last_pressure,
                     tank_states.last_temperature,
-                    tank_states.last_fill
+                    tank_states.last_fill,
+                    multi_flow=getattr(initial, "multi_flow", False)
                 )
 
             # Check for convergence in the thermal capacity of the tank
@@ -432,7 +467,8 @@ class SwitchMissionAnalysis:
             initial = InitialState(
                 tank_states.last_pressure,
                 tank_states.last_temperature,
-                tank_states.last_fill
+                tank_states.last_fill,
+                multi_flow=getattr(initial, "multi_flow", False)
             )
 
         return tank_states

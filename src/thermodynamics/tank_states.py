@@ -8,7 +8,7 @@ from typing import Protocol
 from src.fluids.hydrogen_retrievers import HydrogenRetriever
 
 SECONDS_TO_HOURS = 1 / 60 ** 2
-PASCAL_TO_BAR = 1e-5 
+PASCAL_TO_BAR = 1e-5
 
 
 class Hydrogen(Protocol):
@@ -39,10 +39,9 @@ class Tank(Protocol):
 
 
 class DynamicModel(Protocol):
-
     @abstractmethod
     def compute_state_derivatives(
-        self, tank_sate: TankState, fuel_flows: list[FuelFlow]
+        self, tank_state: TankState, *args
     ) -> StateDerivatives:
         ...
 
@@ -52,6 +51,7 @@ class InitialState:
     pressure: float
     temperature: float
     fill: float
+    multi_flow: bool = False
 
     def __post_init__(self):
         self.hydrogen = self.get_hydrogen_properties()
@@ -61,7 +61,7 @@ class InitialState:
             self.pressure, self.temperature
         )
         return self.hydrogen
- 
+
     def compute_fuel_mass(self, tank_volume: float) -> float:
         if self.fill == 0.0:
             return self.hydrogen.gas.density * tank_volume
@@ -81,7 +81,7 @@ class TargetState:
     fill: float
     mass: float
     density: float = None
-    
+
 
 
 @dataclass
@@ -90,11 +90,12 @@ class TankState:
     temperature: float
     pressure: float
     fuel_mass: float
+    multi_flow: bool = False
 
     @property
     def volume(self):
         return self.tank.volume
-        
+
     @property
     def liquid_mass(self) -> float:
         if self.fill == 0:
@@ -117,15 +118,15 @@ class TankState:
             return 0.0
         if self.phase == "liquid":
             return 1.0
-        
+
         # Ensure that divide by zero is not possible
         if self.volume == 0:
             raise ValueError("Volume cannot be zero")
-        
+
         # Ensure densities are valid
         if self.hydrogen.liquid.density <= self.hydrogen.gas.density:
             raise ValueError("Liquid density must be greater than gas density")
-        
+
         fill_value = (
             (self.fuel_mass / self.volume - self.hydrogen.gas.density)
             / (self.hydrogen.liquid.density - self.hydrogen.gas.density)
@@ -133,9 +134,9 @@ class TankState:
          # Ensure fill value is not negative
         if fill_value < 0:
             fill_value = 0
-        
+
         return fill_value
-    
+
     @property
     def fuel_volume(self):
         return self.fill * self.volume
@@ -145,7 +146,7 @@ class TankState:
         if self.fuel_volume <= 0:
             return 0
         return self.tank.compute_fuel_height(self.fuel_volume)
-    
+
     @property
     def is_full(self):
         return self.fill >= 1
@@ -182,15 +183,24 @@ class TankState:
     def compute_state_derivatives(
         self,
         dynamic_model: DynamicModel,
-        fuel_flows: list[FuelFlow],
-        heat_flux: float,
-        tank_thermal_capacity: float
+        *args
     ) -> StateDerivatives:
-        self.heat_flux = heat_flux
-        self.tank_thermal_capacity = tank_thermal_capacity
-        self.derivatives = dynamic_model.compute_state_derivatives(
-            self, fuel_flows
-        )
+        self.heat_flux = args[-2]  # Second to last argument
+        self.tank_thermal_capacity = args[-1]  # Last argument
+
+        if self.multi_flow:
+            # Multi-flow case: (fuel_flows_in, fuel_flows_out, heat_flux, tank_thermal_capacity)
+            fuel_flows_in, fuel_flows_out, heat_flux, tank_thermal_capacity = args
+            self.derivatives = dynamic_model.compute_state_derivatives(
+                self, fuel_flows_in, fuel_flows_out
+            )
+        else:
+            # Single flow case: (fuel_flows, heat_flux, tank_thermal_capacity)
+            fuel_flows, heat_flux, tank_thermal_capacity = args
+            self.derivatives = dynamic_model.compute_state_derivatives(
+                self, fuel_flows
+            )
+
         return self.derivatives
 
 

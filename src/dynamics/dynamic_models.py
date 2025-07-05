@@ -7,7 +7,7 @@ Victor Kees Poorte, 2022
 """
 
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, Union
 
@@ -86,7 +86,37 @@ class DynamicModel(Protocol):
         ...
 
 
-class SinglePhaseModel(DynamicModel):
+class SinglePhaseModelBase(ABC):
+    """Abstract base class for all single-phase dynamic models"""
+
+    @classmethod
+    @abstractmethod
+    def compute_state_derivatives(cls, tank_state, *args) -> 'StateDerivatives':
+        """
+        Compute state derivatives for single-phase models
+        Args can be:
+        - Single flow: (fuel_flows,)
+        - Multi flow: (inflows, outflows)
+        """
+        pass
+
+
+class TwoPhaseModelBase(ABC):
+    """Abstract base class for all two-phase dynamic models"""
+
+    @classmethod
+    @abstractmethod
+    def compute_state_derivatives(cls, tank_state, *args) -> 'StateDerivatives':
+        """
+        Compute state derivatives for two-phase models
+        Args can be:
+        - Single flow: (fuel_flows,)
+        - Multi flow: (inflows, outflows)
+        """
+        pass
+
+
+class SinglePhaseModel(SinglePhaseModelBase):
 
     @classmethod
     def compute_state_derivatives(
@@ -214,7 +244,7 @@ class SinglePhaseModel(DynamicModel):
         )
 
 
-class TwoPhaseModel(DynamicModel):
+class TwoPhaseModel(DynamicModel, TwoPhaseModelBase):
 
     @classmethod
     def compute_state_derivatives(
@@ -494,7 +524,7 @@ class TwoPhaseLimitLowerPressureModel(DynamicModel):
         return 0
 
 
-class SinglePhaseLimitLowerPressureModel(DynamicModel):
+class SinglePhaseLimitLowerPressureModel(SinglePhaseModelBase):
 
     @classmethod
     def compute_state_derivatives(
@@ -608,7 +638,7 @@ class LinModel(DynamicModel):
         )
 
 
-class SinglePhaseInOutModel(DynamicModel):
+class SinglePhaseInOutModel(SinglePhaseModelBase):
 
     @classmethod
     def compute_state_derivatives(

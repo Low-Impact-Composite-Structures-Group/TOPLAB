@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -78,6 +77,24 @@ class MissionSection:
         return cls(
             duration, fuel_flows, altitude, mach_number
         )
+
+    def has_multiple_flows(self) -> bool:
+        """Check if this section has multiple fuel flows"""
+        return len(self.fuel_flows) > 1
+
+    def get_inflows(self) -> list[InFlow]:
+        """Get all inflows for this section"""
+        return [ff for ff in self.fuel_flows if isinstance(ff, InFlow)]
+
+    def get_outflows(self) -> list[OutFlow]:
+        """Get all outflows for this section"""
+        return [ff for ff in self.fuel_flows if isinstance(ff, OutFlow)]
+
+    def get_single_flow(self) -> FuelFlow:
+        """Get single flow (for backward compatibility)"""
+        if len(self.fuel_flows) != 1:
+            raise ValueError("Section has multiple flows, use get_inflows/get_outflows")
+        return self.fuel_flows[0]
 
 
 def main():

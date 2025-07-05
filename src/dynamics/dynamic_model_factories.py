@@ -1,10 +1,8 @@
-
-
 from src.dynamics.dynamic_models import (DynamicModel,
                                          SinglePhaseLimitLowerPressureModel,
                                          SinglePhaseModel,
                                          TwoPhaseLimitLowerPressureModel,
-                                         TwoPhaseModel)
+                                         TwoPhaseModel, SinglePhaseInOutModel)
 
 
 class TankState:
@@ -58,6 +56,9 @@ class SinglePhaseFactory:
         tank_state: TankState,
         target_conditions: OperatingEnvelope
     ) -> DynamicModel:
+        # Check for multi-flow first
+        if getattr(tank_state, "multi_flow", False):
+            return SinglePhaseInOutModel
         if (
             target_conditions.min_pressure is None
             and target_conditions.max_pressure is None
