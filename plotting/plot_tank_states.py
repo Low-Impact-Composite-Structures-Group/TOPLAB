@@ -1,13 +1,28 @@
 from typing import Protocol, Union
 
-from plotting.figures import Line, SingleFigure, TwinXFigure
-
-
+import matplotlib.pyplot as plt
 import numpy as np
+
+from plotting.figures import Line, SingleFigure, TwinXFigure
+from plotting.plot_style import set_font
 
 SECONDS_TO_HOURS = 1 / 60 ** 2
 PASCAL_TO_BAR = 1e-5
 TO_MEGA = 1e-6
+
+
+def configure_font(font_name: str = "Cambria"):
+    """Configure the font for all plotting operations.
+
+    Args:
+        font_name: Name of the font family to use (e.g., "Cambria", "Arial", "Times New Roman")
+
+    Example:
+        >>> configure_font("Cambria")  # Set to Cambria
+        >>> configure_font("Arial")    # Change to Arial
+    """
+    set_font(font_name)
+    print(f"Font configured to: {font_name}")
 
 
 class Performances(Protocol):

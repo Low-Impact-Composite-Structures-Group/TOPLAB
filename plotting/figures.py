@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 
-import plotting.plot_style
+from plotting.plot_style import set_font
 
 
 @dataclass

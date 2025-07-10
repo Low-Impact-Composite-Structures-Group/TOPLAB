@@ -17,6 +17,7 @@ from cycler import cycler
 FONT_SIZE = 11          # [pt]
 FIGURE_WIDTH = 10.0     # [cm]
 FIGURE_HEIGHT = 8.8     # [cm]
+DEFAULT_FONT = "Times New Roman"
 
 
 CM2INCH = 0.393701
@@ -52,6 +53,17 @@ class MyCycler(object):
         )
 
 
+def set_font(font_name: str = DEFAULT_FONT):
+    """Set the font family for all matplotlib plots.
+
+    Args:
+        font_name: The name of the font family to use (e.g., "Cambria", "Arial", etc.)
+    """
+    plt.rcParams.update({'font.family': font_name})
+
+
+# Set default font and other parameters
+set_font()
 plt.rcParams.update({'font.size': FONT_SIZE})
 plt.rcParams["figure.figsize"] = (
     FIGURE_WIDTH * CM2INCH, FIGURE_HEIGHT * CM2INCH
@@ -108,7 +120,7 @@ class MyFigure:
         xticks = TickFormatter(self.y_data[0]).ticks
         self.ax.set_yticks(xticks)
         self.ax.set_ylim((xticks[0], xticks[-1]))
-  
+
 
 @dataclass
 class AxisValue:
@@ -186,7 +198,7 @@ class TickFormatter:
         if self.upper.order_of_magnitude == 2:
             return 50
         return 10 ** (self.upper.order_of_magnitude - 1)
-    
+
     @property
     def ticks(self):
         ticks = [self.lower.value]
