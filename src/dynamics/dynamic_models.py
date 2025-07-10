@@ -767,209 +767,111 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         )
 
 
-class TwoPhaseInOutModel(DynamicModel):
+class SinglePhaseLimitLowerPressureInOutModel(SinglePhaseModelBase):
+    """
+    Single-phase dynamic model with lower pressure limit support that handles separate
+    inflow and outflow fuel streams. Used when tank is at minimum pressure boundary.
+    """
 
     @classmethod
     def compute_state_derivatives(
         cls,
         tank_state: TankState,
-        fuel_flows: list[FuelFlow]
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
     ) -> StateDerivatives:
-        a = cls.define_a_matrix(tank_state)
-        b = cls.define_b_vector(tank_state, fuel_flows)
-        x = np.linalg.solve(a, b)
+        # Calculate net mass flow for derivatives (consistently subtracting outflow)
+        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
+        outflow_sum = sum([flow.mass_flow for flow in fuel_flow_out])
+
+        # Use same convention as SinglePhaseInOutModel - subtract outflow
+        net_mass_flow = inflow_sum - outflow_sum
+
+        # Get mass derivatives based on phase
+        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
+            tank_state.phase, net_mass_flow
+        )
+
+        # Compute temperature derivative considering both flows
+        dT_dt = cls.compute_temperature_derivative(tank_state, fuel_flow_in, fuel_flow_out)
+
+        # Return state derivatives with required heat flux
         return StateDerivatives(
-            x[0][0],
-            x[1][0],
-            x[2][0],
-            x[3][0],
-            cls.venting_mass(),
-            cls.added_heat_flux()
+            cls.compute_pressure_derivative(),
+            dT_dt,
+            dMg_dt,
+            dMl_dt,
+            cls.compute_venting_mass(),
+            cls.compute_required_heat_flux(tank_state, dT_dt, fuel_flow_in, fuel_flow_out)
         )
 
     @staticmethod
-    def a12(
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        return - hydrogen.dP_dT
+    def compute_pressure_derivative():
+        return 0
 
     @staticmethod
-    def a21(
-        gas_mass: float,
-        liquid_mass: float,
-        hydrogen: TwoPhaseHydrogen
+    def compute_temperature_derivative(
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
     ) -> float:
-        term1 = (
-            gas_mass
-            * hydrogen.gas.dRho_dP
-            / hydrogen.gas.density ** 2
+        # Calculate net mass flow (inflow - outflow)
+        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
+        outflow_sum = sum([flow.mass_flow for flow in fuel_flow_out])
+        net_mass_flow = inflow_sum - outflow_sum
+
+        num = (
+            tank_state.hydrogen.density
+            * net_mass_flow
+            / tank_state.fuel_mass
         )
-        term2 = (
-            liquid_mass
-            * hydrogen.liquid.dRho_dP
-            / hydrogen.liquid.density ** 2
-        )
-        return - (term1 + term2)
+        den = tank_state.hydrogen.dRho_dT
+        return num / den
 
     @staticmethod
-    def a22(
-        gas_mass: float,
-        liquid_mass: float,
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        term1 = (
-            gas_mass
-            * hydrogen.gas.dRho_dT
-            / hydrogen.gas.density ** 2
-        )
-        term2 = (
-            liquid_mass
-            * hydrogen.liquid.dRho_dT
-            / hydrogen.liquid.density ** 2
-        )
-        return - (term1 + term2)
-
-    @staticmethod
-    def a23(
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        return (
-            1 / hydrogen.gas.density
-            - 1 / hydrogen.liquid.density
-        )
-
-    @staticmethod
-    def a42(
-        tank_thermal_capacity: float,
-        tank_volume: float,
-        gas_mass: float,
-        liquid_mass: float,
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        term4 = (
-            liquid_mass * hydrogen.liquid.dH_dP
-            + gas_mass * hydrogen.gas.dH_dP
-            - tank_volume
-        ) * hydrogen.dP_dT
-        return (
-            tank_thermal_capacity
-            + liquid_mass * hydrogen.liquid.dH_dT
-            + gas_mass * hydrogen.gas.dH_dT
-            + term4
-        )
-
-    @staticmethod
-    def a43(
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        return - (
-            hydrogen.liquid.enthalpy
-            - hydrogen.gas.enthalpy
+    def define_liquid_and_mass_derivatives(
+        tank_phase: str, net_mass_flow: float
+    ) -> tuple[float, float]:
+        if tank_phase == "gas":
+            return net_mass_flow, 0
+        if tank_phase == "liquid":
+            return 0, net_mass_flow
+        raise ValueError(
+            f"{tank_phase} not supported in single phase model"
         )
 
     @classmethod
-    def define_a_matrix(
-        cls,
-        tank_state: TankState
-    ) -> npt.ArrayLike:
-        a12 = cls.a12(
-            tank_state.hydrogen
-        )
-        a21 = cls.a21(
-            tank_state.gas_mass,
-            tank_state.liquid_mass,
-            tank_state.hydrogen
-        )
-        a22 = cls.a22(
-            tank_state.gas_mass,
-            tank_state.liquid_mass,
-            tank_state.hydrogen
-        )
-        a23 = cls.a23(
-            tank_state.hydrogen
-        )
-        a42 = cls.a42(
-            tank_state.tank_thermal_capacity,
-            tank_state.volume,
-            tank_state.gas_mass,
-            tank_state.liquid_mass,
-            tank_state.hydrogen
-        )
-        a43 = cls.a43(
-            tank_state.hydrogen
-        )
-        a = [
-            [1, a12, 0, 0],
-            [a21, a22, a23, 0],
-            [0, 0, 1, 1],
-            [0, a42, a43, 0]
-        ]
-
-        return a
-
-    @staticmethod
-    def y2(
-        fuel_flows: list[FuelFlow],
-        hydrogen: TwoPhaseHydrogen
-    ) -> float:
-        return sum([
-            - fuel_flow.mass_flow / hydrogen.liquid.density
-            for fuel_flow in fuel_flows
-        ])
-
-    @staticmethod
-    def y3(
-        fuel_flows: list[FuelFlow]
-    ) -> float:
-        return sum([
-            fuel_flow.mass_flow
-            for fuel_flow in fuel_flows
-        ])
-
-    @staticmethod
-    def y4(
-        fuel_flows: list[FuelFlow],
-        hydrogen: TwoPhaseHydrogen,
-        heat_flux: float
-    ) -> float:
-        term2 = sum([
-            fuel_flow.mass_flow
-            * (
-                fuel_flow.hydrogen.enthalpy
-                - hydrogen.liquid.enthalpy
-            )
-            for fuel_flow in fuel_flows
-        ])
-        return heat_flux + term2
+    def compute_venting_mass(cls):
+        return 0
 
     @classmethod
-    def define_b_vector(
+    def compute_required_heat_flux(
         cls,
         tank_state: TankState,
-        fuel_flows: list[FuelFlow]
-    ) -> npt.ArrayLike:
-        y2 = cls.y2(
-            fuel_flows,
-            tank_state.hydrogen
+        temperature_derivative: float,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> float:
+        # thermal capacity term
+        thermal_capacity_term = (
+            tank_state.tank_thermal_capacity
+            + tank_state.fuel_mass * tank_state.hydrogen.dH_dT
         )
-        y3 = cls.y3(
-            fuel_flows
-        )
-        y4 = cls.y4(
-            fuel_flows,
-            tank_state.hydrogen,
-            tank_state.heat_flux
-        )
-        b = [[0], [y2], [y3], [y4]]
-        return b
 
-    @classmethod
-    def added_heat_flux(cls) -> float:
-        return 0
+        # Energy contribution from mass flows
+        flow_energy = 0
+        # Add inflow energy contribution
+        for flow in fuel_flow_in:
+            flow_energy += flow.mass_flow * (flow.hydrogen.enthalpy - tank_state.hydrogen.enthalpy)
+        # add outflow energy contribution
+        for flow in fuel_flow_out:
+            flow_energy += flow.mass_flow * (tank_state.hydrogen.enthalpy - tank_state.hydrogen.enthalpy)
 
-    @classmethod
-    def venting_mass(cls) -> float:
-        return 0
+        # Required heat flux to maintain conditions
+        return - (
+            thermal_capacity_term * temperature_derivative
+            - tank_state.heat_flux - flow_energy
+        )
 
 
 def main():

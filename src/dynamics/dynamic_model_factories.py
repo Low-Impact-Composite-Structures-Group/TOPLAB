@@ -2,7 +2,7 @@ from src.dynamics.dynamic_models import (DynamicModel,
                                          SinglePhaseLimitLowerPressureModel,
                                          SinglePhaseModel,
                                          TwoPhaseLimitLowerPressureModel,
-                                         TwoPhaseModel, SinglePhaseInOutModel)
+                                         TwoPhaseModel, SinglePhaseInOutModel, SinglePhaseLimitLowerPressureInOutModel)
 
 
 class TankState:
@@ -58,16 +58,18 @@ class SinglePhaseFactory:
     ) -> DynamicModel:
         # Check for multi-flow first
         if getattr(tank_state, "multi_flow", False):
+            # Multi-flow models have different signatures
+            if (target_conditions.min_pressure is not None and
+                target_conditions.min_pressure >= tank_state.pressure):
+                return SinglePhaseLimitLowerPressureInOutModel
             return SinglePhaseInOutModel
-        if (
-            target_conditions.min_pressure is None
-            and target_conditions.max_pressure is None
-        ):
+
+        # Single-flow models (backward compatible)
+        if (target_conditions.min_pressure is None and
+            target_conditions.max_pressure is None):
             return SinglePhaseModel
-        if (
-            target_conditions.min_pressure is not None
-            and target_conditions.min_pressure >= tank_state.pressure
-        ):
+        if (target_conditions.min_pressure is not None and
+            target_conditions.min_pressure >= tank_state.pressure):
             return SinglePhaseLimitLowerPressureModel
         return SinglePhaseModel
 
