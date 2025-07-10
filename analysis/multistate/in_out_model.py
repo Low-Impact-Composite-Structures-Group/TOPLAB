@@ -13,47 +13,51 @@ import os
 import yaml
 
 def perform_analysis():
-    # Get the directory of the current script
-    radius = 1.0 # m
+
+    # Define tank parameters
     p_init = 40000000 # Pa
     t_init = 70 # K
     fill = 0.0
     p_max = 45000000 # Pa
-    p_min = 1500000 # Pa
+    p_min = 10000000 # Pa
     t_min = None # K
     ambient_heat_load = 5.0 # W/m^2
-
-    inflow = 0.01 # kg/s
-    outflow = 0.03 # kg/s
-
-    # instantiate the Tank and TankDimensions object
-    tank_material = Composite.carbon(np.radians(55))
-    tank = SphericalTank(radius, tank_material, p_init)
-    tank_dimensions = TankDimensions(radius, 0.0)
-
-    fuel_mass = 200 # kg
-    total_duration = 1 # hours
+    stopping_mass = 10.0 # kg
 
     # Create multi-flow mission
-    inflow_rate = 0.01  # kg/s
-    outflow_rate = -0.03  # kg/s
+    inflow_rate = 0.03  # kg/s
+    outflow_rate = 0.05  # kg/s
 
     # Get hydrogen properties - FIX: Create instance first
     hydrogen_requester = SinglePhaseRequester()
     hydrogen_props = hydrogen_requester.get_hydrogen_properties(p_init, t_init)
 
+    # Create inflow object
+    inflow = InFlow(inflow_rate, hydrogen_props)
+
+    # Create outflow object
+    outflow = OutFlow(outflow_rate, "gas")
+
     # Create mission with both flows
     mission = Mission([
-        Mission.multi_flow_section(
-            duration=1.0,  # hours
+        MissionSection(
+            duration = 3600*0.5,
+            fuel_flows=[inflow, outflow],  # Pass as a list
             altitude=0,
-            inflow=inflow_rate,
-            outflow=outflow_rate,
-            hydrogen=hydrogen_props,
-            phase="gas",
             mach_number=0.0
         )
     ])
+
+    print(f"Mission required fuel mass: {mission.required_fuel} kg")
+
+    # Calculate appropriate radius based on required mass
+    VOLUME_MARGIN = 1.5 # Margin to ensure sufficient volume
+    required_volume = VOLUME_MARGIN*(mission.required_fuel / hydrogen_props.density)
+    radius = (3 * required_volume / (4 * np.pi))**(1/3)
+
+    # instantiate the Tank and TankDimensions object
+    tank_material = Composite.carbon(np.radians(55))
+    tank_dimensions = TankDimensions(radius, 0.0) # this will instantiate a spherical tank
 
     # Tank material and insulation
     tank_material = Composite.carbon(np.radians(55))
@@ -73,7 +77,7 @@ def perform_analysis():
         ambient_heat_load,
         initial_conditions,
         operating_window,
-        TargetConditions(fuel_mass, 0.0),
+        TargetConditions(stopping_mass, 0.0),
     )
     tank_performance = tank_performance.tank_states
 
