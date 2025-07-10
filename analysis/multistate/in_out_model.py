@@ -19,10 +19,11 @@ def perform_analysis():
     t_init = 70 # K
     fill = 0.0
     p_max = 45000000 # Pa
-    p_min = 10000000 # Pa
+    p_min = 15000000 # Pa
     t_min = None # K
     ambient_heat_load = 5.0 # W/m^2
     stopping_mass = 10.0 # kg
+    duration_in_hours = 1.0 # hours
 
     # Create multi-flow mission
     inflow_rate = 0.03  # kg/s
@@ -41,7 +42,7 @@ def perform_analysis():
     # Create mission with both flows
     mission = Mission([
         MissionSection(
-            duration = 3600*0.5,
+            duration = 3600*duration_in_hours, # Convert hours to seconds
             fuel_flows=[inflow, outflow],  # Pass as a list
             altitude=0,
             mach_number=0.0
@@ -51,7 +52,7 @@ def perform_analysis():
     print(f"Mission required fuel mass: {mission.required_fuel} kg")
 
     # Calculate appropriate radius based on required mass
-    VOLUME_MARGIN = 1.5 # Margin to ensure sufficient volume
+    VOLUME_MARGIN = 1.1 # make the tank 10% larger than the required volume
     required_volume = VOLUME_MARGIN*(mission.required_fuel / hydrogen_props.density)
     radius = (3 * required_volume / (4 * np.pi))**(1/3)
 
