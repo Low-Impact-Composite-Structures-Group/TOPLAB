@@ -226,6 +226,9 @@ class MissionSectionAnalysis:
     def process_flows(cls, flows: list[FuelFlow], tank_state: TankState,
                      section_iter: int, steps: int) -> list[FuelFlow]:
         """Process flows for interpolation, similar to define_fuel_flows"""
+        from src.mission.mission_sections import InFlow as ConcreteInFlow
+        from src.mission.mission_sections import OutFlow as ConcreteOutFlow
+
         processed = []
         for flow in flows:
             if isinstance(flow.mass_flow, list):
@@ -234,10 +237,10 @@ class MissionSectionAnalysis:
                     flow.mass_flow, section_iter, steps
                 )
                 # Create new flow with interpolated value
-                if isinstance(flow, InFlow):
-                    processed.append(InFlow(interpolated_flow, flow.hydrogen))
-                else:  # OutFlow
-                    processed.append(OutFlow(interpolated_flow, flow.phase))
+                if hasattr(flow, 'hydrogen'):  # It's an InFlow
+                    processed.append(ConcreteInFlow(interpolated_flow, flow.hydrogen))
+                else:  # It's an OutFlow
+                    processed.append(ConcreteOutFlow(interpolated_flow, flow.phase))
             else:
                 processed.append(flow)
         return processed

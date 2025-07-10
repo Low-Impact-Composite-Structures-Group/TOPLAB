@@ -189,11 +189,65 @@ class TankState:
         self.tank_thermal_capacity = args[-1]  # Last argument
 
         if self.multi_flow:
-            # Multi-flow case: (fuel_flows_in, fuel_flows_out, heat_flux, tank_thermal_capacity)
-            fuel_flows_in, fuel_flows_out, heat_flux, tank_thermal_capacity = args
-            self.derivatives = dynamic_model.compute_state_derivatives(
-                self, fuel_flows_in, fuel_flows_out
-            )
+            # Multi-flow case needs to handle different argument counts
+            if len(args) == 3:
+                # Only one list of flows provided with multi_flow=True
+                fuel_flows, heat_flux, tank_thermal_capacity = args
+                # Check if model requires separate in/out flows
+                if hasattr(dynamic_model, 'compute_state_derivatives') and 'fuel_flow_out' in dynamic_model.compute_state_derivatives.__code__.co_varnames:
+                    # Model expects separate in/out flows - use empty list for inflows
+                    # If SinglePhaseInOutModel, need to handle empty lists differently
+                    if "SinglePhaseInOutModel" in str(type(dynamic_model)):
+                        # Create a dummy flow for empty lists to avoid index errors
+                        from src.mission.mission_sections import InFlow, OutFlow
+                        from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+
+                        # For Tank 1 (empty inflow list)
+                        if not fuel_flows:
+                            # Both lists empty, create dummy flows
+                            dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
+                            dummy_inflow = InFlow(0.0, dummy_props)
+                            dummy_outflow = OutFlow(0.0, "gas")
+                            self.derivatives = dynamic_model.compute_state_derivatives(
+                                self, [dummy_inflow], [dummy_outflow]
+                            )
+                        else:
+                            # Only inflow list is empty
+                            dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
+                            dummy_inflow = InFlow(0.0, dummy_props)
+                            self.derivatives = dynamic_model.compute_state_derivatives(
+                                self, [dummy_inflow], fuel_flows
+                            )
+                    else:
+                        self.derivatives = dynamic_model.compute_state_derivatives(
+                            self, [], fuel_flows
+                        )
+                else:
+                    # Model can handle single list of flows
+                    self.derivatives = dynamic_model.compute_state_derivatives(
+                        self, fuel_flows
+                    )
+            else:
+                # Full multi-flow case with separate in/out flow lists
+                fuel_flows_in, fuel_flows_out, heat_flux, tank_thermal_capacity = args
+
+                # Handle empty flow lists for SinglePhaseInOutModel
+                if "SinglePhaseInOutModel" in str(type(dynamic_model)):
+                    from src.mission.mission_sections import InFlow, OutFlow
+                    from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+
+                    if not fuel_flows_in:
+                        dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
+                        dummy_inflow = InFlow(0.0, dummy_props)
+                        fuel_flows_in = [dummy_inflow]
+
+                    if not fuel_flows_out:
+                        dummy_outflow = OutFlow(0.0, "gas")
+                        fuel_flows_out = [dummy_outflow]
+
+                self.derivatives = dynamic_model.compute_state_derivatives(
+                    self, fuel_flows_in, fuel_flows_out
+                )
         else:
             # Single flow case: (fuel_flows, heat_flux, tank_thermal_capacity)
             fuel_flows, heat_flux, tank_thermal_capacity = args
