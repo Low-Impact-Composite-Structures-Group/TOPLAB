@@ -20,7 +20,7 @@ from src.tank_design.tank_shapes import Tank, TankFactory
 from src.thermodynamics.external_models import ForcedConvectionModel, NaturalConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.tank_states import (InitialState, TankStates,
-                                            TargetState)
+                                            TargetState, TankState)
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -537,6 +537,353 @@ class InOutTankAnalysisFacade(AnalysisFacade):
     @classmethod
     def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
         return list()
+
+
+class MultiTankAnalysisFacade(AnalysisFacade):
+    @classmethod
+    def analyse(
+        cls,
+        tank_configurations: list,  # List of tank configs (dimensions, materials, etc.)
+        mission: Mission,           # Single mission that applies to the system
+        interaction_rules: dict,    # Rules for tank interactions
+        initial_conditions: list,   # Initial conditions for each tank
+        operating_envelopes: list,  # Operating envelopes for each tank
+        target_conditions: list,    # Target conditions for each tank
+    ) -> list[TankPerformance]:
+        """Analyze multiple interacting tanks simultaneously."""
+        print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
+
+        # Create tank objects
+        tanks = []
+        for i, config in enumerate(tank_configurations):
+            initial_state = cls._define_initial_state(initial_conditions[i])
+            tank = cls._define_tank(
+                config["dimensions"],
+                config["material"],
+                operating_envelopes[i],
+                initial_state
+            )
+            tanks.append(tank)
+
+        # Initialize tank states and results
+        all_tank_states = [TankStates([], MULTISTEP_METHOD.timestep) for _ in tanks]
+
+        # Iterate through all mission sections
+        for section_idx, section in enumerate(mission.sections):
+            print(f"Calculating mission section {section.fuel_flow_key or section_idx}")
+
+            # Set up section states
+            current_states = []
+            for i, tank in enumerate(tanks):
+                if len(all_tank_states[i].states) == 0:
+                    # First section - use initial conditions
+                    current_states.append(InitialState(
+                        initial_conditions[i].pressure,
+                        initial_conditions[i].temperature,
+                        initial_conditions[i].fill,
+                        multi_flow=True
+                    ))
+                else:
+                    # Use last state from previous section
+                    last_state = all_tank_states[i].last_state
+                    current_states.append(InitialState(
+                        last_state.pressure,
+                        last_state.temperature,
+                        all_tank_states[i].last_fill,
+                        multi_flow=True
+                    ))
+
+            # Perform time-stepping for this section
+            section_states = cls._analyse_section_multi_tank(
+                tanks,
+                current_states,
+                section,
+                interaction_rules,
+                operating_envelopes,
+                target_conditions,
+                tank_configurations
+            )
+
+            # Add states to results
+            for i, states in enumerate(section_states):
+                all_tank_states[i] += states
+
+        # Create performance objects
+        performances = []
+        for i, tank in enumerate(tanks):
+            performances.append(TankPerformance(
+                tank,
+                tank_configurations[i]["insulation"],
+                all_tank_states[i]
+            ))
+
+        return performances
+
+    @classmethod
+    def _analyse_section_multi_tank(
+        cls,
+        tanks: list,
+        initial_states: list,
+        mission_section: MissionSection,
+        interaction_rules: dict,
+        operating_envelopes: list,
+        target_conditions: list,
+        tank_configurations: list
+    ) -> list[TankStates]:
+        # Initialize tank states for this section
+        all_states = []
+        for i, tank in enumerate(tanks):
+            states = TankStates([], MULTISTEP_METHOD.timestep)
+            # Create initial TankState and add to states
+            initial_tank_state = TankState(
+                tank,
+                initial_states[i].temperature,
+                initial_states[i].pressure,
+                initial_states[i].compute_fuel_mass(tank.volume),
+                multi_flow=True
+            )
+            states.add_tank_state(initial_tank_state)
+            all_states.append(states)
+
+        # Print initial conditions for debugging
+        print("\n=== INITIAL CONDITIONS ===")
+        for i, tank_state in enumerate(all_states):
+            print(f"Tank {i+1}: Mass={tank_state.last_state.fuel_mass:.2f} kg, "
+                  f"Temp={tank_state.last_state.temperature:.2f} K, "
+                  f"Pressure={tank_state.last_state.pressure/1e5:.2f} bar")
+        print("=========================\n")
+
+        # Number of steps for this section
+        steps = int(mission_section.duration / MULTISTEP_METHOD.timestep)
+
+        # Time-stepping loop
+        for step in range(steps):
+            print(f"\n--- Step {step+1}/{steps} (t={step*MULTISTEP_METHOD.timestep}s) ---")
+
+            # Get current states for all tanks
+            current_states = [states.last_state for states in all_states]
+
+            # Compute interactions between tanks based on rules
+            flow_adjustments = cls._compute_tank_interactions(
+                current_states,
+                interaction_rules,
+                operating_envelopes,
+                mission_section,
+                previous_flow_rate=getattr(interaction_rules, "previous_flow_rate", None),
+                step_index=step,  # Pass current step index
+                total_steps=steps  # Pass total steps
+            )
+
+            # Print flow adjustments
+            print("Flow Adjustments:")
+            for tank_idx, adjusts in flow_adjustments.items():
+                for flow_type, value in adjusts.items():
+                    print(f"  Tank {tank_idx+1}: {flow_type}={value:.4f} kg/s")
+
+            # Compute derivatives and update states for each tank
+            new_states = []
+            for i, tank in enumerate(tanks):
+                # Create thermal model for this tank
+                thermal_model = cls._define_thermal_model(
+                    tank_configurations[i]["insulation"],
+                    tank_configurations[i].get("heat_flux", None)
+                )
+
+                # Compute heat flux and temperatures
+                heat_flux, temperatures = thermal_model.compute_heat_flux(
+                    tank, current_states[i], mission_section
+                )
+
+                # Get dynamic model
+                dynamic_model = DYNAMIC_MODEL_FACTORY.get_dynamic_model(
+                    current_states[i], cls._define_target_conditions(operating_envelopes[i])
+                )
+
+                # Apply flow adjustments based on interactions
+                adjusted_flows = cls._adjust_flows(
+                    mission_section.fuel_flows,
+                    flow_adjustments.get(i, {}),
+                    current_states[i]
+                )
+
+                # Print adjusted flows
+                print(f"Tank {i+1} Flows:")
+                for j, flow in enumerate(adjusted_flows):
+                    flow_type = "InFlow" if hasattr(flow, "hydrogen") else "OutFlow"
+                    flow_value = flow.mass_flow
+                    if isinstance(flow_value, list):
+                        flow_value = flow_value[0]  # Just print first element if list
+                    print(f"  {flow_type} {j}: {flow_value:.4f} kg/s")
+
+                # Compute derivatives
+                derivatives = current_states[i].compute_state_derivatives(
+                    dynamic_model,
+                    adjusted_flows,
+                    heat_flux * HEAT_FLUX_FACTOR,
+                    tank.compute_thermal_capacity(temperatures[0])
+                )
+
+                # Print derivatives
+                print(f"Tank {i+1} Derivatives:")
+                print(f"  dP/dt={derivatives.pressure:.2f} Pa/s, "
+                      f"dT/dt={derivatives.temperature:.4f} K/s, "
+                      f"dmGas/dt={derivatives.gas_mass:.4f} kg/s, "
+                      f"dmLiquid/dt={derivatives.liquid_mass:.4f} kg/s")
+
+                # Compute new state values
+                new_temp = MULTISTEP_METHOD.compute_new_value(
+                    [derivatives.temperature], current_states[i].temperature
+                )
+                new_pressure = MULTISTEP_METHOD.compute_new_value(
+                    [derivatives.pressure], current_states[i].pressure
+                )
+                new_mass = current_states[i].fuel_mass + (derivatives.gas_mass + derivatives.liquid_mass) * MULTISTEP_METHOD.timestep
+
+                # Print current and new values
+                print(f"Tank {i+1} States:")
+                print(f"  CURRENT: Mass={current_states[i].fuel_mass:.2f} kg, "
+                      f"Temp={current_states[i].temperature:.2f} K, "
+                      f"Pressure={current_states[i].pressure/1e5:.2f} bar")
+                print(f"  NEW:     Mass={new_mass:.2f} kg, "
+                      f"Temp={new_temp:.2f} K, "
+                      f"Pressure={new_pressure/1e5:.2f} bar")
+
+                # Sanity checks for physical values
+                if new_temp < 20 or new_temp > 1000:
+                    print(f"  WARNING: Non-physical temperature: {new_temp:.2f} K")
+                if new_mass < 0:
+                    print(f"  WARNING: Non-physical mass: {new_mass:.2f} kg")
+
+                # Create new state
+                new_state = TankState(
+                    tank,
+                    new_temp,
+                    new_pressure,
+                    new_mass,
+                    multi_flow=True
+                )
+                new_states.append(new_state)
+
+            # Add new states to results
+            for i, new_state in enumerate(new_states):
+                all_states[i].add_tank_state(new_state)
+
+        # Print final conditions
+        print("\n=== FINAL CONDITIONS ===")
+        for i, tank_state in enumerate(all_states):
+            print(f"Tank {i+1}: Mass={tank_state.last_state.fuel_mass:.2f} kg, "
+                  f"Temp={tank_state.last_state.temperature:.2f} K, "
+                  f"Pressure={tank_state.last_state.pressure/1e5:.2f} bar")
+        print("========================\n")
+
+        return all_states
+
+    @classmethod
+    def _compute_tank_interactions(
+        cls,
+        current_states: list,
+        interaction_rules: dict,
+        operating_envelopes: list,
+        mission_section: MissionSection = None,
+        previous_flow_rate: float = None,
+        step_index: int = None,
+        total_steps: int = None
+    ) -> dict:
+        """Compute flow adjustments with gradual transitions."""
+        flow_adjustments = {}
+
+        # Mission-based interaction (Tank 1 supplies what Tank 2 needs)
+        if interaction_rules.get("interaction_type") == "mission_based":
+            tank2_idx = interaction_rules.get("consumer_tank_idx", 1)
+            tank1_idx = interaction_rules.get("reservoir_tank_idx", 0)
+            safety_margin = interaction_rules.get("safety_margin", 1.05)
+
+            # Calculate total outflow from Tank 2 for this section
+            total_outflow = 0.0
+            for flow in mission_section.fuel_flows:
+                if not hasattr(flow, "hydrogen"):  # It's an OutFlow
+                    if isinstance(flow.mass_flow, list):
+                        # Interpolate
+                        from src.dynamics.dynamic_analysis import MissionSectionAnalysis
+                        interpolated_flow = MissionSectionAnalysis.interpolate_mass_flows(
+                            flow.mass_flow, step_index, total_steps
+                        )
+                        total_outflow += interpolated_flow
+                    else:
+                        total_outflow += flow.mass_flow
+
+            # Apply safety margin and make positive (as it will be negated for outflow)
+            transfer_flow_rate = abs(total_outflow) * safety_margin
+
+            # Only transfer if needed
+            if transfer_flow_rate > 0.001:  # Small threshold to avoid tiny flows
+                # Initialize dictionaries
+                if tank1_idx not in flow_adjustments:
+                    flow_adjustments[tank1_idx] = {}
+                if tank2_idx not in flow_adjustments:
+                    flow_adjustments[tank2_idx] = {}
+
+                # Apply gradual transition if previous flow rate exists
+                if previous_flow_rate is not None:
+                    # Limit rate of change to 0.01 kg/s per timestep
+                    max_change = 0.01
+                    if abs(transfer_flow_rate - previous_flow_rate) > max_change:
+                        if transfer_flow_rate > previous_flow_rate:
+                            transfer_flow_rate = previous_flow_rate + max_change
+                        else:
+                            transfer_flow_rate = previous_flow_rate - max_change
+
+                # Store current flow rate for next call
+                interaction_rules["previous_flow_rate"] = transfer_flow_rate
+
+                # Tank 1 supplies (negative for outflow)
+                flow_adjustments[tank1_idx]["outflow"] = -transfer_flow_rate
+                # Tank 2 receives (positive for inflow)
+                flow_adjustments[tank2_idx]["inflow"] = transfer_flow_rate
+
+        # Pressure-based interaction (Transfer when pressure drops)
+        elif interaction_rules.get("pressure_based_flow", False):
+            tank2_idx = interaction_rules.get("consumer_tank_idx", 1)
+            tank1_idx = interaction_rules.get("reservoir_tank_idx", 0)
+
+            pressure_threshold = interaction_rules.get("pressure_threshold",
+                                                    operating_envelopes[tank2_idx].max_pressure * 1.1)
+
+            if current_states[tank2_idx].pressure < pressure_threshold:
+                # Increase flow from Tank 1 to Tank 2
+                if tank1_idx not in flow_adjustments:
+                    flow_adjustments[tank1_idx] = {}
+                if tank2_idx not in flow_adjustments:
+                    flow_adjustments[tank2_idx] = {}
+
+                flow_rate = interaction_rules.get("flow_rate", 0.05)  # kg/s
+                flow_adjustments[tank1_idx]["outflow"] = -flow_rate  # Negative for outflow
+                flow_adjustments[tank2_idx]["inflow"] = flow_rate    # Positive for inflow
+
+        return flow_adjustments
+
+    @classmethod
+    def _adjust_flows(
+        cls,
+        original_flows: list,
+        adjustments: dict,
+        current_state: TankState
+    ) -> list:
+        """Create tank-specific flows based on mission and tank role."""
+        # For consumer tank (Tank 2) - Use original mission flows
+        if "consumer" in adjustments:
+            return original_flows
+
+        # For reservoir tank (Tank 1) - Only use flows from tank interactions
+        adjusted_flows = []
+
+        # Add outflow from reservoir to consumer if needed
+        if "outflow" in adjustments and abs(adjustments["outflow"]) > 0.001:
+            from src.mission.mission_sections import OutFlow
+            # Negative value for outflow
+            adjusted_flows.append(OutFlow(-adjustments["outflow"], "gas"))
+
+        return adjusted_flows
 
 
 def main():

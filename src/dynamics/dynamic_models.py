@@ -644,10 +644,44 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
     def compute_state_derivatives(
         cls, tank_state: TankState, fuel_flow_in: list[FuelFlow], fuel_flow_out: list[FuelFlow]
     ) -> StateDerivatives:
+        # Safety check - ensure both lists have at least one item
+        if not fuel_flow_in:
+            # Create a dummy inflow with zero rate
+            from src.mission.mission_sections import InFlow
+            dummy_inflow = InFlow(0.0, tank_state.hydrogen)
+            fuel_flow_in = [dummy_inflow]
+
+        if not fuel_flow_out:
+            # Create a dummy outflow with zero rate
+            from src.mission.mission_sections import OutFlow
+            dummy_outflow = OutFlow(0.0, "gas")
+            fuel_flow_out = [dummy_outflow]
+
+        # Handle mass_flow as list if needed
+        in_flow_rate = fuel_flow_in[0].mass_flow
+        if isinstance(in_flow_rate, list):
+            in_flow_rate = in_flow_rate[0]  # Use first value if it's a list
+
+        out_flow_rate = fuel_flow_out[0].mass_flow
+        if isinstance(out_flow_rate, list):
+            out_flow_rate = out_flow_rate[0]  # Use first value if it's a list
+
+        # Original code continues
         dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flow_in[0], fuel_flow_out[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
-            tank_state.phase, fuel_flow_in[0].mass_flow
+            tank_state.phase, in_flow_rate + out_flow_rate
         )
+
+        # Apply safety limits to prevent non-physical values
+        # Limit pressure change rate (max 1 bar/s)
+        MAX_PRESSURE_CHANGE = 1e5  # Pa/s
+        dP_dt = np.clip(dP_dt, -MAX_PRESSURE_CHANGE, MAX_PRESSURE_CHANGE)
+
+        # Limit temperature change rate (max 1K/s)
+        MAX_TEMP_CHANGE = 1.0  # K/s
+        dT_dt = np.clip(dT_dt, -MAX_TEMP_CHANGE, MAX_TEMP_CHANGE)
+
+
         return StateDerivatives(
             dP_dt,
             dT_dt,
@@ -678,13 +712,23 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
                 )
             ]
         ]
+
+        # Handle mass_flow as list if needed
+        in_flow_rate = fuel_flow_in.mass_flow
+        if isinstance(in_flow_rate, list):
+            in_flow_rate = in_flow_rate[0]  # Use first value if it's a list
+
+        out_flow_rate = fuel_flow_out.mass_flow
+        if isinstance(out_flow_rate, list):
+            out_flow_rate = out_flow_rate[0]  # Use first value if it's a list
+
         b = [
             [
                 cls.y1(
                     tank_state.fuel_mass,
                     tank_state.hydrogen,
-                    fuel_flow_in.mass_flow,
-                    fuel_flow_out.mass_flow
+                    in_flow_rate,
+                    out_flow_rate
                 )
             ], [
                 cls.y2(
@@ -744,7 +788,16 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         fuel_flow_out: FuelFlow,
         heat_flux: float
     ) -> float:
-        net_mass_flow = fuel_flow_in.mass_flow - fuel_flow_out.mass_flow
+        # Handle mass_flow as list if needed
+        in_flow_rate = fuel_flow_in.mass_flow
+        if isinstance(in_flow_rate, list):
+            in_flow_rate = in_flow_rate[0]
+
+        out_flow_rate = fuel_flow_out.mass_flow
+        if isinstance(out_flow_rate, list):
+            out_flow_rate = out_flow_rate[0]
+
+        net_mass_flow = in_flow_rate - out_flow_rate
         h_in = fuel_flow_in.hydrogen.enthalpy
         return heat_flux + net_mass_flow * (h_in - tank_hydrogen.enthalpy)
 
