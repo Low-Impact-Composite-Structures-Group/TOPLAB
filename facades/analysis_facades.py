@@ -553,6 +553,14 @@ class MultiTankAnalysisFacade(AnalysisFacade):
         """Analyze multiple interacting tanks simultaneously."""
         print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
 
+        # Initialize global flow tracking lists and time tracking
+        global_inflow_1_list = []
+        global_outflow_1_list = []
+        global_inflow_2_list = []
+        global_outflow_2_list = []
+        global_time_points = []
+        current_time_offset = 0  # Start at time zero
+
         # Create tank objects
         tanks = []
         for i, config in enumerate(tank_configurations):
@@ -593,16 +601,28 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                         multi_flow=True
                     ))
 
-            # Perform time-stepping for this section
-            section_states = cls._analyse_section_multi_tank(
+            # Perform time-stepping for this section with proper time offset
+            section_states, section_flows = cls._analyse_section_multi_tank(
                 tanks,
                 current_states,
                 section,
                 interaction_rules,
                 operating_envelopes,
                 target_conditions,
-                tank_configurations
+                tank_configurations,
+                current_time_offset  # Use actual time offset in seconds
             )
+
+            # Update the time offset for the next section
+            if len(section_flows['time_points']) > 0:
+                current_time_offset = section_flows['time_points'][-1] + MULTISTEP_METHOD.timestep
+
+            # Concatenate the flow lists
+            global_inflow_1_list.extend(section_flows['inflow_1'])
+            global_outflow_1_list.extend(section_flows['outflow_1'])
+            global_inflow_2_list.extend(section_flows['inflow_2'])
+            global_outflow_2_list.extend(section_flows['outflow_2'])
+            global_time_points.extend(section_flows['time_points'])
 
             # Add states to results
             for i, states in enumerate(section_states):
@@ -617,6 +637,15 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 all_tank_states[i]
             ))
 
+        # Store the flows in a class variable for access from plotting functions
+        cls.flow_data = {
+            'time': global_time_points,
+            'tank1_inflow': global_inflow_1_list,
+            'tank1_outflow': global_outflow_1_list,
+            'tank2_inflow': global_inflow_2_list,
+            'tank2_outflow': global_outflow_2_list
+        }
+
         return performances
 
     @classmethod
@@ -628,13 +657,21 @@ class MultiTankAnalysisFacade(AnalysisFacade):
         interaction_rules: dict,
         operating_envelopes: list,
         target_conditions: list,
-        tank_configurations: list
-    ) -> list[TankStates]:
+        tank_configurations: list,
+        time_offset: int = 0  # Added parameter for time tracking
+    ) -> tuple[list[TankStates], dict]:
         # Initialize tank states for this section
         all_states = []
+
+        # Initialize flow tracking for this section
+        inflow_1_list = []
+        outflow_1_list = []
+        inflow_2_list = []
+        outflow_2_list = []
+        time_points = []
+
+        # Create initial TankState for each tank
         for i, tank in enumerate(tanks):
-            states = TankStates([], MULTISTEP_METHOD.timestep)
-            # Create initial TankState and add to states
             initial_tank_state = TankState(
                 tank,
                 initial_states[i].temperature,
@@ -642,23 +679,16 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 initial_states[i].compute_fuel_mass(tank.volume),
                 multi_flow=True
             )
-            states.add_tank_state(initial_tank_state)
+            states = TankStates([initial_tank_state], MULTISTEP_METHOD.timestep)
             all_states.append(states)
-
-        # Print initial conditions for debugging
-        print("\n=== INITIAL CONDITIONS ===")
-        for i, tank_state in enumerate(all_states):
-            print(f"Tank {i+1}: Mass={tank_state.last_state.fuel_mass:.2f} kg, "
-                  f"Temp={tank_state.last_state.temperature:.2f} K, "
-                  f"Pressure={tank_state.last_state.pressure/1e5:.2f} bar")
-        print("=========================\n")
 
         # Number of steps for this section
         steps = int(mission_section.duration / MULTISTEP_METHOD.timestep)
 
         # Time-stepping loop
         for step in range(steps):
-            print(f"\n--- Step {step+1}/{steps} (t={step*MULTISTEP_METHOD.timestep}s) ---")
+            current_time = time_offset + step * MULTISTEP_METHOD.timestep
+            time_points.append(current_time)
 
             # Get current states for all tanks
             current_states = [states.last_state for states in all_states]
@@ -674,14 +704,41 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 total_steps=steps  # Pass total steps
             )
 
-            # Print flow adjustments
-            print("Flow Adjustments:")
+            # Track flows for the entire simulation
+            tank1_inflow = 0.0
+            tank1_outflow = 0.0
+            tank2_inflow = 0.0
+            tank2_outflow = 0.0
+
             for tank_idx, adjusts in flow_adjustments.items():
                 for flow_type, value in adjusts.items():
-                    print(f"  Tank {tank_idx+1}: {flow_type}={value:.4f} kg/s")
+                    if tank_idx == 0 and flow_type == "inflow":
+                        tank1_inflow = value
+                        outflow_1_list.append(value)
+                    if tank_idx == 0 and flow_type == "outflow":
+                        tank1_outflow = value
+                        outflow_1_list.append(value)
+                    if tank_idx == 1 and flow_type == "inflow":
+                        tank2_inflow = value
+                        inflow_2_list.append(value)
+                    if tank_idx == 1 and flow_type == "outflow":
+                        tank2_outflow = value
+                        outflow_2_list.append(value)
+
+            # If no adjustment was made for a tank/flow, add zero
+            if len(inflow_1_list) < len(time_points):
+                inflow_1_list.append(0.0)
+            if len(outflow_1_list) < len(time_points):
+                outflow_1_list.append(0.0)
+            if len(inflow_2_list) < len(time_points):
+                inflow_2_list.append(0.0)
+            if len(outflow_2_list) < len(time_points):
+                outflow_2_list.append(0.0)
 
             # Compute derivatives and update states for each tank
             new_states = []
+
+            all_adjusted_flows = []
             for i, tank in enumerate(tanks):
                 # Create thermal model for this tank
                 thermal_model = cls._define_thermal_model(
@@ -706,15 +763,6 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     current_states[i]
                 )
 
-                # Print adjusted flows
-                print(f"Tank {i+1} Flows:")
-                for j, flow in enumerate(adjusted_flows):
-                    flow_type = "InFlow" if hasattr(flow, "hydrogen") else "OutFlow"
-                    flow_value = flow.mass_flow
-                    if isinstance(flow_value, list):
-                        flow_value = flow_value[0]  # Just print first element if list
-                    print(f"  {flow_type} {j}: {flow_value:.4f} kg/s")
-
                 # Compute derivatives
                 derivatives = current_states[i].compute_state_derivatives(
                     dynamic_model,
@@ -722,13 +770,6 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     heat_flux * HEAT_FLUX_FACTOR,
                     tank.compute_thermal_capacity(temperatures[0])
                 )
-
-                # Print derivatives
-                print(f"Tank {i+1} Derivatives:")
-                print(f"  dP/dt={derivatives.pressure:.2f} Pa/s, "
-                      f"dT/dt={derivatives.temperature:.4f} K/s, "
-                      f"dmGas/dt={derivatives.gas_mass:.4f} kg/s, "
-                      f"dmLiquid/dt={derivatives.liquid_mass:.4f} kg/s")
 
                 # Compute new state values
                 new_temp = MULTISTEP_METHOD.compute_new_value(
@@ -738,21 +779,6 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     [derivatives.pressure], current_states[i].pressure
                 )
                 new_mass = current_states[i].fuel_mass + (derivatives.gas_mass + derivatives.liquid_mass) * MULTISTEP_METHOD.timestep
-
-                # Print current and new values
-                print(f"Tank {i+1} States:")
-                print(f"  CURRENT: Mass={current_states[i].fuel_mass:.2f} kg, "
-                      f"Temp={current_states[i].temperature:.2f} K, "
-                      f"Pressure={current_states[i].pressure/1e5:.2f} bar")
-                print(f"  NEW:     Mass={new_mass:.2f} kg, "
-                      f"Temp={new_temp:.2f} K, "
-                      f"Pressure={new_pressure/1e5:.2f} bar")
-
-                # Sanity checks for physical values
-                if new_temp < 20 or new_temp > 1000:
-                    print(f"  WARNING: Non-physical temperature: {new_temp:.2f} K")
-                if new_mass < 0:
-                    print(f"  WARNING: Non-physical mass: {new_mass:.2f} kg")
 
                 # Create new state
                 new_state = TankState(
@@ -768,15 +794,16 @@ class MultiTankAnalysisFacade(AnalysisFacade):
             for i, new_state in enumerate(new_states):
                 all_states[i].add_tank_state(new_state)
 
-        # Print final conditions
-        print("\n=== FINAL CONDITIONS ===")
-        for i, tank_state in enumerate(all_states):
-            print(f"Tank {i+1}: Mass={tank_state.last_state.fuel_mass:.2f} kg, "
-                  f"Temp={tank_state.last_state.temperature:.2f} K, "
-                  f"Pressure={tank_state.last_state.pressure/1e5:.2f} bar")
-        print("========================\n")
+        # Return both the tank states and the flow data
+        flow_data = {
+            'time_points': time_points,
+            'inflow_1': outflow_1_list,
+            'outflow_1': outflow_1_list,
+            'inflow_2': inflow_2_list,
+            'outflow_2': outflow_2_list
+        }
 
-        return all_states
+        return all_states, flow_data
 
     @classmethod
     def _compute_tank_interactions(

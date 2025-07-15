@@ -94,14 +94,27 @@ def perform_analysis():
         initial_conditions=[initial_conditions_1, initial_conditions_2],
         operating_envelopes=[operating_window_1, operating_window_2],
         target_conditions=[
-            TargetConditions(0.10 * total_fuel_mass, 0.0),  # Tank 1 target
-            TargetConditions(5.0, 0.0)                      # Tank 2 target
+            TargetConditions(0.10 * total_fuel_mass, 0.0),
+            TargetConditions(5.0, 0.0)
         ]
     )
 
     # Extract results
     tank_states_1 = tank_performances[0].tank_states
     tank_states_2 = tank_performances[1].tank_states
+
+    # Access flow data for plotting
+    flow_data = MultiTankAnalysisFacade.flow_data
+
+    # Plot the mass flows
+    from plotting.plot_tank_states import plot_tank_mass_flows
+    flow_fig = plot_tank_mass_flows(
+        flow_data['time'],
+        flow_data['tank1_inflow'],
+        flow_data['tank1_outflow'],
+        flow_data['tank2_inflow'],
+        flow_data['tank2_outflow']
+    )
 
     # Generate figures and plots
     fig_tank_fill_1 = plot_single_tank_fill(tank_states_1)

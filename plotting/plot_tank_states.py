@@ -783,6 +783,54 @@ def plot_mission_mass_flows(
     return fig
 
 
+def plot_tank_mass_flows(
+    time_points: list[float],
+    tank1_inflow: list[float],
+    tank1_outflow: list[float],
+    tank2_inflow: list[float],
+    tank2_outflow: list[float],
+    x_ticks: list[float] = None,
+    y_ticks: list[float] = None
+):
+    """Plot mass flows between tanks and to mission."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Ensure all arrays have the same length by truncating to the time array length
+    time_len = len(time_points)
+    tank1_inflow = tank1_inflow[:time_len]
+    tank1_outflow = tank1_outflow[:time_len]
+    tank2_inflow = tank2_inflow[:time_len]
+    tank2_outflow = tank2_outflow[:time_len]
+
+    # Convert time from seconds to hours for consistent plotting
+    time_hours = [t * SECONDS_TO_HOURS for t in time_points]
+
+    # Plot the flow rates
+    ax.plot(time_hours, tank1_inflow, 'k-', label="Tank 1 Inflow", linewidth=2)
+    ax.plot(time_hours, tank1_outflow, 'r-', label="Tank 1 Outflow", linewidth=2) # Removed 'o' marker
+    ax.plot(time_hours, tank2_inflow, 'g-', label="Tank 2 Inflow", linewidth=2)
+    ax.plot(time_hours, tank2_outflow, 'b-', label="Tank 2 Outflow (Mission)", linewidth=2)
+
+    # Add a zero line for reference
+    ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+    # Add annotation to explain the flow relationship
+    ax.text(0.02, 0.02, "Tank 1 supplies Tank 2, which supplies the mission",
+            transform=ax.transAxes, fontsize=10, bbox=dict(facecolor='white', alpha=0.7))
+
+    # Customize plot
+    ax.set_title("Tank Mass Flow Rates")
+    ax.set_xlabel("Time [hour]")
+    ax.set_ylabel("Mass Flow Rate [kg/s]")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right')
+
+    if x_ticks:
+        ax.set_xticks(x_ticks)
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+
+    return fig
 def main():
     pass
 
