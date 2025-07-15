@@ -714,16 +714,16 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 for flow_type, value in adjusts.items():
                     if tank_idx == 0 and flow_type == "inflow":
                         tank1_inflow = value
-                        outflow_1_list.append(value)
+                        inflow_1_list.append(value)      # Changed: was incorrectly using outflow_1_list
                     if tank_idx == 0 and flow_type == "outflow":
                         tank1_outflow = value
-                        outflow_1_list.append(value)
+                        outflow_1_list.append(value)     # Correct
                     if tank_idx == 1 and flow_type == "inflow":
                         tank2_inflow = value
-                        inflow_2_list.append(value)
+                        inflow_2_list.append(value)      # Correct
                     if tank_idx == 1 and flow_type == "outflow":
                         tank2_outflow = value
-                        outflow_2_list.append(value)
+                        outflow_2_list.append(value)     # Correct
 
             # If no adjustment was made for a tank/flow, add zero
             if len(inflow_1_list) < len(time_points):
@@ -797,7 +797,7 @@ class MultiTankAnalysisFacade(AnalysisFacade):
         # Return both the tank states and the flow data
         flow_data = {
             'time_points': time_points,
-            'inflow_1': outflow_1_list,
+            'inflow_1': inflow_1_list,
             'outflow_1': outflow_1_list,
             'inflow_2': inflow_2_list,
             'outflow_2': outflow_2_list
@@ -867,6 +867,9 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 flow_adjustments[tank1_idx]["outflow"] = -transfer_flow_rate
                 # Tank 2 receives (positive for inflow)
                 flow_adjustments[tank2_idx]["inflow"] = transfer_flow_rate
+
+                # Tank 2 discharges to supply the mission
+                flow_adjustments[tank2_idx]["outflow"] = -total_outflow  # Use the original outflow demand
 
         # Pressure-based interaction (Transfer when pressure drops)
         elif interaction_rules.get("pressure_based_flow", False):
