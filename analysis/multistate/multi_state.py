@@ -15,7 +15,7 @@ def perform_analysis():
     p_init_1 = 4e+7  # Pa (400 bar)
     t_init_1 = 70  # K
     fill_1 = 0.0 # no liquid
-    p_max_1 = 4.5e+7  # Pa (450 bar)
+    p_max_1 = 5.0e+8  # Pa (500 bar)
     p_min_1 = 1500000  # Pa (15 bar)
     ambient_heat_load_1 = 2.0  # W/m²
 
@@ -24,7 +24,7 @@ def perform_analysis():
     p_init_2 = 4e+7  # Pa (20 bar)
     t_init_2 = 70  # K
     fill_2 = 0.0 # no liquid
-    p_max_2 = 4.5e+7  # Pa (40 bar)
+    p_max_2 = 5.0e+8  # Pa (500 bar)
     p_min_2 = 1500000  # Pa (10 bar)
     ambient_heat_load_2 = 2.0  # W/m²
 
@@ -81,7 +81,7 @@ def perform_analysis():
         "interaction_type": "mission_based",
         "reservoir_tank_idx": 0,
         "consumer_tank_idx": 1,
-        "safety_margin": 1.05,
+        "inflow_safety_factor": 0.8,
         "max_flow_rate": 0.1  # kg/s - limit maximum flow between tanks
     }
 
@@ -126,7 +126,7 @@ def perform_analysis():
 
 
     # Create a combined figure with a 2x3 grid
-    fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axs = plt.subplots(2, 3, figsize=(10, 7))
     axs = axs.flatten()
 
     # List of source axes and titles
@@ -139,10 +139,10 @@ def perform_analysis():
         fig_tank_pressures_2.ax[0],    # Row 2, Col 3: Tank 2 Pressure
     ]
     titles = [
-        "Tank 1 (Reservoir) Fill Level",
+        "Tank 1 (Reservoir) Fuel Mass",
         "Tank 1 (Reservoir) Temperature",
         "Tank 1 (Reservoir) Pressure",
-        "Tank 2 (Consumer) Fill Level",
+        "Tank 2 (Consumer) Fuel Mass",
         "Tank 2 (Consumer) Temperature",
         "Tank 2 (Consumer) Pressure",
     ]

@@ -793,7 +793,7 @@ def plot_tank_mass_flows(
     y_ticks: list[float] = None
 ):
     """Plot mass flows between tanks and to mission."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(8, 5))
 
     # Ensure all arrays have the same length by truncating to the time array length
     time_len = len(time_points)
@@ -806,10 +806,11 @@ def plot_tank_mass_flows(
     time_hours = [t * SECONDS_TO_HOURS for t in time_points]
 
     # Plot the flow rates
+    ax.plot(time_hours, tank2_outflow, 'bo-', label="Tank 2 Outflow (Mission)", linewidth=2)
     ax.plot(time_hours, tank1_inflow, 'k-', label="Tank 1 Inflow", linewidth=2)
     ax.plot(time_hours, tank1_outflow, 'r-', label="Tank 1 Outflow", linewidth=2) # Removed 'o' marker
     ax.plot(time_hours, tank2_inflow, 'g-', label="Tank 2 Inflow", linewidth=2)
-    ax.plot(time_hours, tank2_outflow, 'b-', label="Tank 2 Outflow (Mission)", linewidth=2)
+
 
     # Add a zero line for reference
     ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
