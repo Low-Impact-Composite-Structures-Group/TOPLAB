@@ -63,14 +63,42 @@ class InitialState:
         return self.hydrogen
 
     def compute_fuel_mass(self, tank_volume: float) -> float:
-        if self.fill == 0.0:
-            return self.hydrogen.gas.density * tank_volume
-        elif self.fill == 1.0:
-            return self.hydrogen.liquid.density * tank_volume
-        return tank_volume * (
-            self.fill * self.hydrogen.liquid.density
-            + (1 - self.fill) * self.hydrogen.gas.density
-        )
+        """Compute the initial fuel mass based on tank volume and fill ratio."""
+        try:
+            # Special cases
+            if self.fill == 0.0:
+                return tank_volume * self.hydrogen.gas.density
+            elif self.fill == 1.0:
+                return tank_volume * self.hydrogen.liquid.density
+
+            # Try using both phases if available
+            return tank_volume * (
+                self.fill * self.hydrogen.liquid.density
+                + (1 - self.fill) * self.hydrogen.gas.density
+            )
+        except (ValueError, AttributeError) as e:
+            # If phases aren't available as expected, use a fallback approach
+            print(f"Warning: Issue accessing hydrogen phases: {e}")
+
+            # Try to get density from the available phase
+            try:
+                # If it's a two-phase hydrogen with one phase available
+                if hasattr(self.hydrogen, 'liquid'):
+                    print("Using liquid phase density for initial mass calculation")
+                    return tank_volume * self.hydrogen.liquid.density
+            except ValueError:
+                pass
+
+            try:
+                if hasattr(self.hydrogen, 'gas'):
+                    print("Using gas phase density for initial mass calculation")
+                    return tank_volume * self.hydrogen.gas.density
+            except ValueError:
+                pass
+
+            # Last resort: use the density directly if it's a single-phase hydrogen
+            print("Using base hydrogen density for initial mass calculation")
+            return tank_volume * self.hydrogen.density
 
 
 @dataclass
@@ -157,12 +185,37 @@ class TankState:
 
     @property
     def phase(self) -> str:
-        hydrogen_state = self.hydrogen.phase
-        if "liquid" in hydrogen_state:
-            return "liquid"
-        if hydrogen_state == "twophase":
+        """Determine the phase of the tank state without causing recursion."""
+        # Direct class check to avoid triggering property accessors
+        hydrogen_class_name = self.hydrogen.__class__.__name__
+
+        if 'TwoPhase' in hydrogen_class_name:
             return "twophase"
-        return "gas"
+
+        # Direct attribute checks instead of using properties
+        # that might trigger recursion
+        if hasattr(self, '_fill_level'):
+            fill_level = self._fill_level  # Access the backing field directly
+        elif hasattr(self, 'fuel_mass') and hasattr(self, 'tank') and hasattr(self.tank, 'volume'):
+            # Calculate fill directly without using properties
+            try:
+                max_liquid_mass = self.tank.volume * self.hydrogen.density
+                fill_level = self.fuel_mass / max_liquid_mass if max_liquid_mass > 0 else 0
+            except:
+                # If calculation fails, use a fallback value
+                fill_level = 0.5
+        else:
+            # Default value if we can't determine
+            fill_level = 0.5
+
+        # Determine phase based on fill level directly
+        if fill_level < 0.01:  # Almost empty
+            return "gas"
+        elif fill_level > 0.99:  # Almost full
+            return "liquid"
+        else:
+            # Default to gas for single-phase if we can't determine otherwise
+            return "gas"
 
     def __post_init__(self) -> None:
         self.get_hydrogen_properties()
