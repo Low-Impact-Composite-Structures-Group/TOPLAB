@@ -2,7 +2,7 @@ from src.dynamics.dynamic_models import (DynamicModel,
                                          SinglePhaseLimitLowerPressureModel,
                                          SinglePhaseModel,
                                          TwoPhaseLimitLowerPressureModel,
-                                         TwoPhaseModel, SinglePhaseInOutModel, SinglePhaseLimitLowerPressureInOutModel)
+                                         TwoPhaseModel, SinglePhaseInOutModel, SinglePhaseLimitLowerPressureInOutModel, TwoPhaseInOutModel, TwoPhaseLimitLowerPressureInOutModel)
 
 
 class TankState:
@@ -16,12 +16,14 @@ class OperatingEnvelope:
 
 
 class DynamicModelFactory:
-
     def get_dynamic_model(
         self,
         tank_state: TankState,
         target_conditions: OperatingEnvelope
     ) -> DynamicModel:
+        # Debug print to see what phase is being detected
+        # print(f"DEBUG: Tank state phase = {tank_state.phase}")
+
         if tank_state.phase == "twophase":
             return TwoPhaseFactory().get_dynamic_model(
                 tank_state, target_conditions
@@ -32,20 +34,26 @@ class DynamicModelFactory:
 
 
 class TwoPhaseFactory:
-
     def get_dynamic_model(
         self,
         tank_state: TankState,
         target_conditions: OperatingEnvelope
     ) -> DynamicModel:
-        if (
-            target_conditions.min_pressure is None
-            and target_conditions.max_pressure is None
-        ):
+        # Check for multi-flow first
+        if getattr(tank_state, "multi_flow", False):
+            # Multi-flow models have different signatures
+            if (target_conditions.min_pressure is not None and
+                target_conditions.min_pressure >= tank_state.pressure):
+                return TwoPhaseLimitLowerPressureInOutModel
+            return TwoPhaseInOutModel
+
+        # Original single-flow logic
+        if (target_conditions.min_pressure is None and
+            target_conditions.max_pressure is None):
             return TwoPhaseModel
-        if target_conditions.min_pressure is not None:
-            if tank_state.pressure <= target_conditions.min_pressure:
-                return TwoPhaseLimitLowerPressureModel
+        if (target_conditions.min_pressure is not None and
+            target_conditions.min_pressure >= tank_state.pressure):
+            return TwoPhaseLimitLowerPressureModel
         return TwoPhaseModel
 
 
