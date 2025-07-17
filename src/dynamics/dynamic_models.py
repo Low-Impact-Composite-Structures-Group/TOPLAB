@@ -927,6 +927,220 @@ class SinglePhaseLimitLowerPressureInOutModel(SinglePhaseModelBase):
         )
 
 
+class TwoPhaseInOutModel(TwoPhaseModelBase):
+    """
+    Two-phase dynamic model that handles separate inflow and outflow fuel streams.
+    """
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> StateDerivatives:
+        # Safety check - ensure both lists have at least one item
+        if not fuel_flow_in:
+            # Create a dummy inflow with zero rate
+            from src.mission.mission_sections import InFlow
+            dummy_inflow = InFlow(0.0, tank_state.hydrogen.liquid)
+            fuel_flow_in = [dummy_inflow]
+
+        if not fuel_flow_out:
+            # Create a dummy outflow with zero rate
+            from src.mission.mission_sections import OutFlow
+            dummy_outflow = OutFlow(0.0, "gas")
+            fuel_flow_out = [dummy_outflow]
+
+        # Ensure flows use appropriate hydrogen phase objects
+        processed_inflows = []
+        for flow in fuel_flow_in:
+            flow_rate = flow.mass_flow
+            if isinstance(flow_rate, list):
+                flow_rate = flow_rate[0]
+
+            # Make sure flow has the correct hydrogen type
+            if not hasattr(flow.hydrogen, 'gas') and not hasattr(flow.hydrogen, 'liquid'):
+                # If it's a single-phase hydrogen, convert to appropriate two-phase component
+                from src.mission.mission_sections import InFlow
+                processed_inflows.append(InFlow(flow_rate, tank_state.hydrogen.liquid))
+            else:
+                processed_inflows.append(flow)
+
+        # Create combined flow list for matrix calculations
+        combined_flows = []
+
+        # Add inflows with positive mass flow
+        for flow in processed_inflows:
+            flow_rate = flow.mass_flow
+            if isinstance(flow_rate, list):
+                flow_rate = flow_rate[0]
+            if flow_rate > 0:
+                combined_flows.append(flow)
+
+        # Add outflows with negated mass flow
+        for flow in fuel_flow_out:
+            flow_rate = flow.mass_flow
+            if isinstance(flow_rate, list):
+                flow_rate = flow_rate[0]
+            if flow_rate > 0:
+                # Create a flow with negative mass flow for outflows
+                from src.mission.mission_sections import InFlow
+
+                # Determine hydrogen phase for outflow based on specified phase
+                if hasattr(flow, 'phase'):
+                    # Use appropriate phase from tank's hydrogen
+                    hydrogen_for_outflow = (
+                        tank_state.hydrogen.gas if flow.phase == "gas"
+                        else tank_state.hydrogen.liquid
+                    )
+                elif hasattr(flow, 'hydrogen'):
+                    hydrogen_for_outflow = flow.hydrogen
+                else:
+                    # Default to gas phase if not specified
+                    hydrogen_for_outflow = tank_state.hydrogen.gas
+
+                outflow = InFlow(-flow_rate, hydrogen_for_outflow)
+                combined_flows.append(outflow)
+
+        # Continue with matrix calculations as before
+        a = cls.define_a_matrix(tank_state)
+        b = cls.define_b_vector(tank_state, combined_flows)
+        x = np.linalg.solve(a, b)
+
+        # Apply safety limits to prevent non-physical values
+        MAX_PRESSURE_CHANGE = 1e5  # Pa/s (max 1 bar/s)
+        MAX_TEMP_CHANGE = 1.0  # K/s
+
+        dP_dt = np.clip(x[0][0], -MAX_PRESSURE_CHANGE, MAX_PRESSURE_CHANGE)
+        dT_dt = np.clip(x[1][0], -MAX_TEMP_CHANGE, MAX_TEMP_CHANGE)
+
+        return StateDerivatives(
+            dP_dt,
+            dT_dt,
+            x[2][0],
+            x[3][0],
+            cls.venting_mass(),
+            cls.added_heat_flux()
+        )
+
+    @classmethod
+    def venting_mass(cls) -> float:
+        return 0
+
+    @classmethod
+    def added_heat_flux(cls) -> float:
+        return 0
+
+class TwoPhaseLimitLowerPressureInOutModel(TwoPhaseModelBase):
+    """
+    Two-phase dynamic model with lower pressure limit support that handles separate
+    inflow and outflow fuel streams. Used when tank is at minimum pressure boundary.
+    """
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> StateDerivatives:
+        # Calculate net mass flow (inflow - outflow)
+        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
+        outflow_sum = sum([flow.mass_flow for flow in fuel_flow_out])
+        net_mass_flow = inflow_sum - outflow_sum
+
+        # Create a combined flow list for compatibility with existing methods
+        from src.mission.mission_sections import InFlow
+        combined_flows = [InFlow(net_mass_flow, tank_state.hydrogen.liquid)]
+
+        return StateDerivatives(
+            cls.compute_pressure_derivative(),
+            cls.compute_temperature_derivative(),
+            cls.compute_gas_mass_derivative(tank_state.hydrogen, combined_flows),
+            cls.compute_liquid_mass_derivative(tank_state.hydrogen, combined_flows),
+            cls.compute_venting_mass(),
+            cls.compute_required_heat_flux(
+                tank_state.hydrogen,
+                combined_flows,
+                tank_state.heat_flux,
+                fuel_flow_in,
+                fuel_flow_out
+            )
+        )
+
+    @staticmethod
+    def compute_pressure_derivative() -> float:
+        return 0
+
+    @staticmethod
+    def compute_temperature_derivative() -> float:
+        return 0
+
+    @staticmethod
+    def compute_gas_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, combined_flows: list[FuelFlow]
+    ) -> float:
+        return (
+            sum([flow.mass_flow for flow in combined_flows]) / (
+                1 - hydrogen.liquid.density / hydrogen.gas.density
+            )
+        )
+
+    @staticmethod
+    def compute_liquid_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, combined_flows: list[FuelFlow]
+    ) -> float:
+        return (
+            sum([flow.mass_flow for flow in combined_flows]) / (
+                1 - hydrogen.gas.density / hydrogen.liquid.density
+            )
+        )
+
+    @staticmethod
+    def compute_venting_mass() -> float:
+        return 0
+
+    @classmethod
+    def compute_required_heat_flux(
+        cls,
+        hydrogen: TwoPhaseHydrogen,
+        combined_flows: list[FuelFlow],
+        heat_flux: float,
+        fuel_flow_in: list[FuelFlow] = None,
+        fuel_flow_out: list[FuelFlow] = None
+    ) -> float:
+        # Calculate energy contributions from mass derivatives
+        t1 = hydrogen.liquid.enthalpy * cls.compute_liquid_mass_derivative(
+            hydrogen, combined_flows
+        )
+        t2 = hydrogen.gas.enthalpy * cls.compute_gas_mass_derivative(
+            hydrogen, combined_flows
+        )
+
+        # Calculate energy contributions from flows
+        flow_energy = 0
+        # Add energy from inflows
+        if fuel_flow_in:
+            for flow in fuel_flow_in:
+                flow_energy += flow.mass_flow * flow.hydrogen.enthalpy
+
+        # Add energy from outflows
+        if fuel_flow_out:
+            for flow in fuel_flow_out:
+                if hasattr(flow, 'hydrogen'):
+                    flow_energy -= flow.mass_flow * flow.hydrogen.enthalpy
+                else:
+                    # If outflow has no hydrogen property, use tank phase
+                    flow_energy -= flow.mass_flow * (
+                        hydrogen.gas.enthalpy if flow.phase == "gas"
+                        else hydrogen.liquid.enthalpy
+                    )
+
+        # Return required heat flux
+        return - (t1 + t2 - flow_energy - heat_flux)
+
+
 def main():
     pass
 
