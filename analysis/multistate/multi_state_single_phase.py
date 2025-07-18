@@ -78,11 +78,10 @@ def perform_analysis():
     # Define interaction rules - Transfer fuel from Tank 1 to Tank 2
     # based on the mission requirements
     interaction_rules = {
-        "interaction_type": "mission_based",
-        "reservoir_tank_idx": 0,
-        "consumer_tank_idx": 1,
-        "inflow_safety_factor": 0.8,
-        "max_flow_rate": 0.1  # kg/s - limit maximum flow between tanks
+        "type": "mission_based",
+        "safety_factor": 0.8,
+        "max_flow_rate": 0.1,
+        "active_at_start": True
     }
 
     # Run multi-tank analysis
