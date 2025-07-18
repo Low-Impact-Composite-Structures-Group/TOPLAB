@@ -669,7 +669,7 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         # Original code continues
         dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flow_in[0], fuel_flow_out[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
-            tank_state.phase, in_flow_rate + out_flow_rate
+            tank_state.phase, in_flow_rate - out_flow_rate
         )
 
         # Apply safety limits to prevent non-physical values
