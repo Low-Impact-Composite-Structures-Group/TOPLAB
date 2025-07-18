@@ -360,15 +360,43 @@ def plot_single_tank_fill(
     y2ticks: list[float] = None
 ):
     times = tank_state.timesteps_in_hours
-    data = [
-        [
-            Line(times, tank_state.liquid_masses, "Liquid"),
-            Line(times, tank_state.gas_masses, "Gas"),
-            Line(times, tank_state.total_masses, "Total")
-        ], [
-            Line(times, tank_state.fills, "Fill")
+
+    # Safely determine if we're dealing with single-phase hydrogen
+    is_single_phase = True
+    try:
+        # Check the class name directly
+        hydrogen_class = tank_state.hydrogens[0].__class__.__name__
+        is_single_phase = 'TwoPhase' not in hydrogen_class
+    except (IndexError, AttributeError):
+        # If any error occurs, assume single phase to be safe
+        is_single_phase = True
+
+    # Get masses directly from states
+    try:
+        # Get masses directly from state objects without using properties
+        masses = []
+        for state in tank_state.states:
+            masses.append(state.fuel_mass)
+
+        # For single phase, only plot total mass and fill level
+        data = [
+            [
+                Line(times, masses, "Total Mass")
+            ], [
+                Line(times, tank_state.fills, "Fill")
+            ]
         ]
-    ]
+    except (AttributeError, ValueError) as e:
+        print(f"Warning: Error accessing fuel masses: {e}")
+        # Fallback with empty data
+        data = [
+            [
+                Line(times, [0] * len(times), "No mass data available")
+            ], [
+                Line(times, tank_state.fills, "Fill")
+            ]
+        ]
+
     x_label = "Time [hour]"
     y_labels = ["Fuel Mass [kg]", "Fill [%]"]
     return TwinXFigure(
@@ -378,7 +406,6 @@ def plot_single_tank_fill(
         x_ticks=x_ticks,
         y_ticks=[y1ticks, y2ticks]
     )
-
 def plot_single_required_flux(
     tank_state: TankStates,
     x_ticks: list[float] = None,
