@@ -22,6 +22,10 @@ from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.tank_states import (InitialState, TankStates,
                                             TargetState, TankState)
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
+from src.rules.interaction_rules import (
+    InteractionRule, MissionBasedFlow, TimeBasedFlow, ConditionalFlow,
+    pressure_above, pressure_below, time_after, mission_based_flow
+)
 
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -580,6 +584,9 @@ class MultiTankAnalysisFacade(AnalysisFacade):
         # Define maximum allowable temperature
         MAX_TEMPERATURE = 800.0  # Kelvin - prevent unrealistic temperatures
 
+        # Create the flow rule from configuration
+        flow_rule = cls._create_flow_rule(interaction_rules)
+
         # Loop over mission sections
         time_offset = 0
         early_stop = False
@@ -602,13 +609,20 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                         else:
                             mission_outflow += flow.mass_flow
 
-                # Compute transfer flow (from tank 1 to tank 2)
-                # inflow_safety_factor ensures inflow is less than outflow
-                inflow_safety_factor = interaction_rules.get("inflow_safety_factor")
-                transfer_flow = abs(mission_outflow)  * inflow_safety_factor
-                max_flow = interaction_rules.get("max_flow_rate", None)
-                if max_flow is not None:
-                    transfer_flow = min(transfer_flow, max_flow)
+                # Evaluate the flow rule
+                last_state_1 = tank_states[0].last_state if tank_states[0].states else cls._define_initial_state(initial_conditions[0])
+                last_state_2 = tank_states[1].last_state if tank_states[1].states else cls._define_initial_state(initial_conditions[1])
+
+                # Add step info to mission data for interpolation
+                section.current_step = step
+                section.total_steps = steps
+
+                # Evaluate the flow rule
+                transfer_flow = flow_rule.evaluate(
+                    [last_state_1, last_state_2],
+                    t,
+                    section
+                )
 
                 # Net flows for each tank
                 # Tank 1: only outflow (should be negative)
@@ -842,6 +856,70 @@ class MultiTankAnalysisFacade(AnalysisFacade):
     def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
         """Define stopping criteria for multi-tank analysis."""
         return [NoFuelMass(), MaxPressureReached()]
+
+    @classmethod
+    def _create_flow_rule(cls, rule_config: dict) -> InteractionRule:
+        """Create an InteractionRule from configuration dictionary"""
+        rule_type = rule_config.get("type", "mission_based")
+        max_flow_rate = rule_config.get("max_flow_rate")
+
+        if rule_type == "mission_based":
+            return MissionBasedFlow(
+                safety_factor=rule_config.get("safety_factor", 0.8),
+                max_flow_rate=max_flow_rate,
+                active=rule_config.get("active_at_start", True)
+            )
+
+        elif rule_type == "time_based":
+            return TimeBasedFlow(
+                rule_config["time_flow_pairs"],
+                max_flow_rate=max_flow_rate,
+                active=rule_config.get("active_at_start", True)
+            )
+
+        elif rule_type == "conditional":
+            rule = ConditionalFlow(
+                max_flow_rate=max_flow_rate,
+                active=rule_config.get("active_at_start", True)
+            )
+
+            # Add conditions from config
+            for condition in rule_config.get("conditions", []):
+                cond_type = condition.get("type")
+
+                if cond_type == "pressure_above":
+                    cond_func = pressure_above(
+                        condition.get("tank_idx", 1),
+                        condition.get("threshold")
+                    )
+                elif cond_type == "pressure_below":
+                    cond_func = pressure_below(
+                        condition.get("tank_idx", 1),
+                        condition.get("threshold")
+                    )
+                elif cond_type == "time_after":
+                    cond_func = time_after(condition.get("threshold"))
+                else:
+                    raise ValueError(f"Unknown condition type: {cond_type}")
+
+                # Handle flow value or calculator
+                flow_value = condition.get("flow_value")
+                if condition.get("use_mission_flow", False):
+                    flow_calc = mission_based_flow(
+                        condition.get("safety_factor", 0.8)
+                    )
+                    rule.add_condition(cond_func, flow_calc)
+                else:
+                    rule.add_condition(cond_func, flow_value)
+
+            # Set default flow
+            if "default_flow" in rule_config:
+                rule.set_default_flow(rule_config["default_flow"])
+
+            return rule
+
+        else:
+            raise ValueError(f"Unsupported rule type: {rule_type}")
 
 
 def main():
