@@ -26,6 +26,7 @@ from src.rules.interaction_rules import (
     InteractionRule, MissionBasedFlow, TimeBasedFlow, ConditionalFlow,
     pressure_above, pressure_below, time_after, mission_based_flow
 )
+import numpy as np
 
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -74,6 +75,7 @@ class InitialConditions:
     temperature: float
     fill: float
     multi_flow: bool = False  # Used for dual tank analysis
+    mass_fraction: float = 1.0  # 1.0 = full mass at given P,T, 0.1 = 10% of max capacity
 
 @dataclass
 class TargetConditions:
@@ -148,14 +150,28 @@ class AnalysisFacade(Protocol):
 
     @staticmethod
     def _define_initial_state(
-        initial_conditions: InitialConditions
+        initial_conditions: InitialConditions,
+        tank_volume: float = None  # Optional parameter for tank volume
     ) -> InitialState:
-        return InitialState(
+        # Create initial state with original pressure and temperature
+        state = InitialState(
             initial_conditions.pressure,
             initial_conditions.temperature,
             initial_conditions.fill,
             multi_flow=initial_conditions.multi_flow
         )
+
+        # Apply mass fraction if specified without modifying pressure or temperature
+        if hasattr(initial_conditions, 'mass_fraction') and tank_volume is not None:
+            if initial_conditions.mass_fraction < 1.0 and initial_conditions.mass_fraction > 0.0:
+                # Calculate the full mass at these conditions
+                full_mass = state.compute_fuel_mass(tank_volume)
+                # Set a custom attribute to store the adjusted mass
+                state.override_mass = full_mass * initial_conditions.mass_fraction
+                print(f"DEBUG: Setting override_mass to {state.override_mass:.2f} kg")
+                print(f"DEBUG: Attribute exists? {hasattr(state, 'override_mass')}")
+
+        return state
 
 
 class DrainingAnalysisFacade(AnalysisFacade):
@@ -561,11 +577,25 @@ class MultiTankAnalysisFacade(AnalysisFacade):
         tanks = []
         tank_states = []
         for i, config in enumerate(tank_configurations):
+            # Calculate tank volume
+            dimensions = config["dimensions"]
+            tank_volume = None
+            if dimensions.body_length == 0:  # Spherical tank
+                tank_volume = (4/3) * np.pi * dimensions.radius**3
+            else:  # Cylindrical tank with hemispherical ends
+                cylinder_volume = np.pi * dimensions.radius**2 * dimensions.body_length
+                hemispheres_volume = (4/3) * np.pi * dimensions.radius**3
+                tank_volume = cylinder_volume + hemispheres_volume
+
+            # Create initial state with tank volume for mass fraction adjustment
+            initial_state = cls._define_initial_state(initial_conditions[i], tank_volume)
+
+            # Create tank
             tank = cls._define_tank(
-                config["dimensions"],
+                dimensions,
                 config["material"],
                 operating_envelopes[i],
-                cls._define_initial_state(initial_conditions[i])
+                initial_state
             )
             tanks.append(tank)
             tank_states.append(TankStates([], MULTISTEP_METHOD.timestep))
@@ -636,26 +666,43 @@ class MultiTankAnalysisFacade(AnalysisFacade):
 
                 # Convert InitialState to TankState because we need to access certain attributes
                 if isinstance(last_state_1, InitialState):
+                    # Check if we have an overridden mass
+                    if hasattr(last_state_1, 'override_mass'):
+                        # Use the overridden mass value
+                        override_mass = last_state_1.override_mass
+                    else:
+                        # Calculate normally
+                        override_mass = last_state_1.compute_fuel_mass(tanks[0].volume)
+
                     last_state_1 = TankState(
                         tanks[0],
                         last_state_1.temperature,
                         last_state_1.pressure,
-                        last_state_1.compute_fuel_mass(tanks[0].volume),
+                        override_mass,  # Use the override mass here
                         multi_flow=last_state_1.multi_flow
                     )
+
                 if isinstance(last_state_2, InitialState):
+                    # Check if we have an overridden mass
+                    if hasattr(last_state_2, 'override_mass'):
+                        # Use the overridden mass value
+                        override_mass = last_state_2.override_mass
+                    else:
+                        # Calculate normally
+                        override_mass = last_state_2.compute_fuel_mass(tanks[1].volume)
+
                     last_state_2 = TankState(
                         tanks[1],
                         last_state_2.temperature,
                         last_state_2.pressure,
-                        last_state_2.compute_fuel_mass(tanks[1].volume),
+                        override_mass,  # Use the override mass here
                         multi_flow=last_state_2.multi_flow
                     )
 
                 # Get current masses
                 current_mass_1 = last_state_1.fuel_mass if hasattr(last_state_1, "fuel_mass") else last_state_1.compute_fuel_mass(tanks[0].volume)
                 current_mass_2 = last_state_2.fuel_mass if hasattr(last_state_2, "fuel_mass") else last_state_2.compute_fuel_mass(tanks[1].volume)
-
+                # current_mass_2 = 220
                 # Update initial masses if first step
                 if step == 0 and initial_mass_1 is None:
                     initial_mass_1 = current_mass_1
@@ -664,6 +711,12 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     min_mass_2 = max(MIN_ABSOLUTE_MASS, initial_mass_2 * 0.01)  # 1% of initial
                     print(f"Initial masses: Tank 1 = {initial_mass_1:.2f}kg, Tank 2 = {initial_mass_2:.2f}kg")
                     print(f"Minimum mass thresholds: Tank 1 = {min_mass_1:.2f}kg, Tank 2 = {min_mass_2:.2f}kg")
+
+                    # If we have a mass_fraction in initial_conditions, adjust initial_mass_2
+                    if hasattr(initial_conditions[1], 'mass_fraction') and initial_conditions[1].mass_fraction < 1.0:
+                        initial_mass_2 = initial_mass_2 * initial_conditions[1].mass_fraction
+                        current_mass_2 = initial_mass_2  # Also update current_mass_2
+                        print(f"Adjusted Tank 2 initial mass to {initial_mass_2:.2f} kg (mass_fraction={initial_conditions[1].mass_fraction})")
 
                 #TODO: make this feature optional. It's a good feature for analysis, but not for development
                 # # Early stop if either tank is approaching the minimum mass
