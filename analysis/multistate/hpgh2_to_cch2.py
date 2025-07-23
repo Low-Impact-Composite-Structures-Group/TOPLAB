@@ -12,20 +12,22 @@ import matplotlib.pyplot as plt
 
 def perform_analysis():
     # Define Tank 1 parameters (reservoir)
-    p_init_1 = 4e+7  # Pa
-    t_init_1 = 300  # K
+    p_init_1 = 5e+7  # Pa
+    t_init_1 = 400  # K
     fill_1 = 0.0 # no liquid
     p_max_1 = 5.0e+8  # Pa
     p_min_1 = 1500000  # Pa
     ambient_heat_load_1 = 2.0  # W/m²
+    mass_fraction_1 = 1.0 # analog to fill, but for gas wrt mass
 
     # Define Tank 2 parameters (consumer)
     p_init_2 = 4e+7  # Pa
-    t_init_2 = 70  # K
+    t_init_2 =  70 # K
     fill_2 = 0.0 # no liquid
     p_max_2 = 5.0e+8  # Pa
     p_min_2 = 1500000  # Pa
     ambient_heat_load_2 = 2.0  # W/m²
+    mass_fraction_2 = 0.35
 
     # Get mission details
     mission = Mission.triathlon()
@@ -55,8 +57,8 @@ def perform_analysis():
     operating_window_2 = OperatingEnvelope(p_max_2, p_min_2, None)
 
     # Initial conditions
-    initial_conditions_1 = InitialConditions(p_init_1, t_init_1, fill_1, multi_flow=True)
-    initial_conditions_2 = InitialConditions(p_init_2, t_init_2, fill_2, multi_flow=True)
+    initial_conditions_1 = InitialConditions(p_init_1, t_init_1, fill_1, multi_flow=True, mass_fraction=mass_fraction_1)
+    initial_conditions_2 = InitialConditions(p_init_2, t_init_2, fill_2, multi_flow=True, mass_fraction=mass_fraction_2)
 
     # Define tank configurations for MultiTankAnalysisFacade
     tank_configs = [
@@ -81,15 +83,15 @@ def perform_analysis():
     "active_at_start": True,
     "conditions": [
         {
-            "type": "pressure_below",
+            "type": "time_after",
             "tank_idx": 1,        # Monitor Tank 2 (consumer)
-            "threshold": 10e5,     # pressure threshold (floor)
+            "threshold": 0.35*3600,     # pressure threshold (floor)
             "use_mission_flow": True,
             "safety_factor": 0.8  # Same as before
         }
     ],
     "default_flow": 0.0  # No flow until condition is met
-}
+    }
 
     # Run multi-tank analysis
     print("Analyzing multi-tank system...")
@@ -130,9 +132,9 @@ def perform_analysis():
         tank_states_2,
         figsize=(15, 5),
         titles=[
-            "Comparative Fuel Mass - Reservoir vs Consumer",
-            "Comparative Temperatures - Reservoir vs Consumer",
-            "Comparative Pressures - Reservoir vs Consumer"
+            "Fuel Masses - Reservoir vs Consumer",
+            "Tank Temperatures - Reservoir vs Consumer",
+            "Tank Pressures - Reservoir vs Consumer"
         ]
     )
 
