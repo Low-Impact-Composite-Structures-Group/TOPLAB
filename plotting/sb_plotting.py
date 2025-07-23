@@ -191,8 +191,8 @@ class SeabornPlotter:
                     masses2 = [0] * len(times2)
 
         # Plot mass data
-        mass_ax.plot(times1, masses1, '-', color=KONINGSBLAUW, label="Tank 1 (Reservoir)", linewidth=2)
-        mass_ax.plot(times2, masses2, '-', color=BORDEAUX, label="Tank 2 (Consumer)", linewidth=2)
+        mass_ax.plot(times1, masses1, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        mass_ax.plot(times2, masses2, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
         mass_ax.set_xlabel("Time [hour]")
         mass_ax.set_ylabel("Fuel Mass [kg]")
         mass_ax.set_title(titles[0])
@@ -200,8 +200,8 @@ class SeabornPlotter:
         mass_ax.grid(True, alpha=0.3)
 
         # SUBPLOT 2: Temperature Comparison
-        temp_ax.plot(times1, tank_states_1.temperatures, '-', color=KONINGSBLAUW, label="Tank 1 (Reservoir)", linewidth=2)
-        temp_ax.plot(times2, tank_states_2.temperatures, '-', color=BORDEAUX, label="Tank 2 (Consumer)", linewidth=2)
+        temp_ax.plot(times1, tank_states_1.temperatures, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        temp_ax.plot(times2, tank_states_2.temperatures, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
         temp_ax.set_xlabel("Time [hour]")
         temp_ax.set_ylabel("Temperature [K]")
         temp_ax.set_title(titles[1])
@@ -209,8 +209,8 @@ class SeabornPlotter:
         temp_ax.grid(True, alpha=0.3)
 
         # SUBPLOT 3: Pressure Comparison
-        pressure_ax.plot(times1, tank_states_1.pressures_in_bar, '-', color=KONINGSBLAUW, label="Tank 1 (Reservoir)", linewidth=2)
-        pressure_ax.plot(times2, tank_states_2.pressures_in_bar, '-', color=BORDEAUX, label="Tank 2 (Consumer)", linewidth=2)
+        pressure_ax.plot(times1, tank_states_1.pressures_in_bar, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        pressure_ax.plot(times2, tank_states_2.pressures_in_bar, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
         pressure_ax.set_xlabel("Time [hour]")
         pressure_ax.set_ylabel("Pressure [bar]")
         pressure_ax.set_title(titles[2])
@@ -279,6 +279,136 @@ class SeabornPlotter:
 
         # Add legend with better positioning
         ax.legend(loc='best', framealpha=0.9)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_single_tank_states(self, tank_states, figsize=(15, 5)):
+        """
+        Create a single figure with three plots for a single tank:
+        1. Fuel Mass
+        2. Temperature
+        3. Pressure
+
+        Similar to plot_comparative_tank_states but for a single dataset
+        """
+        # Colors from the Delft palette
+        from plotting.plot_style_sb import KONINGSBLAUW
+
+        # Create figure with 3 subplots
+        fig, axs = plt.subplots(1, 3, figsize=figsize)
+
+        # Unpack the axes for easier access
+        mass_ax, temp_ax, pressure_ax = axs
+
+        # Get time data
+        times = tank_states.timesteps_in_hours
+
+        # SUBPLOT 1: Fuel Mass
+        try:
+            # Try to get masses directly from states
+            masses = []
+            for state in tank_states.states:
+                masses.append(state.fuel_mass)
+        except (AttributeError, IndexError):
+            # Fall back to total_masses if available
+            try:
+                masses = tank_states.total_masses
+            except (AttributeError, IndexError):
+                # Last resort - compute from liquid+gas masses
+                try:
+                    masses = [l + g for l, g in zip(tank_states.liquid_masses, tank_states.gas_masses)]
+                except (AttributeError, IndexError):
+                    print("Warning: Could not access fuel masses")
+                    masses = [0] * len(times)
+
+        # Plot mass data
+        mass_ax.plot(times, masses, '-', color=KONINGSBLAUW, linewidth=2)
+        mass_ax.set_xlabel("Time [hour]")
+        mass_ax.set_ylabel("Fuel Mass [kg]")
+        mass_ax.set_title("Tank Fuel Mass")
+        mass_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 2: Temperature
+        temp_ax.plot(times, tank_states.temperatures, '-', color=KONINGSBLAUW, linewidth=2)
+        temp_ax.set_xlabel("Time [hour]")
+        temp_ax.set_ylabel("Temperature [K]")
+        temp_ax.set_title("Tank Temperature")
+        temp_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 3: Pressure
+        pressure_ax.plot(times, tank_states.pressures_in_bar, '-', color=KONINGSBLAUW, linewidth=2)
+        pressure_ax.set_xlabel("Time [hour]")
+        pressure_ax.set_ylabel("Pressure [bar]")
+        pressure_ax.set_title("Tank Pressure")
+        pressure_ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_single_mission_flows(self, mass_flows, fuel_flow_keys, durations, total_duration,
+                             interpolated_mass_flows=None, figsize=(10, 6)):
+        """
+        Plot mission mass flows with Seaborn styling for a single tank.
+        """
+        # Colors from the Delft palette
+        from plotting.plot_style_sb import KONINGSBLAUW, BORDEAUX
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Create time array
+        cumulative_time = 0
+        time_points = []
+        section_mass_flows = []
+
+        # Process each mission section
+        for i, (flows, duration) in enumerate(zip(mass_flows, durations)):
+            # Add section start and end times
+            section_start_time = cumulative_time
+            section_end_time = section_start_time + duration
+
+            # Add mass flow points
+            if len(flows) == 2:  # If we have start and end values
+                time_points.extend([section_start_time, section_end_time])
+                section_mass_flows.extend(flows)
+            else:  # If we have more detailed points
+                # Create evenly spaced time points for this section
+                section_times = np.linspace(section_start_time, section_end_time, len(flows))
+                time_points.extend(section_times)
+                section_mass_flows.extend(flows)
+
+            cumulative_time = section_end_time
+
+        # Convert time to hours for plotting
+        time_hours = [t * (1 / 3600) for t in time_points]
+
+        # Plot the mission flow rate
+        ax.plot(time_hours, section_mass_flows, '-', color=KONINGSBLAUW,
+                label="Mission Flow Rate", linewidth=2)
+
+        # If we have interpolated mass flows, plot those too for comparison
+        if interpolated_mass_flows is not None:
+            # Create time points matching the length of interpolated_mass_flows
+            interp_times = np.linspace(0, total_duration, len(interpolated_mass_flows))
+            ax.plot(interp_times, interpolated_mass_flows, '--', color=BORDEAUX,
+                    label="Interpolated Flow Rate", linewidth=1.5, alpha=0.7)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        ax.set_title("Mission Mass Flow Rate")
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Mass Flow Rate [kg/s]")
+
+        # Add legend if we have multiple datasets
+        if interpolated_mass_flows is not None:
+            ax.legend(loc='best', framealpha=0.9)
 
         # Apply tight layout
         fig.tight_layout()

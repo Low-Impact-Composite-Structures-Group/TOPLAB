@@ -15,6 +15,7 @@ import os
 import time
 import yaml # type: ignore
 import csv
+from plotting.sb_plotting import SeabornPlotter
 
 # helper function to ensure computed length is not negative
 def radius_from_volume_sphere(volume: float) -> float:
@@ -252,10 +253,18 @@ def perform_analysis():
     print(f"Time taken: {time.time() - start_time}")
 
     # Plotting
-    fig_tank_temperatures = plot_single_tank_temperatures(performance.tank_states)
-    fig_tank_pressures = plot_single_tank_loads(performance.tank_states)
+    # Create a SeabornPlotter instance for consistent styling
+    plotter = SeabornPlotter(font="Cambria", palette="deep")
+
+    # Create single tank state plots with Seaborn styling
+    fig_tank_states = plotter.plot_single_tank_states(performance.tank_states)
+
+    # Plot mission mass flows with Seaborn styling
+    fig_mass_flows = plotter.plot_single_mission_flows(mass_flows, fuel_flow_keys, durations, total_duration,
+                                               interpolated_mass_flows)
+
+    # Keep your other specialized plots
     fig_req_flux, ihex_heat = plot_single_required_flux(performance.tank_states)
-    fig_tank_fill = plot_single_tank_fill(performance.tank_states)
     fig_density_vs_temperature_gas = plot_density_vs_temperature(
         performance.tank_states,
         "Discharge",
@@ -263,7 +272,6 @@ def perform_analysis():
         isobar_labels,
         density_lists
     )
-    plot_mission_mass_flows(mass_flows, fuel_flow_keys, durations, total_duration)
     plot_heat_flows(performance.tank_states, ohex_heat)
 
         # Save some lists to a CSV file
@@ -273,6 +281,8 @@ def perform_analysis():
         writer.writerow(['Enthalpies', 'oHEX Heat', 'Mass Flows', 'Masses', 'iHEX Heat'])
         for enthalpy, ohex, mdot, mass, ihex in zip(enthalpies, ohex_heat, interpolated_mass_flows, masses, ihex_heat):
             writer.writerow([enthalpy, ohex, mdot, mass, ihex])
+
+    plt.close(fig_req_flux.fig)
 
     plt.show()
 
