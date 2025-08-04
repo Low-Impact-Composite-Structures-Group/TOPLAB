@@ -122,6 +122,36 @@ class Mission:
         return cls(mission_sections)
 
     @classmethod
+    def atr72(cls):
+
+        # Definition of the mission particulars
+        cruise_altitude = 7010 # [m]
+        standard_temperature = 273.15 # [K]
+        durations = [0.008333333, 0.009464785, 0.251716247, 0.446224256, 0.008899059, 0.101703534, 0.002542588, 0.035596237, 0.044495296,0.00817315, 0.10751462] # durations in hours
+        # In the atr72() method:
+        altitudes = [0, cruise_altitude/2, cruise_altitude/2, cruise_altitude, cruise_altitude/2, cruise_altitude/2, cruise_altitude/2,
+             cruise_altitude/2, cruise_altitude/2, cruise_altitude/2, cruise_altitude/2]  # Now 11 elements to match durations
+        temperatures = [standard_temperature] * len(durations)  # assume constant standard temperature
+        mach_number = 0.0
+        fuel_flows = [[0.0, 0.098061674], 0.098061674, [0.098061674, 0.060528634], 0.060528634, [0.060528634, 0.026167401], [0.026167401, 0.01215859], [0.01215859, 0.03753304], [0.03753304, 0.054185022], [0.054185022, 0.035154185], [0.035154185, 0.007665198], [0.007665198, 0.0]] # [kg/s] values from H2 mass and flow estimation excel sheet
+        throttles = [1.0] * len(durations) # default to 1 for now
+        fuel_flow_keys = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven']
+
+        mission_sections = [
+            MissionSection(
+                duration * HOURS_TO_SECONDS,
+                [OutFlow([-throttle * flow for flow in fuel_flow], "gas") if isinstance(fuel_flow, list) else OutFlow(-throttle * fuel_flow, "gas")],
+                altitude,
+                mach_number,
+                fuel_flow_key,
+                temperature
+            )
+            for duration, altitude, throttle, fuel_flow, temperature, fuel_flow_key in zip(durations, altitudes, throttles, fuel_flows, temperatures, fuel_flow_keys)
+        ]
+
+        return cls(mission_sections)
+
+    @classmethod
     def aircraft_mission(
         cls,
         fuel_flow_state: str,
