@@ -96,7 +96,7 @@ def set_font_with_fallbacks(primary_font="Cambria", fallbacks=["Times New Roman"
     # Try primary font first
     if primary_font in available_fonts:
         plt.rcParams["font.family"] = primary_font
-        print(f"Using font: {primary_font}")
+        # print(f"Using font: {primary_font}")
         return primary_font
 
     # Try fallbacks
@@ -134,7 +134,7 @@ def set_seaborn_style(font: str = "Cambria", palette: str = "delft",
     # Set font with fallbacks
     actual_font = set_font_with_fallbacks(font)
 
-    print(f"Seaborn style set with font: {actual_font}, palette: {palette}, style: {style}, context: {context}")
+    # print(f"Seaborn style set with font: {actual_font}, palette: {palette}, style: {style}, context: {context}")
 
 
 def configure_plot_style(font: str = "Cambria",
@@ -172,7 +172,7 @@ def configure_plot_style(font: str = "Cambria",
     plt.rcParams["ytick.labelsize"] = 10
     plt.rcParams["legend.fontsize"] = 10
 
-    print(f"Plot style configured with figure size: {figure_size}, dpi: {dpi}")
+    # print(f"Plot style configured with figure size: {figure_size}, dpi: {dpi}")
 
 
 def get_palette_colors(n_colors: int = 10, palette: str = None):
