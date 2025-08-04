@@ -27,17 +27,23 @@ def perform_analysis():
     p_max_2 = 5.0e+8  # Pa
     p_min_2 = 1500000  # Pa
     ambient_heat_load_2 = 2.0  # W/m²
-    mass_fraction_2 = 0.35
+    mass_fraction_2 = 0.5
 
     # Get mission details
-    mission = Mission.triathlon()
+    mission = Mission.atr72()
+    # Add after creating the mission
+    print(f"Mission created: {mission.__class__.__name__}")
+    print(f"Number of sections: {len(mission.sections)}")
+    for i, section in enumerate(mission.sections):
+        print(f"Section {i+1}: {section.duration/3600:.4f}h")
+    print(f"Total duration: {sum(s.duration for s in mission.sections)/3600:.4f}h")
     total_fuel_mass = mission.required_fuel
     print(f"Total fuel mass required for mission: {total_fuel_mass:.2f} kg")
 
     # Calculate appropriate radius based on required mass
     hydrogen_requester = SinglePhaseRequester()
     hydrogen_props = hydrogen_requester.get_hydrogen_properties(p_init_1, t_init_1)
-    VOLUME_MARGIN = 1.1 # make the tank 10% larger than the required volume
+    VOLUME_MARGIN = 1.5 # make the tank 10% larger than the required volume
     required_volume = VOLUME_MARGIN*(mission.required_fuel / hydrogen_props.density)
     radius_1 = (3 * required_volume / (4 * np.pi))**(1/3)
     radius_2 = radius_1  # Same radius for both tanks
@@ -77,20 +83,26 @@ def perform_analysis():
     ]
 
     # Define interaction rules
+    # interaction_rules = {
+    # "type": "conditional",
+    # "max_flow_rate": 0.1,  # kg/s - limit maximum flow between tanks
+    # "active_at_start": True,
+    # "conditions": [
+    #     {
+    #         "type": "time_after",
+    #         "tank_idx": 1,        # Monitor Tank 2 (consumer)
+    #         "threshold": 0.1*3600,
+    #         "use_mission_flow": True,
+    #         "safety_factor": 0.8  # Same as before
+    #     }
+    # ],
+    # "default_flow": 0.0  # No flow until condition is met
+    # }
     interaction_rules = {
-    "type": "conditional",
-    "max_flow_rate": 0.1,  # kg/s - limit maximum flow between tanks
-    "active_at_start": True,
-    "conditions": [
-        {
-            "type": "time_after",
-            "tank_idx": 1,        # Monitor Tank 2 (consumer)
-            "threshold": 0.35*3600,     # pressure threshold (floor)
-            "use_mission_flow": True,
-            "safety_factor": 0.8  # Same as before
-        }
-    ],
-    "default_flow": 0.0  # No flow until condition is met
+        "type": "mission_based",
+        "max_flow_rate": 0.1,  # kg/s - limit maximum flow between tanks
+        "active_at_start": True,
+        "safety_factor": 0.8  # Move this to top level
     }
 
     # Run multi-tank analysis
