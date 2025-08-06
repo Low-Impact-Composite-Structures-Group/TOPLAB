@@ -779,6 +779,8 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         fuel_flow_in: float,
         fuel_flow_out: float
     ) -> float:
+        if fuel_mass == 0:
+            return 0
         return hydrogen.density * (fuel_flow_in - fuel_flow_out) / fuel_mass
 
     @staticmethod
