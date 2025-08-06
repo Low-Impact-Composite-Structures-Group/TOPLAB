@@ -58,27 +58,33 @@ class Mission:
         )
 
     @classmethod
-    def refuel_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, mach_number: float, hydrogen) -> MissionSection:
+    def refuel_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, mach_number: float) -> MissionSection:
+        # For refueling, we use negative OutFlow to represent inflow (the opposite of consumption)
         return MissionSection(
                 duration*HOURS_TO_SECONDS,
                 [
-                    InFlow(
-                        throttle*fuel_flow,
-                        hydrogen
+                    OutFlow(
+                        -1 * throttle * fuel_flow,  # Negative flow means adding fuel
+                        "gas"                      # Using gas phase for refueling
                     )
                 ],
                 altitude,
                 mach_number,
-                "Refuelling"
+                "Refueling"
             )
 
     @classmethod
     def dormancy_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, phase: str, mach_number: float) -> MissionSection:
+        """Create a mission section for dormancy with zero fuel flow"""
+        # Force zero fuel flow for dormancy
+        fuel_flow = 0.0
+        throttle = 0.0
         return MissionSection(
                 duration*HOURS_TO_SECONDS,
-                [OutFlow(throttle* fuel_flow, phase)],
+                [],  # Empty list - no fuel flows during dormancy
                 altitude,
-                mach_number
+                mach_number,
+                "Dormancy"
             )
     
     @classmethod
