@@ -36,7 +36,7 @@ LOWER_MASS_LIMIT = 1 # TODO: find suitable lower limit
 # Factories and constants to be used in the analysis
 #TODO: expose timestep to driver programs
 # to pass the configuration to the classes and functions that need it
-TIMESTEP = 1
+TIMESTEP = 5
 MULTISTEP_METHOD = EulerMethod(TIMESTEP)
 DYNAMIC_MODEL_FACTORY = DynamicModelFactory()
 INTERNAL_MODEL = SingleZoneModel()
@@ -163,7 +163,7 @@ class AnalysisFacade(Protocol):
 
         # Apply mass fraction if specified without modifying pressure or temperature
         if hasattr(initial_conditions, 'mass_fraction') and tank_volume is not None:
-            if initial_conditions.mass_fraction < 1.0 and initial_conditions.mass_fraction > 0.0:
+            if initial_conditions.mass_fraction < 1.0:
                 # Calculate the full mass at these conditions
                 full_mass = state.compute_fuel_mass(tank_volume)
                 # Set a custom attribute to store the adjusted mass
@@ -629,15 +629,22 @@ class MultiTankAnalysisFacade(AnalysisFacade):
 
                 # Interpolate mission outflow for tank 2
                 mission_outflow = 0.0
+                refuel_inflow = 0.0
                 for flow in section.fuel_flows:
                     if isinstance(flow, OutFlow):
                         if isinstance(flow.mass_flow, list):
                             from src.dynamics.dynamic_analysis import MissionSectionAnalysis
-                            mission_outflow += MissionSectionAnalysis.interpolate_mass_flows(
+                            flow_value = MissionSectionAnalysis.interpolate_mass_flows(
                                 flow.mass_flow, step, steps
                             )
                         else:
-                            mission_outflow += flow.mass_flow
+                            flow_value = flow.mass_flow
+
+                        # Check if this is refueling (negative outflow in a Refueling section)
+                        if flow_value < 0 and hasattr(section, "fuel_flow_key") and section.fuel_flow_key == "Refuelling":
+                            refuel_inflow += abs(flow_value)  # Make positive for inflow to Tank 1
+                        else:
+                            mission_outflow += flow_value  # Regular outflow for Tank 2
 
                 # Evaluate the flow rule
                 last_state_1 = tank_states[0].last_state if tank_states[0].states else cls._define_initial_state(initial_conditions[0])
@@ -656,7 +663,7 @@ class MultiTankAnalysisFacade(AnalysisFacade):
 
                 # Net flows for each tank
                 # Tank 1: only outflow (should be negative)
-                tank1_net_flow = -transfer_flow
+                tank1_net_flow = refuel_inflow -transfer_flow
                 # Tank 2: inflow (positive) + mission outflow (negative)
                 tank2_net_flow = transfer_flow + mission_outflow
 
@@ -710,9 +717,14 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     min_mass_1 = max(MIN_ABSOLUTE_MASS, initial_mass_1 * 0.01)  # 1% of initial
                     min_mass_2 = max(MIN_ABSOLUTE_MASS, initial_mass_2 * 0.01)  # 1% of initial
                     print(f"Initial masses: Tank 1 = {initial_mass_1:.2f}kg, Tank 2 = {initial_mass_2:.2f}kg")
-                    print(f"Minimum mass thresholds: Tank 1 = {min_mass_1:.2f}kg, Tank 2 = {min_mass_2:.2f}kg")
 
-                    # If we have a mass_fraction in initial_conditions, adjust initial_mass_2
+                    # Add this new code block to handle Tank 1's mass_fraction
+                    if hasattr(initial_conditions[0], 'mass_fraction') and initial_conditions[0].mass_fraction == 0.0:
+                        initial_mass_1 = 0.0
+                        current_mass_1 = 0.0  # Also update current_mass_1
+                        print(f"Forced Tank 1 initial mass to 0.0 kg (mass_fraction={initial_conditions[0].mass_fraction})")
+
+                    # Existing code for Tank 2
                     if hasattr(initial_conditions[1], 'mass_fraction') and initial_conditions[1].mass_fraction < 1.0:
                         initial_mass_2 = initial_mass_2 * initial_conditions[1].mass_fraction
                         current_mass_2 = initial_mass_2  # Also update current_mass_2
@@ -821,7 +833,7 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                 )
 
                 # Check for stopping conditions
-                if new_mass_1 <= min_mass_1:
+                if new_mass_1 <= min_mass_1 and refuel_inflow <= 0:  # Skip this check when refueling
                     print(f"\nStopping simulation: Tank 1 reached minimum mass threshold of {min_mass_1:.2f} kg")
                     # Add states to history
                     tank_states[0].add_tank_state(new_state_1)
@@ -829,7 +841,7 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                     early_stop = True
                     break
 
-                if new_mass_2 <= min_mass_2:
+                if new_mass_2 <= min_mass_2 and refuel_inflow <= 0:
                     print(f"\nStopping simulation: Tank 2 reached minimum mass threshold of {min_mass_2:.2f} kg")
                     # Add states to history
                     tank_states[0].add_tank_state(new_state_1)
@@ -868,7 +880,7 @@ class MultiTankAnalysisFacade(AnalysisFacade):
                         f"Flow T1→T2: {transfer_flow:.3f}kg/s, Mission: {mission_outflow:.3f}kg/s")
 
                 # Track flows for plotting
-                inflow_1.append(0.0)
+                inflow_1.append(refuel_inflow)
                 outflow_1.append(-transfer_flow) # manually making this negative for plotting purposes
                 inflow_2.append(transfer_flow)
                 outflow_2.append(mission_outflow)

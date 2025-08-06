@@ -3,8 +3,14 @@ from src.mission.mission import Mission
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from facades.analysis_facades import OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, MultiTankAnalysisFacade
+from src.mission.mission_sections import OutFlow, MissionSection
 import numpy as np
 
+######################################
+## DISCHARGE ANALYSIS CONFIGURATION ##
+######################################
+
+HOURS_TO_SECONDS = 3600.0
 
 # Define Tank 1 parameters (reservoir)
 p_init_1 = 5e+7  # Pa
@@ -12,7 +18,7 @@ t_init_1 = 400  # K
 fill_1 = 0.0 # no liquid
 p_max_1 = 5.0e+8  # Pa
 p_min_1 = 1500000  # Pa
-ambient_heat_load_1 = 2.0  # W/m²
+ambient_heat_load_1 = 2000.0  # W/m²
 mass_fraction_1 = 1.0 # analog to fill, but for gas wrt mass
 
 # Define Tank 2 parameters (consumer)
@@ -21,7 +27,7 @@ t_init_2 =  70 # K
 fill_2 = 0.0 # no liquid
 p_max_2 = 5.0e+8  # Pa
 p_min_2 = 1500000  # Pa
-ambient_heat_load_2 = 2.0  # W/m²
+ambient_heat_load_2 = 2000.0  # W/m²
 mass_fraction_2 = 0.5
 
 # Get mission details
@@ -100,3 +106,83 @@ interaction_rules = {
 # ],
 # "default_flow": 0.0  # No flow until condition is met
 # }
+
+#####################################
+## DORMANCY ANALYSIS CONFIGURATION ##
+#####################################
+
+# DORMANCY ANALYSIS CONFIGURATION
+duration_hours = 24.0  # Duration of dormancy in hours
+altitude = 0.0  # Altitude in meters
+
+# Create a dormancy mission with a single section
+dormancy_mission = Mission([
+    Mission.dormancy_section(
+        duration=duration_hours,
+        altitude=altitude,
+        fuel_flow=0.0,  # Will be forced to zero anyway
+        throttle=0.0,   # Will be forced to zero anyway
+        phase="gas",    # Dummy value, not used
+        mach_number=0.0
+    )
+])
+
+dormancy_interaction_rules = {
+    "type": "mission_based",
+    "max_flow_rate": 0.0,  # No flow between tanks
+    "active_at_start": False,  # Disable flow
+    "safety_factor": 0.0
+}
+
+####################################
+## REFUEL ANALYSIS CONFIGURATION ##
+####################################
+
+# Define Tank 1 parameters (reservoir)
+p_init_1_refuel = 900000  # Pa
+t_init_1_refuel = 20  # K
+fill_1_refuel = 0.0 # no liquid
+p_max_1_refuel = 5.0e+8  # Pa
+p_min_1_refuel = None  # Pa
+ambient_heat_load_1_refuel = 2000.0  # W/m²
+mass_fraction_1_refuel = 0.0 # analog to fill, but for gas wrt mass
+
+# Define Tank 2 parameters (consumer)
+p_init_2_refuel = 4e+7  # Pa
+t_init_2_refuel =  70 # K
+fill_2_refuel = 0.0 # no liquid
+p_max_2_refuel = 5.0e+8  # Pa
+p_min_2_refuel = None  # Pa
+ambient_heat_load_2_refuel = 2000.0  # W/m²
+mass_fraction_2_refuel = 0.0
+
+# mission details for refuel
+duration_hours_refuel = 1.0  # Duration of refuel in hours
+altitude_refuel = 0.0  # Altitude in meters
+fuel_flow_refuel = 0.1  # Fuel flow rate in kg/s
+
+# get refuel hydrogen properties
+refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_1_refuel, t_init_1_refuel)
+
+refuel_mission = Mission([
+    MissionSection(
+        duration_hours_refuel * HOURS_TO_SECONDS,
+        [
+            OutFlow(-fuel_flow_refuel, "gas")  # NEGATIVE OutFlow = INFLOW to system
+        ],
+        altitude_refuel,
+        0.0,
+        "Refuelling"
+    )
+])
+
+# Initial conditions
+initial_conditions_1_refuel = InitialConditions(p_init_1_refuel, t_init_1_refuel, fill_1_refuel, multi_flow=True, mass_fraction=mass_fraction_1_refuel)
+initial_conditions_2_refuel = InitialConditions(p_init_2_refuel, t_init_2_refuel, fill_2_refuel, multi_flow=True, mass_fraction=mass_fraction_2_refuel)
+
+refuel_interaction_rules = {
+    "type": "mission_based",
+    "max_flow_rate": 0.0,  # No flow between tanks
+    "active_at_start": False,  # Disable flow
+    "safety_factor": 0.0
+}

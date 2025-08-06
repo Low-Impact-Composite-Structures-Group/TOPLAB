@@ -4,8 +4,8 @@ from analysis.multistate.multi_state_dormancy import perform_dormancy_analysis
 
 def perform_analysis():
     perform_discharge_analysis()
-    perform_refuel_analysis()
-    perform_dormancy_analysis()
+    # perform_refuel_analysis()
+    # perform_dormancy_analysis()
 
 
 if __name__ == "__main__":
