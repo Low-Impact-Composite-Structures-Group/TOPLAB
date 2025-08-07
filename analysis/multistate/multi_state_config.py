@@ -6,11 +6,85 @@ from facades.analysis_facades import OperatingEnvelope, TankDimensions, InitialC
 from src.mission.mission_sections import OutFlow, MissionSection
 import numpy as np
 
+
+HOURS_TO_SECONDS = 3600.0
+# Add scenario-specific timesteps
+REFUEL_TIMESTEP = 2.0    # Smaller timestep for refuel (faster dynamics)
+DISCHARGE_TIMESTEP = 10.0  # Standard timestep for discharge
+DORMANCY_TIMESTEP = 60.0  # Larger timestep for dormancy (slower dynamics)
+
+####################################
+## REFUEL ANALYSIS CONFIGURATION ##
+####################################
+
+# Define Tank 1 parameters (reservoir)
+p_init_1_refuel = 900000  # Pa
+t_init_1_refuel = 20  # K
+fill_1_refuel = 0.0 # no liquid
+p_max_1_refuel = 5.0e+8  # Pa
+p_min_1_refuel = None  # Pa
+ambient_heat_load_1_refuel = 2000.0  # W/m²
+mass_fraction_1_refuel = 0.0 # analog to fill, but for gas wrt mass
+
+# Define Tank 2 parameters (consumer)
+p_init_2_refuel = 4e+7  # Pa
+t_init_2_refuel =  70 # K
+fill_2_refuel = 0.0 # no liquid
+p_max_2_refuel = 5.0e+8  # Pa
+p_min_2_refuel = None  # Pa
+ambient_heat_load_2_refuel = 2000.0  # W/m²
+mass_fraction_2_refuel = 0.0
+
+# mission details for refuel
+duration_hours_refuel = 1.0  # Duration of refuel in hours
+altitude_refuel = 0.0  # Altitude in meters
+fuel_flow_refuel = 0.1  # Fuel flow rate in kg/s
+
+# get refuel hydrogen properties
+refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_1_refuel, t_init_1_refuel)
+
+refuel_mission = Mission([
+    MissionSection(
+        duration_hours_refuel * HOURS_TO_SECONDS,
+        [
+            OutFlow(-fuel_flow_refuel, "gas")  # NEGATIVE OutFlow = INFLOW to system
+        ],
+        altitude_refuel,
+        0.0,
+        "Refuelling"
+    )
+])
+
+# Initial conditions
+initial_conditions_1_refuel = InitialConditions(p_init_1_refuel, t_init_1_refuel, fill_1_refuel, multi_flow=True, mass_fraction=mass_fraction_1_refuel)
+initial_conditions_2_refuel = InitialConditions(p_init_2_refuel, t_init_2_refuel, fill_2_refuel, multi_flow=True, mass_fraction=mass_fraction_2_refuel)
+
+# refuel_interaction_rules = {
+#     "type": "mission_based",
+#     "max_flow_rate": 0.0,  # No flow between tanks
+#     "active_at_start": False,  # Disable flow
+#     "safety_factor": 0.0
+# }
+
+refuel_interaction_rules = {
+    "type": "conditional",
+    "max_flow_rate": fuel_flow_refuel,  # Make sure this is not None
+    "active_at_start": True,
+    "conditions": [
+        {
+            "type": "time_after",
+            "tank_idx": 0,
+            "threshold": 600,
+            "use_mission_flow": True,  # Use mission flow instead of specifying flow_rate
+            "safety_factor": 0.8  # Add safety factor
+        }
+    ],
+    "default_flow": 0.0
+}
+
 ######################################
 ## DISCHARGE ANALYSIS CONFIGURATION ##
 ######################################
-
-HOURS_TO_SECONDS = 3600.0
 
 # Define Tank 1 parameters (reservoir)
 p_init_1 = 5e+7  # Pa
@@ -128,59 +202,6 @@ dormancy_mission = Mission([
 ])
 
 dormancy_interaction_rules = {
-    "type": "mission_based",
-    "max_flow_rate": 0.0,  # No flow between tanks
-    "active_at_start": False,  # Disable flow
-    "safety_factor": 0.0
-}
-
-####################################
-## REFUEL ANALYSIS CONFIGURATION ##
-####################################
-
-# Define Tank 1 parameters (reservoir)
-p_init_1_refuel = 900000  # Pa
-t_init_1_refuel = 20  # K
-fill_1_refuel = 0.0 # no liquid
-p_max_1_refuel = 5.0e+8  # Pa
-p_min_1_refuel = None  # Pa
-ambient_heat_load_1_refuel = 2000.0  # W/m²
-mass_fraction_1_refuel = 0.0 # analog to fill, but for gas wrt mass
-
-# Define Tank 2 parameters (consumer)
-p_init_2_refuel = 4e+7  # Pa
-t_init_2_refuel =  70 # K
-fill_2_refuel = 0.0 # no liquid
-p_max_2_refuel = 5.0e+8  # Pa
-p_min_2_refuel = None  # Pa
-ambient_heat_load_2_refuel = 2000.0  # W/m²
-mass_fraction_2_refuel = 0.0
-
-# mission details for refuel
-duration_hours_refuel = 1.0  # Duration of refuel in hours
-altitude_refuel = 0.0  # Altitude in meters
-fuel_flow_refuel = 0.1  # Fuel flow rate in kg/s
-
-# get refuel hydrogen properties
-refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_1_refuel, t_init_1_refuel)
-
-refuel_mission = Mission([
-    MissionSection(
-        duration_hours_refuel * HOURS_TO_SECONDS,
-        [
-            OutFlow(-fuel_flow_refuel, "gas")  # NEGATIVE OutFlow = INFLOW to system
-        ],
-        altitude_refuel,
-        0.0,
-        "Refuelling"
-    )
-])
-
-# Initial conditions
-initial_conditions_1_refuel = InitialConditions(p_init_1_refuel, t_init_1_refuel, fill_1_refuel, multi_flow=True, mass_fraction=mass_fraction_1_refuel)
-initial_conditions_2_refuel = InitialConditions(p_init_2_refuel, t_init_2_refuel, fill_2_refuel, multi_flow=True, mass_fraction=mass_fraction_2_refuel)
-
-refuel_interaction_rules = {
     "type": "mission_based",
     "max_flow_rate": 0.0,  # No flow between tanks
     "active_at_start": False,  # Disable flow

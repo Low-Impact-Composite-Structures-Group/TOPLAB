@@ -11,8 +11,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def perform_dormancy_analysis():
+def perform_dormancy_analysis(initial_states=None, return_performances=False):
+    """
+    Perform dormancy analysis with optional initial states from previous scenario.
 
+    Args:
+        initial_states: List of tank states from previous scenario (optional)
+        return_performances: Whether to return the tank performances
+
+    Returns:
+        List of TankPerformance objects if return_performances is True
+    """
     # Import configuration from the config file
     from analysis.multistate.multi_state_config import (
         # Mission details
@@ -24,65 +33,86 @@ def perform_dormancy_analysis():
         # Operating envelopes
         operating_window_1, operating_window_2,
         # Interaction rules
-        dormancy_interaction_rules
+        dormancy_interaction_rules,
+        # Dormancy timestep
+        DORMANCY_TIMESTEP
     )
 
-    # Print mission information
-    print(f"Mission created: {dormancy_mission.__class__.__name__}")
-    print(f"Total fuel mass required for dormancy_mission: {total_fuel_mass:.2f} kg")
+    # Import the multistep method directly
+    from facades.analysis_facades import MULTISTEP_METHOD
 
-    # Run multi-tank analysis
-    print("Analyzing multi-tank system for dormancy scenario...")
-    tank_performances = MultiTankAnalysisFacade.analyse(
-        tank_configurations=tank_configs,
-        mission=dormancy_mission,
-        interaction_rules=dormancy_interaction_rules,
-        initial_conditions=[initial_conditions_1, initial_conditions_2],
-        operating_envelopes=[operating_window_1, operating_window_2],
-        target_conditions=[
-            TargetConditions(0.10 * total_fuel_mass, 0.0),
-            TargetConditions(5.0, 0.0)
-        ]
-    )
+    # Store original timestep
+    original_timestep = MULTISTEP_METHOD.timestep
 
-    # Extract results
-    tank_states_1 = tank_performances[0].tank_states
-    tank_states_2 = tank_performances[1].tank_states
+    # Set scenario-specific timestep
+    MULTISTEP_METHOD.timestep = DORMANCY_TIMESTEP
+    print(f"Using timestep: {DORMANCY_TIMESTEP} seconds for dormancy scenario")
 
-    # Access flow data for plotting
-    flow_data = MultiTankAnalysisFacade.flow_data
+    # Use provided initial states if available
+    try:
+        ic_list = [initial_conditions_1, initial_conditions_2]
+        if initial_states:
+            ic_list = []
+            for i, state in enumerate(initial_states):
+                # Convert TankState to InitialConditions
+                ic = InitialConditions(
+                    pressure=state.pressure,
+                    temperature=state.temperature,
+                    fill=0.0,  # Assuming no liquid for dormancy initial state
+                    multi_flow=True,
+                    mass_fraction=state.fuel_mass / state.tank.compute_max_fuel_mass(state.temperature, state.pressure)
+                )
+                ic_list.append(ic)
+                print(f"Using initial state for Tank {i+1} from previous scenario: T={state.temperature:.1f}K, P={state.pressure/1e5:.1f}bar")
 
-    # Initialize the plotter at the beginning of the analysis
-    plotter = SeabornPlotter(font="Cambria", palette="deep")
+        # Run multi-tank analysis
+        print("Analyzing multi-tank system for dormancy scenario...")
+        tank_performances = MultiTankAnalysisFacade.analyse(
+            tank_configurations=tank_configs,
+            mission=dormancy_mission,
+            interaction_rules=dormancy_interaction_rules,
+            initial_conditions=ic_list,
+            operating_envelopes=[operating_window_1, operating_window_2],
+            target_conditions=[
+                TargetConditions(0.10 * total_fuel_mass, 0.0),
+                TargetConditions(5.0, 0.0)
+            ]
+        )
 
-    # Plot the mass flows (not necessary for dormancy but helpful for debugging)
-    # flow_fig = plotter.plot_tank_mass_flows(
-    #     flow_data['time'],
-    #     flow_data['tank1_inflow'],
-    #     flow_data['tank1_outflow'],
-    #     flow_data['tank2_inflow'],
-    #     flow_data['tank2_outflow']
-    # )
+        # Extract results
+        tank_states_1 = tank_performances[0].tank_states
+        tank_states_2 = tank_performances[1].tank_states
 
-    # Create comparative plots (all in one figure)
-    comparative_fig = plotter.plot_comparative_tank_states(
-        tank_states_1,
-        tank_states_2,
-        figsize=(15, 5),
-        titles=[
-            "Fuel Masses - Reservoir vs Consumer (Dormancy)",
-            "Tank Temperatures - Reservoir vs Consumer (Dormancy)",
-            "Tank Pressures - Reservoir vs Consumer (Dormancy)"
-        ]
-    )
+        # Access flow data for plotting
+        flow_data = MultiTankAnalysisFacade.flow_data
 
-    plt.show()
+        # Initialize the plotter at the beginning of the analysis
+        plotter = SeabornPlotter(font="Cambria", palette="deep")
 
-    # Return the performance data for potential use
+        # Create comparative plots (all in one figure)
+        comparative_fig = plotter.plot_comparative_tank_states(
+            tank_states_1,
+            tank_states_2,
+            figsize=(15, 5),
+            titles=[
+                "Fuel Masses - Reservoir vs Consumer (Dormancy)",
+                "Tank Temperatures - Reservoir vs Consumer (Dormancy)",
+                "Tank Pressures - Reservoir vs Consumer (Dormancy)"
+            ]
+        )
 
-def main():
-    perform_dormancy_analysis()
+        plt.show()
 
-if __name__ == "__main__":
-    main()
+        # Add this before the finally block
+        print("\nDormancy scenario complete. Final states:")
+        for i, state in enumerate(tank_performances):
+            last_state = state.tank_states.last_state
+            print(f"Tank {i+1}: T={last_state.temperature:.1f}K, P={last_state.pressure/1e5:.1f}bar, mass={last_state.fuel_mass:.1f}kg")
+        print()
 
+        # Then in the if return_performances block, just do the return
+        if return_performances:
+            return tank_performances
+    finally:
+        # Restore original timestep - critical to avoid side effects
+        MULTISTEP_METHOD.timestep = original_timestep
