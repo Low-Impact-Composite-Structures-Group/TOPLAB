@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from plotting.plot_tank_states import plot_single_tank_fill, plot_single_tank_temperatures, plot_single_tank_loads
 from plotting.sb_plotting import SeabornPlotter
-from facades.analysis_facades import OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, MultiTankAnalysisFacade
+from facades.analysis_facades import MULTISTEP_METHOD, OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, MultiTankAnalysisFacade
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
@@ -11,66 +11,33 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def perform_discharge_analysis(initial_states=None, return_performances=False):
-    """
-    Perform discharge analysis with optional initial states from previous scenario.
-
-    Args:
-        initial_states: List of tank states from previous scenario (optional)
-        return_performances: Whether to return the tank performances
-
-    Returns:
-        List of TankPerformance objects if return_performances is True
-    """
-    # Import configuration from the config file
+def perform_discharge_analysis(return_performances=False):
+    """Perform discharge analysis with cleaner output"""
     from analysis.multistate.multi_state_config import (
-        # Mission details
-        mission, total_fuel_mass,
-        # Tank configurations
-        tank_configs,
-        # Initial conditions
+        mission, total_fuel_mass, tank_configs,
         initial_conditions_1, initial_conditions_2,
-        # Operating envelopes
-        operating_window_1, operating_window_2,
-        # Interaction rules
-        interaction_rules,
-        # DISCHARGE_TIMESTEP added here
-        DISCHARGE_TIMESTEP
+        operating_window_1, operating_window_2, interaction_rules, DISCHARGE_TIMESTEP
     )
 
-    # Import the multistep method directly
-    from facades.analysis_facades import MULTISTEP_METHOD
-
-    # Store original timestep
+    # Set timestep
     original_timestep = MULTISTEP_METHOD.timestep
-
-    # Set scenario-specific timestep
     MULTISTEP_METHOD.timestep = DISCHARGE_TIMESTEP
-    print(f"Using timestep: {DISCHARGE_TIMESTEP} seconds for discharge scenario")
+    print(f"\n=== DISCHARGE ANALYSIS ===")
+    print(f"Using timestep: {DISCHARGE_TIMESTEP} seconds")
 
     try:
-        # Print mission information
-        print(f"Mission created: {mission.__class__.__name__}")
-        print(f"Total fuel mass required for mission: {total_fuel_mass:.2f} kg")
+        # Print initial info
+        print(f"Mission type: {mission.__class__.__name__}")
+        print(f"Required mission fuel: {total_fuel_mass:.2f} kg")
 
-        # Use provided initial states if available
+        # Create and adjust initial conditions
         ic_list = [initial_conditions_1, initial_conditions_2]
-        if initial_states:
-            ic_list = []
-            for i, state in enumerate(initial_states):
-                # Convert TankState to InitialConditions
-                ic = InitialConditions(
-                    pressure=state.pressure,
-                    temperature=state.temperature,
-                    fill=0.0,  # Assuming no liquid for discharge initial state
-                    multi_flow=True,
-                    mass_fraction=state.fuel_mass / state.tank.compute_max_fuel_mass(state.temperature, state.pressure)
-                )
-                ic_list.append(ic)
-                print(f"Using initial state for Tank {i+1} from previous scenario: T={state.temperature:.1f}K, P={state.pressure/1e5:.1f}bar")
+        print("\nInitial tank states:")
+        for i, ic in enumerate(ic_list):
+            print(f"Tank {i+1}: T={ic.temperature:.1f}K, P={ic.pressure/1e5:.1f}bar, mass_fraction={ic.mass_fraction:.4f}")
 
-        # Run multi-tank analysis
-        print("Analyzing multi-tank system for discharge scenario...")
+        # Run analysis
+        print("\nRunning simulation...")
         tank_performances = MultiTankAnalysisFacade.analyse(
             tank_configurations=tank_configs,
             mission=mission,
@@ -83,14 +50,14 @@ def perform_discharge_analysis(initial_states=None, return_performances=False):
             ]
         )
 
-        # Extract results
+        # Extract results and plot
         tank_states_1 = tank_performances[0].tank_states
         tank_states_2 = tank_performances[1].tank_states
 
         # Access flow data for plotting
         flow_data = MultiTankAnalysisFacade.flow_data
 
-        # Initialize the plotter at the beginning of the analysis
+        # Initialize the plotter
         plotter = SeabornPlotter(font="Cambria", palette="deep")
 
         # Plot the mass flows
@@ -102,36 +69,32 @@ def perform_discharge_analysis(initial_states=None, return_performances=False):
             flow_data['tank2_outflow']
         )
 
-        # Create comparative plots (all in one figure)
+        # Plot the tank states
         comparative_fig = plotter.plot_comparative_tank_states(
-            tank_states_1,
-            tank_states_2,
-            figsize=(15, 5),
-            titles=[
-                "Fuel Masses - Reservoir vs Consumer (Discharge)",
-                "Tank Temperatures - Reservoir vs Consumer (Discharge)",
-                "Tank Pressures - Reservoir vs Consumer (Discharge)"
-            ]
+            tank_states_1, tank_states_2, figsize=(15, 5),
+            titles=["Fuel Masses - Reservoir vs Consumer (Discharge)",
+                   "Tank Temperatures - Reservoir vs Consumer (Discharge)",
+                   "Tank Pressures - Reservoir vs Consumer (Discharge)"]
         )
 
         plt.show()
 
-        # Add this before the finally block
+        # Show final states
         print("\nDischarge scenario complete. Final states:")
         for i, state in enumerate(tank_performances):
             last_state = state.tank_states.last_state
             print(f"Tank {i+1}: T={last_state.temperature:.1f}K, P={last_state.pressure/1e5:.1f}bar, mass={last_state.fuel_mass:.1f}kg")
-        print()
 
-        # Then in the if return_performances block, just do the return
         if return_performances:
             return tank_performances
     finally:
         # Restore original timestep
         MULTISTEP_METHOD.timestep = original_timestep
 
+
 def main():
     perform_discharge_analysis()
+
 
 if __name__ == "__main__":
     main()
