@@ -272,19 +272,81 @@ def perform_analysis():
         isobar_labels,
         density_lists
     )
+
+    # Generate saturation line data
+    sat_temps, sat_liquid_densities, sat_vapor_densities = get_hydrogen_saturation_line()
+
+    # Add saturation lines to the existing plot
+    ax = fig_density_vs_temperature_gas.axes[0]  # Get the main axes from the figure
+    ax.plot(sat_temps, sat_liquid_densities, 'k--', label='Saturated Liquid')
+    ax.plot(sat_temps, sat_vapor_densities, 'k--', label='Saturated Vapor')
+
+    # Fill between the saturation lines to indicate two-phase region
+    ax.fill_between(sat_temps, sat_liquid_densities, sat_vapor_densities, alpha=0.1, color='gray')
+
+    # Refresh the legend to include new entries
+    ax.legend()
+
     plot_heat_flows(performance.tank_states, ohex_heat)
 
         # Save some lists to a CSV file
     output_csv_path = os.path.join(script_dir, '../../data/results/cc_results/lists.csv')
     with open(output_csv_path, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Enthalpies', 'oHEX Heat', 'Mass Flows', 'Masses', 'iHEX Heat'])
-        for enthalpy, ohex, mdot, mass, ihex in zip(enthalpies, ohex_heat, interpolated_mass_flows, masses, ihex_heat):
-            writer.writerow([enthalpy, ohex, mdot, mass, ihex])
+
+        # Write the original data
+        writer.writerow(['Enthalpies', 'oHEX Heat', 'Mass Flows', 'Masses', 'iHEX Heat', 'Densities'])
+        for enthalpy, ohex, mdot, mass, ihex, density in zip(enthalpies, ohex_heat, interpolated_mass_flows, masses, ihex_heat, densities):
+            writer.writerow([enthalpy, ohex, mdot, mass, ihex, density])
+
+    # Write saturation data to a separate file
+    saturation_csv_path = os.path.join(script_dir, '../../data/results/cc_results/saturation_line.csv')
+    with open(saturation_csv_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+
+        # Write saturation line data
+        writer.writerow(['Temperature (K)', 'Saturated Liquid Density', 'Saturated Vapor Density'])
+        for temp, liq_density, vap_density in zip(sat_temps, sat_liquid_densities, sat_vapor_densities):
+            writer.writerow([temp, liq_density, vap_density])
 
     plt.close(fig_req_flux.fig)
 
     plt.show()
+
+def get_hydrogen_saturation_line(min_temp=14.0, max_temp=33.0, num_points=100):
+    """Generate saturation line data for hydrogen."""
+    temperatures = np.linspace(min_temp, max_temp, num_points)
+    liquid_densities = []
+    vapor_densities = []
+
+    requester = SinglePhaseRequester()
+
+    for temp in temperatures:
+        try:
+            # Get saturated pressure at this temperature
+            pressure = PropsSI('P', 'T', temp, 'Q', 0, 'PARAHYDROGEN')
+
+            # Get saturated liquid density
+            liquid_density = PropsSI('D', 'T', temp, 'Q', 0, 'PARAHYDROGEN')
+            liquid_densities.append(liquid_density)
+
+            # Get saturated vapor density
+            vapor_density = PropsSI('D', 'T', temp, 'Q', 1, 'PARAHYDROGEN')
+            vapor_densities.append(vapor_density)
+        except Exception as e:
+            print(f"Error at temperature {temp}K: {e}")
+            # Handle errors by continuing with last valid value
+            if liquid_densities:
+                liquid_densities.append(liquid_densities[-1])
+            else:
+                liquid_densities.append(None)
+
+            if vapor_densities:
+                vapor_densities.append(vapor_densities[-1])
+            else:
+                vapor_densities.append(None)
+
+    return temperatures, liquid_densities, vapor_densities
 
 
 def main():
