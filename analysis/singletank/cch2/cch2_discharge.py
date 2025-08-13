@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 from plotting.sb_plotting import SeabornPlotter
-from facades.analysis_facades import MULTISTEP_METHOD, OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, SingleTankMissionAnalysisFacade
+from facades.analysis_facades import MULTISTEP_METHOD, OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, MissionAnalysisFacade
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
@@ -35,7 +35,7 @@ def perform_discharge_analysis(return_performances=False):
 
         # Run analysis
         print("\nRunning simulation...")
-        tank_performance = SingleTankMissionAnalysisFacade.analyse(
+        tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
             insulation=tank_config[0]['insulation'],

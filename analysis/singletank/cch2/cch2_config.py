@@ -54,7 +54,8 @@ refuel_mission = Mission([
 ])
 
 # Initial conditions
-initial_conditions_refuel = InitialConditions(p_init_refuel, t_init_refuel, fill_refuel, multi_flow=True, mass_fraction=mass_fraction_refuel)
+initial_conditions_refuel = InitialConditions(p_init_refuel, t_init_refuel, fill_refuel, multi_flow=False, mass_fraction=mass_fraction_refuel)
+
 
 
 ######################################
@@ -101,7 +102,7 @@ insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 operating_window_disch = OperatingEnvelope(p_max_disch, p_min_disch, None)
 
 # Initial conditions
-initial_conditions_disch = InitialConditions(p_init_disch, t_init_disch, fill_disch, multi_flow=True, mass_fraction=mass_fraction_disch)
+initial_conditions_disch = InitialConditions(p_init_disch, t_init_disch, fill_disch, multi_flow=False, mass_fraction=mass_fraction_disch)
 
 # Define tank configurations for MultiTankAnalysisFacade
 tank_config = [
