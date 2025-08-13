@@ -51,7 +51,7 @@ def perform_discharge_analysis(return_performances=False):
         print("\nSimulation complete. Plotting results...")
 
         # Initialize the plotter
-        plotter = SeabornPlotter(font="Cambria", palette="deep")
+        plotter = SeabornPlotter(font="Cambria", palette="delft")
 
         # Create plots for pressure and temperature
         # Convert pandas Series to numpy arrays before plotting
