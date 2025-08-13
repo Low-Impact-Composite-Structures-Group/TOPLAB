@@ -1,9 +1,11 @@
 from typing import Protocol, Union, List, Optional, Tuple
+from plotting.plot_style_sb import DELFT_PALETTE
 
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import pandas as pd
+
 
 # Import from our custom seaborn style module
 from plotting.plot_style_sb import (
@@ -41,7 +43,7 @@ class SeabornPlotter:
     """A class to handle all Seaborn-based plotting for hydrogen fuel tank analysis."""
 
     def __init__(self, style: str = "whitegrid", font: str = "Cambria",
-                 palette: str = "deep", context: str = "paper"):
+                 palette: str = "delft", context: str = "paper"):  # Changed default from "deep" to "delft"
         """Initialize the plotter with styling options.
 
         Args:
@@ -51,7 +53,14 @@ class SeabornPlotter:
             context: Scaling parameters ("paper", "notebook", "talk", "poster")
         """
         configure_plot_style(font=font, palette=palette, style=style, context=context)
-        self.palette = sns.color_palette(palette)
+
+        # Store the actual color palette for consistent use
+        if palette == "delft":
+            self.palette = DELFT_PALETTE
+        else:
+            self.palette = sns.color_palette(palette)
+
+        self.figsize = (8, 6)  # Default figure size
 
     def plot_tank_loads(self, tank_states: Union[TankStates, List[TankStates]],
                         labels: Optional[List[str]] = None,
