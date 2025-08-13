@@ -987,6 +987,46 @@ class MultiTankAnalysisFacade(AnalysisFacade):
             raise ValueError(f"Unsupported rule type: {rule_type}")
 
 
+class SingleTankMissionAnalysisFacade(MissionAnalysisFacade):
+    """A fixed version of MissionAnalysisFacade that correctly handles flow signs"""
+
+    @classmethod
+    def analyse(cls, *args, **kwargs):
+        # Get the mission from kwargs
+        mission = kwargs.get('mission')
+
+        # Create a modified mission with corrected flow signs
+        modified_sections = []
+        for section in mission.sections:
+            modified_flows = []
+            for flow in section.fuel_flows:
+                if isinstance(flow, OutFlow):
+                    # Make outflows positive (take absolute value)
+                    if isinstance(flow.mass_flow, list):
+                        corrected_flow = OutFlow([abs(f) for f in flow.mass_flow], flow.phase)
+                    else:
+                        corrected_flow = OutFlow(abs(flow.mass_flow), flow.phase)
+                    modified_flows.append(corrected_flow)
+                else:
+                    modified_flows.append(flow)
+
+            # Create modified section
+            modified_section = MissionSection(
+                section.duration,
+                modified_flows,
+                section.altitude,
+                section.mach_number,
+                section.fuel_flow_key,
+                section.ground_temperature
+            )
+            modified_sections.append(modified_section)
+
+        # Replace mission in kwargs
+        modified_mission = Mission(modified_sections)
+        kwargs['mission'] = modified_mission
+
+        # Call the parent method with modified arguments
+        return super().analyse(*args, **kwargs)
 def main():
     pass
 
