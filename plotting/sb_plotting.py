@@ -360,9 +360,13 @@ class SeabornPlotter:
         return fig
 
     def plot_single_mission_flows(self, mass_flows, fuel_flow_keys, durations, total_duration,
-                             interpolated_mass_flows=None, figsize=(10, 6), invert_flow=False):
+                 interpolated_mass_flows=None, figsize=(10, 6)):
         """
         Plot mission mass flows with Seaborn styling for a single tank.
+
+        Standardized convention:
+        - Positive values: Flow INTO the tank (refueling)
+        - Negative values: Flow OUT OF the tank (consumption/draining)
 
         Args:
             mass_flows: List of flow rates for each mission section
@@ -371,7 +375,6 @@ class SeabornPlotter:
             total_duration: Total mission duration in hours
             interpolated_mass_flows: Optional interpolated flow data
             figsize: Figure size (width, height) tuple
-            invert_flow: If True, invert flow sign for display purposes (refuel shows as positive)
         """
         # Colors from the Delft palette
         from plotting.plot_style_sb import KONINGSBLAUW, BORDEAUX
@@ -390,10 +393,12 @@ class SeabornPlotter:
             section_start_time = cumulative_time
             section_end_time = section_start_time + duration
 
-            # Apply sign inversion if requested
+            # For the sign convention, we need to handle InFlow objects differently
+            # since their mass_flow values are already positive
             section_flows = []
             for f in flows:
-                section_flows.append(-f if invert_flow else f)
+                # Check if this is a value from an InFlow (already in correct convention)
+                section_flows.append(f)
 
             # Add mass flow points
             if len(section_flows) == 2:  # If we have start and end values
@@ -420,7 +425,9 @@ class SeabornPlotter:
 
         # If we have interpolated mass flows, plot those too for comparison
         if interpolated_mass_flows is not None:
-            interp_flows = [-f if invert_flow else f for f in interpolated_mass_flows]
+            # For interpolated flows, use the values directly
+            interp_flows = interpolated_mass_flows
+
             # Create time points matching the length of interpolated_mass_flows
             interp_times = np.linspace(0, total_duration, len(interp_flows))
             ax.plot(interp_times, interp_flows, '--', color=BORDEAUX,
@@ -429,9 +436,8 @@ class SeabornPlotter:
         # Add a zero reference line
         ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
 
-        # Set labels and title
-        flow_direction = "Refuel (+) / Drain (-)" if invert_flow else "Drain (+) / Refuel (-)"
-        ax.set_title(f"Mission Mass Flow Rate ({flow_direction})")
+        # Set labels and title with standardized convention
+        ax.set_title("Mission Mass Flow Rate (Refuel (+) / Drain (-))")
         ax.set_xlabel("Time [hour]")
         ax.set_ylabel("Mass Flow Rate [kg/s]")
 
@@ -443,5 +449,3 @@ class SeabornPlotter:
         fig.tight_layout()
 
         return fig
-
-    # Implement other methods as needed
