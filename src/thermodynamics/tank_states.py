@@ -224,35 +224,55 @@ class TankState:
             if len(args) == 3:
                 # Only one list of flows provided with multi_flow=True
                 fuel_flows, heat_flux, tank_thermal_capacity = args
+
                 # Check if model requires separate in/out flows
                 if hasattr(dynamic_model, 'compute_state_derivatives') and 'fuel_flow_out' in dynamic_model.compute_state_derivatives.__code__.co_varnames:
-                    # Model expects separate in/out flows - use empty list for inflows
-                    # If SinglePhaseInOutModel, need to handle empty lists differently
-                    if "SinglePhaseInOutModel" in str(type(dynamic_model)):
-                        # Create a dummy flow for empty lists to avoid index errors
-                        from src.mission.mission_sections import InFlow, OutFlow
-                        from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+                    # Sort by attributes rather than class type
+                    inflows = []
+                    outflows = []
 
-                        # For Tank 1 (empty inflow list)
-                        if not fuel_flows:
-                            # Both lists empty, create dummy flows
-                            dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
-                            dummy_inflow = InFlow(0.0, dummy_props)
-                            dummy_outflow = OutFlow(0.0, "gas")
-                            self.derivatives = dynamic_model.compute_state_derivatives(
-                                self, [dummy_inflow], [dummy_outflow]
-                            )
+                    # Sort by checking for specific attributes that distinguish flow types
+                    for flow in fuel_flows:
+                        # Check if it has hydrogen attribute (InFlow) or phase attribute (OutFlow)
+                        if hasattr(flow, 'hydrogen'):
+                            inflows.append(flow)
+                        elif hasattr(flow, 'phase'):
+                            outflows.append(flow)
                         else:
-                            # Only inflow list is empty
+                            # If we can't determine type from attributes, check if mass_flow is negative
+                            if hasattr(flow, 'mass_flow'):
+                                flow_rate = flow.mass_flow
+                                if isinstance(flow_rate, (int, float)) and flow_rate < 0:
+                                    # Convert this to a proper inflow
+
+                                    dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
+                                    # Create positive inflow
+                                    converted_inflow = InFlow(abs(flow_rate), dummy_props)
+                                    inflows.append(converted_inflow)
+                                else:
+                                    # Default to gas phase if not specified
+                                    converted_outflow = OutFlow(flow_rate, "gas")
+                                    outflows.append(converted_outflow)
+
+                    # If SinglePhaseInOutModel, ensure no empty lists
+                    if "SinglePhaseInOutModel" in str(type(dynamic_model)):
+                        # Create dummy flows if needed
+                        from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+                        from src.mission.mission_sections import InFlow, OutFlow
+
+                        if not inflows:
                             dummy_props = SinglePhaseRequester().get_hydrogen_properties(self.pressure, self.temperature)
                             dummy_inflow = InFlow(0.0, dummy_props)
-                            self.derivatives = dynamic_model.compute_state_derivatives(
-                                self, [dummy_inflow], fuel_flows
-                            )
-                    else:
-                        self.derivatives = dynamic_model.compute_state_derivatives(
-                            self, [], fuel_flows
-                        )
+                            inflows = [dummy_inflow]
+
+                        if not outflows:
+                            dummy_outflow = OutFlow(0.0, "gas")
+                            outflows = [dummy_outflow]
+
+                    # Call with properly sorted flows
+                    self.derivatives = dynamic_model.compute_state_derivatives(
+                        self, inflows, outflows
+                    )
                 else:
                     # Model can handle single list of flows
                     self.derivatives = dynamic_model.compute_state_derivatives(
