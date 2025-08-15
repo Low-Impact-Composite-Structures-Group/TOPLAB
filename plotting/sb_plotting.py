@@ -360,9 +360,18 @@ class SeabornPlotter:
         return fig
 
     def plot_single_mission_flows(self, mass_flows, fuel_flow_keys, durations, total_duration,
-                             interpolated_mass_flows=None, figsize=(10, 6)):
+                             interpolated_mass_flows=None, figsize=(10, 6), invert_flow=False):
         """
         Plot mission mass flows with Seaborn styling for a single tank.
+
+        Args:
+            mass_flows: List of flow rates for each mission section
+            fuel_flow_keys: Keys/names for each flow section
+            durations: Duration of each section in seconds
+            total_duration: Total mission duration in hours
+            interpolated_mass_flows: Optional interpolated flow data
+            figsize: Figure size (width, height) tuple
+            invert_flow: If True, invert flow sign for display purposes (refuel shows as positive)
         """
         # Colors from the Delft palette
         from plotting.plot_style_sb import KONINGSBLAUW, BORDEAUX
@@ -381,15 +390,24 @@ class SeabornPlotter:
             section_start_time = cumulative_time
             section_end_time = section_start_time + duration
 
+            # Apply sign inversion if requested
+            section_flows = []
+            for f in flows:
+                section_flows.append(-f if invert_flow else f)
+
             # Add mass flow points
-            if len(flows) == 2:  # If we have start and end values
+            if len(section_flows) == 2:  # If we have start and end values
                 time_points.extend([section_start_time, section_end_time])
-                section_mass_flows.extend(flows)
+                section_mass_flows.extend(section_flows)
+            elif len(section_flows) == 1:  # Handle single constant flow value case
+                # Create two time points (start and end) with the same flow value
+                time_points.extend([section_start_time, section_end_time])
+                section_mass_flows.extend([section_flows[0], section_flows[0]])  # Duplicate the flow value
             else:  # If we have more detailed points
                 # Create evenly spaced time points for this section
-                section_times = np.linspace(section_start_time, section_end_time, len(flows))
+                section_times = np.linspace(section_start_time, section_end_time, len(section_flows))
                 time_points.extend(section_times)
-                section_mass_flows.extend(flows)
+                section_mass_flows.extend(section_flows)
 
             cumulative_time = section_end_time
 
@@ -402,16 +420,18 @@ class SeabornPlotter:
 
         # If we have interpolated mass flows, plot those too for comparison
         if interpolated_mass_flows is not None:
+            interp_flows = [-f if invert_flow else f for f in interpolated_mass_flows]
             # Create time points matching the length of interpolated_mass_flows
-            interp_times = np.linspace(0, total_duration, len(interpolated_mass_flows))
-            ax.plot(interp_times, interpolated_mass_flows, '--', color=BORDEAUX,
+            interp_times = np.linspace(0, total_duration, len(interp_flows))
+            ax.plot(interp_times, interp_flows, '--', color=BORDEAUX,
                     label="Interpolated Flow Rate", linewidth=1.5, alpha=0.7)
 
         # Add a zero reference line
         ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
 
         # Set labels and title
-        ax.set_title("Mission Mass Flow Rate")
+        flow_direction = "Refuel (+) / Drain (-)" if invert_flow else "Drain (+) / Refuel (-)"
+        ax.set_title(f"Mission Mass Flow Rate ({flow_direction})")
         ax.set_xlabel("Time [hour]")
         ax.set_ylabel("Mass Flow Rate [kg/s]")
 
