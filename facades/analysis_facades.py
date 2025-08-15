@@ -75,7 +75,7 @@ class InitialConditions:
     temperature: float
     fill: float
     multi_flow: bool = False  # Used for dual tank analysis
-    mass_fraction: float = 1.0  # 1.0 = full mass at given P,T, 0.1 = 10% of max capacity
+    mass_fraction: float = 0.0  # 1.0 = full mass at given P,T, 0.1 = 10% of max capacity
 
 @dataclass
 class TargetConditions:
@@ -154,6 +154,10 @@ class AnalysisFacade(Protocol):
         tank_volume: float = None  # Optional parameter for tank volume
     ) -> InitialState:
         # Create initial state with original pressure and temperature
+        print(f"DEBUG _define_initial_state: Creating InitialState with P={initial_conditions.pressure/1e5:.1f}bar, T={initial_conditions.temperature:.1f}K")
+        print(f"DEBUG _define_initial_state: Has mass_fraction={hasattr(initial_conditions, 'mass_fraction')}, value={getattr(initial_conditions, 'mass_fraction', 'N/A')}")
+        print(f"DEBUG _define_initial_state: Tank volume provided: {tank_volume is not None}, value={tank_volume if tank_volume else 'N/A'}")
+
         state = InitialState(
             initial_conditions.pressure,
             initial_conditions.temperature,
@@ -163,13 +167,12 @@ class AnalysisFacade(Protocol):
 
         # Apply mass fraction if specified without modifying pressure or temperature
         if hasattr(initial_conditions, 'mass_fraction') and tank_volume is not None:
-            if initial_conditions.mass_fraction < 1.0:
-                # Calculate the full mass at these conditions
-                full_mass = state.compute_fuel_mass(tank_volume)
-                # Set a custom attribute to store the adjusted mass
-                state.override_mass = full_mass * initial_conditions.mass_fraction
-                print(f"DEBUG: Setting override_mass to {state.override_mass:.2f} kg")
-                print(f"DEBUG: Attribute exists? {hasattr(state, 'override_mass')}")
+            # Calculate the full mass at these conditions
+            full_mass = state.compute_fuel_mass(tank_volume)
+            print(f"DEBUG _define_initial_state: Computed full_mass={full_mass:.2f}kg")
+            # Set a custom attribute to store the adjusted mass
+            state.override_mass = full_mass * initial_conditions.mass_fraction
+            print(f"DEBUG _define_initial_state: Setting override_mass={state.override_mass:.2f}kg")
 
         return state
 
@@ -363,7 +366,78 @@ class FillingAnalysisFacade(AnalysisFacade):
         )
         return target_conditions
 
+class RefuellingAnalysisFacade(AnalysisFacade):
+    @classmethod
+    def analyse(
+        cls,
+        tank_dimensions: TankDimensions,
+        material: Material,
+        insulation: Insulation,
+        mission: Mission,
+        constant_heat_flux: float,
+        initial_conditions: InitialConditions,
+        operating_envelope: OperatingEnvelope,
+        target_conditions: TargetConditions,
+        timestep: float = None,
+    ) -> TankPerformance:
+        # Set timestep if provided
+        if timestep is not None:
+            MULTISTEP_METHOD.timestep = timestep
+        print(f"Timestep: {MULTISTEP_METHOD.timestep} seconds")
 
+        # Force multi_flow to True for refuelling analysis
+        initial_conditions.multi_flow = True
+
+        # Create tank with correct volume
+        temp_initial_state = cls._define_initial_state(initial_conditions)
+        tank = cls._define_tank(tank_dimensions, material, operating_envelope, temp_initial_state)
+        print(f"Tank volume: {tank.volume} m³")
+
+        # Create proper initial state with volume information and multi_flow=True
+        initial_state = cls._define_initial_state(initial_conditions, tank.volume)
+        initial_state.multi_flow = True
+
+        # Create thermal model
+        thermal_model = cls._define_thermal_model(insulation, constant_heat_flux)
+
+        # Define target conditions
+        target_state = cls._define_target_conditions(operating_envelope, target_conditions)
+
+        # Use MissionAnalysis to perform the simulation
+        tank_states = MissionAnalysis.perform_analysis(
+            tank,
+            initial_state,
+            mission,
+            cls._define_stopping_criteria(),
+            target_state,
+            MULTISTEP_METHOD,
+            DYNAMIC_MODEL_FACTORY,
+            thermal_model,
+            HEAT_FLUX_FACTOR
+        )
+
+        print(f"Current state: m={tank_states.last_state.fuel_mass:.1f}kg, P={tank_states.last_state.pressure/1e5:.1f}bar, T = {tank_states.last_state.temperature:.1f}K")
+        return TankPerformance(tank, insulation, tank_states)
+
+    @classmethod
+    def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
+        criteria = [TargetFillReached(), TargetMassReached(), MaxPressureReached()]
+        print(f"Using stopping criteria: {[c.__class__.__name__ for c in criteria]}")
+        return criteria
+
+    @staticmethod
+    def _define_target_conditions(
+        operating_envelope: OperatingEnvelope,
+        target_conditions: TargetConditions
+    ) -> TargetState:
+        target_state = TargetState(
+            operating_envelope.max_pressure,
+            operating_envelope.min_pressure,
+            operating_envelope.min_temperature,
+            target_conditions.fill,
+            target_conditions.fuel_mass
+        )
+        return target_state
 class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
 
     @classmethod
