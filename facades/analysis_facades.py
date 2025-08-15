@@ -165,14 +165,15 @@ class AnalysisFacade(Protocol):
             multi_flow=initial_conditions.multi_flow
         )
 
+        #TODO: this logic needs to be changes because it because a fraction of mass wrt the original state of the tank (temp and press, and hence, density) is not very useful for mission analyses. What we want instead is a fraction wrt to some nominal mass.
         # Apply mass fraction if specified without modifying pressure or temperature
         if hasattr(initial_conditions, 'mass_fraction') and tank_volume is not None:
             # Calculate the full mass at these conditions
             full_mass = state.compute_fuel_mass(tank_volume)
-            print(f"DEBUG _define_initial_state: Computed full_mass={full_mass:.2f}kg")
+            # print(f"DEBUG _define_initial_state: Computed full_mass={full_mass:.2f}kg")
             # Set a custom attribute to store the adjusted mass
             state.override_mass = full_mass * initial_conditions.mass_fraction
-            print(f"DEBUG _define_initial_state: Setting override_mass={state.override_mass:.2f}kg")
+            # print(f"DEBUG _define_initial_state: Setting override_mass={state.override_mass:.2f}kg")
 
         return state
 
