@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import abstractmethod
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import mean
 from typing import Protocol
 
@@ -192,30 +192,8 @@ class TankState:
         if 'TwoPhase' in hydrogen_class_name:
             return "twophase"
 
-        # Direct attribute checks instead of using properties
-        # that might trigger recursion
-        if hasattr(self, '_fill_level'):
-            fill_level = self._fill_level  # Access the backing field directly
-        elif hasattr(self, 'fuel_mass') and hasattr(self, 'tank') and hasattr(self.tank, 'volume'):
-            # Calculate fill directly without using properties
-            try:
-                max_liquid_mass = self.tank.volume * self.hydrogen.density
-                fill_level = self.fuel_mass / max_liquid_mass if max_liquid_mass > 0 else 0
-            except:
-                # If calculation fails, use a fallback value
-                fill_level = 0.5
-        else:
-            # Default value if we can't determine
-            fill_level = 0.5
-
-        # Determine phase based on fill level directly
-        if fill_level < 0.01:  # Almost empty
-            return "gas"
-        elif fill_level > 0.99:  # Almost full
-            return "liquid"
-        else:
-            # Default to gas for single-phase if we can't determine otherwise
-            return "gas"
+        # For CCH2 analysis, always default to gas if not explicitly two-phase
+        return "gas"
 
     def __post_init__(self) -> None:
         self.get_hydrogen_properties()
