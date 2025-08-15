@@ -128,11 +128,24 @@ class MissionSectionAnalysis:
         tank: FuelTank,
         timestep: float
     ) -> TankStates:
+        # Use override_mass if it exists, otherwise compute mass from fill level
+        if hasattr(initial_state, 'override_mass'):
+            fuel_mass = initial_state.override_mass
+            print(f"Using override_mass: {fuel_mass:.2f}kg")
+        else:
+            # Add debug statement 5 here to examine density and calculation
+            print(f"DEBUG: Computing fuel mass with volume {tank.volume} m³")
+            if hasattr(initial_state, 'hydrogen'):
+                print(f"DEBUG: Using density {initial_state.hydrogen.density} kg/m³")
+            fuel_mass = initial_state.compute_fuel_mass(tank.volume)
+            print(f"DEBUG: Calculated full mass = {fuel_mass} kg")
+            print(f"Computed fuel mass: {fuel_mass:.2f}kg")
+
         initial_state = TankState(
             tank,
             initial_state.temperature,
             initial_state.pressure,
-            initial_state.compute_fuel_mass(tank.volume),
+            fuel_mass,
             multi_flow=getattr(initial_state, "multi_flow", False)
         )
         return TankStates([initial_state], timestep)
@@ -278,12 +291,20 @@ class MissionSectionAnalysis:
         tank_states: TankStates
     ) -> float:
         new_mass = (
-                tank_states.last_state.fuel_mass
-                + (
-                    tank_states.last_state.derivatives.liquid_mass
-                    + tank_states.last_state.derivatives.gas_mass
+            tank_states.last_state.fuel_mass
+            + (
+                tank_states.last_state.derivatives.liquid_mass
+                + tank_states.last_state.derivatives.gas_mass
                 ) * timestep
-            )
+        )
+
+        # Debug mass changes
+        if abs(new_mass - tank_states.last_state.fuel_mass) > 0.1:
+            print(f"WARNING: Large mass change: {new_mass - tank_states.last_state.fuel_mass:.3f}kg")
+            print(f"  Current: {tank_states.last_state.fuel_mass:.3f}kg → New: {new_mass:.3f}kg")
+            print(f"  Mass derivatives: {tank_states.last_state.derivatives.liquid_mass + tank_states.last_state.derivatives.gas_mass:.3f}kg/s")
+            print(f"  Timestep: {timestep}s")
+
         return new_mass
     @classmethod
     def stopping_criterion_is_met(
