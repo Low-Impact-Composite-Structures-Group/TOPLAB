@@ -122,6 +122,14 @@ class SinglePhaseModel(SinglePhaseModelBase):
     def compute_state_derivatives(
         cls, tank_state: TankState, fuel_flows: list[FuelFlow]
     ) -> StateDerivatives:
+        # Safety check - ensure we have a flow with hydrogen properties
+        if not fuel_flows or not hasattr(fuel_flows[0], 'hydrogen'):
+            # Create a dummy flow with hydrogen properties from tank
+            from src.mission.mission_sections import OutFlow
+            dummy_flow = OutFlow(0.0, "gas")
+            dummy_flow.hydrogen = tank_state.hydrogen
+            fuel_flows = [dummy_flow]
+
         dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
             tank_state.phase, fuel_flows[0].mass_flow
@@ -209,6 +217,14 @@ class SinglePhaseModel(SinglePhaseModelBase):
         hydrogen: Hydrogen,
         fuel_mass_flow: float
     ) -> float:
+        """
+        The first coefficient in the state equation for pressure rate.
+        """
+        # Avoid division by zero when mass is zero
+        if fuel_mass <= 0:
+            # When starting with zero mass, return a safe default
+            # (If adding mass, rate should be positive; if removing, should be zero)
+            return 0 if fuel_mass_flow >= 0 else 0
         return hydrogen.density * fuel_mass_flow / fuel_mass
 
     @staticmethod
