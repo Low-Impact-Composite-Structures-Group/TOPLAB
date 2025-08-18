@@ -15,6 +15,7 @@ import numpy as np
 import numpy.typing as npt
 
 from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
+from src.mission.mission_sections import OutFlow
 
 
 class OperatingEnvelope(Protocol):
@@ -1050,6 +1051,7 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
     def added_heat_flux(cls) -> float:
         return 0
 
+
 class TwoPhaseLimitLowerPressureInOutModel(TwoPhaseModelBase):
     """
     Two-phase dynamic model with lower pressure limit support that handles separate
@@ -1159,12 +1161,176 @@ class TwoPhaseLimitLowerPressureInOutModel(TwoPhaseModelBase):
         return - (t1 + t2 - flow_energy - heat_flux)
 
 
-def main():
-    pass
+class SinglePhaseLimitUpperPressureModel(SinglePhaseModelBase):
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        # Calculate temperature derivative
+        dT_dt = cls.compute_temperature_derivative(tank_state, fuel_flows)
+
+        # Calculate required venting flow to maintain constant pressure
+        venting_flow = cls.compute_required_venting_flow(tank_state, fuel_flows, dT_dt)
+
+        # Add venting flow to original flows for mass derivative calculation
+        total_flows = fuel_flows.copy()
+        total_flows.append(OutFlow(venting_flow, "gas"))
+
+        # Calculate mass derivatives with total flows (including venting)
+        dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
+            tank_state.phase, total_flows
+        )
+
+        return StateDerivatives(
+            cls.compute_pressure_derivative(),  # Always 0
+            dT_dt,
+            dMg_dt,
+            dMl_dt,
+            venting_flow,
+            tank_state.heat_flux
+        )
+
+    @staticmethod
+    def compute_pressure_derivative():
+        return 0  # Constant pressure
+
+    @staticmethod
+    def compute_temperature_derivative(
+        tank_state: TankState, fuel_flows: list[FuelFlow]
+    ) -> float:
+        # Implement equation: dT/dt = Q_in / [m_s*C_s + m_H2*(∂h_H2/∂T)_P]
+        thermal_capacity = (
+            tank_state.tank_thermal_capacity +
+            tank_state.fuel_mass * tank_state.hydrogen.dH_dT
+        )
+
+        # Add a small epsilon to prevent division by zero
+        return tank_state.heat_flux / (thermal_capacity + 1e-10)
+
+    @classmethod
+    def compute_required_venting_flow(
+        cls, tank_state: TankState, fuel_flows: list[FuelFlow], dT_dt: float
+    ) -> float:
+        # Implement equation: m_H2_out = (m_H2/ρ_H2)*(∂ρ_H2/∂T)_P * dT/dt  (Ahluwalia and Peng)
+
+        # Calculate required venting flow to maintain constant pressure
+        venting_flow = (
+            -tank_state.fuel_mass / tank_state.hydrogen.density *
+            tank_state.hydrogen.dRho_dT * dT_dt
+        )
+
+        return venting_flow
+
+    @staticmethod
+    def define_liquid_and_mass_derivatives(
+        tank_phase: str, fuel_flows: list[FuelFlow]
+    ) -> tuple[float, float]:
+        # Calculate net mass flow, accounting for OutFlow vs InFlow
+        net_flow = 0
+        for flow in fuel_flows:
+            # Check if this is an OutFlow (should be subtracted) or InFlow (should be added)
+            if hasattr(flow, '__class__') and flow.__class__.__name__ == 'OutFlow':
+                net_flow -= flow.mass_flow  # Subtract outflows
+            else:
+                net_flow += flow.mass_flow  # Add inflows
+
+        # Return appropriate derivatives based on phase
+        if tank_phase == "gas":
+            return net_flow, 0
+        if tank_phase == "liquid":
+            return 0, net_flow
+        raise ValueError(
+            f"{tank_phase} not supported in single phase model"
+        )
 
 
-if __name__ == "__main__":
-    main()
+class TwoPhaseLimitUpperPressureModel(DynamicModel):
 
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flows: list[FuelFlow]
+    ) -> StateDerivatives:
+        # Temperature derivative is zero in two-phase at constant pressure (saturated conditions)
+        dT_dt = cls.compute_temperature_derivative()  # Always 0 for two-phase at constant pressure
 
-# End
+        # Calculate required venting flow using the heat input
+        venting_flow = cls.compute_required_venting_flow(tank_state)
+
+        # Calculate gas and liquid mass derivatives using the venting flow
+        dMg_dt = cls.compute_gas_mass_derivative(tank_state.hydrogen, venting_flow)
+        dMl_dt = cls.compute_liquid_mass_derivative(tank_state.hydrogen, venting_flow)
+
+        return StateDerivatives(
+            cls.compute_pressure_derivative(),  # Always 0
+            dT_dt,
+            dMg_dt,
+            dMl_dt,
+            venting_flow,  # Track venting flow separately
+            tank_state.heat_flux  # No additional heat flux
+        )
+
+    @staticmethod
+    def compute_pressure_derivative() -> float:
+        return 0  # Constant pressure
+
+    @staticmethod
+    def compute_temperature_derivative() -> float:
+        # dT/dt = (dP_s/dT)^(-1) * dP/dt = 0 since dP/dt = 0
+        return 0  # Temperature is constant in two-phase at constant pressure
+
+    @classmethod
+    def compute_required_venting_flow(
+        cls, tank_state: TankState
+    ) -> float:
+        # Using the equation: ṁ_H2^out = ((ρ_l - ρ_g) * Q̇_in^r) / (ρ_l * (h_g - h_l))
+        hydrogen = tank_state.hydrogen
+
+        # Get the properties
+        rho_l = hydrogen.liquid.density
+        rho_g = hydrogen.gas.density
+        h_g = hydrogen.gas.enthalpy
+        h_l = hydrogen.liquid.enthalpy
+        heat_input = tank_state.heat_flux
+
+        # Calculate venting flow rate
+        # Ensure we don't divide by zero
+        denominator = rho_l * (h_g - h_l)
+        if abs(denominator) < 1e-10:
+            return 0.0
+
+        venting_flow = ((rho_l - rho_g) * heat_input) / denominator
+
+    @staticmethod
+    def compute_gas_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, venting_flow: float
+    ) -> float:
+        # Using the equation: dm_g/dt = -ṁ_H2^out / (1 - (ρ_l/ρ_g))
+        rho_l = hydrogen.liquid.density
+        rho_g = hydrogen.gas.density
+
+        # Avoid division by zero
+        denominator = 1.0 - (rho_l / rho_g)
+        if abs(denominator) < 1e-10:
+            return 0.0
+
+        return -venting_flow / denominator
+
+    @staticmethod
+    def compute_liquid_mass_derivative(
+        hydrogen: TwoPhaseHydrogen, venting_flow: float
+    ) -> float:
+        # Using the equation: dm_l/dt = -ṁ_H2^out / (1 - (ρ_g/ρ_l))
+        rho_l = hydrogen.liquid.density
+        rho_g = hydrogen.gas.density
+
+        # Avoid division by zero
+        denominator = 1.0 - (rho_g / rho_l)
+        if abs(denominator) < 1e-10:
+            return 0.0
+
+        return -venting_flow / denominator

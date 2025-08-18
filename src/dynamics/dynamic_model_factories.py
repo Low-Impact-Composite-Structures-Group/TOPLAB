@@ -2,7 +2,11 @@ from src.dynamics.dynamic_models import (DynamicModel,
                                          SinglePhaseLimitLowerPressureModel,
                                          SinglePhaseModel,
                                          TwoPhaseLimitLowerPressureModel,
-                                         TwoPhaseModel, SinglePhaseInOutModel, SinglePhaseLimitLowerPressureInOutModel, TwoPhaseInOutModel, TwoPhaseLimitLowerPressureInOutModel)
+                                         TwoPhaseModel, SinglePhaseInOutModel,
+                                         SinglePhaseLimitLowerPressureInOutModel,
+                                         TwoPhaseInOutModel, TwoPhaseLimitLowerPressureInOutModel,
+                                         SinglePhaseLimitUpperPressureModel,
+                                         TwoPhaseLimitUpperPressureModel)
 
 
 class TankState:
@@ -41,19 +45,36 @@ class TwoPhaseFactory:
     ) -> DynamicModel:
         # Check for multi-flow first
         if getattr(tank_state, "multi_flow", False):
-            # Multi-flow models have different signatures
+            # Check for upper pressure limit first (highest priority)
+            if (target_conditions.max_pressure is not None and
+                target_conditions.max_pressure <= tank_state.pressure):
+                return TwoPhaseLimitUpperPressureModel
+
+            # Check for lower pressure limit
             if (target_conditions.min_pressure is not None and
                 target_conditions.min_pressure >= tank_state.pressure):
                 return TwoPhaseLimitLowerPressureInOutModel
+
+            # Normal multi-flow
             return TwoPhaseInOutModel
 
         # Original single-flow logic
+        # Check upper pressure limit first
+        if (target_conditions.max_pressure is not None and
+            target_conditions.max_pressure <= tank_state.pressure):
+            return TwoPhaseLimitUpperPressureModel
+
+        # Check for no limits
         if (target_conditions.min_pressure is None and
             target_conditions.max_pressure is None):
             return TwoPhaseModel
+
+        # Check lower pressure limit
         if (target_conditions.min_pressure is not None and
             target_conditions.min_pressure >= tank_state.pressure):
             return TwoPhaseLimitLowerPressureModel
+
+        # Normal two-phase model
         return TwoPhaseModel
 
 
@@ -66,19 +87,36 @@ class SinglePhaseFactory:
     ) -> DynamicModel:
         # Check for multi-flow first
         if getattr(tank_state, "multi_flow", False):
-            # Multi-flow models have different signatures
+            # Check for upper pressure limit first (highest priority)
+            if (target_conditions.max_pressure is not None and
+                target_conditions.max_pressure <= tank_state.pressure):
+                return SinglePhaseLimitUpperPressureModel
+
+            # Check for lower pressure limit
             if (target_conditions.min_pressure is not None and
                 target_conditions.min_pressure >= tank_state.pressure):
                 return SinglePhaseLimitLowerPressureInOutModel
+
+            # Normal multi-flow
             return SinglePhaseInOutModel
 
         # Single-flow models (backward compatible)
+        # Check upper pressure limit first
+        if (target_conditions.max_pressure is not None and
+            target_conditions.max_pressure <= tank_state.pressure):
+            return SinglePhaseLimitUpperPressureModel
+
+        # Check for no limits
         if (target_conditions.min_pressure is None and
             target_conditions.max_pressure is None):
             return SinglePhaseModel
+
+        # Check lower pressure limit
         if (target_conditions.min_pressure is not None and
             target_conditions.min_pressure >= tank_state.pressure):
             return SinglePhaseLimitLowerPressureModel
+
+        # Normal single-phase model
         return SinglePhaseModel
 
 
