@@ -366,19 +366,105 @@ dormancy_mission = Mission([
 ])
 
 # Define Tank 1 parameters for dormancy - 100kg, 300K, 200 bar
-p_init_dormancy = 2e+7  # Pa (200 bar)
-t_init_dormancy = 300   # K
+p_init_dormancy = 400e+5  # Pa (200 bar)
+t_init_dormancy = 55   # K
 fill_dormancy = 0.0     # no liquid
-mass_fraction_dormancy = 0.11  # Will give approximately 100kg (adjust after first run if needed)
-
-# Define Tank 2 parameters for dormancy - 50kg, 70K, 20 bar
-p_init_2_dormancy = 2e+6  # Pa (20 bar)
-t_init_2_dormancy = 70    # K
-fill_2_dormancy = 0.0     # no liquid
-mass_fraction_2_dormancy = 0.11  # Will give approximately 50kg (adjust after first run if needed)
+mass_fraction_dormancy = 0.11
+ambient_heat_load_dormancy = 20.0  # W/m²
 
 # Initial conditions for dormancy
 initial_conditions_dormancy = InitialConditions(p_init_dormancy, t_init_dormancy, fill_dormancy,
                                                  multi_flow=True, mass_fraction=mass_fraction_dormancy)
+
+def perform_dormancy_analysis(return_performances=False):
+    # Set timestep
+    original_timestep = MULTISTEP_METHOD.timestep
+    MULTISTEP_METHOD.timestep = DORMANCY_TIMESTEP
+    print(f"\n=== DORMANCY ANALYSIS ===")
+    print(f"Using timestep: {DORMANCY_TIMESTEP} seconds")
+
+    try:
+        # Create and adjust initial conditions
+        print("\nInitial tank states:")
+        print(f"T={initial_conditions_dormancy.temperature:.1f}K, P={initial_conditions_dormancy.pressure/1e5:.1f}bar")
+
+        # Ensure multi_flow is True for proper phase handling
+        initial_conditions_dormancy.multi_flow = True
+
+        # Define operating envelope. ensure that max_pressure is defined (and larger than initial pressure)
+
+        operating_window_dormancy = OperatingEnvelope(
+            max_pressure=450e5,  # Pa
+            min_pressure=15e5,   # Pa
+            min_temperature=20   # K
+        )
+
+        # Run analysis
+        print("\nRunning simulation...")
+        tank_performance = MissionAnalysisFacade.analyse(
+            tank_dimensions=tank_config[0]['dimensions'],
+            material=tank_config[0]['material'],
+            insulation=tank_config[0]['insulation'],
+            mission=dormancy_mission,
+            initial_conditions=initial_conditions_dormancy,
+            operating_envelope=operating_window_dormancy,
+            constant_heat_flux=ambient_heat_load_dormancy,
+        )
+
+        # Extract results and plot
+        tank_states = tank_performance.tank_states
+
+        print("\nSimulation complete. Plotting results...")
+
+        # Initialize the plotter
+        plotter = SeabornPlotter(font="Cambria", palette="delft")
+
+        # Convert tank_states data to numpy arrays before plotting
+        tank_states_dict = {
+            'time': tank_states.timesteps_in_hours,
+            'pressure': tank_states.pressures_in_bar,
+            'temperature': tank_states.temperatures,
+            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])
+        }
+
+        try:
+            # Plot tank states
+            fig_states = plotter.plot_single_tank_states(tank_states)
+            plt.savefig("dormancy_tank_states.png", dpi=300)
+        except ValueError as e:
+            print(f"Error plotting tank states: {e}")
+
+            # Fallback plotting
+            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+            ax1.plot(tank_states_dict['time'], tank_states_dict['pressure'])
+            ax1.set_ylabel("Pressure [bar]")
+            ax1.grid(True)
+
+            ax2.plot(tank_states_dict['time'], tank_states_dict['temperature'])
+            ax2.set_ylabel("Temperature [K]")
+            ax2.grid(True)
+
+            ax3.plot(tank_states_dict['time'], tank_states_dict['fuel_mass'])
+            ax3.set_xlabel("Time [hours]")
+            ax3.set_ylabel("Fuel Mass [kg]")
+            ax3.grid(True)
+
+            fig.suptitle("Tank States During Dormancy")
+            plt.savefig("dormancy_tank_states.png", dpi=300)
+
+        # Show final states
+        print("\nDormancy scenario complete. Final states:")
+        last_state = tank_states.last_state
+        print(f"T={last_state.temperature:.1f}K, P={last_state.pressure/1e5:.1f}bar, mass={last_state.fuel_mass:.1f}kg")
+
+        # Show only the figures we want
+        plt.show()
+
+        if return_performances:
+            return tank_performance
+    finally:
+        # Restore original timestep
+        MULTISTEP_METHOD.timestep = original_timestep
+
 
 
