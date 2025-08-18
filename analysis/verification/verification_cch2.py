@@ -64,7 +64,7 @@ tank_config = [
     }
 ]
 
-def perform_discharge_analysis(return_performances=False):
+def perform_discharge_analysis(return_performances=False, show_plots=False):
 
     # Set timestep
     original_timestep = MULTISTEP_METHOD.timestep
@@ -178,7 +178,8 @@ def perform_discharge_analysis(return_performances=False):
         )
 
         # Show only the two figures we want
-        plt.show()
+        if show_plots:
+            plt.show()
 
         # Show final states
         print("\nDischarge scenario complete. Final states:")
@@ -237,7 +238,7 @@ refuel_mission = Mission([
 # Initial conditions
 operating_window_refuel = OperatingEnvelope(p_max_refuel, p_min_refuel, None)
 
-def perform_refuel_analysis(return_performances=False):
+def perform_refuel_analysis(return_performances=False, show_plots=False):
 
     # Set timestep
     original_timestep = MULTISTEP_METHOD.timestep
@@ -331,7 +332,8 @@ def perform_refuel_analysis(return_performances=False):
         plt.savefig("refuel_mass_flows.png", dpi=300)
 
         # Show only the two figures we want
-        plt.show()
+        if show_plots:
+            plt.show()
 
         # Show final states
         print("\Refuel scenario complete. Final states:")
@@ -376,7 +378,7 @@ ambient_heat_load_dormancy = 20.0  # W/m²
 initial_conditions_dormancy = InitialConditions(p_init_dormancy, t_init_dormancy, fill_dormancy,
                                                  multi_flow=True, mass_fraction=mass_fraction_dormancy)
 
-def perform_dormancy_analysis(return_performances=False):
+def perform_dormancy_analysis(return_performances=False, show_plots=False):
     # Set timestep
     original_timestep = MULTISTEP_METHOD.timestep
     MULTISTEP_METHOD.timestep = DORMANCY_TIMESTEP
@@ -458,13 +460,168 @@ def perform_dormancy_analysis(return_performances=False):
         print(f"T={last_state.temperature:.1f}K, P={last_state.pressure/1e5:.1f}bar, mass={last_state.fuel_mass:.1f}kg")
 
         # Show only the figures we want
-        plt.show()
+        if show_plots:
+            plt.show()
 
         if return_performances:
             return tank_performance
     finally:
         # Restore original timestep
         MULTISTEP_METHOD.timestep = original_timestep
+
+
+def perform_complete_analysis(show_intermediate_plots=False):
+    """
+    Run all three analyses (discharge, refuel, dormancy) sequentially and create a combined plot.
+
+    Args:
+        show_intermediate_plots: If True, show plots after each analysis. If False,
+                                generate but don't display intermediate plots.
+
+    Returns:
+        tuple: Performance results from all three analyses
+    """
+    print("\n====== RUNNING COMPLETE VERIFICATION ANALYSIS ======\n")
+
+    # Create SinglePhaseRequester for density calculations
+    requester = SinglePhaseRequester()
+
+    # Run discharge analysis
+    print("\n==== DISCHARGE ANALYSIS ====")
+    discharge_performance = perform_discharge_analysis(
+        return_performances=True,
+        show_plots=show_intermediate_plots
+    )
+
+    # Run refuel analysis
+    print("\n==== REFUEL ANALYSIS ====")
+    refuel_performance = perform_refuel_analysis(
+        return_performances=True,
+        show_plots=show_intermediate_plots
+    )
+
+    # Run dormancy analysis
+    print("\n==== DORMANCY ANALYSIS ====")
+    dormancy_performance = perform_dormancy_analysis(
+        return_performances=True,
+        show_plots=show_intermediate_plots
+    )
+
+    # Extract temperature and density data from each analysis
+    print("\n==== EXTRACTING TEMPERATURE AND DENSITY DATA ====")
+
+    # Dictionary to store data for each scenario
+    scenario_data = {
+        'discharge': {'temperatures': [], 'densities': [], 'pressures': []},
+        'refuel': {'temperatures': [], 'densities': [], 'pressures': []},
+        'dormancy': {'temperatures': [], 'densities': [], 'pressures': []}
+    }
+
+    # Extract data from discharge analysis
+    print("Processing discharge data...")
+    for state in discharge_performance.tank_states.states:
+        scenario_data['discharge']['temperatures'].append(state.temperature)
+        scenario_data['discharge']['pressures'].append(state.pressure)
+
+        # Get density based on phase
+        if hasattr(state, 'hydrogen'):
+            if hasattr(state.hydrogen, 'phase'):
+                if state.hydrogen.phase in ["gas", "supercritical"]:
+                    if hasattr(state.hydrogen, 'gas'):
+                        density = state.hydrogen.gas.density
+                    else:
+                        density = state.hydrogen.density
+                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
+                    if hasattr(state.hydrogen, 'liquid'):
+                        density = state.hydrogen.liquid.density
+                    else:
+                        density = state.hydrogen.density
+                else:
+                    # Default to getting density from requester
+                    density = requester.get_property(state.pressure, state.temperature, "D")
+            else:
+                # If no phase attribute, use the direct density
+                density = state.hydrogen.density
+        else:
+            # If no hydrogen attribute, calculate from requester
+            density = requester.get_property(state.pressure, state.temperature, "D")
+
+        scenario_data['discharge']['densities'].append(density)
+
+    # Extract data from refuel analysis
+    print("Processing refuel data...")
+    for state in refuel_performance.tank_states.states:
+        scenario_data['refuel']['temperatures'].append(state.temperature)
+        scenario_data['refuel']['pressures'].append(state.pressure)
+
+        # Get density based on phase (same logic as above)
+        if hasattr(state, 'hydrogen'):
+            if hasattr(state.hydrogen, 'phase'):
+                if state.hydrogen.phase in ["gas", "supercritical"]:
+                    if hasattr(state.hydrogen, 'gas'):
+                        density = state.hydrogen.gas.density
+                    else:
+                        density = state.hydrogen.density
+                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
+                    if hasattr(state.hydrogen, 'liquid'):
+                        density = state.hydrogen.liquid.density
+                    else:
+                        density = state.hydrogen.density
+                else:
+                    density = requester.get_property(state.pressure, state.temperature, "D")
+            else:
+                density = state.hydrogen.density
+        else:
+            density = requester.get_property(state.pressure, state.temperature, "D")
+
+        scenario_data['refuel']['densities'].append(density)
+
+    # Extract data from dormancy analysis
+    print("Processing dormancy data...")
+    for state in dormancy_performance.tank_states.states:
+        scenario_data['dormancy']['temperatures'].append(state.temperature)
+        scenario_data['dormancy']['pressures'].append(state.pressure)
+
+        # Get density based on phase (same logic as above)
+        if hasattr(state, 'hydrogen'):
+            if hasattr(state.hydrogen, 'phase'):
+                if state.hydrogen.phase in ["gas", "supercritical"]:
+                    if hasattr(state.hydrogen, 'gas'):
+                        density = state.hydrogen.gas.density
+                    else:
+                        density = state.hydrogen.density
+                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
+                    if hasattr(state.hydrogen, 'liquid'):
+                        density = state.hydrogen.liquid.density
+                    else:
+                        density = state.hydrogen.density
+                else:
+                    density = requester.get_property(state.pressure, state.temperature, "D")
+            else:
+                density = state.hydrogen.density
+        else:
+            density = requester.get_property(state.pressure, state.temperature, "D")
+
+        scenario_data['dormancy']['densities'].append(density)
+
+    # Create the combined density-temperature plot
+    print("\n==== CREATING COMBINED DENSITY-TEMPERATURE PLOT ====")
+    plotter = SeabornPlotter(font="Cambria", palette="delft")
+
+    # We'll add a new method to SeabornPlotter to handle this plot
+    # For now, we'll call a placeholder that we'll implement next
+    fig = plotter.plot_density_temperature_combined(
+        scenario_data=scenario_data,
+        include_saturation_line=True,
+        include_isobars=True
+    )
+
+    plt.savefig("combined_density_temperature.png", dpi=300)
+    plt.show()
+
+    print("\n====== COMPLETE VERIFICATION ANALYSIS FINISHED ======\n")
+
+    return discharge_performance, refuel_performance, dormancy_performance
 
 
 

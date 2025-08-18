@@ -1,4 +1,5 @@
 from typing import Protocol, Union, List, Optional, Tuple
+from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 from plotting.plot_style_sb import DELFT_PALETTE
 
 import matplotlib.pyplot as plt
@@ -444,6 +445,145 @@ class SeabornPlotter:
         # Add legend if we have multiple datasets
         if interpolated_mass_flows is not None:
             ax.legend(loc='best', framealpha=0.9)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_density_temperature_combined(self, scenario_data, include_saturation_line=True,
+                                     include_isobars=True, figsize=(10, 8),
+                                     temperature_range=(30, 80), density_range=(0, 80)):
+        """
+        Create a combined density-temperature plot for discharge, refuel and dormancy phases.
+
+        Args:
+            scenario_data: Dictionary containing temperature, density and pressure data for each scenario
+            include_saturation_line: Whether to include hydrogen saturation line
+            include_isobars: Whether to include isobar lines
+            figsize: Figure size tuple
+            temperature_range: Min/max temperature range for the plot
+            density_range: Min/max density range for the plot
+
+        Returns:
+            Figure with the combined density-temperature plot
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN
+
+        # Create figure and axes
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot each scenario
+        # Discharge (gray line in the reference image)
+        ax.plot(scenario_data['discharge']['temperatures'],
+                scenario_data['discharge']['densities'],
+                '-', color='gray', linewidth=2, label="Discharge")
+
+        # Refuel (red dash-dot line in the reference image)
+        ax.plot(scenario_data['refuel']['temperatures'],
+                scenario_data['refuel']['densities'],
+                '-.', color=BORDEAUX, linewidth=2, label="Refueling")
+
+        # Dormancy (blue dotted line in the reference image)
+        ax.plot(scenario_data['dormancy']['temperatures'],
+                scenario_data['dormancy']['densities'],
+                ':', color=KONINGSBLAUW, linewidth=2, label="Dormancy")
+
+        # Optional: Add saturation line
+        if include_saturation_line:
+            # Create temperature points along the range
+            temps = np.linspace(temperature_range[0], temperature_range[1], 100)
+            sat_densities = []
+
+            # Get saturation density for each temperature using CoolProp
+            from CoolProp.CoolProp import PropsSI
+            requester = SinglePhaseRequester()
+
+            for temp in temps:
+                try:
+                    # Try to get saturation density at this temperature
+                    sat_density = PropsSI('D', 'T', temp, 'Q', 0, 'Hydrogen')
+                    sat_densities.append(sat_density)
+                except:
+                    # If temperature is above critical point, use critical density
+                    sat_densities.append(np.nan)
+
+            # Remove NaN values and corresponding temperatures
+            valid_indices = ~np.isnan(sat_densities)
+            valid_temps = temps[valid_indices]
+            valid_densities = np.array(sat_densities)[valid_indices]
+
+            # Plot saturation line
+            if len(valid_temps) > 0:
+                ax.plot(valid_temps, valid_densities, '--', color='black',
+                        linewidth=1.5, label="Saturation line")
+
+        # Optional: Add isobar lines
+        if include_isobars:
+            # Define key pressure levels in bar
+            pressure_levels = [10, 15, 400, 450]
+
+            # Create temperature points
+            temps = np.linspace(temperature_range[0], temperature_range[1], 100)
+
+            for pressure in pressure_levels:
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'Hydrogen')
+                        densities.append(density)
+                    except:
+                        densities.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot isobar line with dotted gray
+                    ax.plot(valid_temps, valid_densities, ':', color='gray', alpha=0.7, linewidth=1)
+
+                    # Add pressure label
+                    # Find midpoint or suitable position for the label
+                    mid_idx = len(valid_temps) // 2
+                    if mid_idx < len(valid_temps):
+                        ax.text(valid_temps[mid_idx], valid_densities[mid_idx],
+                                f"{pressure} bar", fontsize=8, alpha=0.8,
+                                horizontalalignment='center', verticalalignment='center',
+                                color='gray', bbox=dict(facecolor='white', alpha=0.7,
+                                                       edgecolor=None, pad=1))
+
+        # Mark starting points of each scenario with X
+        # Get the first point from each dataset
+        if len(scenario_data['discharge']['temperatures']) > 0:
+            ax.plot(scenario_data['discharge']['temperatures'][0],
+                    scenario_data['discharge']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2)
+
+        if len(scenario_data['refuel']['temperatures']) > 0:
+            ax.plot(scenario_data['refuel']['temperatures'][0],
+                    scenario_data['refuel']['densities'][0],
+                    'o', color=BORDEAUX, markersize=8, markerfacecolor='none', markeredgewidth=2)
+
+        if len(scenario_data['dormancy']['temperatures']) > 0:
+            ax.plot(scenario_data['dormancy']['temperatures'][0],
+                    scenario_data['dormancy']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2)
+
+        # Add a small legend box for the markers
+        legend1 = ax.legend(['Discharge', 'Refueling', 'Dormancy', 'Saturation line', 'Isobars', 'Starting point'],
+                          loc='upper right', title='Legend')
+
+        # Set labels and limits
+        ax.set_xlabel('Temperature T in K')
+        ax.set_ylabel('Density ρ in g/L')
+        ax.set_xlim(temperature_range)
+        ax.set_ylim(density_range)
+        ax.grid(True, alpha=0.3)
 
         # Apply tight layout
         fig.tight_layout()
