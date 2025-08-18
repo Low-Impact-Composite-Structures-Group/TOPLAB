@@ -352,7 +352,7 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
 #######################
 
 # DORMANCY ANALYSIS CONFIGURATION
-duration_hours = 24.0  # Duration of dormancy in hours
+duration_hours = 60.0  # Duration of dormancy in hours
 altitude = 0.0  # Altitude in meters
 
 # Create a dormancy mission with a single section
@@ -369,7 +369,7 @@ dormancy_mission = Mission([
 
 # Define Tank 1 parameters for dormancy - 100kg, 300K, 200 bar
 p_init_dormancy = 400e+5  # Pa (200 bar)
-t_init_dormancy = 55   # K
+t_init_dormancy = 53.15   # K
 fill_dormancy = 0.0     # no liquid
 mass_fraction_dormancy = 0.11
 ambient_heat_load_dormancy = 20.0  # W/m²
