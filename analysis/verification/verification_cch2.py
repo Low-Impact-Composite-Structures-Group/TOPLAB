@@ -206,7 +206,7 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
 
 # Define Tank 1 parameters (reservoir)
 p_init_refuel = 15e+5  # Pa
-t_init_refuel = 65  # K (adjusted to better match first image)
+t_init_refuel = 63  # K (adjusted to better match first image)
 fill_refuel = 0.0 # no liquid
 p_max_refuel = 5.0e+8  # Pa
 p_min_refuel = None  # Pa
@@ -217,7 +217,7 @@ supply_pressure = 3.0e+5  # Pa (3 bar)
 
 
 # mission details for refuel
-duration_hours_refuel = 0.12  # Duration of refuel in hours (shorter for steeper curve)
+duration_hours_refuel = 0.05  # Duration of refuel in hours (shorter for steeper curve)
 altitude_refuel = 0.0  # Altitude in meters
 fuel_flow_refuel = 0.07  # Fuel flow rate in kg/s - increased even more for faster pressurization
 

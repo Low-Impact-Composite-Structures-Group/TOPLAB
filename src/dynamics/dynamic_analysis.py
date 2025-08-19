@@ -6,6 +6,7 @@ from typing import Protocol, Union, List, Optional
 
 from CoolProp.CoolProp import PropsSI
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
+from src.dynamics.cryopump_model import compute_pump_outlet_hydrogen, CryopumpModel, CryopumpParameters
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester, HydrogenRetriever
 from src.mission.mission import Mission, MissionSection, InFlow
 from src.mission.mission_sections import InFlow as ConcreteInFlow
@@ -19,92 +20,6 @@ from src.thermodynamics.tank_states import (InitialState, TankState,
 MAX_THERMAL_CAPACITY_ITERATIONS = 5
 THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
 LOWER_MASS_LIMIT = 500
-
-# Cryopump parameters
-DEFAULT_RESERVOIR_PRESSURE = 3.0e5  # 3 bar in Pa - reverted to original working value
-DEFAULT_PUMP_EFFICIENCY = 0.78
-
-def compute_pump_outlet_hydrogen(tank_pressure, reservoir_pressure=DEFAULT_RESERVOIR_PRESSURE, eta=DEFAULT_PUMP_EFFICIENCY):
-    """Computes the hydrogen properties at pump outlet based on isentropic pump model with efficiency.
-
-    Args:
-        tank_pressure (float): The current pressure in the tank (Pa)
-        reservoir_pressure (float, optional): Pressure of the LH2 reservoir (Pa). Defaults to 3 bar.
-        eta (float, optional): Pump isentropic efficiency. Defaults to 0.78.
-
-    Returns:
-        Union[Hydrogen, TwoPhaseHydrogen]: Hydrogen property object at pump outlet conditions
-    """
-    # Get saturated liquid properties at reservoir_pressure (always use saturated liquid from reservoir)
-    try:
-        h_liq_in = PropsSI("H", "P", reservoir_pressure, "Q", 0, "hydrogen")
-        s_liq_in = PropsSI("S", "P", reservoir_pressure, "Q", 0, "hydrogen")
-    except ValueError as e:
-        # If we can't get saturated properties at the reservoir pressure
-        # Use properties near the critical point
-        print(f"Using fallback reservoir properties due to error: {str(e)}")
-        # Use properties at 3 bar (default)
-        h_liq_in = PropsSI("H", "P", 3.0e5, "Q", 0, "hydrogen")
-        s_liq_in = PropsSI("S", "P", 3.0e5, "Q", 0, "hydrogen")
-
-    # Isentropic enthalpy at tank_pressure (ideal pump work)
-    # Try to calculate isentropic enthalpy - this is where the error occurs
-    try:
-        h_liq_isentropic = PropsSI("H", "P", tank_pressure, "S", s_liq_in, "hydrogen")
-    except ValueError as e:
-        # If we get a flash error, use a simpler model to approximate the enthalpy change
-        # This is a simplified model for when CoolProp can't solve the flash calculation
-        print(f"Using simplified pump model due to flash calculation error at P={tank_pressure/1e5:.2f}bar")
-        # Simple work calculation: v * (P2 - P1) - approximate isentropic pump work
-        v_liq = 1.0 / PropsSI("D", "P", reservoir_pressure, "Q", 0, "hydrogen")
-        h_liq_isentropic = h_liq_in + v_liq * (tank_pressure - reservoir_pressure)
-
-    # Real enthalpy after pump (using efficiency)
-    # For a pump, the real work is greater than isentropic work, so divide by efficiency
-    h_liq_out = h_liq_in + (h_liq_isentropic - h_liq_in) / eta
-
-    # Find temperature at tank_pressure and h_liq_out
-    try:
-        t_liq_out = PropsSI("T", "P", tank_pressure, "H", h_liq_out, "hydrogen")
-    except ValueError as e:
-        # If we can't get temperature from enthalpy, estimate it
-        print(f"Using estimated temperature due to calculation error")
-        # Estimate temperature change based on enthalpy change and a typical Cp value
-        t_liq_in = PropsSI("T", "P", reservoir_pressure, "Q", 0, "hydrogen")
-        cp_avg = 12000.0  # J/kg-K - approximate for liquid hydrogen
-        t_liq_out = t_liq_in + (h_liq_out - h_liq_in) / cp_avg
-
-    # Always use the HydrogenRetriever which will select the appropriate requester
-    # based on the actual phase of hydrogen at the given conditions
-    from src.fluids.hydrogen_retrievers import HydrogenRetriever, SinglePhaseRequester
-
-    # Print debug information
-    print(f"Pump outlet conditions: P={tank_pressure/1e5:.2f}bar, T={t_liq_out:.2f}K")
-
-    # Use HydrogenRetriever which will automatically determine the correct phase
-    try:
-        hydrogen = HydrogenRetriever().get_hydrogen_properties(tank_pressure, t_liq_out)
-    except ValueError as e:
-        # If HydrogenRetriever fails, fallback to SinglePhaseRequester
-        print(f"Using fallback SinglePhaseRequester due to error: {str(e)}")
-        try:
-            hydrogen = SinglePhaseRequester().get_hydrogen_properties(tank_pressure, t_liq_out)
-        except ValueError:
-            # Last resort: use properties at a safe condition near the actual point
-            print(f"Using last-resort property calculation")
-            # Try slightly different temperature to avoid edge cases
-            t_safe = t_liq_out * 1.05
-            hydrogen = SinglePhaseRequester().get_hydrogen_properties(tank_pressure, t_safe)
-
-    # Print debug information about the hydrogen phase
-    if hasattr(hydrogen, 'phase'):
-        print(f"Hydrogen phase: {hydrogen.phase}")
-    elif hasattr(hydrogen, 'liquid') and hasattr(hydrogen, 'gas'):
-        print(f"Two-phase hydrogen")
-    else:
-        print(f"Unknown hydrogen type: {type(hydrogen)}")
-
-    return hydrogen
 
 class FuelTank(Protocol):
     volume: float

@@ -858,9 +858,6 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
                     # Fall back to some default or raise an error
                     raise ValueError(f"Cannot determine enthalpy for tank hydrogen: {type(tank_hydrogen)}")
 
-        # Add debug print to see what's happening
-        print(f"DEBUG: Flow H_in={h_in:.2f}, Tank H={h_tank:.2f}, Net mass flow={net_mass_flow:.6f}")
-
         return heat_flux + net_mass_flow * (h_in - h_tank)
 
     @classmethod
