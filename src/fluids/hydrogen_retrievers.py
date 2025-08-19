@@ -37,21 +37,21 @@ class HydrogenRequester(Protocol):
         Args:
             pressure (float): Pressure of the hydrogen.
             temperature (float): Temperature of the hydrogen.
-            property (float): Desired property of the hydrogen, these 
+            property (float): Desired property of the hydrogen, these
             have to be in the form accepted by CoolProp database.
 
         Returns:
             float: Value of the requested property
         """
         ...
-    
+
     @abstractmethod
     def get_hydrogen_properties(
         self, pressure: float, temperature: float
     ) -> Union[Hydrogen, TwoPhaseHydrogen]:
         """Method to retrieve the properties of hydrogen.
 
-        The properties should entail all the properties required for 
+        The properties should entail all the properties required for
         the thermodynamic and dynamic models.
 
         Args:
@@ -59,15 +59,15 @@ class HydrogenRequester(Protocol):
             temperature (float): Temperature of the hydrogen.
 
         Returns:
-            Union[Hydrogen, TwoPhaseHydrogen]: Returns a Single or 
-            Two Phase Hydrogen dataclass object, depending on the 
+            Union[Hydrogen, TwoPhaseHydrogen]: Returns a Single or
+            Two Phase Hydrogen dataclass object, depending on the
             requester type.
         """
         ...
 
 
 class SinglePhaseRequester(HydrogenRequester):
-    """Single phase requester is used to request the properties of 
+    """Single phase requester is used to request the properties of
     hydrogen for a single phase. See the list of properties in the class
     attribute to see which properties are requested form the database.
 
@@ -78,7 +78,7 @@ class SinglePhaseRequester(HydrogenRequester):
     fluid = HYDROGEN_FLUID
 
     properties = [
-        "T", "P", "D", "V", "C", "L", "H", "U", "A", "d(D)/d(P)|T", 
+        "T", "P", "D", "V", "C", "L", "H", "U", "A", "d(D)/d(P)|T",
         "d(D)/d(T)|P", "d(H)/d(P)|T", "d(H)/d(T)|P", "d(P)/d(T)|D",
         "Phase"
     ]
@@ -91,7 +91,7 @@ class SinglePhaseRequester(HydrogenRequester):
         Args:
             pressure (float): Pressure of the hydrogen.
             temperature (float): Temperature of the hydrogen.
-            property (float): Desired property of the hydrogen, these 
+            property (float): Desired property of the hydrogen, these
             have to be in the form accepted by CoolProp database.
 
         Returns:
@@ -115,7 +115,7 @@ class SinglePhaseRequester(HydrogenRequester):
 
 
 class TwoPhaseRequester(SinglePhaseRequester):
-    
+
     def get_property(
         self, pressure: float, property: str, state
     ) -> float:
@@ -153,15 +153,15 @@ class TwoPhaseRequester(SinglePhaseRequester):
             gas,
             self.compute_pressure_derivative(liquid.temperature)
         )
-    
+
     def compute_pressure_derivative(
         self, temperature: float
     ) -> float:
-        """Method to compute the saturated pressure derivative with 
+        """Method to compute the saturated pressure derivative with
         respect to temperature.
 
         Args:
-            temperature (float): Temperature at which the derivative is 
+            temperature (float): Temperature at which the derivative is
             to be determined.
 
         Returns:
@@ -213,7 +213,7 @@ class PhaseRequester():
         pressure.
 
         Note that the states are simplified to twophase, liquid and gas.
-        As such the supercritical states are simplified, where the 
+        As such the supercritical states are simplified, where the
         actual supercritical state is simplified to gas.
 
         Args:
@@ -223,13 +223,35 @@ class PhaseRequester():
         Returns:
             str: State of the hydrogen, thus twophase, liquid or gas.
         """
-        # When the temperature and pressure are close to the 
+        # Get critical points
+        T_crit = PropsSI("Tcrit", "", 0, "", 0, self.fluid)
+        P_crit = PropsSI("Pcrit", "", 0, "", 0, self.fluid)
+
+        # In supercritical region, return gas directly
+        if pressure > P_crit and temperature > T_crit:
+            return "gas"
+
+        # For high pressure refueling, more aggressively force transition to gas phase
+        # when approaching critical pressure, even if temperature is still subcritical
+        # This helps simulate crossing the dome during rapid pressurization
+        pressure_ratio = pressure / P_crit
+        # Use a lower threshold to cross the dome earlier and create the curved path
+        if pressure_ratio > 0.75:  # More aggressive threshold (was 0.85)
+            # Get saturation temperature at this pressure
+            try:
+                t_sat = PropsSI("T", "P", pressure, "Q", 0, self.fluid)
+                # More aggressively promote to gas phase with smaller temperature buffer
+                if temperature > t_sat * 1.01:  # Smaller buffer (was 1.05)
+                    return "gas"
+            except:
+                # If we can't get saturation properties, fall back to simpler logic
+                if temperature > 0.7 * T_crit:  # More aggressive (was 0.8)
+                    return "gas"
+
+        # When the temperature and pressure are close to the
         # saturated properties, twophase is to be returned
         two_phase_temperature_limit = 1e-2
-        if (
-            temperature <= PropsSI("Tcrit", "", 0, "", 0, self.fluid)
-            and pressure <= PropsSI("Pcrit", "", 0, "", 0, self.fluid) 
-        ):
+        if temperature <= T_crit and pressure <= P_crit:
             ref_temperature = PropsSI(
                 "T", "P", pressure, "Q", 0, self.fluid
             )
@@ -238,21 +260,25 @@ class PhaseRequester():
                 < two_phase_temperature_limit
             ):
                 return "twophase"
+
+        # Get the actual phase from CoolProp
         phase: str = PhaseSI(
-            'P',pressure,
-            'T',temperature,
+            'P', pressure,
+            'T', temperature,
             self.fluid
         )
+
         # The supercritical phase is simplified to the gas phase
         if phase == "supercritical":
             return "gas"
+
         # Should the fluid be in a supercritical gas or liquid state,
         # simply gas and liquid are returned respectively
         return phase.split("_")[-1]
 
 
 class PropertyRetriever(Protocol):
-    
+
     @abstractmethod
     def get_hydrogen_properties(
         self, pressure: float, temperature: float

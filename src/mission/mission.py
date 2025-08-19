@@ -57,21 +57,21 @@ class Mission:
             "Discharge"
         )
 
-    @classmethod
-    def refuel_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, mach_number: float) -> MissionSection:
-        # For refueling, we use negative OutFlow to represent inflow (the opposite of consumption)
-        return MissionSection(
-                duration*HOURS_TO_SECONDS,
-                [
-                    OutFlow(
-                        -1 * throttle * fuel_flow,  # Negative flow means adding fuel
-                        "gas"                      # Using gas phase for refueling
-                    )
-                ],
-                altitude,
-                mach_number,
-                "Refueling"
-            )
+    # @classmethod
+    # def refuel_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, mach_number: float) -> MissionSection:
+    #     # For refueling, we use negative OutFlow to represent inflow (the opposite of consumption)
+    #     return MissionSection(
+    #             duration*HOURS_TO_SECONDS,
+    #             [
+    #                 OutFlow(
+    #                     -1 * throttle * fuel_flow,  # Negative flow means adding fuel
+    #                     "gas"                      # Using gas phase for refueling
+    #                 )
+    #             ],
+    #             altitude,
+    #             mach_number,
+    #             "Refueling"
+    #         )
 
     @classmethod
     def dormancy_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, phase: str, mach_number: float) -> MissionSection:

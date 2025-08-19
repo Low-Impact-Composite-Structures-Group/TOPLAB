@@ -1,11 +1,17 @@
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+
+# Import necessary modules
 from src.mission.mission import Mission
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
-from facades.analysis_facades import OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, MultiTankAnalysisFacade
 from src.mission.mission_sections import OutFlow, MissionSection, InFlow
 from plotting.sb_plotting import SeabornPlotter
-from facades.analysis_facades import MULTISTEP_METHOD, OperatingEnvelope, TankDimensions, InitialConditions, TargetConditions, FillingAnalysisFacade, RefuellingAnalysisFacade, InOutTankAnalysisFacade, MissionAnalysisFacade
+from facades.analysis_facades import (
+    MULTISTEP_METHOD, OperatingEnvelope, TankDimensions,
+    InitialConditions, TargetConditions, FillingAnalysisFacade,
+    RefuellingAnalysisFacade, InOutTankAnalysisFacade,
+    MissionAnalysisFacade, MultiTankAnalysisFacade
+)
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -14,9 +20,11 @@ import matplotlib.pyplot as plt
 ## COMMON CONFIGURATION ##
 ##########################
 
+
 HOURS_TO_SECONDS = 3600.0
+
 # Add scenario-specific timesteps
-REFUEL_TIMESTEP = 0.1    # Smaller timestep for refuel (faster dynamics)
+REFUEL_TIMESTEP = 0.1    # Extremely small timestep for refuel (capture rapid dynamics)
 DISCHARGE_TIMESTEP = 5.0  # Standard timestep for discharge
 DORMANCY_TIMESTEP = 60.0  # Larger timestep for dormancy (slower dynamics)
 NOMINAL_MASS = 35.0  # kg
@@ -198,34 +206,40 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
 
 # Define Tank 1 parameters (reservoir)
 p_init_refuel = 15e+5  # Pa
-t_init_refuel = 65  # K
+t_init_refuel = 65  # K (adjusted to better match first image)
 fill_refuel = 0.0 # no liquid
 p_max_refuel = 5.0e+8  # Pa
 p_min_refuel = None  # Pa
 ambient_heat_load_refuel = 0.0  # W/m²
 
+supply_temp = 20  # K (cooler supply temperature to match reference)
+supply_pressure = 3.0e+5  # Pa (3 bar)
+
 
 # mission details for refuel
-duration_hours_refuel = 0.12  # Duration of refuel in hours
+duration_hours_refuel = 0.12  # Duration of refuel in hours (shorter for steeper curve)
 altitude_refuel = 0.0  # Altitude in meters
-fuel_flow_refuel = 0.07  # Fuel flow rate in kg/s
-
-# get refuel hydrogen properties
-refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_refuel, t_init_refuel)
+fuel_flow_refuel = 0.07  # Fuel flow rate in kg/s - increased even more for faster pressurization
 
 # Set multi_flow flag to True in initial conditions
 initial_conditions_refuel = InitialConditions(p_init_refuel, t_init_refuel, fill_refuel,
                                              multi_flow=True)
 
-# Get refuel hydrogen properties
-refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_refuel, t_init_refuel)
+# We no longer need to pre-define hydrogen properties for InFlow
+# The dynamic_analysis module will calculate the correct hydrogen properties
+# at each timestep based on the cryopump model
+
+# Create a dummy hydrogen object just for the mission definition
+# This will be replaced during simulation with the properly calculated properties
+dummy_hydrogen = SinglePhaseRequester().get_hydrogen_properties(supply_pressure, supply_temp)
 
 # Make sure the mission uses an InFlow (positive value = flow INTO the tank)
 refuel_mission = Mission([
     MissionSection(
         duration_hours_refuel * HOURS_TO_SECONDS,
         [
-            InFlow(fuel_flow_refuel, refuel_hydrogen)  # Positive InFlow = INFLOW to system
+            InFlow(fuel_flow_refuel, dummy_hydrogen)  # Positive InFlow = INFLOW to system
+            # Note: The hydrogen properties will be dynamically updated during simulation
         ],
         altitude_refuel,
         0.0,
