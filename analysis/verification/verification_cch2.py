@@ -1,67 +1,90 @@
-from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+"""
+Verification scenarios for cryo-compressed hydrogen (CCH2) tank.
 
-# Import necessary modules
-from src.mission.mission import Mission
-from src.insulation.foam_insulations import ConstantFoamInsulation
-from src.materials.materials import Composite
-from src.mission.mission_sections import OutFlow, MissionSection, InFlow
-from plotting.sb_plotting import SeabornPlotter
-from facades.analysis_facades import (
-    MULTISTEP_METHOD, OperatingEnvelope, TankDimensions,
-    InitialConditions, TargetConditions, FillingAnalysisFacade,
-    RefuellingAnalysisFacade, InOutTankAnalysisFacade,
-    MissionAnalysisFacade, MultiTankAnalysisFacade
-)
+This module provides simulation capabilities for three standard scenarios:
+1. Discharge - Fuel flow out of the tank
+2. Refuel - Filling the tank with hydrogen
+3. Dormancy - Tank sitting with no fuel flow in/out (heat soak)
+
+Each scenario can be run individually or in sequence using the complete analysis function.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Import hydrogen fluid models
+from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 
-##########################
-## COMMON CONFIGURATION ##
-##########################
+# Import mission components
+from src.mission.mission import Mission
+from src.mission.mission_sections import OutFlow, MissionSection, InFlow
+
+# Import tank components
+from src.insulation.foam_insulations import ConstantFoamInsulation
+from src.materials.materials import Composite
+
+# Import facades and analysis components
+from plotting.sb_plotting import SeabornPlotter
+from facades.analysis_facades import (
+    MULTISTEP_METHOD, OperatingEnvelope, TankDimensions,
+    InitialConditions, TargetConditions,
+    MissionAnalysisFacade
+)
 
 
-HOURS_TO_SECONDS = 3600.0
+#################################
+## COMMON SIMULATION CONSTANTS ##
+#################################
 
-# Add scenario-specific timesteps
-REFUEL_TIMESTEP = 0.1    # Extremely small timestep for refuel (capture rapid dynamics)
-DISCHARGE_TIMESTEP = 5.0  # Standard timestep for discharge
-DORMANCY_TIMESTEP = 60.0  # Larger timestep for dormancy (slower dynamics)
-NOMINAL_MASS = 35.0  # kg
+# Time conversion
+HOURS_TO_SECONDS = 3600.0  # seconds per hour
 
-# geometry
-tank_volume = 0.5
-radius = (3 * tank_volume / (4 * np.pi))**(1/3)
-print(f"Calculated tank radius: {radius:.3f} m")
+# Simulation timesteps for different scenarios
+DISCHARGE_TIMESTEP = 5.0   # seconds - standard timestep for discharge
+REFUEL_TIMESTEP = 1.0      # seconds - small timestep for refuel (rapid dynamics)
+DORMANCY_TIMESTEP = 60.0  # seconds - larger timestep for dormancy (slower dynamics)
+
+# Tank parameters
+NOMINAL_MASS = 35.0        # kg - target hydrogen mass
+TANK_VOLUME = 0.5          # m³ - internal volume of the tank
+TANK_RADIUS = (3 * TANK_VOLUME / (4 * np.pi))**(1/3)  # m - radius assuming spherical tank
+
+# Display tank size
+print(f"Calculated tank radius: {TANK_RADIUS:.3f} m")
 
 
-#########################
-## DISCHARGE ANALYSIS  ##
-#########################
+#######################################
+## SCENARIO CONFIGURATIONS ##
+#######################################
 
-# Define Tank 1 parameters (reservoir) - 100kg, 300K, 500 bar
-p_init_disch = 4e+7  # Pa
-t_init_disch = 53.15  # K
-fill_disch = 0.0  # no liquid
-p_max_disch = 5.0e+8  # Pa
-p_min_disch = 1500000  # Pa
-ambient_heat_load_disch = 2.0  # W/m²
+#-------------------------#
+# 1. DISCHARGE PARAMETERS #
+#-------------------------#
+# Tank initial conditions
+p_init_disch = 4e+7        # Pa - initial tank pressure
+t_init_disch = 53.15       # K - initial tank temperature
+fill_disch = 0.0           # fraction - no liquid phase (0.0 = all gas)
 
-# Instantiate tank objects
+# Operating limits
+p_max_disch = 5.0e+8       # Pa - maximum allowable pressure
+p_min_disch = 1500000      # Pa - minimum allowable pressure
+ambient_heat_load_disch = 0.0  # W/m² - external heat flux
+
+# Instantiate common tank objects
 tank_material = Composite.carbon(np.radians(55))
-tank_dimensions = TankDimensions(radius, 0.0)  # Spherical tank
+tank_dimensions = TankDimensions(TANK_RADIUS, 0.0)  # Spherical tank
 
-# Insulation for both tanks
-insulation_thickness = 0.05  # m
+# Insulation configuration
+insulation_thickness = 0.05  # m - thermal insulation thickness
 insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 
-# Operating envelopes
+# Operating envelopes for discharge scenario
 operating_window_disch = OperatingEnvelope(p_max_disch, p_min_disch, None)
 
-# Initial conditions
+# Initial conditions for discharge scenario
 initial_conditions_disch = InitialConditions(p_init_disch, t_init_disch, fill_disch, multi_flow=False)
 
-# Define tank configurations for MultiTankAnalysisFacade
+# Define tank configuration for all analysis scenarios
 tank_config = [
     {
         "dimensions": tank_dimensions,
@@ -71,27 +94,40 @@ tank_config = [
     }
 ]
 
-def perform_discharge_analysis(return_performances=False, show_plots=False):
+# Add discharge mission parameters to the configuration section
+duration_hours_disch = 10    # hours - duration of discharge operation
+fuel_flow_disch = 0.001      # kg/s - fuel flow rate out of tank
 
-    # Set timestep
+# Create discharge mission
+discharge_mission = Mission([
+    MissionSection(
+        duration_hours_disch * HOURS_TO_SECONDS,  # Convert hours to seconds
+        [
+            OutFlow(-fuel_flow_disch, "gas")  # NEGATIVE OutFlow = flow INTO system
+        ],
+        0.0,        # Altitude (m)
+        0.0,        # Mach number
+        "Discharge" # Section label
+    )
+])
+
+def perform_discharge_analysis(return_performances=False, show_plots=False):
+    """
+    Run a discharge analysis simulation with the configured parameters.
+
+    Args:
+        return_performances (bool): Whether to return the performance data
+        show_plots (bool): Whether to display plots during execution
+
+    Returns:
+        TankPerformance object if return_performances is True
+    """
+    # Set timestep for discharge scenario
     original_timestep = MULTISTEP_METHOD.timestep
     MULTISTEP_METHOD.timestep = DISCHARGE_TIMESTEP
+
     print(f"\n=== DISCHARGE ANALYSIS ===")
     print(f"Using timestep: {DISCHARGE_TIMESTEP} seconds")
-
-    duration_hours_disch = 10
-    fuel_flow_disch = 0.001  # [kg/s] example value
-    discharge_mission = Mission([
-        MissionSection(
-            duration_hours_disch * HOURS_TO_SECONDS,
-            [
-                OutFlow(-fuel_flow_disch, "gas")  # NEGATIVE OutFlow = INFLOW to system
-            ],
-            0.0,
-            0.0,
-            "Discharge"
-        )
-    ])
 
     try:
         # Print initial info
@@ -103,6 +139,8 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
 
         # Run analysis
         print("\nRunning simulation...")
+        print(f"Discharge duration: {duration_hours_disch} hours with {DISCHARGE_TIMESTEP} second timesteps")
+
         tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
@@ -121,67 +159,72 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
         # Initialize the plotter
         plotter = SeabornPlotter(font="Cambria", palette="delft")
 
-        # Create plots for pressure and temperature
-        # Convert pandas Series to numpy arrays before plotting
-
-        # Convert tank_states data to numpy arrays before plotting
+        # Convert tank states data to dictionary for plotting
         tank_states_dict = {
-            'time': tank_states.timesteps_in_hours,  # Use timesteps_in_hours instead of time
-            'pressure': tank_states.pressures_in_bar,  # Use pressures_in_bar instead of pressure
-            'temperature': tank_states.temperatures,
-            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])
+            'time': tank_states.timesteps_in_hours,       # hours
+            'pressure': tank_states.pressures_in_bar,     # bar
+            'temperature': tank_states.temperatures,      # K
+            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])  # kg
         }
 
         try:
+            # Try to use SeabornPlotter for consistent styling
             fig_combined = plotter.plot_single_tank_states(tank_states)
         except ValueError:
-            # Create a simple combined plot with numpy arrays
+            # Fallback plotting if the plotter fails
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+
+            # Plot pressure over time
             ax1.plot(tank_states_dict['time'], tank_states_dict['pressure'])
             ax1.set_ylabel("Pressure [bar]")
             ax1.grid(True)
 
+            # Plot temperature over time
             ax2.plot(tank_states_dict['time'], tank_states_dict['temperature'])
             ax2.set_ylabel("Temperature [K]")
             ax2.grid(True)
 
+            # Plot fuel mass over time
             ax3.plot(tank_states_dict['time'], tank_states_dict['fuel_mass'])
             ax3.set_xlabel("Time [hours]")
             ax3.set_ylabel("Fuel Mass [kg]")
             ax3.grid(True)
 
+            # Add title
             fig.suptitle("Tank States During Discharge")
             fig_combined = fig
 
-        # Extract mission data for mass flow plotting
-        mass_flows = []
-        fuel_flow_keys = []
-        durations = []
+        # Extract mass flow data from mission for plotting
+        mass_flows = []      # List to hold mass flow rates for each section
+        fuel_flow_keys = []  # Labels for each section
+        durations = []       # Duration of each section in seconds
 
-        # Get data from mission sections
+        # Process each mission section
         for section in discharge_mission.sections:
-            # Extract flows keeping original signs to indicate direction
+            # Collect all mass flows from this section
             section_flows = []
             for flow in section.fuel_flows:
                 if hasattr(flow, 'mass_flow'):
+                    # Handle both single values and lists of mass flows
                     if isinstance(flow.mass_flow, list):
                         section_flows.extend(flow.mass_flow)
                     else:
                         section_flows.append(flow.mass_flow)
 
+            # Store section data
             mass_flows.append(section_flows)
             fuel_flow_keys.append(section.fuel_flow_key if section.fuel_flow_key else "Section")
             durations.append(section.duration)
 
-        # Calculate total duration in hours
-        total_duration = sum(durations) / 3600.0
+        # Calculate total mission duration in hours
+        total_duration = sum(durations) / HOURS_TO_SECONDS
 
-        # Plot the mission mass flows
+        # Generate mass flow plot
         fig_flows = plotter.plot_single_mission_flows(
-            mass_flows=mass_flows,
-            fuel_flow_keys=fuel_flow_keys,
-            durations=durations,
-            total_duration=total_duration
+            mass_flows=mass_flows,         # List of mass flow rates
+            fuel_flow_keys=fuel_flow_keys, # Section labels
+            durations=durations,           # Section durations (seconds)
+            total_duration=total_duration  # Total mission duration (hours)
         )
 
         # Show only the two figures we want
@@ -200,61 +243,71 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
         MULTISTEP_METHOD.timestep = original_timestep
 
 
-#####################
-## REFUEL ANALYSIS ##
-#####################
+#----------------------#
+# 2. REFUEL PARAMETERS #
+#----------------------#
+# Tank initial conditions
+p_init_refuel = 15e+5      # Pa - initial tank pressure
+t_init_refuel = 63         # K - initial tank temperature
+fill_refuel = 0.0          # fraction - no liquid phase (0.0 = all gas)
 
-# Define Tank 1 parameters (reservoir)
-p_init_refuel = 15e+5  # Pa
-t_init_refuel = 63  # K (adjusted to better match first image)
-fill_refuel = 0.0 # no liquid
-p_max_refuel = 5.0e+8  # Pa
-p_min_refuel = None  # Pa
-ambient_heat_load_refuel = 0.0  # W/m²
+# Operating limits
+p_max_refuel = 400.0e+5    # Pa - maximum allowable pressure
+p_min_refuel = None        # Pa - minimum allowable pressure (None = no limit)
+ambient_heat_load_refuel = 8.0  # W/m² - external heat flux
 
-supply_temp = 20  # K (cooler supply temperature to match reference)
-supply_pressure = 3.0e+5  # Pa (3 bar)
+# Supply hydrogen conditions
+supply_temp = 25           # K - hydrogen supply temperature
+supply_pressure = 3.0e+5   # Pa - hydrogen supply pressure (3 bar)
 
+# Mission parameters
+duration_hours_refuel = 0.1  # hours - duration of refueling operation
+altitude_refuel = 0.0      # m - ground-level altitude
+fuel_flow_refuel = 0.07    # kg/s - fuel flow rate into tank
 
-# mission details for refuel
-duration_hours_refuel = 0.05  # Duration of refuel in hours (shorter for steeper curve)
-altitude_refuel = 0.0  # Altitude in meters
-fuel_flow_refuel = 0.07  # Fuel flow rate in kg/s - increased even more for faster pressurization
+# Create initial conditions object
+initial_conditions_refuel = InitialConditions(
+    p_init_refuel,
+    t_init_refuel,
+    fill_refuel,
+    multi_flow=True        # Enable multi-flow mode for phase handling
+)
 
-# Set multi_flow flag to True in initial conditions
-initial_conditions_refuel = InitialConditions(p_init_refuel, t_init_refuel, fill_refuel,
-                                             multi_flow=True)
-
-# We no longer need to pre-define hydrogen properties for InFlow
-# The dynamic_analysis module will calculate the correct hydrogen properties
-# at each timestep based on the cryopump model
-
-# Create a dummy hydrogen object just for the mission definition
-# This will be replaced during simulation with the properly calculated properties
+# Create dummy hydrogen object for mission definition
+# This will be dynamically updated during simulation by the cryopump model
 dummy_hydrogen = SinglePhaseRequester().get_hydrogen_properties(supply_pressure, supply_temp)
 
-# Make sure the mission uses an InFlow (positive value = flow INTO the tank)
+# Define refuel mission with inflow
 refuel_mission = Mission([
     MissionSection(
-        duration_hours_refuel * HOURS_TO_SECONDS,
+        duration_hours_refuel * HOURS_TO_SECONDS,  # Convert hours to seconds
         [
-            InFlow(fuel_flow_refuel, dummy_hydrogen)  # Positive InFlow = INFLOW to system
-            # Note: The hydrogen properties will be dynamically updated during simulation
+            InFlow(fuel_flow_refuel, dummy_hydrogen)  # Positive value = flow INTO tank
         ],
-        altitude_refuel,
-        0.0,
-        "Refuelling"
+        altitude_refuel,  # Altitude (m)
+        0.0,              # Mach number
+        "Refuelling"      # Section label
     )
 ])
 
-# Initial conditions
+# Define operating envelope for refuel scenario
 operating_window_refuel = OperatingEnvelope(p_max_refuel, p_min_refuel, None)
 
 def perform_refuel_analysis(return_performances=False, show_plots=False):
+    """
+    Run a refuel analysis simulation with the configured parameters.
 
-    # Set timestep
+    Args:
+        return_performances (bool): Whether to return the performance data
+        show_plots (bool): Whether to display plots during execution
+
+    Returns:
+        TankPerformance object if return_performances is True
+    """
+    # Set timestep for refuel scenario
     original_timestep = MULTISTEP_METHOD.timestep
     MULTISTEP_METHOD.timestep = REFUEL_TIMESTEP
+
     print(f"\n=== REFUEL ANALYSIS ===")
     print(f"Using timestep: {REFUEL_TIMESTEP} seconds")
 
@@ -271,20 +324,21 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
 
         # Run analysis
         print("\nRunning simulation...")
+        print(f"Refuel duration: {duration_hours_refuel} hours with {REFUEL_TIMESTEP} second timesteps")
+
         target_conditions = TargetConditions(
             fuel_mass=35,
             fill=1.0
         )
 
-        tank_performance = RefuellingAnalysisFacade.analyse(
+        tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
             insulation=tank_config[0]['insulation'],
             mission=refuel_mission,
-            constant_heat_flux=tank_config[0]['heat_flux'],
             initial_conditions=initial_conditions_refuel,
             operating_envelope=operating_window_refuel,
-            target_conditions=target_conditions
+            constant_heat_flux=ambient_heat_load_refuel
         )
 
         # Extract results and plot
@@ -295,51 +349,54 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
         # Initialize the plotter
         plotter = SeabornPlotter(font="Cambria", palette="delft")
 
-        # Convert tank_states data to numpy arrays before plotting
+        # Convert tank states data to dictionary for plotting
         tank_states_dict = {
-            'time': tank_states.timesteps_in_hours,
-            'pressure': tank_states.pressures_in_bar,
-            'temperature': tank_states.temperatures,
-            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])
+            'time': tank_states.timesteps_in_hours,       # hours
+            'pressure': tank_states.pressures_in_bar,     # bar
+            'temperature': tank_states.temperatures,      # K
+            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])  # kg
         }
 
         try:
-            # Plot tank states
+            # Try to use SeabornPlotter for consistent styling
             fig_states = plotter.plot_single_tank_states(tank_states)
             plt.savefig("refuel_tank_states.png", dpi=300)
         except ValueError as e:
             print(f"Error plotting tank states: {e}")
 
-        # Extract mission data for mass flow plotting
-        mass_flows = []
-        fuel_flow_keys = []
-        durations = []
+            # Could add fallback plotting here as in dormancy function
 
-        # Get flow data from the mission
+        # Extract mass flow data from mission for plotting
+        mass_flows = []      # List to hold mass flow rates for each section
+        fuel_flow_keys = []  # Labels for each section
+        durations = []       # Duration of each section in seconds
+
+        # Process each mission section
         for section in refuel_mission.sections:
+            # Collect all mass flows from this section
             section_flows = []
             for flow in section.fuel_flows:
-                # Get the flow value
                 if hasattr(flow, 'mass_flow'):
+                    # Handle both single values and lists of mass flows
                     if isinstance(flow.mass_flow, list):
                         section_flows.extend(flow.mass_flow)
                     else:
                         section_flows.append(flow.mass_flow)
 
-            # Store the section data
+            # Store section data
             mass_flows.append(section_flows)
             fuel_flow_keys.append(section.fuel_flow_key or "Refuelling")
             durations.append(section.duration)
 
-        # Calculate total duration in hours
-        total_duration = sum(durations) / 3600.0
+        # Calculate total mission duration in hours
+        total_duration = sum(durations) / HOURS_TO_SECONDS
 
-        # Plot mass flows with invert_flow=True to show refueling as positive
+        # Generate mass flow plot
         fig_flows = plotter.plot_single_mission_flows(
-            mass_flows=mass_flows,
-            fuel_flow_keys=fuel_flow_keys,
-            durations=durations,
-            total_duration=total_duration,
+            mass_flows=mass_flows,         # List of mass flow rates
+            fuel_flow_keys=fuel_flow_keys, # Section labels
+            durations=durations,           # Section durations (seconds)
+            total_duration=total_duration  # Total mission duration (hours)
         )
         plt.savefig("refuel_mass_flows.png", dpi=300)
 
@@ -359,40 +416,54 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
         MULTISTEP_METHOD.timestep = original_timestep
 
 
-#######################
-## DORMANCY ANALYSIS ##
-#######################
+#------------------------#
+# 3. DORMANCY PARAMETERS #
+#------------------------#
+# Tank initial conditions
+p_init_dormancy = 400e+5   # Pa - initial tank pressure (400 bar)
+t_init_dormancy = 53.15    # K - initial tank temperature
+fill_dormancy = 0.0        # fraction - no liquid phase (0.0 = all gas)
+ambient_heat_load_dormancy = 10.0  # W/m² - external heat flux (reduced from 20.0)
 
-# DORMANCY ANALYSIS CONFIGURATION
-duration_hours = 60.0  # Duration of dormancy in hours
-altitude = 0.0  # Altitude in meters
+# Mission parameters
+duration_hours_dormancy = 60.0  # hours - duration of dormancy period (reduced from 60.0 to improve simulation speed)
+altitude_dormancy = 0.0    # m - ground-level altitude
 
-# Create a dormancy mission with a single section
+# Create dormancy mission (no fuel flow)
 dormancy_mission = Mission([
     Mission.dormancy_section(
-        duration=duration_hours,
-        altitude=altitude,
-        fuel_flow=0.0,  # Will be forced to zero anyway
-        throttle=0.0,   # Will be forced to zero anyway
-        phase="gas",    # Dummy value, not used
-        mach_number=0.0
+        duration=duration_hours_dormancy,
+        altitude=altitude_dormancy,
+        fuel_flow=0.0,     # No fuel flow during dormancy
+        throttle=0.0,      # No engine throttle
+        phase="gas",       # Dummy value (not used in dormancy)
+        mach_number=0.0    # No movement
     )
 ])
 
-# Define Tank 1 parameters for dormancy - 100kg, 300K, 200 bar
-p_init_dormancy = 400e+5  # Pa (200 bar)
-t_init_dormancy = 53.15   # K
-fill_dormancy = 0.0     # no liquid
-ambient_heat_load_dormancy = 20.0  # W/m²
-
-# Initial conditions for dormancy
-initial_conditions_dormancy = InitialConditions(p_init_dormancy, t_init_dormancy, fill_dormancy,
-                                                 multi_flow=True)
+# Create initial conditions object for dormancy
+initial_conditions_dormancy = InitialConditions(
+    p_init_dormancy,
+    t_init_dormancy,
+    fill_dormancy,
+    multi_flow=True        # Enable multi-flow mode for phase handling
+)
 
 def perform_dormancy_analysis(return_performances=False, show_plots=False):
-    # Set timestep
+    """
+    Run a dormancy analysis simulation with the configured parameters.
+
+    Args:
+        return_performances (bool): Whether to return the performance data
+        show_plots (bool): Whether to display plots during execution
+
+    Returns:
+        TankPerformance object if return_performances is True
+    """
+    # Set timestep for dormancy scenario
     original_timestep = MULTISTEP_METHOD.timestep
     MULTISTEP_METHOD.timestep = DORMANCY_TIMESTEP
+
     print(f"\n=== DORMANCY ANALYSIS ===")
     print(f"Using timestep: {DORMANCY_TIMESTEP} seconds")
 
@@ -404,16 +475,17 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
         # Ensure multi_flow is True for proper phase handling
         initial_conditions_dormancy.multi_flow = True
 
-        # Define operating envelope. ensure that max_pressure is defined (and larger than initial pressure)
-
+        # Define operating envelope for dormancy
         operating_window_dormancy = OperatingEnvelope(
-            max_pressure=450e5,  # Pa
-            min_pressure=15e5,   # Pa
-            min_temperature=20   # K
+            max_pressure=450e5,      # Pa - maximum allowable pressure
+            min_pressure=15e5,       # Pa - minimum allowable pressure
+            min_temperature=20       # K - minimum allowable temperature
         )
 
         # Run analysis
         print("\nRunning simulation...")
+        print(f"Dormancy duration: {duration_hours_dormancy} hours with {DORMANCY_TIMESTEP} second timesteps")
+
         tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
@@ -432,36 +504,41 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
         # Initialize the plotter
         plotter = SeabornPlotter(font="Cambria", palette="delft")
 
-        # Convert tank_states data to numpy arrays before plotting
+        # Convert tank states data to dictionary for plotting
         tank_states_dict = {
-            'time': tank_states.timesteps_in_hours,
-            'pressure': tank_states.pressures_in_bar,
-            'temperature': tank_states.temperatures,
-            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])
+            'time': tank_states.timesteps_in_hours,       # hours
+            'pressure': tank_states.pressures_in_bar,     # bar
+            'temperature': tank_states.temperatures,      # K
+            'fuel_mass': np.array([state.fuel_mass for state in tank_states.states]) if hasattr(tank_states, 'states') else np.array([0])  # kg
         }
 
         try:
-            # Plot tank states
+            # Try to use SeabornPlotter for consistent styling
             fig_states = plotter.plot_single_tank_states(tank_states)
             plt.savefig("dormancy_tank_states.png", dpi=300)
         except ValueError as e:
             print(f"Error plotting tank states: {e}")
 
-            # Fallback plotting
+            # Fallback plotting if the plotter fails
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+
+            # Plot pressure over time
             ax1.plot(tank_states_dict['time'], tank_states_dict['pressure'])
             ax1.set_ylabel("Pressure [bar]")
             ax1.grid(True)
 
+            # Plot temperature over time
             ax2.plot(tank_states_dict['time'], tank_states_dict['temperature'])
             ax2.set_ylabel("Temperature [K]")
             ax2.grid(True)
 
+            # Plot fuel mass over time
             ax3.plot(tank_states_dict['time'], tank_states_dict['fuel_mass'])
             ax3.set_xlabel("Time [hours]")
             ax3.set_ylabel("Fuel Mass [kg]")
             ax3.grid(True)
 
+            # Add title and save
             fig.suptitle("Tank States During Dormancy")
             plt.savefig("dormancy_tank_states.png", dpi=300)
 
@@ -479,6 +556,44 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
     finally:
         # Restore original timestep
         MULTISTEP_METHOD.timestep = original_timestep
+
+
+def get_hydrogen_density_from_state(state, requester):
+    """
+    Helper function to consistently extract hydrogen density from a tank state.
+
+    Args:
+        state: Tank state object containing hydrogen properties
+        requester: SinglePhaseRequester for calculating properties if needed
+
+    Returns:
+        float: Hydrogen density in kg/m³
+    """
+    # Check if the state has hydrogen properties
+    if hasattr(state, 'hydrogen'):
+        # If hydrogen has phase information
+        if hasattr(state.hydrogen, 'phase'):
+            if state.hydrogen.phase in ["gas", "supercritical"]:
+                # Gas phase - check for specific gas property
+                if hasattr(state.hydrogen, 'gas'):
+                    return state.hydrogen.gas.density
+                else:
+                    return state.hydrogen.density
+            elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
+                # Liquid phase - check for specific liquid property
+                if hasattr(state.hydrogen, 'liquid'):
+                    return state.hydrogen.liquid.density
+                else:
+                    return state.hydrogen.density
+            else:
+                # Unknown phase - calculate from requester
+                return requester.get_property(state.pressure, state.temperature, "D")
+        else:
+            # No phase information - use direct density
+            return state.hydrogen.density
+    else:
+        # No hydrogen information - calculate using requester
+        return requester.get_property(state.pressure, state.temperature, "D")
 
 
 def perform_complete_analysis(show_intermediate_plots=False):
@@ -531,89 +646,35 @@ def perform_complete_analysis(show_intermediate_plots=False):
     # Extract data from discharge analysis
     print("Processing discharge data...")
     for state in discharge_performance.tank_states.states:
-        scenario_data['discharge']['temperatures'].append(state.temperature)
-        scenario_data['discharge']['pressures'].append(state.pressure)
+        # Store temperature and pressure
+        scenario_data['discharge']['temperatures'].append(state.temperature)  # K
+        scenario_data['discharge']['pressures'].append(state.pressure)        # Pa
 
-        # Get density based on phase
-        if hasattr(state, 'hydrogen'):
-            if hasattr(state.hydrogen, 'phase'):
-                if state.hydrogen.phase in ["gas", "supercritical"]:
-                    if hasattr(state.hydrogen, 'gas'):
-                        density = state.hydrogen.gas.density
-                    else:
-                        density = state.hydrogen.density
-                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
-                    if hasattr(state.hydrogen, 'liquid'):
-                        density = state.hydrogen.liquid.density
-                    else:
-                        density = state.hydrogen.density
-                else:
-                    # Default to getting density from requester
-                    density = requester.get_property(state.pressure, state.temperature, "D")
-            else:
-                # If no phase attribute, use the direct density
-                density = state.hydrogen.density
-        else:
-            # If no hydrogen attribute, calculate from requester
-            density = requester.get_property(state.pressure, state.temperature, "D")
-
-        scenario_data['discharge']['densities'].append(density)
+        # Get hydrogen density using a consistent approach
+        density = get_hydrogen_density_from_state(state, requester)
+        scenario_data['discharge']['densities'].append(density)  # kg/m³
 
     # Extract data from refuel analysis
     print("Processing refuel data...")
     for state in refuel_performance.tank_states.states:
-        scenario_data['refuel']['temperatures'].append(state.temperature)
-        scenario_data['refuel']['pressures'].append(state.pressure)
+        # Store temperature and pressure
+        scenario_data['refuel']['temperatures'].append(state.temperature)  # K
+        scenario_data['refuel']['pressures'].append(state.pressure)        # Pa
 
-        # Get density based on phase (same logic as above)
-        if hasattr(state, 'hydrogen'):
-            if hasattr(state.hydrogen, 'phase'):
-                if state.hydrogen.phase in ["gas", "supercritical"]:
-                    if hasattr(state.hydrogen, 'gas'):
-                        density = state.hydrogen.gas.density
-                    else:
-                        density = state.hydrogen.density
-                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
-                    if hasattr(state.hydrogen, 'liquid'):
-                        density = state.hydrogen.liquid.density
-                    else:
-                        density = state.hydrogen.density
-                else:
-                    density = requester.get_property(state.pressure, state.temperature, "D")
-            else:
-                density = state.hydrogen.density
-        else:
-            density = requester.get_property(state.pressure, state.temperature, "D")
-
-        scenario_data['refuel']['densities'].append(density)
+        # Get hydrogen density using helper function
+        density = get_hydrogen_density_from_state(state, requester)
+        scenario_data['refuel']['densities'].append(density)  # kg/m³
 
     # Extract data from dormancy analysis
     print("Processing dormancy data...")
     for state in dormancy_performance.tank_states.states:
-        scenario_data['dormancy']['temperatures'].append(state.temperature)
-        scenario_data['dormancy']['pressures'].append(state.pressure)
+        # Store temperature and pressure
+        scenario_data['dormancy']['temperatures'].append(state.temperature)  # K
+        scenario_data['dormancy']['pressures'].append(state.pressure)        # Pa
 
-        # Get density based on phase (same logic as above)
-        if hasattr(state, 'hydrogen'):
-            if hasattr(state.hydrogen, 'phase'):
-                if state.hydrogen.phase in ["gas", "supercritical"]:
-                    if hasattr(state.hydrogen, 'gas'):
-                        density = state.hydrogen.gas.density
-                    else:
-                        density = state.hydrogen.density
-                elif state.hydrogen.phase in ["liquid", "supercritical_liquid"]:
-                    if hasattr(state.hydrogen, 'liquid'):
-                        density = state.hydrogen.liquid.density
-                    else:
-                        density = state.hydrogen.density
-                else:
-                    density = requester.get_property(state.pressure, state.temperature, "D")
-            else:
-                density = state.hydrogen.density
-        else:
-            density = requester.get_property(state.pressure, state.temperature, "D")
-
-        scenario_data['dormancy']['densities'].append(density)
+        # Get hydrogen density using helper function
+        density = get_hydrogen_density_from_state(state, requester)
+        scenario_data['dormancy']['densities'].append(density)  # kg/m³
 
     # Create the combined density-temperature plot
     print("\n==== CREATING COMBINED DENSITY-TEMPERATURE PLOT ====")
@@ -633,6 +694,32 @@ def perform_complete_analysis(show_intermediate_plots=False):
     print("\n====== COMPLETE VERIFICATION ANALYSIS FINISHED ======\n")
 
     return discharge_performance, refuel_performance, dormancy_performance
+
+
+def run_analysis(mode="complete", show_plots=False):
+    """
+    Main entry point function for running simulations.
+
+    Args:
+        mode (str): Analysis mode - one of "complete", "discharge", "refuel", "dormancy"
+        show_plots (bool): Whether to display plots during execution
+
+    Returns:
+        Object or tuple: Performance results from the selected analysis
+    """
+    print(f"\n====== RUNNING {mode.upper()} ANALYSIS ======\n")
+
+    if mode == "complete":
+        return perform_complete_analysis(show_plots)
+    elif mode == "discharge":
+        return perform_discharge_analysis(return_performances=True, show_plots=show_plots)
+    elif mode == "refuel":
+        return perform_refuel_analysis(return_performances=True, show_plots=show_plots)
+    elif mode == "dormancy":
+        return perform_dormancy_analysis(return_performances=True, show_plots=show_plots)
+    else:
+        raise ValueError(f"Invalid analysis mode: {mode}. " +
+                         "Must be one of: 'complete', 'discharge', 'refuel', 'dormancy'.")
 
 
 
