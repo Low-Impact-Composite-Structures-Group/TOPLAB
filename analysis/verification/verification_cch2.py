@@ -38,7 +38,6 @@ fill_disch = 0.0  # no liquid
 p_max_disch = 5.0e+8  # Pa
 p_min_disch = 1500000  # Pa
 ambient_heat_load_disch = 2.0  # W/m²
-mass_fraction_disch = 1.0
 
 # Instantiate tank objects
 tank_material = Composite.carbon(np.radians(55))
@@ -52,7 +51,7 @@ insulation = ConstantFoamInsulation.rohacell(insulation_thickness)
 operating_window_disch = OperatingEnvelope(p_max_disch, p_min_disch, None)
 
 # Initial conditions
-initial_conditions_disch = InitialConditions(p_init_disch, t_init_disch, fill_disch, multi_flow=False, mass_fraction=mass_fraction_disch)
+initial_conditions_disch = InitialConditions(p_init_disch, t_init_disch, fill_disch, multi_flow=False)
 
 # Define tank configurations for MultiTankAnalysisFacade
 tank_config = [
@@ -204,7 +203,6 @@ fill_refuel = 0.0 # no liquid
 p_max_refuel = 5.0e+8  # Pa
 p_min_refuel = None  # Pa
 ambient_heat_load_refuel = 0.0  # W/m²
-mass_fraction_refuel = 0.0 # analog to fill, but for gas wrt mass
 
 
 # mission details for refuel
@@ -217,7 +215,7 @@ refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_refuel, 
 
 # Set multi_flow flag to True in initial conditions
 initial_conditions_refuel = InitialConditions(p_init_refuel, t_init_refuel, fill_refuel,
-                                             multi_flow=True, mass_fraction=mass_fraction_refuel)
+                                             multi_flow=True)
 
 # Get refuel hydrogen properties
 refuel_hydrogen = SinglePhaseRequester().get_hydrogen_properties(p_init_refuel, t_init_refuel)
@@ -371,12 +369,11 @@ dormancy_mission = Mission([
 p_init_dormancy = 400e+5  # Pa (200 bar)
 t_init_dormancy = 53.15   # K
 fill_dormancy = 0.0     # no liquid
-mass_fraction_dormancy = 0.11
 ambient_heat_load_dormancy = 20.0  # W/m²
 
 # Initial conditions for dormancy
 initial_conditions_dormancy = InitialConditions(p_init_dormancy, t_init_dormancy, fill_dormancy,
-                                                 multi_flow=True, mass_fraction=mass_fraction_dormancy)
+                                                 multi_flow=True)
 
 def perform_dormancy_analysis(return_performances=False, show_plots=False):
     # Set timestep

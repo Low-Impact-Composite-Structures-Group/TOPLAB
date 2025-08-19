@@ -128,18 +128,7 @@ class MissionSectionAnalysis:
         tank: FuelTank,
         timestep: float
     ) -> TankStates:
-        # Use override_mass if it exists, otherwise compute mass from fill level
-        if hasattr(initial_state, 'override_mass'):
-            fuel_mass = initial_state.override_mass
-            print(f"Using override_mass: {fuel_mass:.2f}kg")
-        else:
-            # Add debug statement 5 here to examine density and calculation
-            print(f"DEBUG: Computing fuel mass with volume {tank.volume} m³")
-            if hasattr(initial_state, 'hydrogen'):
-                print(f"DEBUG: Using density {initial_state.hydrogen.density} kg/m³")
-            fuel_mass = initial_state.compute_fuel_mass(tank.volume)
-            print(f"DEBUG: Calculated full mass = {fuel_mass} kg")
-            print(f"Computed fuel mass: {fuel_mass:.2f}kg")
+        fuel_mass = initial_state.compute_fuel_mass(tank.volume)
 
         initial_state = TankState(
             tank,
