@@ -352,7 +352,6 @@ class FillingAnalysisFacade(AnalysisFacade):
         )
         return target_conditions
 
-class RefuellingAnalysisFacade(AnalysisFacade):
     @classmethod
     def analyse(
         cls,
