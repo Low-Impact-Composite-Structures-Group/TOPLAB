@@ -17,7 +17,7 @@ from src.thermodynamics.tank_states import (InitialState, TankState,
 # such this needs to be iterated as the operating pressure of the
 # tank is refined. Here the maximum amount of iterations are defined
 # and the percentage change in capacity of the tank
-MAX_THERMAL_CAPACITY_ITERATIONS = 5
+MAX_THERMAL_CAPACITY_ITERATIONS = 10
 THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
 LOWER_MASS_LIMIT = 500
 
