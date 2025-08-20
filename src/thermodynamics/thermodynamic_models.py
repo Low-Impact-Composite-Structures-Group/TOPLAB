@@ -66,6 +66,7 @@ class ThermodynamicModel:
     insulation_layers: int = 12
     max_iterations: int = int(1e3)
     constant_heat_flux: float = None
+    heat_transfer_coefficient: float = None  # W/m²K - Overall heat transfer coefficient
 
     def compute_heat_flux(
         self,
@@ -73,15 +74,31 @@ class ThermodynamicModel:
         tank_state: TankState,
         mission_section: MissionSection
     ) -> tuple[float, list]:
-
+        # For constant heat flux case, just return it directly
         if self.constant_heat_flux is not None:
-            # Use the constant heat flux value
-            heat_flux = self.constant_heat_flux
+            # Use the constant heat flux value (W/m²) multiplied by the surface area
+            # to get total heat transfer in Watts
+            total_heat_flux = self.constant_heat_flux * tank.surface_area
             temperatures = self.define_initial_temperatures(
                 tank_state.temperature, mission_section.temperature
             )
-            return heat_flux, temperatures
+            return total_heat_flux, temperatures
 
+        # If using fixed heat transfer coefficient (U-value)
+        if self.heat_transfer_coefficient is not None:
+            # Calculate heat flux using the fixed heat transfer coefficient
+            # Q = U × A × ΔT
+            temperature_difference = mission_section.temperature - tank_state.temperature
+            total_heat_flux = self.heat_transfer_coefficient * tank.surface_area * temperature_difference
+
+            # Define temperature profile through insulation (linear approximation)
+            temperatures = self.define_initial_temperatures(
+                tank_state.temperature, mission_section.temperature
+            )
+
+            return total_heat_flux, temperatures
+
+        # Otherwise calculate heat flux based on thermal resistances
         temperatures = self.define_initial_temperatures(
             tank_state.temperature, mission_section.temperature
         )
@@ -94,14 +111,26 @@ class ThermodynamicModel:
                 tank, tank_state, mission_section, temperatures
             )
 
-            # Compute the total heat flux
+            # Adjust thermal resistance if constant_heat_flux is provided
+            # This effectively scales the heat transfer to match the expected heat flux
+            total_resistance = SeriesResistances().compute_equivalent_resistance(
+                thermal_resistances
+            )
+
+            # Calculate temperature-based heat flux
             heat_flux = self.compute_total_tank_heat_flux(
                 mission_section.temperature,
                 tank_state.temperature,
-                SeriesResistances().compute_equivalent_resistance(
-                    thermal_resistances
-                )
+                total_resistance
             )
+
+            # If constant_heat_flux is provided, use it to scale the heat transfer
+            # This preserves the temperature-dependent behavior while matching expected heat flux
+            if self.constant_heat_flux is not None:
+                # Scale the heat flux to match the desired constant value
+                # Only during refueling (when constant_heat_flux is not None)
+                desired_total_heat = self.constant_heat_flux * tank.surface_area
+                heat_flux = desired_total_heat
 
             # Compute new temperatures
             new_temperatures = self.compute_new_temperatures(

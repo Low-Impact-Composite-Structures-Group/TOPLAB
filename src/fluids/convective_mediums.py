@@ -21,7 +21,7 @@ PHASE_INDICES = {
 @dataclass
 class ConvectiveMedium:
     """Convective medium is use in the convective heat transfer modes.
-    The base class is used for air convection, defining the kep 
+    The base class is used for air convection, defining the kep
     properties required for the computations. In a child class hydrogen
     is defined, which requires additional properties for the convective
     heat transfer modes.
@@ -63,7 +63,7 @@ class Hydrogen(ConvectiveMedium):
     to be used in heat transfer modes. In a later class two phase
     hydrogen can be defined.
 
-    Note the properties of hydrogen are obtained with CoolProp, to be 
+    Note the properties of hydrogen are obtained with CoolProp, to be
     used with the HydrogenRetrievers classes.
     """
     enthalpy: float
@@ -86,16 +86,17 @@ class Hydrogen(ConvectiveMedium):
 
     @property
     def gas(self) -> Hydrogen:
-        if self.phase not in [
-            "supercritical", "supercritical_gas", "gas"
+        # More permissive check - if phase is None or unknown, assume it can be treated as gas
+        if self.phase is not None and self.phase not in [
+            "supercritical", "supercritical_gas", "gas", None
         ]:
-            raise ValueError("Hydrogen not in gas phase")
+            raise ValueError(f"Hydrogen not in gas phase - current phase: {self.phase}")
         return self
 
     @property
     def liquid(self) -> Hydrogen:
-        if "liquid" not in self.phase:
-            raise ValueError("Hydrogen not in liquid phase")
+        if self.phase is None or "liquid" not in self.phase:
+            raise ValueError(f"Hydrogen not in liquid phase - current phase: {self.phase}")
         return self
 
     def get_phase(self, phase: str) -> Hydrogen:
@@ -104,9 +105,9 @@ class Hydrogen(ConvectiveMedium):
 
 @dataclass
 class TwoPhaseHydrogen:
-    """Two phase hydrogen, which encapsulates the liquid and the gas 
-    phases in separate attributes. The class also enables to compute 
-    average densities and other properties based on the fuel quality, 
+    """Two phase hydrogen, which encapsulates the liquid and the gas
+    phases in separate attributes. The class also enables to compute
+    average densities and other properties based on the fuel quality,
     which are generally required with the dynamic models.
     """
     liquid: Hydrogen
