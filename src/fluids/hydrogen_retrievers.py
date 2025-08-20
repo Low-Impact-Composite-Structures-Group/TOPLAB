@@ -231,35 +231,39 @@ class PhaseRequester():
         if pressure > P_crit and temperature > T_crit:
             return "gas"
 
-        # For high pressure refueling, more aggressively force transition to gas phase
+        # For high pressure refueling, enforce transition to gas phase
         # when approaching critical pressure, even if temperature is still subcritical
-        # This helps simulate crossing the dome during rapid pressurization
+        # This helps simulate crossing the dome during rapid pressurization with correct path
         pressure_ratio = pressure / P_crit
-        # Use a lower threshold to cross the dome earlier and create the curved path
-        if pressure_ratio > 0.75:  # More aggressive threshold (was 0.85)
+        # Use threshold to ensure proper path creation across the dome
+        if pressure_ratio > 0.75:
             # Get saturation temperature at this pressure
             try:
                 t_sat = PropsSI("T", "P", pressure, "Q", 0, self.fluid)
-                # More aggressively promote to gas phase with smaller temperature buffer
-                if temperature > t_sat * 1.01:  # Smaller buffer (was 1.05)
+                # Ensure sufficient distance from the saturation line
+                if temperature > t_sat * 1.01:
                     return "gas"
             except:
                 # If we can't get saturation properties, fall back to simpler logic
-                if temperature > 0.7 * T_crit:  # More aggressive (was 0.8)
+                if temperature > 0.7 * T_crit:
                     return "gas"
 
         # When the temperature and pressure are close to the
         # saturated properties, twophase is to be returned
         two_phase_temperature_limit = 1e-2
         if temperature <= T_crit and pressure <= P_crit:
-            ref_temperature = PropsSI(
-                "T", "P", pressure, "Q", 0, self.fluid
-            )
-            if (
-                abs(ref_temperature - temperature) / temperature
-                < two_phase_temperature_limit
-            ):
-                return "twophase"
+            try:
+                ref_temperature = PropsSI(
+                    "T", "P", pressure, "Q", 0, self.fluid
+                )
+                if (
+                    abs(ref_temperature - temperature) / temperature
+                    < two_phase_temperature_limit
+                ):
+                    return "twophase"
+            except:
+                # If we can't get saturation properties, don't default to two-phase
+                pass
 
         # Get the actual phase from CoolProp
         phase: str = PhaseSI(
@@ -309,7 +313,25 @@ class HydrogenRetriever(PropertyRetriever):
 
 
 def main():
-    pass
+    # Test the phase detection for refueling scenario
+    print("Testing phase detection for refueling scenario")
+    ph_requester = PhaseRequester()
+
+    # Critical points for reference
+    T_crit = PropsSI("Tcrit", "", 0, "", 0, HYDROGEN_FLUID)
+    P_crit = PropsSI("Pcrit", "", 0, "", 0, HYDROGEN_FLUID)
+    print(f"Critical points: T_crit={T_crit:.2f}K, P_crit={P_crit/1e6:.2f}MPa")
+
+    # Test refueling path from literature
+    print("\nTesting phase detection along refueling path:")
+    pressures = [23e5, 50e5, 100e5, 200e5, 300e5, 400e5]  # Pa
+    temps = [70, 60, 50, 40, 35, 32]  # K
+
+    for p, t in zip(pressures, temps):
+        phase = ph_requester.get_fluid_phase(t, p)
+        sat_t = PropsSI("T", "P", p, "Q", 0, HYDROGEN_FLUID)
+        p_mpa = p/1e6
+        print(f"P={p_mpa:.2f} MPa, T={t:.1f}K, T_sat={sat_t:.1f}K, Phase={phase}")
 
 
 if __name__ == "__main__":
