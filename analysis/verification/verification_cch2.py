@@ -27,12 +27,9 @@ from src.materials.materials import Composite
 from plotting.sb_plotting import SeabornPlotter
 from facades.analysis_facades import (
     MULTISTEP_METHOD, OperatingEnvelope, TankDimensions,
-    InitialConditions, TargetConditions, Insulation,
+    InitialConditions, TargetConditions,
     MissionAnalysisFacade
 )
-
-# Import thermodynamic model
-from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 
 #################################
@@ -52,13 +49,8 @@ NOMINAL_MASS = 35.0        # kg - target hydrogen mass
 TANK_VOLUME = 0.5          # m³ - internal volume of the tank
 TANK_RADIUS = (3 * TANK_VOLUME / (4 * np.pi))**(1/3)  # m - radius assuming spherical tank
 
-# Heat transfer coefficient from reference paper
-# Adjust this value to match reference paper data
-HEAT_TRANSFER_COEFFICIENT = 0.025  # W/m²K
-
 # Display tank size
 print(f"Calculated tank radius: {TANK_RADIUS:.3f} m")
-print(f"Using heat transfer coefficient: {HEAT_TRANSFER_COEFFICIENT} W/m²K")
 
 
 #######################################
@@ -70,13 +62,13 @@ print(f"Using heat transfer coefficient: {HEAT_TRANSFER_COEFFICIENT} W/m²K")
 #-------------------------#
 # Tank initial conditions
 p_init_disch = 4e+7        # Pa - initial tank pressure
-t_init_disch = 51.8       # K - initial tank temperature
+t_init_disch = 53.15       # K - initial tank temperature
 fill_disch = 0.0           # fraction - no liquid phase (0.0 = all gas)
 
 # Operating limits
 p_max_disch = 5.0e+8       # Pa - maximum allowable pressure
 p_min_disch = 1500000      # Pa - minimum allowable pressure
-ambient_heat_load_disch = None  # Set to None to use thermal resistance model
+ambient_heat_load_disch = 0.0  # W/m² - external heat flux
 
 # Instantiate common tank objects
 tank_material = Composite.carbon(np.radians(55))
@@ -119,25 +111,6 @@ discharge_mission = Mission([
     )
 ])
 
-# Custom MissionAnalysisFacade that uses our FixedHTCThermodynamicModel
-class FixedHTCMissionAnalysisFacade(MissionAnalysisFacade):
-    @classmethod
-    def _define_thermal_model(
-        cls,
-        insulation: Insulation,
-        constant_heat_flux: float = None
-    ) -> ThermodynamicModel:
-        # Create a thermal model with fixed heat transfer coefficient
-        from facades.analysis_facades import INTERNAL_MODEL, EXTERNAL_MODEL
-
-        return ThermodynamicModel(
-            INTERNAL_MODEL,
-            EXTERNAL_MODEL,
-            insulation,
-            constant_heat_flux=constant_heat_flux,
-            heat_transfer_coefficient=HEAT_TRANSFER_COEFFICIENT
-        )
-
 def perform_discharge_analysis(return_performances=False, show_plots=False):
     """
     Run a discharge analysis simulation with the configured parameters.
@@ -168,14 +141,14 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
         print("\nRunning simulation...")
         print(f"Discharge duration: {duration_hours_disch} hours with {DISCHARGE_TIMESTEP} second timesteps")
 
-        # Use our custom facade with fixed HTC model
-        tank_performance = FixedHTCMissionAnalysisFacade.analyse(
+        tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
             insulation=tank_config[0]['insulation'],
             mission=discharge_mission,
             initial_conditions=initial_conditions_disch,
             operating_envelope=operating_window_disch,
+            constant_heat_flux=tank_config[0]['heat_flux']
         )
 
         # Extract results and plot
@@ -281,16 +254,14 @@ fill_refuel = 0.0          # fraction - no liquid phase (0.0 = all gas)
 # Operating limits
 p_max_refuel = 400.0e+5    # Pa - maximum allowable pressure
 p_min_refuel = None        # Pa - minimum allowable pressure (None = no limit)
-# Using the thermal resistance model with adjusted insulation thickness
-# to match the reference paper's heat transfer coefficient of ~0.025 W/m²K
-ambient_heat_load_refuel = None  # Set to None to use thermal resistance model
+ambient_heat_load_refuel = 0.1  # W/m² - external heat flux
 
 # Supply hydrogen conditions
-supply_temp = 24            # K - hydrogen supply temperature
-supply_pressure = 2.0e+5   # Pa - hydrogen supply pressure
+supply_temp = 22.8           # K - hydrogen supply temperature
+supply_pressure = 2.0e+5   # Pa - hydrogen supply pressure (2 bar)
 
 # Mission parameters
-duration_hours_refuel = 0.155  # hours - duration of refueling operation
+duration_hours_refuel = 0.15  # hours - duration of refueling operation
 altitude_refuel = 0.0      # m - ground-level altitude
 fuel_flow_refuel = 0.06    # kg/s - fuel flow rate into tank
 
@@ -360,13 +331,14 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
             fill=1.0
         )
 
-        tank_performance = FixedHTCMissionAnalysisFacade.analyse(
+        tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
             insulation=tank_config[0]['insulation'],
             mission=refuel_mission,
             initial_conditions=initial_conditions_refuel,
             operating_envelope=operating_window_refuel,
+            constant_heat_flux=ambient_heat_load_refuel
         )
 
         # Extract results and plot
@@ -449,9 +421,9 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
 #------------------------#
 # Tank initial conditions
 p_init_dormancy = 400e+5   # Pa - initial tank pressure (400 bar)
-t_init_dormancy = 51.8    # K - initial tank temperature
+t_init_dormancy = 53.15    # K - initial tank temperature
 fill_dormancy = 0.0        # fraction - no liquid phase (0.0 = all gas)
-ambient_heat_load_dormancy = None  # Set to None to use thermal resistance model
+ambient_heat_load_dormancy = 10.0  # W/m² - external heat flux (reduced from 20.0)
 
 # Mission parameters
 duration_hours_dormancy = 60.0  # hours - duration of dormancy period (reduced from 60.0 to improve simulation speed)
@@ -514,13 +486,14 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
         print("\nRunning simulation...")
         print(f"Dormancy duration: {duration_hours_dormancy} hours with {DORMANCY_TIMESTEP} second timesteps")
 
-        tank_performance = FixedHTCMissionAnalysisFacade.analyse(
+        tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_config[0]['dimensions'],
             material=tank_config[0]['material'],
             insulation=tank_config[0]['insulation'],
             mission=dormancy_mission,
             initial_conditions=initial_conditions_dormancy,
             operating_envelope=operating_window_dormancy,
+            constant_heat_flux=ambient_heat_load_dormancy,
         )
 
         # Extract results and plot
