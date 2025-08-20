@@ -247,23 +247,23 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
 # 2. REFUEL PARAMETERS #
 #----------------------#
 # Tank initial conditions
-p_init_refuel = 15e+5      # Pa - initial tank pressure
-t_init_refuel = 63         # K - initial tank temperature
+p_init_refuel = 23e+5      # Pa - initial tank pressure
+t_init_refuel = 70        # K - initial tank temperature
 fill_refuel = 0.0          # fraction - no liquid phase (0.0 = all gas)
 
 # Operating limits
 p_max_refuel = 400.0e+5    # Pa - maximum allowable pressure
 p_min_refuel = None        # Pa - minimum allowable pressure (None = no limit)
-ambient_heat_load_refuel = 8.0  # W/m² - external heat flux
+ambient_heat_load_refuel = 0.1  # W/m² - external heat flux
 
 # Supply hydrogen conditions
-supply_temp = 25           # K - hydrogen supply temperature
-supply_pressure = 3.0e+5   # Pa - hydrogen supply pressure (3 bar)
+supply_temp = 22.8           # K - hydrogen supply temperature
+supply_pressure = 2.0e+5   # Pa - hydrogen supply pressure (2 bar)
 
 # Mission parameters
-duration_hours_refuel = 0.1  # hours - duration of refueling operation
+duration_hours_refuel = 0.15  # hours - duration of refueling operation
 altitude_refuel = 0.0      # m - ground-level altitude
-fuel_flow_refuel = 0.07    # kg/s - fuel flow rate into tank
+fuel_flow_refuel = 0.06    # kg/s - fuel flow rate into tank
 
 # Create initial conditions object
 initial_conditions_refuel = InitialConditions(
@@ -680,12 +680,12 @@ def perform_complete_analysis(show_intermediate_plots=False):
     print("\n==== CREATING COMBINED DENSITY-TEMPERATURE PLOT ====")
     plotter = SeabornPlotter(font="Cambria", palette="delft")
 
-    # We'll add a new method to SeabornPlotter to handle this plot
-    # For now, we'll call a placeholder that we'll implement next
+    # Create plot with the combined data and reference data from literature
     fig = plotter.plot_density_temperature_combined(
         scenario_data=scenario_data,
         include_saturation_line=True,
-        include_isobars=True
+        include_isobars=True,
+        include_ref_data=True  # Enable plotting of reference data
     )
 
     plt.savefig("combined_density_temperature.png", dpi=300)

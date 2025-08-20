@@ -453,7 +453,7 @@ class SeabornPlotter:
         return fig
 
     def plot_density_temperature_combined(self, scenario_data, include_saturation_line=True,
-                                 include_isobars=True, figsize=(10, 8),
+                                 include_isobars=True, include_ref_data=False, figsize=(10, 8),
                                  temperature_range=(30, 80), density_range=(0, 80)):
         """
         Create a combined density-temperature plot for discharge, refuel and dormancy phases.
@@ -462,6 +462,7 @@ class SeabornPlotter:
             scenario_data: Dictionary containing temperature, density and pressure data for each scenario
             include_saturation_line: Whether to include hydrogen saturation line
             include_isobars: Whether to include isobar lines
+            include_ref_data: Whether to include reference data from literature
             figsize: Figure size tuple
             temperature_range: Min/max temperature range for the plot
             density_range: Min/max density range for the plot
@@ -470,27 +471,83 @@ class SeabornPlotter:
             Figure with the combined density-temperature plot
         """
         from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS
+        import os
+        import pandas as pd
 
         # Create figure and axes
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Plot each scenario
-        # Discharge (gray line in the reference image)
+        # Plot each scenario - using solid lines for consistency
+        # Discharge (gray solid line)
         discharge_line, = ax.plot(scenario_data['discharge']['temperatures'],
                 scenario_data['discharge']['densities'],
                 '-', color=DONKERGRIJS, linewidth=2, label="Discharge")
 
-        # Refuel (red dash-dot line in the reference image)
+        # Refuel (red solid line)
         refuel_line, = ax.plot(scenario_data['refuel']['temperatures'],
                 scenario_data['refuel']['densities'],
-                '-.', color=BORDEAUX, linewidth=2, label="Refuelling")
+                '-', color=BORDEAUX, linewidth=2, label="Refuelling")
 
-        # Dormancy (blue dotted line in the reference image)
+        # Dormancy (blue solid line)
         dormancy_line, = ax.plot(scenario_data['dormancy']['temperatures'],
                 scenario_data['dormancy']['densities'],
-                ':', color=KONINGSBLAUW, linewidth=2, label="Dormancy")
+                '-', color=KONINGSBLAUW, linewidth=2, label="Dormancy")
 
-        # Add direction arrows to each line
+        # Add reference data from literature if requested
+        ref_discharge_line = None
+        ref_refuel_line = None
+        ref_dormancy_line = None
+
+        if include_ref_data:
+            # Base path for reference data files
+            ref_data_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "analysis", "verification", "reference_data"
+            )
+
+            # Use the sorted CSV files
+            discharge_ref_file = os.path.join(ref_data_path, "discharge_data.csv")
+            if os.path.exists(discharge_ref_file):
+                try:
+                    # Read CSV data
+                    discharge_ref_data = pd.read_csv(discharge_ref_file, header=None)
+                    x_values = discharge_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = discharge_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    ref_discharge_line, = ax.plot(x_values, y_values, '.', color=DONKERGRIJS,
+                                               linewidth=2, label="Discharge (Ref)")
+                except Exception as e:
+                    print(f"Warning: Could not load reference discharge data: {e}")
+
+            # Load and plot reference refuel data
+            refuel_ref_file = os.path.join(ref_data_path, "refuel_data.csv")
+            if os.path.exists(refuel_ref_file):
+                try:
+                    # Read CSV data
+                    refuel_ref_data = pd.read_csv(refuel_ref_file, header=None)
+                    x_values = refuel_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = refuel_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    ref_refuel_line, = ax.plot(x_values, y_values, '.', color=BORDEAUX,
+                                             linewidth=2, label="Refuelling (Ref)")
+
+                except Exception as e:
+                    print(f"Warning: Could not load reference refuel data: {e}")
+
+            # Load and plot reference dormancy data
+            dormancy_ref_file = os.path.join(ref_data_path, "dormancy_data.csv")
+            if os.path.exists(dormancy_ref_file):
+                try:
+                    # Read CSV data
+                    dormancy_ref_data = pd.read_csv(dormancy_ref_file, header=None)
+                    x_values = dormancy_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = dormancy_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    ref_dormancy_line, = ax.plot(x_values, y_values, '.', color=KONINGSBLAUW,
+                                               linewidth=2, label="Dormancy (Ref)")
+
+                except Exception as e:
+                    print(f"Warning: Could not load reference dormancy data: {e}")        # Add direction arrows to each line
         # For discharge (about 1/3 along the path)
         if len(scenario_data['discharge']['temperatures']) > 10:
             idx = len(scenario_data['discharge']['temperatures']) // 3
@@ -571,7 +628,7 @@ class SeabornPlotter:
         isobar_line = None
         if include_isobars:
             # Define key pressure levels in bar
-            pressure_levels = [10, 15, 400, 450]
+            pressure_levels = [10, 15, 23, 400, 450]
 
             # Create temperature points
             temps = np.linspace(temperature_range[0], temperature_range[1], 100)
@@ -639,6 +696,24 @@ class SeabornPlotter:
         ]
 
         legend_labels = ['Discharge', 'Refuelling', 'Dormancy']
+
+        # Add reference data scatter plots to legend if they exist
+        if include_ref_data:
+            if ref_discharge_line is not None:
+                # For scatter plots, we need to use different legend handling
+                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
+                                      markerfacecolor=DONKERGRIJS, markersize=8, alpha=0.7, linestyle=''))
+                legend_labels.append('Discharge (Ref)')
+
+            if ref_refuel_line is not None:
+                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
+                                      markerfacecolor=BORDEAUX, markersize=8, alpha=0.7, linestyle=''))
+                legend_labels.append('Refuelling (Ref)')
+
+            if ref_dormancy_line is not None:
+                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
+                                      markerfacecolor=KONINGSBLAUW, markersize=8, alpha=0.7, linestyle=''))
+                legend_labels.append('Dormancy (Ref)')
 
         if saturation_line is not None:
             legend_elements.append(saturation_line)
