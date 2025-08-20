@@ -514,7 +514,7 @@ class SeabornPlotter:
                     x_values = discharge_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
                     y_values = discharge_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
 
-                    ref_discharge_line, = ax.plot(x_values, y_values, '.', color=DONKERGRIJS,
+                    ref_discharge_line, = ax.plot(x_values, y_values, '--', color=DONKERGRIJS,
                                                linewidth=2, label="Discharge (Ref)")
                 except Exception as e:
                     print(f"Warning: Could not load reference discharge data: {e}")
@@ -528,7 +528,7 @@ class SeabornPlotter:
                     x_values = refuel_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
                     y_values = refuel_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
 
-                    ref_refuel_line, = ax.plot(x_values, y_values, '.', color=BORDEAUX,
+                    ref_refuel_line, = ax.plot(x_values, y_values, '--', color=BORDEAUX,
                                              linewidth=2, label="Refuelling (Ref)")
 
                 except Exception as e:
@@ -543,7 +543,7 @@ class SeabornPlotter:
                     x_values = dormancy_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
                     y_values = dormancy_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
 
-                    ref_dormancy_line, = ax.plot(x_values, y_values, '.', color=KONINGSBLAUW,
+                    ref_dormancy_line, = ax.plot(x_values, y_values, '--', color=KONINGSBLAUW,
                                                linewidth=2, label="Dormancy (Ref)")
 
                 except Exception as e:
@@ -702,17 +702,17 @@ class SeabornPlotter:
             if ref_discharge_line is not None:
                 # For scatter plots, we need to use different legend handling
                 legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=DONKERGRIJS, markersize=8, alpha=0.7, linestyle=''))
+                                      markerfacecolor=DONKERGRIJS, markersize=8, alpha=0.7, linestyle='--'))
                 legend_labels.append('Discharge (Ref)')
 
             if ref_refuel_line is not None:
                 legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=BORDEAUX, markersize=8, alpha=0.7, linestyle=''))
+                                      markerfacecolor=BORDEAUX, markersize=8, alpha=0.7, linestyle='--'))
                 legend_labels.append('Refuelling (Ref)')
 
             if ref_dormancy_line is not None:
                 legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=KONINGSBLAUW, markersize=8, alpha=0.7, linestyle=''))
+                                      markerfacecolor=KONINGSBLAUW, markersize=8, alpha=0.7, linestyle='--'))
                 legend_labels.append('Dormancy (Ref)')
 
         if saturation_line is not None:
