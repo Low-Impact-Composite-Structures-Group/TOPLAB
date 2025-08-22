@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, Union, List, Optional
 
-from CoolProp.CoolProp import PropsSI
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
-from src.dynamics.cryopump_model import compute_pump_outlet_hydrogen, CryopumpModel, CryopumpParameters
+from src.dynamics.cryopump_model import CryoPumpModel
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester, HydrogenRetriever
 from src.mission.mission import Mission, MissionSection, InFlow
+
+# Use the compute_pump_outlet_hydrogen from CryoPumpModel
+compute_pump_outlet_hydrogen = CryoPumpModel.compute_pump_outlet_hydrogen
 from src.mission.mission_sections import InFlow as ConcreteInFlow
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
@@ -158,11 +161,11 @@ class MissionSectionAnalysis:
                     )
                 )
             elif hasattr(fuel_flow, "hydrogen"):  # InFlow
-                # Update InFlow hydrogen properties using the cryopump model
-                if isinstance(fuel_flow, ConcreteInFlow):
-                    hydrogen = compute_pump_outlet_hydrogen(tank_state.pressure)
-                else:
-                    hydrogen = fuel_flow.hydrogen
+                # Update hydrogen properties using our simplified cryopump model
+                hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_state.pressure, tank_state.temperature)
+
+                # Update tank pressure with the pump outlet pressure
+                tank_state.pressure = new_pressure
 
                 flows.append(
                     FuelFlow(
@@ -182,21 +185,28 @@ class MissionSectionAnalysis:
         return start + (end - start) * section_iter / steps
 
     @staticmethod
-    def update_inflow_hydrogen(flow, tank_pressure: float) -> Optional[ConcreteInFlow]:
-        """Update hydrogen properties for an InFlow based on cryopump model.
+    def update_inflow_hydrogen(flow, tank_pressure: float, tank_temperature: float = None) -> Optional[ConcreteInFlow]:
+        """Update hydrogen properties for an InFlow based on current tank pressure.
+        This uses our simplified cryopump model which calculates pump outlet conditions.
 
         Args:
-            flow: The flow to check and update
+            flow: The flow to check
             tank_pressure: The current tank pressure (Pa)
+            tank_temperature: The current tank temperature (K)
 
         Returns:
-            Updated InFlow if flow is an InFlow, None otherwise
+            The updated InFlow if flow is an InFlow, None otherwise and new pressure
         """
         if isinstance(flow, ConcreteInFlow):
-            # Update hydrogen properties based on current tank pressure
-            flow.hydrogen = compute_pump_outlet_hydrogen(tank_pressure)
-            return flow
-        return None
+            # Update hydrogen properties using our simplified cryopump model
+            if tank_temperature is None:
+                # Use a default temperature if none provided (this is just for backward compatibility)
+                tank_temperature = 50.0  # Default K
+
+            # Get hydrogen properties and new pressure from the pump model
+            flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_pressure, tank_temperature)
+            return flow, new_pressure
+        return None, tank_pressure
 
     @classmethod
     def compute_state_derivatives(
@@ -214,6 +224,7 @@ class MissionSectionAnalysis:
         heat_flux, temperatures = thermal_model.compute_heat_flux(
             tank, tank_state, mission_section
         )
+
         dynamic_model = dynamic_model_factory.get_dynamic_model(
             tank_state, target_conditions
         )
@@ -260,10 +271,12 @@ class MissionSectionAnalysis:
 
         processed = []
         for flow in flows:
-            # First, update InFlow hydrogen properties using the cryopump model if it's an InFlow
-            if isinstance(flow, ConcreteInFlow):
-                # Update hydrogen properties based on current tank pressure
-                flow.hydrogen = compute_pump_outlet_hydrogen(tank_state.pressure)
+            # Update hydrogen properties for InFlow using our simplified cryopump model
+            if hasattr(flow, 'hydrogen') and isinstance(flow, ConcreteInFlow):
+                # Update hydrogen properties to match current tank pressure and get new pressure
+                flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_state.pressure, tank_state.temperature)
+                # Update tank pressure with the pump outlet pressure
+                tank_state.pressure = new_pressure
 
             if isinstance(flow.mass_flow, list):
                 # Interpolate
@@ -364,21 +377,29 @@ class MissionSectionAnalysis:
             multistep_method.timestep
         )
 
-        # Check for refuel flow and update its initial properties if needed
+        # Initial update of refuel flow properties using our simplified cryopump model
         for flow in mission_section.fuel_flows:
             if isinstance(flow, ConcreteInFlow):
-                # Update hydrogen properties based on current tank pressure at the beginning
-                flow.hydrogen = compute_pump_outlet_hydrogen(tank_states.last_state.pressure)
-                print(f"Initial refuel properties updated: T={flow.hydrogen.temperature:.2f}K at P={tank_states.last_state.pressure/1e5:.2f}bar")
+                # Update using our simplified cryopump model
+                flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_states.last_state.pressure, tank_states.last_state.temperature)
+                # Update tank pressure with the pump outlet pressure
+                tank_states.last_state.pressure = new_pressure
+                print(f"Initial refuel properties: T={flow.hydrogen.temperature:.2f}K, P={flow.hydrogen.pressure/1e5:.2f}bar, tank pressure updated to {new_pressure/1e5:.2f}bar")
 
         for section_iter in range(steps):
-            # Update InFlow hydrogen properties for each iteration based on the current tank pressure
+            # Update hydrogen supply properties based on current tank pressure
+            # This simulates refueling where supply properties change with tank pressure
             for flow in mission_section.fuel_flows:
-                if isinstance(flow, ConcreteInFlow):
-                    # Update hydrogen properties based on current tank pressure
-                    flow.hydrogen = compute_pump_outlet_hydrogen(tank_states.last_state.pressure)
+                if isinstance(flow, ConcreteInFlow) and section_iter > 0:
+                    # Update using our simplified cryopump model
+                    flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_states.last_state.pressure, tank_states.last_state.temperature)
+                    # Update tank pressure with the pump outlet pressure
+                    tank_states.last_state.pressure = new_pressure
 
-            # print(f"Section iteration: {section_iter}")
+                    # Only print every 100 steps to avoid excessive output
+                    if section_iter % 100 == 0:
+                        print(f"Updated refuel: T={flow.hydrogen.temperature:.2f}K, P={flow.hydrogen.pressure/1e5:.2f}bar, tank pressure set to {new_pressure/1e5:.2f}bar at step {section_iter}")
+
             cls.compute_state_derivatives(
                 tank,
                 thermal_model,

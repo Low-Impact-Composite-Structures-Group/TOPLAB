@@ -123,13 +123,6 @@ class SinglePhaseModel(SinglePhaseModelBase):
     def compute_state_derivatives(
         cls, tank_state: TankState, fuel_flows: list[FuelFlow]
     ) -> StateDerivatives:
-        # Safety check - ensure we have a flow with hydrogen properties
-        if not fuel_flows or not hasattr(fuel_flows[0], 'hydrogen'):
-            # Create a dummy flow with hydrogen properties from tank
-            from src.mission.mission_sections import OutFlow
-            dummy_flow = OutFlow(0.0, "gas")
-            dummy_flow.hydrogen = tank_state.hydrogen
-            fuel_flows = [dummy_flow]
 
         dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flows[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
@@ -825,40 +818,11 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
             out_flow_rate = out_flow_rate[0]
 
         net_mass_flow = in_flow_rate - out_flow_rate
+        h_in = fuel_flow_in.hydrogen.enthalpy
+        h_tank = tank_hydrogen.enthalpy
 
-        # Handle both single-phase and two-phase hydrogen objects
-        try:
-            # First try to get the enthalpy directly from the hydrogen object
-            h_in = fuel_flow_in.hydrogen.enthalpy
-        except (AttributeError, ValueError):
-            try:
-                # Try to get it from the liquid phase if available
-                h_in = fuel_flow_in.hydrogen.liquid.enthalpy
-            except (AttributeError, ValueError):
-                try:
-                    # Try to get it from the gas phase if available
-                    h_in = fuel_flow_in.hydrogen.gas.enthalpy
-                except (AttributeError, ValueError):
-                    # Fall back to some default or raise an error
-                    raise ValueError(f"Cannot determine enthalpy for input hydrogen: {type(fuel_flow_in.hydrogen)}")
-
-        # Same approach for tank hydrogen
-        try:
-            # First try to get the enthalpy directly
-            h_tank = tank_hydrogen.enthalpy
-        except (AttributeError, ValueError):
-            try:
-                # Try to get it from the liquid phase if available
-                h_tank = tank_hydrogen.liquid.enthalpy
-            except (AttributeError, ValueError):
-                try:
-                    # Try to get it from the gas phase if available
-                    h_tank = tank_hydrogen.gas.enthalpy
-                except (AttributeError, ValueError):
-                    # Fall back to some default or raise an error
-                    raise ValueError(f"Cannot determine enthalpy for tank hydrogen: {type(tank_hydrogen)}")
-
-        return heat_flux + net_mass_flow * (h_in - h_tank)
+        result = heat_flux + net_mass_flow * (h_in - h_tank)
+        return result
 
     @classmethod
     def compute_venting_mass(cls):
@@ -1027,27 +991,7 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
             if isinstance(flow_rate, list):
                 flow_rate = flow_rate[0]
 
-            # Check if flow's hydrogen has the structure we expect
-            # Instead of using instanceof, check if the object has the characteristic
-            # attributes of a TwoPhaseHydrogen
-            is_two_phase = (hasattr(flow.hydrogen, 'phase') and
-                           flow.hydrogen.phase == "twophase" and
-                           hasattr(flow.hydrogen, 'dP_dT'))
-
-            if is_two_phase:
-                # It looks like a TwoPhaseHydrogen, use as is
-                processed_inflows.append(flow)
-            else:
-                # It's a single-phase hydrogen, try to get the right phase from tank
-                try:
-                    # First try to use the tank's liquid phase
-                    from src.mission.mission_sections import InFlow
-                    processed_inflows.append(InFlow(flow_rate, tank_state.hydrogen.liquid))
-                    print(f"Converted single-phase hydrogen to tank's liquid phase")
-                except (ValueError, AttributeError):
-                    # If that fails, just use the flow's hydrogen as is
-                    processed_inflows.append(flow)
-                    print(f"Using flow's hydrogen as is")        # Create combined flow list for matrix calculations
+            processed_inflows.append(flow)
         combined_flows = []
 
         # Add inflows with positive mass flow
