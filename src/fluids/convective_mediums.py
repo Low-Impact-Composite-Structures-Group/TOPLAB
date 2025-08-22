@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+"""
+Convective mediums module for handling heat transfer properties of different fluids.
+
+This module defines classes for representing convective mediums (like air and hydrogen)
+used in heat transfer calculations. For hydrogen specifically, it handles:
+
+1. Phase representation: Hydrogen can exist in various phases (liquid, gas, supercritical)
+2. Phase access: Methods for accessing properties specific to gas-like or liquid-like behavior
+3. Two-phase representation: Special handling for when hydrogen exists in two phases
+
+PHASE HANDLING LOGIC:
+- For standard states (gas, liquid), the phase is straightforward
+- For supercritical states, we allow access through both .gas and .liquid properties:
+  * This is physically justified as supercritical fluids exist on a continuum between
+    gas-like and liquid-like behavior
+  * In heat transfer calculations, this enables consistent model handling regardless of phase
+  * The exact phase description is still maintained in the .phase property
+"""
+
 from dataclasses import dataclass
 import math
 
@@ -21,7 +40,7 @@ PHASE_INDICES = {
 @dataclass
 class ConvectiveMedium:
     """Convective medium is use in the convective heat transfer modes.
-    The base class is used for air convection, defining the kep 
+    The base class is used for air convection, defining the kep
     properties required for the computations. In a child class hydrogen
     is defined, which requires additional properties for the convective
     heat transfer modes.
@@ -63,7 +82,7 @@ class Hydrogen(ConvectiveMedium):
     to be used in heat transfer modes. In a later class two phase
     hydrogen can be defined.
 
-    Note the properties of hydrogen are obtained with CoolProp, to be 
+    Note the properties of hydrogen are obtained with CoolProp, to be
     used with the HydrogenRetrievers classes.
     """
     enthalpy: float
@@ -82,31 +101,80 @@ class Hydrogen(ConvectiveMedium):
 
     @property
     def phase(self):
-        return PHASE_INDICES.get(str(int(self.state)))
+        """
+        Get the phase of hydrogen based on the state value.
+
+        The state code is mapped to a descriptive phase name using PHASE_INDICES.
+
+        Returns:
+            str: Phase name (liquid, gas, supercritical, etc.)
+        """
+        try:
+            state_code = str(int(self.state))
+            phase = PHASE_INDICES.get(state_code)
+            if not phase:
+                print(f"Warning: Unknown phase state code: {state_code}")
+                return "unknown"
+            return phase
+        except (ValueError, TypeError) as e:
+            print(f"Error determining phase from state value: {self.state}")
+            return "unknown"
 
     @property
     def gas(self) -> Hydrogen:
+        """
+        Get hydrogen properties for gas-like behavior.
+
+        For heat transfer calculations, we treat supercritical fluid as gas-like
+        regardless of whether it's 'supercritical_liquid' or 'supercritical_gas',
+        as the properties are continuous across the pseudo-critical line.
+        """
         if self.phase not in [
-            "supercritical", "supercritical_gas", "gas"
+            "supercritical", "supercritical_gas", "gas", "supercritical_liquid"
         ]:
-            raise ValueError("Hydrogen not in gas phase")
+            raise ValueError(f"Cannot access gas properties: hydrogen is in {self.phase} phase")
         return self
 
     @property
     def liquid(self) -> Hydrogen:
-        if "liquid" not in self.phase:
-            raise ValueError("Hydrogen not in liquid phase")
+        """
+        Get hydrogen properties for liquid-like behavior.
+
+        For consistency with the gas property, we also allow supercritical_liquid
+        to be accessed as liquid, since this represents the region where the
+        supercritical fluid has more liquid-like properties.
+        """
+        if self.phase not in ["liquid", "supercritical_liquid", "twophase"]:
+            raise ValueError(f"Cannot access liquid properties: hydrogen is in {self.phase} phase")
         return self
 
     def get_phase(self, phase: str) -> Hydrogen:
+        """
+        Get hydrogen properties for a specific phase.
+
+        Args:
+            phase: The requested phase ("gas" or "liquid")
+
+        Returns:
+            The hydrogen object with properties for the requested phase
+
+        Raises:
+            ValueError: If the requested phase is not supported
+        """
+        if phase == "gas":
+            return self.gas
+        elif phase == "liquid":
+            return self.liquid
+        else:
+            raise ValueError(f"Unsupported phase request: {phase}")
         return self
 
 
 @dataclass
 class TwoPhaseHydrogen:
-    """Two phase hydrogen, which encapsulates the liquid and the gas 
-    phases in separate attributes. The class also enables to compute 
-    average densities and other properties based on the fuel quality, 
+    """Two phase hydrogen, which encapsulates the liquid and the gas
+    phases in separate attributes. The class also enables to compute
+    average densities and other properties based on the fuel quality,
     which are generally required with the dynamic models.
     """
     liquid: Hydrogen
