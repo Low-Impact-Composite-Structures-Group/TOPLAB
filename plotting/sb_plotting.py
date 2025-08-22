@@ -729,7 +729,7 @@ class SeabornPlotter:
                            loc='upper right', title='Legend')
 
         # Set labels and limits
-        ax.set_xlabel('Temperature [k]')
+        ax.set_xlabel('Temperature [K]')
         ax.set_ylabel('Density [g/L]')
         ax.set_xlim(temperature_range)
         ax.set_ylim(density_range)
