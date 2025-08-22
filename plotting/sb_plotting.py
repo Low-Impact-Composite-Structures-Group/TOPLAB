@@ -628,7 +628,7 @@ class SeabornPlotter:
         isobar_line = None
         if include_isobars:
             # Define key pressure levels in bar
-            pressure_levels = [10, 15, 23, 400, 450]
+            pressure_levels = [10, 15, 23, 100, 400, 450]
 
             # Create temperature points
             temps = np.linspace(temperature_range[0], temperature_range[1], 100)
@@ -731,8 +731,8 @@ class SeabornPlotter:
                            loc='upper right', title='Legend')
 
         # Set labels and limits
-        ax.set_xlabel('Temperature T in K')
-        ax.set_ylabel('Density ρ in g/L')
+        ax.set_xlabel('Temperature [k]')
+        ax.set_ylabel('Density [g/L]')
         ax.set_xlim(temperature_range)
         ax.set_ylim(density_range)
         ax.grid(True, alpha=0.3)
