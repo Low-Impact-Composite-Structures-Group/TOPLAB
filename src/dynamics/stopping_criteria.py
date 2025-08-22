@@ -44,9 +44,9 @@ class TankIsEmpty(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        
+
         return (
-            fuel_tank_state.fill <= EMPTY_LIMIT 
+            fuel_tank_state.fill <= EMPTY_LIMIT
             and fuel_tank_state.phase == "twophase"
         )
 
@@ -99,10 +99,24 @@ class MaxPressureReached(StoppingCriterion):
         return fuel_tank_state.pressure >= target_state.max_pressure
 
 class TargetDensityReached(StoppingCriterion):
+    def __init__(self, target_density=None):
+        self.target_density = target_density
 
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
+        # If target density is explicitly provided to this instance, use it
+        target = self.target_density
+
+        # Otherwise fall back to the target state's density
+        if target is None:
+            target = target_state.density
+
+        # If no density target is available, we can't meet this criterion
+        if target is None:
+            return False
+
+        # Calculate density based on phase
         phase = fuel_tank_state.hydrogen.phase
         if phase == 'twophase':
             density = fuel_tank_state.hydrogen.two_phase.density
@@ -110,7 +124,21 @@ class TargetDensityReached(StoppingCriterion):
             density = fuel_tank_state.hydrogen.gas.density
         elif phase in ["liquid", "supercritical_liquid"]:
             density = fuel_tank_state.hydrogen.liquid.density
-        return density >= target_state.density
+        else:
+            # Default calculation if we can't determine phase
+            if hasattr(fuel_tank_state, 'fuel_mass') and hasattr(fuel_tank_state, 'tank'):
+                if hasattr(fuel_tank_state.tank, 'volume'):
+                    density = fuel_tank_state.fuel_mass / fuel_tank_state.tank.volume
+                else:
+                    return False  # Can't calculate density
+            else:
+                return False  # Can't calculate density
+
+        # Print debug info
+        if density >= target:
+            print(f"STOPPING: Target density reached ({density:.1f} kg/m³)")
+
+        return density >= target
 
 def main():
     pass

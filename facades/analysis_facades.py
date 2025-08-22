@@ -276,21 +276,32 @@ class MissionAnalysisFacade(AnalysisFacade):
         mission: Mission,
         initial_conditions: InitialConditions,
         operating_envelope: OperatingEnvelope,
-        constant_heat_flux: float = None
+        constant_heat_flux: float = None,
+        target_density: float = None
     ) -> TankPerformance:
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
             tank_dimensions, material, operating_envelope, initial_state
         )
+
+        thermal_model = cls._define_thermal_model(insulation, constant_heat_flux)
+
+        # Create stopping criteria, checking for target density
+        stopping_criteria = cls._define_stopping_criteria()
+        if target_density is not None:
+            print(f"Using target density: {target_density} kg/m³")
+            stopping_criteria.append(TargetDensityReached(target_density))
+
+        # Run the analysis
         tank_states = MissionAnalysis.perform_analysis(
             tank,
             initial_state,
             mission,
-            cls._define_stopping_criteria(),
+            stopping_criteria,
             cls._define_target_conditions(operating_envelope),
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
-            cls._define_thermal_model(insulation, constant_heat_flux),
+            thermal_model,
             HEAT_FLUX_FACTOR
         )
         return TankPerformance(tank, insulation, tank_states)
