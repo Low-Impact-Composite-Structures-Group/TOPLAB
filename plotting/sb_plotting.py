@@ -470,7 +470,7 @@ class SeabornPlotter:
         Returns:
             Figure with the combined density-temperature plot
         """
-        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
         import os
         import pandas as pd
 
@@ -514,6 +514,7 @@ class SeabornPlotter:
                     x_values = discharge_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
                     y_values = discharge_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
 
+                    # Use dashed line style for reference data
                     ref_discharge_line, = ax.plot(x_values, y_values, '--', color=DONKERGRIJS,
                                                linewidth=2, label="Discharge (Ref)")
                 except Exception as e:
@@ -619,7 +620,7 @@ class SeabornPlotter:
 
                 # Plot the complete saturation dome
                 if len(sat_temps) > 0:
-                    saturation_line, = ax.plot(sat_temps, sat_densities, '--', color='black',
+                    saturation_line, = ax.plot(sat_temps, sat_densities, '--', color=ORANJE,
                             linewidth=1.5, label="Saturation line")
             except Exception as e:
                 print(f"Warning: Could not create saturation line: {e}")
@@ -697,22 +698,19 @@ class SeabornPlotter:
 
         legend_labels = ['Discharge', 'Refuelling', 'Dormancy']
 
-        # Add reference data scatter plots to legend if they exist
+        # Add reference data lines to legend if they exist
         if include_ref_data:
             if ref_discharge_line is not None:
-                # For scatter plots, we need to use different legend handling
-                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=DONKERGRIJS, markersize=8, alpha=0.7, linestyle='--'))
+                # Use the actual line objects for correct dashed line style in legend
+                legend_elements.append(ref_discharge_line)
                 legend_labels.append('Discharge (Ref)')
 
             if ref_refuel_line is not None:
-                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=BORDEAUX, markersize=8, alpha=0.7, linestyle='--'))
+                legend_elements.append(ref_refuel_line)
                 legend_labels.append('Refuelling (Ref)')
 
             if ref_dormancy_line is not None:
-                legend_elements.append(plt.Line2D([0], [0], marker='o', color='w',
-                                      markerfacecolor=KONINGSBLAUW, markersize=8, alpha=0.7, linestyle='--'))
+                legend_elements.append(ref_dormancy_line)
                 legend_labels.append('Dormancy (Ref)')
 
         if saturation_line is not None:
