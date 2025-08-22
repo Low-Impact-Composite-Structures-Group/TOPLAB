@@ -336,7 +336,7 @@ class EllipsoidalEndCap(TankSection):
             lambda phi: np.pi,
             args=(self.a, self.b)
         )
-        
+
         self.surface_area_section /= 2.0
         return self.surface_area_section
 
@@ -344,6 +344,7 @@ class Tank:
     sections: list[TankSection]
     material: Material
     operating_pressure: float
+    liner = None  # Initialize with no liner by default
 
     def set_sections(
         self, sections: list[TankSection]
@@ -359,13 +360,38 @@ class Tank:
         self.sections = sections
         return self.sections
 
+    def set_liner(self, liner):
+        """Method to assign a liner to the tank.
+
+        Args:
+            liner: The liner to assign to the tank.
+
+        Returns:
+            The assigned liner
+        """
+        self.liner = liner
+        # Update the tank reference in the liner if needed
+        if hasattr(liner, 'tank') and liner.tank is None:
+            liner.tank = self
+        return self.liner
+
     def compute_thermal_capacity(
         self, temperature: float
     ) -> float:
-        return sum([
+        # Sum thermal capacities of all sections
+        thermal_capacity = sum([
             section.compute_thermal_capacity(temperature)
             for section in self.sections
         ])
+
+        # Add thermal capacity of liner if present
+        if self.liner is not None and hasattr(self.liner, 'material'):
+            if hasattr(self.liner, 'mass') and self.liner.mass is not None:
+                thermal_capacity += self.liner.material.determine_thermal_capacity(
+                    temperature, self.liner.mass
+                )
+
+        return thermal_capacity
 
     def set_operating_pressure(self, pressure: float):
         self.operating_pressure = pressure
@@ -769,8 +795,8 @@ class CylindricalTankSphericalCaps(Tank):
         # return 0 length if we have a spherical tank
         if length < 1.0e-4:
             return 0.0
-        else: 
-            return length 
+        else:
+            return length
 
 
 @dataclass
@@ -945,18 +971,25 @@ class TankFactory():
         operating_pressure: float,
         a: float = None,
         b: float = None,
+        liner = None,
     ) -> Tank:
+        # Create the base tank based on the provided parameters
         if a is not None and b is not None:
             # Return a Winnefeld tank object if a and b are provided
-            return WinnefeldTank(radius, body_length,  a, b, material, operating_pressure)
+            tank = WinnefeldTank(radius, body_length, a, b, material, operating_pressure)
+        elif body_length == 0:
+            tank = SphericalTank(radius, material, operating_pressure)
+        else:
+            total_length = 2 * radius + body_length
+            tank = CylindricalTankSphericalCaps(
+                radius, total_length, material, operating_pressure
+            )
 
-        if body_length == 0:
-            return SphericalTank(radius, material, operating_pressure)
+        # Add liner if provided
+        if liner is not None:
+            tank.set_liner(liner)
 
-        total_length = 2 * radius + body_length
-        return CylindricalTankSphericalCaps(
-            radius, total_length, material, operating_pressure
-        )
+        return tank
 
 
 

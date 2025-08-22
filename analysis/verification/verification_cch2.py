@@ -11,6 +11,7 @@ from src.mission.mission_sections import OutFlow, MissionSection, InFlow
 # Import tank components
 from src.materials.materials import Composite, Metal
 from src.insulation.vacuum_insulation import VacuumInsulation
+from src.tank_design.liner import Liner
 
 # Import facades and analysis components
 from plotting.sb_plotting import SeabornPlotter
@@ -31,28 +32,66 @@ from facades.analysis_facades import MissionAnalysisFacade
 HOURS_TO_SECONDS = 3600.0  # seconds per hour
 
 # Tank parameters from paper specifications
-NOMINAL_MASS = 35.0         # kg - 5kg hydrogen capacity per paper
-TANK_VOLUME = 0.5    # m³ - internal volume calculated based on paper's final density
-TANK_RADIUS = (3 * TANK_VOLUME / (4 * np.pi))**(1/3)  # m - radius assuming spherical tank
+NOMINAL_MASS = 35.0
+TANK_VOLUME = 0.5
+TANK_RADIUS = (3 * TANK_VOLUME / (4 * np.pi))**(1/3)
 
 AMBIENT_TEMPERATURE = 298.15  # K
 
 
 # Simulation timesteps for different scenarios
-DISCHARGE_TIMESTEP = 5.0   # seconds - standard timestep for discharge
+DISCHARGE_TIMESTEP = 10.0   # seconds - standard timestep for discharge
 REFUEL_TIMESTEP = 0.5      # seconds - small timestep for refuel (rapid dynamics)
-DORMANCY_TIMESTEP = 60.0   # seconds - larger timestep for dormancy (slower dynamics)
+DORMANCY_TIMESTEP = 300.0   # seconds - larger timestep for dormancy (slower dynamics)
 
 # Display tank size
 print(f"Tank radius: {TANK_RADIUS:.3f} m")
 print(f"Tank volume: {TANK_VOLUME:.3f} m³")
 
-# Instantiate common tank objects
-# tank_material = Composite.carbon(np.radians(55))
-tank_material = Metal.aluminum()
+
+# Use aluminum for the tank material
+tank_material = Composite.carbon(np.radians(55))
+
+# Create tank dimensions with liner
 tank_dimensions = TankDimensions(TANK_RADIUS, 0.0)  # Spherical tank
 
+# Create a liner with specified mass
+LINER_MASS = 5.5
+liner_by_mass = Liner.from_mass(LINER_MASS, tank_dimensions, Metal.aluminum())
+
+# Assign the liner to tank_dimensions
+tank_dimensions.liner = liner_by_mass
+
+# instantiate insulation
 insulation = VacuumInsulation()
+
+# Create a temporary tank to display properties
+from src.tank_design.tank_shapes import TankFactory
+temp_tank = TankFactory.create_tank(
+    TANK_RADIUS, 0.0, tank_material, 400e5, liner=liner_by_mass
+)
+
+# Print tank properties early in the execution
+print("\n===== TANK PROPERTIES =====")
+print(f"Tank structural mass: {temp_tank.structural_mass:.2f} kg")
+print(f"Tank surface area: {temp_tank.surface_area:.2f} m²")
+
+# Print thickness for each section
+for i, section in enumerate(temp_tank.sections):
+    if hasattr(section, 'thickness'):
+        section_type = section.type if hasattr(section, 'type') else f"Section {i+1}"
+        print(f"{section_type} thickness: {section.thickness*1000:.2f} mm")
+
+# Print liner details after calculation
+if hasattr(temp_tank, 'liner') and temp_tank.liner is not None:
+    print("\n===== LINER PROPERTIES =====")
+    liner = temp_tank.liner
+    print(f"Liner mass: {liner.mass:.2f} kg")
+    if liner.thickness is not None:
+        print(f"Liner thickness: {liner.thickness*1000:.2f} mm")
+    print(f"Liner material: {liner.material.__class__.__name__}")
+
+print("\n===== BEGINNING ANALYSIS =====\n")
 
 #-------------------------#
 # 1. DISCHARGE PARAMETERS #
@@ -147,7 +186,7 @@ t_init_dormancy = 51.8      # K - initial tank temperature
 fill_dormancy = 0.0        # fraction - no liquid phase (0.0 = all gas)
 
 # Mission parameters
-duration_hours_dormancy = 60.0  # hours - duration of dormancy period
+duration_hours_dormancy = 300.0  # hours - duration of dormancy period
 altitude_dormancy = 0.0    # m - ground-level altitude
 
 # Define operating envelope for dormancy
@@ -594,6 +633,34 @@ def perform_complete_analysis(show_intermediate_plots=False):
 
     plt.show()
 
+    # Print tank and liner properties after analysis
+    print("\n==== TANK DETAILS ====")
+    tank = discharge_performance.tank
+    print(f"Tank structural mass: {tank.structural_mass:.2f} kg")
+    print(f"Tank surface area: {tank.surface_area:.2f} m²")
+
+    # Print thickness for each section
+    for i, section in enumerate(tank.sections):
+        if hasattr(section, 'thickness'):
+            section_type = section.type if hasattr(section, 'type') else f"Section {i+1}"
+            print(f"{section_type} thickness: {section.thickness*1000:.2f} mm")
+
+    print("\n==== LINER DETAILS ====")
+    if hasattr(discharge_performance.tank, 'liner') and discharge_performance.tank.liner is not None:
+        liner = discharge_performance.tank.liner
+        print(f"Liner mass: {liner.mass:.2f} kg")
+        print(f"Calculated liner thickness: {liner.thickness:.6f} m ({liner.thickness*1000:.2f} mm)")
+        print(f"Tank surface area: {discharge_performance.tank.surface_area:.2f} m²")
+
+        # Calculate the thermal resistance contribution of the liner
+        hot_temp = discharge_performance.tank_states.temperatures[0]
+        cold_temp = discharge_performance.tank_states.temperatures[-1]
+        thermal_resistance = liner.compute_thermal_resistance(hot_temp, cold_temp)
+        print(f"Liner thermal resistance: {thermal_resistance:.4e} K/W")
+        print(f"Liner material: {liner.material.__class__.__name__}")
+    else:
+        print("No liner was used in this analysis")
+
     print("\n====== COMPLETE VERIFICATION ANALYSIS FINISHED ======\n")
 
     return discharge_performance, refuel_performance, dormancy_performance
@@ -604,7 +671,8 @@ def run_analysis(mode="refuel", show_plots=False):
     Main entry point function for running simulations.
 
     Args:
-        mode (str): Analysis mode - one of "refuel", "discharge", "dormancy", "complete", "htc_comparison"
+        mode (str): Analysis mode - one of "refuel", "discharge", "dormancy",
+                   "complete"
         show_plots (bool): Whether to display plots during execution
 
     Returns:
@@ -621,12 +689,11 @@ def run_analysis(mode="refuel", show_plots=False):
         return perform_complete_analysis(show_intermediate_plots=show_plots)
     else:
         raise ValueError(f"Invalid analysis mode: {mode}. " +
-                         "Must be one of: 'refuel', 'discharge', 'dormancy', 'complete', 'htc_comparison'.")
-
+                         "Must be one of: 'refuel', 'discharge', 'dormancy', " +
+                         "'complete'.")
 
 def main():
-    """Run the fixed HTC refuel analysis and display plots"""
-    run_analysis("refuel", show_plots=True)
+    run_analysis("complete", show_plots=True)
 
 
 if __name__ == "__main__":

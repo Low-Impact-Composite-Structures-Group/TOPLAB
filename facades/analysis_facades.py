@@ -56,6 +56,7 @@ class Insulation(Protocol):
 class TankDimensions:
     radius: float
     body_length: float
+    liner = None  # Optional liner
 
 @dataclass
 class GenericTankDimensions(TankDimensions):
@@ -97,22 +98,30 @@ class AnalysisFacade(Protocol):
         target_state: OperatingEnvelope,
         initial_state: InitialState
     ) -> Tank:
+        # Get the operating pressure
+        operating_pressure = cls._define_operating_pressure(target_state, initial_state)
+
+        # Get the liner if available
+        liner = tank_dimensions.liner if hasattr(tank_dimensions, 'liner') else None
+
         # TODO: this is sloppy... find a better way to do this
         if hasattr(tank_dimensions, 'a') and hasattr(tank_dimensions, 'b'):
             return TankFactory.create_tank(
                 tank_dimensions.radius,
                 tank_dimensions.body_length,
                 material,
-                cls._define_operating_pressure(target_state, initial_state),
+                operating_pressure,
                 tank_dimensions.a,
-                tank_dimensions.b
+                tank_dimensions.b,
+                liner=liner
             )
         else:
             return TankFactory.create_tank(
                 tank_dimensions.radius,
                 tank_dimensions.body_length,
                 material,
-                cls._define_operating_pressure(target_state, initial_state)
+                operating_pressure,
+                liner=liner
             )
 
     @staticmethod
