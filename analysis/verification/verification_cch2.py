@@ -98,8 +98,8 @@ print("\n===== BEGINNING ANALYSIS =====\n")
 #-------------------------#
 # Tank initial conditions - based on paper's Case B starting point
 p_init_disch = 4e+7        # Pa - initial tank pressure (400 bar)
-t_init_disch = 51.8       # K - initial tank temperature
-fill_disch = 0.0           # fraction - no liquid phase (0.0 = all gas)
+t_init_disch = 53.25       # K - initial tank temperature
+fill_disch = 1.0           # fraction - no liquid phase (0.0 = all gas)
 
 # Operating limits - ensure physically reasonable values
 p_max_disch = 5.0e+7       # Pa - maximum allowable pressure (500 bar)
@@ -133,10 +133,10 @@ discharge_mission = Mission([
 # 2. REFUEL PARAMETERS #
 #----------------------#
 # Tank initial conditions - Case B from the paper
-p_init_refuel = 23e+5      # Pa - initial tank pressure (23 bar)
-t_init_refuel = 69.0       # K - initial tank temperature
+p_init_refuel = 15e+5      # Pa - initial tank pressure (23 bar)
+t_init_refuel = 66.0       # K - initial tank temperature
 fill_refuel = 0.0          # fraction - no liquid phase (0.0 = all gas)
-rho_stop_refuel = 75.0     # kg/m³ - stop density
+rho_stop_refuel = 78.0     # kg/m³ - stop density
 
 # Operating limits
 p_max_refuel = 400.0e+5    # Pa - maximum allowable pressure
@@ -145,7 +145,7 @@ p_min_refuel = None        # Pa - minimum allowable pressure (None = no limit)
 # Mission parameters - directly from paper
 duration_hours_refuel = 0.155   # hours - increased duration to ensure we reach 400 bar
 altitude_refuel = 0.0      # m - ground-level altitude
-fuel_flow_refuel = 0.06   # kg/s - 60 g/s as specified in the paper
+fuel_flow_refuel = 0.07   # kg/s - 60 g/s as specified in the paper
 
 # Create initial conditions object
 initial_conditions_refuel = InitialConditions(
@@ -182,11 +182,11 @@ operating_window_refuel = OperatingEnvelope(p_max_refuel, 1.0e5, None)
 #------------------------#
 # Tank initial conditions
 p_init_dormancy = 400e+5   # Pa - initial tank pressure (400 bar)
-t_init_dormancy = 51.8      # K - initial tank temperature
+t_init_dormancy = 53.25      # K - initial tank temperature
 fill_dormancy = 0.0        # fraction - no liquid phase (0.0 = all gas)
 
 # Mission parameters
-duration_hours_dormancy = 300.0  # hours - duration of dormancy period
+duration_hours_dormancy = 600.0  # hours - duration of dormancy period
 altitude_dormancy = 0.0    # m - ground-level altitude
 
 # Define operating envelope for dormancy

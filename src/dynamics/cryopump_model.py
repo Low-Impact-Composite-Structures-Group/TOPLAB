@@ -39,7 +39,7 @@ class CryoPumpModel:
                 - new_pressure: The outlet pressure (Pa)
         """
         fluid = "Hydrogen"
-        P1 = 2e5       # Pa (2 bar) - reservoir pressure
+        P1 = 3e5       # Pa (2 bar) - reservoir pressure
         P2 = tank_pressure  # Target pressure (Pa)
         eta_p = 0.78   # Pump isentropic efficiency (78%)
 
