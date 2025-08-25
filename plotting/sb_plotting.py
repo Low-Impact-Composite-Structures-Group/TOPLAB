@@ -506,7 +506,7 @@ class SeabornPlotter:
             )
 
             # Use the sorted CSV files
-            discharge_ref_file = os.path.join(ref_data_path, "discharge_data.csv")
+            discharge_ref_file = os.path.join(ref_data_path, "discharge_data_15bar.csv")
             if os.path.exists(discharge_ref_file):
                 try:
                     # Read CSV data
@@ -521,7 +521,7 @@ class SeabornPlotter:
                     print(f"Warning: Could not load reference discharge data: {e}")
 
             # Load and plot reference refuel data
-            refuel_ref_file = os.path.join(ref_data_path, "refuel_data.csv")
+            refuel_ref_file = os.path.join(ref_data_path, "refuel_data_15bar.csv")
             if os.path.exists(refuel_ref_file):
                 try:
                     # Read CSV data
@@ -536,7 +536,7 @@ class SeabornPlotter:
                     print(f"Warning: Could not load reference refuel data: {e}")
 
             # Load and plot reference dormancy data
-            dormancy_ref_file = os.path.join(ref_data_path, "dormancy_data.csv")
+            dormancy_ref_file = os.path.join(ref_data_path, "dormancy_data_15bar.csv")
             if os.path.exists(dormancy_ref_file):
                 try:
                     # Read CSV data
