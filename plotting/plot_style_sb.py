@@ -55,7 +55,7 @@ def register_custom_fonts():
             if os.path.getsize(font_path) > 0:  # Skip empty placeholder files
                 fm.fontManager.addfont(font_path)
                 font_count += 1
-                print(f"Registered font: {font_file}")
+                # print(f"Registered font: {font_file}")
             else:
                 print(f"Skipping empty placeholder font: {font_file}")
 
@@ -73,10 +73,10 @@ def register_custom_fonts():
         # Force font manager to reload all fonts
         fm._load_fontmanager(try_read_cache=False)
 
-    if font_count > 0:
-        print(f"Successfully registered {font_count} custom fonts")
-    else:
-        print("No valid font files found in custom fonts directory")
+    # if font_count > 0:
+        # print(f"Successfully registered {font_count} custom fonts")
+    # else:
+        # print("No valid font files found in custom fonts directory")
 
     return font_count > 0
 
