@@ -84,20 +84,64 @@ class InternalModel(Protocol):
         tank_state: TankState,
         surface_temperature: float
     ) -> list[ThermalResistance]:
-        # Only gas in the tank
-        if tank_state.is_empty:
+        # Check if we're in a transition state
+        is_transition = False
+        if hasattr(tank_state, '_forced_phase'):
+            # Check if we're transitioning between phases
+            if (tank_state._forced_phase == "twophase" and 
+                (not hasattr(tank_state.hydrogen, "liquid") or not hasattr(tank_state.hydrogen, "gas"))):
+                print(f"WARNING: In transition state for thermal model. Using gas-only model temporarily.")
+                is_transition = True
+        
+        # In transition state or empty tank
+        if is_transition or tank_state.is_empty:
             return [self.create_gas_resistance(
                 tank, tank_state, surface_temperature
             )]
-        # Full liquid tank
-        if tank_state.is_full:
-            return self.create_liquid_resistance(
+        
+        # Check phase to determine thermal model
+        phase = tank_state.phase
+        
+        # Single-phase liquid tank
+        if phase == "liquid" or tank_state.is_full:
+            try:
+                return self.create_liquid_resistance(
+                    tank, tank_state, surface_temperature
+                )
+            except ValueError as e:
+                print(f"WARNING: Error creating liquid resistances: {e}. Trying gas model.")
+                # Only try gas model if liquid fails and gas properties are available
+                try:
+                    return [self.create_gas_resistance(
+                        tank, tank_state, surface_temperature
+                    )]
+                except ValueError as e2:
+                    raise ValueError(f"Cannot create thermal resistance - both liquid and gas models failed: {e}, {e2}")
+        
+        # Single-phase gas tank  
+        if phase == "gas":
+            try:
+                return [self.create_gas_resistance(
+                    tank, tank_state, surface_temperature
+                )]
+            except ValueError as e:
+                print(f"WARNING: Error creating gas resistances: {e}. Trying liquid model.")
+                # Fall back to liquid model if gas fails
+                return self.create_liquid_resistance(
+                    tank, tank_state, surface_temperature
+                )
+                
+        # Two-phase tank (default case)
+        try:
+            return self.create_two_phase_thermal_resistances(
                 tank, tank_state, surface_temperature
             )
-        # Partial gas partial liquid tank 
-        return self.create_two_phase_thermal_resistances(
-            tank, tank_state, surface_temperature
-        )
+        except ValueError as e:
+            print(f"WARNING: Error creating two-phase resistances: {e}. Using gas model.")
+            # Fall back to gas model if two-phase properties unavailable
+            return [self.create_gas_resistance(
+                tank, tank_state, surface_temperature
+            )]
 
     def create_two_phase_thermal_resistances(
         self,
@@ -105,13 +149,29 @@ class InternalModel(Protocol):
         tank_state: TankState,
         surface_temperature: float
     ) -> list[ThermalResistance]:
-        liquid_resistance = self.create_liquid_resistance(
-            tank, tank_state, surface_temperature
-        )
-        gas_resistance = self.create_gas_resistance(
-            tank, tank_state, surface_temperature
-        )
-        return [*liquid_resistance, gas_resistance]
+        try:
+            # First ensure we have liquid phase available
+            if not hasattr(tank_state.hydrogen, "liquid"):
+                print(f"WARNING: Liquid phase unavailable in two-phase model. Using gas-only resistance.")
+                gas_resistance = self.create_gas_resistance(
+                    tank, tank_state, surface_temperature
+                )
+                return [gas_resistance]
+                
+            # Normal case - both liquid and gas available
+            liquid_resistance = self.create_liquid_resistance(
+                tank, tank_state, surface_temperature
+            )
+            gas_resistance = self.create_gas_resistance(
+                tank, tank_state, surface_temperature
+            )
+            return [*liquid_resistance, gas_resistance]
+        except Exception as e:
+            print(f"WARNING: Error in create_two_phase_thermal_resistances: {e}. Using gas-only model.")
+            gas_resistance = self.create_gas_resistance(
+                tank, tank_state, surface_temperature
+            )
+            return [gas_resistance]
 
     def create_gas_resistance(
         self,

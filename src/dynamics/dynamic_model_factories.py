@@ -28,6 +28,20 @@ class DynamicModelFactory:
         # Debug print to see what phase is being detected
         # print(f"DEBUG: Tank state phase = {tank_state.phase}")
 
+        # Check for forced phase transition first
+        if hasattr(tank_state, '_forced_phase') and tank_state._forced_phase:
+            if tank_state._forced_phase == "liquid":
+                print("\n==== SELECTING SinglePhase MODEL DUE TO FORCED PHASE ====")
+                print("Enforcing transition from two-phase to liquid phase!")
+                print("=====================================\n")
+                return SinglePhaseFactory().get_dynamic_model(tank_state, target_conditions)
+            elif tank_state._forced_phase == "twophase":
+                print("\n==== SELECTING TwoPhase MODEL DUE TO FORCED PHASE ====")
+                print("Enforcing transition from gas to two-phase!")
+                print("=====================================\n")
+                return TwoPhaseFactory().get_dynamic_model(tank_state, target_conditions)
+
+        # Normal phase detection continues as before
         if tank_state.phase == "twophase":
             return TwoPhaseFactory().get_dynamic_model(
                 tank_state, target_conditions

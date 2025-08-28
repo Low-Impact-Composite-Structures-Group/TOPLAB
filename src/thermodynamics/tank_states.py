@@ -57,9 +57,29 @@ class InitialState:
         self.hydrogen = self.get_hydrogen_properties()
 
     def get_hydrogen_properties(self) -> Hydrogen:
+        # Check if a phase transition just occurred - if so, don't override it
+        if hasattr(self, '_recent_phase_transition') and self._recent_phase_transition:
+            # Keep the hydrogen object from the phase transition for a short time
+            if hasattr(self, '_transition_time'):
+                # Use the simulation time if available, otherwise fall back to system time
+                current_time = getattr(self, '_last_check_time', self._transition_time + 5)
+                if current_time - self._transition_time < 5.0:  # Preserve for 5 seconds
+                    print(f"Preserving phase transition - not overriding hydrogen properties")
+                    return self.hydrogen
+                else:
+                    # Transition is old enough, we can update normally
+                    self._recent_phase_transition = False
+        
+        original_phase = getattr(self.hydrogen, 'phase', 'unknown') if hasattr(self, 'hydrogen') else 'none'
+        
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
+        
+        new_phase = getattr(self.hydrogen, 'phase', 'unknown')
+        if original_phase != 'none' and original_phase != new_phase:
+            print(f"WARNING: get_hydrogen_properties() changed phase from {original_phase} to {new_phase}")
+        
         return self.hydrogen
 
     def compute_fuel_mass(self, tank_volume: float) -> float:
@@ -146,20 +166,41 @@ class TankState:
             return 0.0
         if self.phase == "liquid":
             return 1.0
+        
+        # For supercritical phase, treat as single-phase gas (fill = 0)
+        # because supercritical fluids behave more like dense gases
+        if hasattr(self.hydrogen, 'phase') and 'supercritical' in self.hydrogen.phase:
+            return 0.0
 
         # Ensure that divide by zero is not possible
         if self.volume == 0:
             raise ValueError("Volume cannot be zero")
 
-        # Ensure densities are valid
-        if self.hydrogen.liquid.density <= self.hydrogen.gas.density:
-            raise ValueError("Liquid density must be greater than gas density")
+        # Two-phase case: need to safely access densities
+        try:
+            # Ensure densities are valid
+            if self.hydrogen.liquid.density <= self.hydrogen.gas.density:
+                raise ValueError("Liquid density must be greater than gas density")
 
-        fill_value = (
-            (self.fuel_mass / self.volume - self.hydrogen.gas.density)
-            / (self.hydrogen.liquid.density - self.hydrogen.gas.density)
-        )
-         # Ensure fill value is not negative
+            fill_value = (
+                (self.fuel_mass / self.volume - self.hydrogen.gas.density)
+                / (self.hydrogen.liquid.density - self.hydrogen.gas.density)
+            )
+        except (ValueError, AttributeError):
+            # If we can't access both phases, estimate based on fuel mass and available density
+            if hasattr(self.hydrogen, 'density'):
+                # Single phase - calculate fill based on total density
+                total_density = self.fuel_mass / self.volume
+                reference_density = self.hydrogen.density
+                if total_density >= reference_density * 0.8:  # High density = more liquid-like
+                    return min(1.0, total_density / reference_density)
+                else:  # Low density = more gas-like
+                    return 0.0
+            else:
+                # Last resort: use fuel mass to estimate
+                return min(1.0, self.fuel_mass / (self.volume * 70))  # 70 kg/m³ ~ liquid H2 density
+        
+        # Ensure fill value is not negative
         if fill_value < 0:
             fill_value = 0
 
@@ -177,30 +218,154 @@ class TankState:
 
     @property
     def is_full(self):
-        return self.fill >= 1
+        # Direct phase check for safety
+        if self.phase == "liquid":
+            return True
+            
+        # Safe check that doesn't require accessing phase-specific properties
+        try:
+            return self.fill >= 1
+        except ValueError:
+            # If error occurs accessing fill, use alternative check
+            # Check if we have high density relative to critical density of hydrogen
+            try:
+                density = self.fuel_mass / self.volume
+                # Hydrogen critical density is ~31 kg/m³, liquid is ~70 kg/m³
+                return density > 65  # Close to liquid density
+            except:
+                return False
 
     @property
     def is_empty(self):
-        return self.fill == 0 or self.fuel_height == 0
+        # Safe check that doesn't try to access phase-specific properties
+        if hasattr(self, 'fuel_mass') and self.fuel_mass <= 0:
+            return True
+            
+        # For single-phase tanks (gas or liquid), check based on fuel mass or volume
+        if self.phase in ["gas", "liquid"]:
+            # Tank can have gas phase and still have significant mass
+            # Only consider empty if fuel mass is very small
+            return self.fuel_mass <= 1e-6  # Very small threshold for numerical precision
+            
+        # For two-phase, use fill-based check
+        try:
+            return self.fill == 0 or self.fuel_height == 0
+        except ValueError:
+            # If error occurs accessing fill, fall back to mass-based check
+            return self.fuel_mass <= 1e-6
 
     @property
     def phase(self) -> str:
-        """Determine the phase of the tank state without causing recursion."""
+        """Determine the phase of the tank state based on hydrogen properties."""
         # Direct class check to avoid triggering property accessors
         hydrogen_class_name = self.hydrogen.__class__.__name__
 
         if 'TwoPhase' in hydrogen_class_name:
             return "twophase"
+        
+        # Check if hydrogen object has phase attribute
+        if hasattr(self.hydrogen, 'phase'):
+            phase = self.hydrogen.phase
+            # Map supercritical phases to simpler categories for thermal calculations
+            if 'supercritical' in phase:
+                return "gas"  # Treat supercritical as gas for thermal resistance
+            return phase
+        
+        # Check phase based on available properties
+        try:
+            # Try to access gas properties - if this works, it's gas or supercritical
+            _ = self.hydrogen.gas
+            return "gas"
+        except (ValueError, AttributeError):
+            # If gas access fails, check if liquid properties work
+            try:
+                _ = self.hydrogen.liquid
+                return "liquid"
+            except (ValueError, AttributeError):
+                # If both fail, default to gas for CCH2 analysis
+                return "gas"
+    
+    def check_phase_transition(self, current_time):
+        """
+        Check if phase transition should occur based on natural thermodynamic conditions.
+        Uses the HydrogenRetriever's natural phase detection instead of artificial triggers.
+        """
+        # Only check every few seconds to avoid overhead
+        if hasattr(self, '_last_check_time') and current_time - self._last_check_time < 5.0:
+            return
 
-        # For CCH2 analysis, always default to gas if not explicitly two-phase
-        return "gas"
+        self._last_check_time = current_time
+
+        # Get natural phase from hydrogen retriever
+        try:
+            from src.fluids.hydrogen_retrievers import PhaseRequester
+            phase_requester = PhaseRequester()
+            natural_phase = phase_requester.get_fluid_phase(self.temperature, self.pressure)
+            
+            # Debug: Always print the phase comparison
+            print(f"PHASE CHECK: current={self.phase}, natural={natural_phase}, P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
+            
+            # Only transition if the natural phase is different from current phase
+            if natural_phase != self.phase:
+                print(f"NATURAL PHASE TRANSITION: {self.phase} → {natural_phase}")
+                print(f"  Conditions: P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
+                
+                # Update hydrogen properties to match the new phase
+                from src.fluids.hydrogen_retrievers import HydrogenRetriever
+                retriever = HydrogenRetriever()
+                
+                try:
+                    new_hydrogen = retriever.get_hydrogen_properties(self.pressure, self.temperature)
+                    self.hydrogen = new_hydrogen
+                    # Mark that a phase transition just occurred
+                    self._recent_phase_transition = True
+                    self._transition_time = current_time
+                    print(f"Successfully transitioned to {natural_phase} phase")
+                    
+                    # If transitioning to two-phase, initialize gas/liquid masses properly
+                    if natural_phase == "twophase" and hasattr(self, 'fuel_mass'):
+                        # Estimate initial gas/liquid split based on conditions
+                        # This is a reasonable approximation that can be refined by the dynamics
+                        total_mass = self.fuel_mass
+                        if hasattr(new_hydrogen, 'gas') and hasattr(new_hydrogen, 'liquid'):
+                            # Use density ratio to estimate initial split
+                            rho_gas = new_hydrogen.gas.density
+                            rho_liquid = new_hydrogen.liquid.density
+                            # Start with 50/50 volume split as initial guess
+                            vol_fraction_gas = 0.5
+                            vol_fraction_liquid = 0.5
+                            
+                            # Calculate masses based on volume fractions
+                            total_volume = self.volume
+                            mass_gas = rho_gas * vol_fraction_gas * total_volume
+                            mass_liquid = rho_liquid * vol_fraction_liquid * total_volume
+                            
+                            # Normalize to match total fuel mass
+                            mass_total_calc = mass_gas + mass_liquid
+                            if mass_total_calc > 0:
+                                self.gas_mass = mass_gas * (total_mass / mass_total_calc)
+                                self.liquid_mass = mass_liquid * (total_mass / mass_total_calc)
+                            else:
+                                self.gas_mass = total_mass * 0.5
+                                self.liquid_mass = total_mass * 0.5
+                                
+                            print(f"Initialized two-phase: gas={self.gas_mass:.3f}kg, liquid={self.liquid_mass:.3f}kg")
+                        else:
+                            # Fallback if hydrogen object doesn't have gas/liquid components
+                            self.gas_mass = total_mass * 0.5
+                            self.liquid_mass = total_mass * 0.5
+                            print(f"Fallback two-phase initialization: gas={self.gas_mass:.3f}kg, liquid={self.liquid_mass:.3f}kg")
+                            
+                except Exception as e:
+                    print(f"Could not complete phase transition to {natural_phase}: {e}")
+                    # Keep the current phase but log the issue
+                    
+        except Exception as e:
+            print(f"Error in natural phase detection: {e}")
+            # Continue with current phase - no artificial forcing
 
     def __post_init__(self) -> None:
-        # Preserve using_refuel_model flag if source state had it
-        # Check if this state is coming from another state with using_refuel_model flag
-        if hasattr(self, 'source_state') and hasattr(self.source_state, 'using_refuel_model'):
-            self.using_refuel_model = self.source_state.using_refuel_model
-
+        # No forced phase transitions - rely on natural thermodynamic detection
         self.get_hydrogen_properties()
         self.complete_state_properties()
 
@@ -211,9 +376,29 @@ class TankState:
             self.temperature = self.hydrogen.temperature
 
     def get_hydrogen_properties(self) -> Hydrogen:
+        # Check if a phase transition just occurred - if so, don't override it
+        if hasattr(self, '_recent_phase_transition') and self._recent_phase_transition:
+            # Keep the hydrogen object from the phase transition for a short time
+            if hasattr(self, '_transition_time'):
+                # Use the simulation time if available, otherwise fall back to system time
+                current_time = getattr(self, '_last_check_time', self._transition_time + 5)
+                if current_time - self._transition_time < 5.0:  # Preserve for 5 seconds
+                    print(f"Preserving phase transition - not overriding hydrogen properties")
+                    return self.hydrogen
+                else:
+                    # Transition is old enough, we can update normally
+                    self._recent_phase_transition = False
+        
+        original_phase = getattr(self.hydrogen, 'phase', 'unknown') if hasattr(self, 'hydrogen') else 'none'
+        
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
+        
+        new_phase = getattr(self.hydrogen, 'phase', 'unknown')
+        if original_phase != 'none' and original_phase != new_phase:
+            print(f"WARNING: get_hydrogen_properties() changed phase from {original_phase} to {new_phase}")
+        
         return self.hydrogen
 
     def compute_state_derivatives(

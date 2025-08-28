@@ -425,6 +425,30 @@ class MissionSectionAnalysis:
             # We don't need to update flow objects here anymore - we'll calculate the enthalpy
             # when we process the flows in compute_state_derivatives
 
+            # Check for phase transitions every time, not just in refueling scenario
+            current_time = section_iter * multistep_method.timestep
+            # Call the phase transition check method if it exists
+            if hasattr(tank_states.last_state, 'check_phase_transition'):
+                print(f"DEBUG: Calling check_phase_transition at t={current_time:.1f}s, P={tank_states.last_state.pressure/1e5:.1f}bar, T={tank_states.last_state.temperature:.1f}K")
+                tank_states.last_state.check_phase_transition(current_time)
+            else:
+                print(f"DEBUG: tank_states.last_state does not have check_phase_transition method, type: {type(tank_states.last_state)}")
+                
+            # After phase transition check, update hydrogen object if needed
+            if hasattr(tank_states.last_state, '_forced_phase') and tank_states.last_state._forced_phase:
+                if tank_states.last_state._forced_phase == "liquid" and getattr(tank_states.last_state, '_in_transition', False):
+                    # We just detected a transition to liquid, update the hydrogen object
+                    try:
+                        from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+                        new_hydrogen = SinglePhaseRequester().get_hydrogen_properties(
+                            tank_states.last_state.pressure, tank_states.last_state.temperature
+                        )
+                        tank_states.last_state.hydrogen = new_hydrogen
+                        tank_states.last_state._in_transition = False
+                        print(f"Updated hydrogen object to SinglePhase for liquid phase transition")
+                    except Exception as e:
+                        print(f"Could not update hydrogen object during transition: {e}")
+
             # Print enthalpy updates occasionally for debugging
             if section_iter > 0 and section_iter % 100 == 0:
                 enthalpy = cls.calculate_inflow_enthalpy(tank_states.last_state.pressure, tank_states.last_state.temperature)
@@ -442,15 +466,44 @@ class MissionSectionAnalysis:
                 steps
             )
 
-            tank_states.add_tank_state(
-                TankState(
-                    tank,
-                    cls.compute_new_temperature(multistep_method, tank_states),
-                    cls.compute_new_pressure(multistep_method, tank_states),
-                    cls.compute_new_mass(multistep_method.timestep, tank_states),
-                    multi_flow=getattr(tank_states.last_state, "multi_flow", False)
-                )
+            # Create the new tank state
+            new_state = TankState(
+                tank,
+                cls.compute_new_temperature(multistep_method, tank_states),
+                cls.compute_new_pressure(multistep_method, tank_states),
+                cls.compute_new_mass(multistep_method.timestep, tank_states),
+                multi_flow=getattr(tank_states.last_state, "multi_flow", False)
             )
+            
+            # Copy any phase transition information from previous state BEFORE __post_init__ can overwrite
+            if hasattr(tank_states.last_state, '_forced_phase'):
+                new_state._forced_phase = tank_states.last_state._forced_phase
+            if hasattr(tank_states.last_state, '_in_transition'):
+                new_state._in_transition = tank_states.last_state._in_transition
+                
+            # If we have a forced phase, we need to preserve the hydrogen object from the previous state
+            # or immediately recreate it with the correct phase
+            if hasattr(tank_states.last_state, '_forced_phase') and tank_states.last_state._forced_phase:
+                if tank_states.last_state._forced_phase == "liquid" and not getattr(tank_states.last_state, '_in_transition', True):
+                    # Previous state had successfully completed transition to liquid
+                    if hasattr(tank_states.last_state.hydrogen, 'dRho_dP'):  # It's already a single-phase hydrogen
+                        new_state.hydrogen = tank_states.last_state.hydrogen
+                        print(f"Preserved liquid hydrogen object from previous state")
+                    else:
+                        # Need to create a new liquid hydrogen object
+                        try:
+                            from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+                            new_hydrogen = SinglePhaseRequester().get_hydrogen_properties(
+                                new_state.pressure, new_state.temperature
+                            )
+                            new_state.hydrogen = new_hydrogen
+                            new_state._in_transition = False
+                            print(f"Created new liquid hydrogen object for new state")
+                        except Exception as e:
+                            print(f"Could not create liquid hydrogen for new state: {e}")
+                            
+            # Add the new state to our collection
+            tank_states.add_tank_state(new_state)
             if cls.stopping_criterion_is_met(
                 stopping_criteria,
                 tank_states.last_state,

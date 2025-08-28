@@ -78,6 +78,12 @@ class ParallelResistances(ResistanceCoupling):
             if resistance == 0:
                 return 0
             den += 1 / resistance
+        
+        # Handle case where all resistances are invalid (avoid division by zero)
+        if den == 0:
+            print("WARNING: All thermal resistances are infinite or invalid. Using default resistance.")
+            return 1.0  # Default resistance value
+        
         return 1 / den
 
 

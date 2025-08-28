@@ -70,7 +70,7 @@ tank_material = Composite.carbon(np.radians(55))
 tank_dimensions = TankDimensions(TANK_RADIUS, 0.0)  # Spherical tank
 
 # Create a liner with specified mass
-LINER_MASS = 5.0
+LINER_MASS = 3.0
 liner_by_mass = Liner.from_mass(LINER_MASS, tank_dimensions, Metal.aluminum())
 
 # Assign the liner to tank_dimensions

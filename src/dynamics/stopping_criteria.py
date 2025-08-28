@@ -4,6 +4,69 @@ from CoolProp.CoolProp import PropsSI
 
 EMPTY_LIMIT = 0.01  # A lower limit to define when the tank is empty
 
+def safe_quality_calculation(pressure, temperature, fluid="hydrogen"):
+    """
+    Safely calculate quality (vapor fraction) near the saturation line.
+    
+    This function handles cases where the standard CoolProp PropsSI("Q", "P", P, "T", T, fluid)
+    might fail because we're too close to the saturation line.
+    
+    Args:
+        pressure: Pressure in Pa
+        temperature: Temperature in K
+        fluid: Fluid name, defaults to "hydrogen"
+        
+    Returns:
+        Quality value (0 to 1) or None if calculation fails
+    """
+    try:
+        # First try direct calculation
+        try:
+            Q = PropsSI("Q", "P", pressure, "T", temperature, fluid)
+            return Q
+        except ValueError as e:
+            # Check if we're at saturation line
+            if "Saturation pressure" in str(e) and "is within" in str(e):
+                # We're exactly at saturation, get saturation temperature
+                t_sat = PropsSI("T", "P", pressure, "Q", 0, fluid)
+                
+                # Compare with our temperature to determine if we're slightly
+                # on the liquid or gas side
+                if temperature < t_sat:
+                    return 0.0  # Slightly subcooled liquid
+                else:
+                    return 0.001  # Just barely into two-phase
+            
+            # If we got another error, try a different approach
+            # Get saturation temperature and compare
+            t_sat = PropsSI("T", "P", pressure, "Q", 0, fluid)
+            temp_diff = temperature - t_sat
+            
+            if abs(temp_diff) < 0.1:  # Very close to saturation
+                # Determine if we're slightly subcooled or superheated
+                if temp_diff < 0:
+                    return 0.0  # Subcooled liquid
+                else:
+                    return 0.001  # Just barely into two-phase region
+            
+            # If we're more than 0.1K away from saturation
+            if temp_diff > 0:
+                # Try calculating with a slightly adjusted temperature
+                safe_temp = t_sat + 0.2  # 0.2K above saturation
+                try:
+                    Q = PropsSI("Q", "P", pressure, "T", safe_temp, fluid)
+                    return Q
+                except:
+                    # If still failing, return a reasonable guess
+                    return 0.5  # Assume mid-point in two-phase region
+            else:
+                # We're below saturation temperature
+                return 0.0
+    except Exception as e:
+        # If all else fails
+        print(f"WARNING: Could not calculate quality: {e}")
+        return None
+
 
 class TargetState(Protocol):
     max_pressure: float
@@ -120,15 +183,47 @@ class TargetDensityReached(StoppingCriterion):
         # Calculate density based on phase
         phase = fuel_tank_state.hydrogen.phase
         if phase == 'twophase':
-            # get quality of mixture from coolprop PropSI call
-            Q = PropsSI("Q", "P", fuel_tank_state.pressure, "T", fuel_tank_state.temperature, "H2")
-            # print(f"DEBUG: Two-phase quality Q={Q:.3f}")
-            # use lever rule
-            # density = 1 / (
-            #     (1 - Q) / fuel_tank_state.hydrogen.liquid.density +
-            #     Q / fuel_tank_state.hydrogen.gas.density
-            # )
-            density = fuel_tank_state.hydrogen.gas.density
+            try:
+                # Try to get quality of mixture from coolprop PropSI call
+                # This can fail near the saturation line where P,T exactly hits the saturation curve
+                from CoolProp.CoolProp import PropsSI, get_global_param_string
+                
+                # First check if we're extremely close to the saturation line
+                try:
+                    # Get saturation temperature at current pressure
+                    T_sat = PropsSI("T", "P", fuel_tank_state.pressure, "Q", 0, "hydrogen")
+                    temp_diff = abs(fuel_tank_state.temperature - T_sat)
+                    
+                    # If extremely close to saturation (within 0.1K), use a safer calculation
+                    if temp_diff < 0.1:
+                        print(f"WARNING: Extremely close to saturation line (within {temp_diff:.4f}K). Using safe density calculation.")
+                        # Use average of liquid and gas density as an approximation
+                        if hasattr(fuel_tank_state.hydrogen, 'liquid') and hasattr(fuel_tank_state.hydrogen, 'gas'):
+                            density = (fuel_tank_state.hydrogen.liquid.density + fuel_tank_state.hydrogen.gas.density) / 2.0
+                        else:
+                            # If phase properties not available, use overall density
+                            density = fuel_tank_state.hydrogen.density
+                    else:
+                        # Try the normal calculation if not too close to saturation
+                        # Use our safe quality calculation function instead of direct PropsSI call
+                        Q = safe_quality_calculation(fuel_tank_state.pressure, fuel_tank_state.temperature, "hydrogen")
+                        if Q is None:
+                            # If calculation failed, fall back to gas density
+                            density = fuel_tank_state.hydrogen.gas.density
+                        else:
+                            # Could use lever rule but we're using gas density for simplicity for now
+                            density = fuel_tank_state.hydrogen.gas.density
+                except Exception as e:
+                    print(f"WARNING: Error checking saturation point: {e}")
+                    # Fall back to using the hydrogen object's density directly
+                    density = fuel_tank_state.hydrogen.density
+            except Exception as e:
+                print(f"WARNING: Error calculating two-phase quality: {e}")
+                # Fall back to direct phase properties
+                if hasattr(fuel_tank_state.hydrogen, 'gas'):
+                    density = fuel_tank_state.hydrogen.gas.density
+                else:
+                    density = fuel_tank_state.hydrogen.density
 
         elif phase in ["gas", "supercritical"]:
             density = fuel_tank_state.hydrogen.gas.density
