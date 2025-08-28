@@ -16,6 +16,7 @@ import numpy.typing as npt
 
 from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
 from src.mission.mission_sections import OutFlow
+from CoolProp.CoolProp import PropsSI
 
 
 class OperatingEnvelope(Protocol):
@@ -419,15 +420,62 @@ class TwoPhaseModel(DynamicModel, TwoPhaseModelBase):
         hydrogen: TwoPhaseHydrogen,
         heat_flux: float
     ) -> float:
-        term2 = sum([
-            fuel_flow.mass_flow
-            * (
-                fuel_flow.hydrogen.enthalpy
-                - hydrogen.liquid.enthalpy
-            )
-            for fuel_flow in fuel_flows
-        ])
-        return heat_flux + term2
+        print(f"\n==== TwoPhaseModel.y4 Debug ====")
+        print(f"Number of fuel flows: {len(fuel_flows)}")
+
+        term2 = 0
+        for i, fuel_flow in enumerate(fuel_flows):
+            print(f"  Flow {i} mass_flow: {fuel_flow.mass_flow}")
+            print(f"  Flow {i} hydrogen type: {type(fuel_flow.hydrogen).__name__}")
+
+            try:
+                if hasattr(fuel_flow.hydrogen, "enthalpy"):
+                    inflow_enthalpy = fuel_flow.hydrogen.enthalpy
+                    print(f"  Flow {i} hydrogen enthalpy: {inflow_enthalpy:.2f} J/kg")
+                else:
+                    # Try to get enthalpy from gas/liquid phase if it's TwoPhaseHydrogen
+                    if hasattr(fuel_flow.hydrogen, "gas") and hasattr(fuel_flow.hydrogen, "liquid"):
+                        # Use average of gas and liquid enthalpy as fallback
+                        inflow_enthalpy = (fuel_flow.hydrogen.gas.enthalpy + fuel_flow.hydrogen.liquid.enthalpy) / 2
+                        print(f"  Flow {i} using average of gas/liquid enthalpies: {inflow_enthalpy:.2f} J/kg")
+                    elif hasattr(fuel_flow.hydrogen, "gas"):
+                        inflow_enthalpy = fuel_flow.hydrogen.gas.enthalpy
+                        print(f"  Flow {i} using gas enthalpy: {inflow_enthalpy:.2f} J/kg")
+                    elif hasattr(fuel_flow.hydrogen, "liquid"):
+                        inflow_enthalpy = fuel_flow.hydrogen.liquid.enthalpy
+                        print(f"  Flow {i} using liquid enthalpy: {inflow_enthalpy:.2f} J/kg")
+                    else:
+                        # Create a fallback value
+                        print(f"  Flow {i} ERROR: hydrogen has no enthalpy attribute!")
+                        from CoolProp.CoolProp import PropsSI
+                        # Use CoolProp to get enthalpy at standard conditions
+                        P = 101325  # 1 atm
+                        T = 293.15  # 20°C
+                        inflow_enthalpy = PropsSI('H', 'P', P, 'T', T, 'hydrogen')
+                        print(f"  Flow {i} using fallback enthalpy from CoolProp: {inflow_enthalpy:.2f} J/kg")
+
+                # Use the same approach for the tank hydrogen
+                if hasattr(hydrogen, "liquid"):
+                    tank_enthalpy = hydrogen.liquid.enthalpy
+                    print(f"  Tank liquid hydrogen enthalpy: {tank_enthalpy:.2f} J/kg")
+                else:
+                    print(f"  ERROR: Tank hydrogen has no liquid attribute!")
+                    tank_enthalpy = 0
+
+                # Calculate this flow's contribution to term2
+                flow_contribution = fuel_flow.mass_flow * (inflow_enthalpy - tank_enthalpy)
+                term2 += flow_contribution
+                print(f"  Flow {i} contribution: {flow_contribution:.2f}")
+
+            except Exception as e:
+                print(f"  Error processing flow {i}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
+        result = heat_flux + term2
+        print(f"Heat flux: {heat_flux:.2f}, Term2: {term2:.2f}, Total y4: {result:.2f}")
+        print(f"=====================================\n")
+        return result
 
     @classmethod
     def define_b_vector(
@@ -818,10 +866,29 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
             out_flow_rate = out_flow_rate[0]
 
         net_mass_flow = in_flow_rate - out_flow_rate
-        h_in = fuel_flow_in.hydrogen.enthalpy
-        h_tank = tank_hydrogen.enthalpy
 
-        result = heat_flux + net_mass_flow * (h_in - h_tank)
+        # Use the raw enthalpy value if available
+        if hasattr(fuel_flow_in, 'inlet_enthalpy') and fuel_flow_in.inlet_enthalpy is not None:
+            h_in = fuel_flow_in.inlet_enthalpy
+            print(f"SinglePhaseInOutModel using raw enthalpy: {h_in:.2f} J/kg")
+        else:
+            h_in = fuel_flow_in.hydrogen.enthalpy
+            print(f"SinglePhaseInOutModel using hydrogen enthalpy: {h_in:.2f} J/kg")
+
+        h_tank = tank_hydrogen.enthalpy
+        print(f"Tank enthalpy: {h_tank:.2f} J/kg, enthalpy difference: {h_in - h_tank:.2f} J/kg")
+
+        # Apply an enthalpy correction factor to limit extreme differences
+        enthalpy_diff = h_in - h_tank
+        # MAX_ENTHALPY_DIFF = 100000  # 100 kJ/kg limit for enthalpy difference
+        # if abs(enthalpy_diff) > MAX_ENTHALPY_DIFF:
+        #     # Scale down the difference while preserving sign
+        #     correction_factor = MAX_ENTHALPY_DIFF / abs(enthalpy_diff)
+        #     corrected_diff = enthalpy_diff * correction_factor
+        #     print(f"Limiting enthalpy difference from {enthalpy_diff:.2f} to {corrected_diff:.2f} J/kg")
+        #     enthalpy_diff = corrected_diff
+
+        result = heat_flux + net_mass_flow * enthalpy_diff
         return result
 
     @classmethod
@@ -962,27 +1029,49 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
         fuel_flow_in: list[FuelFlow],
         fuel_flow_out: list[FuelFlow]
     ) -> StateDerivatives:
-        # Print debug info for refueling scenario
-        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
-        if inflow_sum > 0:
-            # This is a refueling scenario, print more debug info
-            from CoolProp.CoolProp import PropsSI
-            # Get critical properties
-            P_crit = PropsSI("Pcrit", "", 0, "", 0, "hydrogen")
-            T_crit = PropsSI("Tcrit", "", 0, "", 0, "hydrogen")
-            print(f"Refueling debug: P/Pcrit = {tank_state.pressure/P_crit:.3f}, T/Tcrit = {tank_state.temperature/T_crit:.3f}")
-        # Safety check - ensure both lists have at least one item
-        if not fuel_flow_in:
-            # Create a dummy inflow with zero rate
-            from src.mission.mission_sections import InFlow
-            dummy_inflow = InFlow(0.0, tank_state.hydrogen.liquid)
-            fuel_flow_in = [dummy_inflow]
+        #show structure of tank_state object with all its attributes
+        print(f"Tank state attributes:")
+        for attr, value in tank_state.__dict__.items():
+            print(f"  {attr}: {value}")
+        # Print detailed debug info for all scenarios
+        print(f"\n==== TwoPhaseInOutModel Debug ====")
+        print(f"Tank state: P={tank_state.pressure/1e5:.2f}bar, T={tank_state.temperature:.2f}K")
+        print(f"Tank phase: {tank_state.phase}")
+        print(f"Tank hydrogen type: {type(tank_state.hydrogen).__name__}")
 
-        if not fuel_flow_out:
-            # Create a dummy outflow with zero rate
-            from src.mission.mission_sections import OutFlow
-            dummy_outflow = OutFlow(0.0, "gas")
-            fuel_flow_out = [dummy_outflow]
+        if hasattr(tank_state.hydrogen, "enthalpy"):
+            print(f"Tank hydrogen has enthalpy attribute: {tank_state.hydrogen.enthalpy:.2f} J/kg")
+        else:
+            print(f"Tank hydrogen DOES NOT have enthalpy attribute")
+
+        # Check for TwoPhaseHydrogen liquid/gas attributes
+        if hasattr(tank_state.hydrogen, "liquid"):
+            print(f"Tank hydrogen has liquid attribute with enthalpy: {tank_state.hydrogen.liquid.enthalpy:.2f} J/kg")
+        if hasattr(tank_state.hydrogen, "gas"):
+            print(f"Tank hydrogen has gas attribute with enthalpy: {tank_state.hydrogen.gas.enthalpy:.2f} J/kg")
+
+        # Inflow details
+        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
+        print(f"Total inflow: {inflow_sum:.6f} kg/s from {len(fuel_flow_in)} flows")
+
+        for i, flow in enumerate(fuel_flow_in):
+            print(f"  Inflow {i} mass_flow: {flow.mass_flow:.6f} kg/s")
+            print(f"  Inflow {i} hydrogen type: {type(flow.hydrogen).__name__}")
+            if hasattr(flow.hydrogen, "enthalpy"):
+                print(f"  Inflow {i} hydrogen has enthalpy: {flow.hydrogen.enthalpy:.2f} J/kg")
+            else:
+                print(f"  Inflow {i} hydrogen DOES NOT have enthalpy attribute")
+                # Try to access attributes directly for debugging
+                if hasattr(flow.hydrogen, "__dict__"):
+                    print(f"  Inflow {i} hydrogen attributes: {list(flow.hydrogen.__dict__.keys())}")
+
+        # Get critical properties for reference
+        from CoolProp.CoolProp import PropsSI
+        P_crit = PropsSI("Pcrit", "", 0, "", 0, "hydrogen")
+        T_crit = PropsSI("Tcrit", "", 0, "", 0, "hydrogen")
+        print(f"Hydrogen critical point: P_crit={P_crit/1e5:.2f}bar, T_crit={T_crit:.2f}K")
+        print(f"Relative to critical: P/Pcrit={tank_state.pressure/P_crit:.3f}, T/Tcrit={tank_state.temperature/T_crit:.3f}")
+        print(f"=====================================\n")
 
         # Ensure flows use appropriate hydrogen phase objects
         processed_inflows = []
@@ -990,8 +1079,8 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
             flow_rate = flow.mass_flow
             if isinstance(flow_rate, list):
                 flow_rate = flow_rate[0]
-
             processed_inflows.append(flow)
+
         combined_flows = []
 
         # Add inflows with positive mass flow
@@ -1011,19 +1100,14 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
                 # Create a flow with negative mass flow for outflows
                 from src.mission.mission_sections import InFlow
 
-                # Determine hydrogen phase for outflow based on specified phase
+                # Determine hydrogen phase for outflow
                 if hasattr(flow, 'phase'):
                     # Create a new hydrogen object using safe methods
                     from src.fluids.hydrogen_retrievers import HydrogenRetriever
-
-                    # Let HydrogenRetriever decide the appropriate type
                     hydrogen_for_outflow = HydrogenRetriever().get_hydrogen_properties(
                         tank_state.pressure,
                         tank_state.temperature
                     )
-
-                    # We don't need to force it to be a specific phase, the retriever will
-                    # create the right type based on the conditions
                     print(f"Created hydrogen for outflow at P={tank_state.pressure/1e5:.2f}bar, T={tank_state.temperature:.2f}K")
 
                 elif hasattr(flow, 'hydrogen'):
@@ -1045,47 +1129,36 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
 
         import numpy as np
         try:
+            print("Attempting to solve matrix equation...")
+            print(f"A matrix: {np.array(a)}")
+            print(f"b vector: {np.array(b)}")
+
             x = np.linalg.solve(a, b)
+            print(f"Solution x: {np.array(x)}")
 
-            # Apply safety limits to prevent non-physical values
-            # For refueling, use extremely high pressure change rate limit to simulate
-            # the rapid pressurization that occurs during refueling
+            # Use the raw values without limits
+            dP_dt = x[0][0]
+            dT_dt = x[1][0]
+            dMg_dt = x[2][0]
+            dMl_dt = x[3][0]
 
-            # Higher limits to match the path in the first image
-            MAX_PRESSURE_CHANGE = 1e9  # Pa/s (max 10000 bar/s) - essentially unlimited
-            MAX_TEMP_CHANGE = 100.0  # K/s - much higher for refueling
-
-            # During refueling, boost the pressure rate to ensure we get the curved path
-            # that crosses the saturation dome as seen in the first image
-            inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
-            if x[0][0] > 0 and inflow_sum > 0:  # If pressure is increasing (refueling)
-                # Boost pressure rate during refueling to match desired curve
-                dP_dt = min(x[0][0] * 1.5, MAX_PRESSURE_CHANGE)  # Boost by 1.5x
-            else:  # Draining or other operations
-                # Apply a more reasonable limit for draining
-                dP_dt = max(x[0][0], -1e6)  # -10 bar/s max for pressure drop
-
-            # Similarly for temperature but allow faster temperature changes during refueling
-            if inflow_sum > 0:  # During refueling
-                dT_dt = np.clip(x[1][0], -MAX_TEMP_CHANGE, MAX_TEMP_CHANGE)
-            else:
-                dT_dt = np.clip(x[1][0], -20.0, 20.0)  # More reasonable for normal operation
+            print(f"Raw derivatives - dP_dt: {dP_dt:.2f} Pa/s, dT_dt: {dT_dt:.2f} K/s")
+            print(f"Raw derivatives - dMg_dt: {dMg_dt:.6f} kg/s, dMl_dt: {dMl_dt:.6f} kg/s")
 
             return StateDerivatives(
                 dP_dt,
                 dT_dt,
-                x[2][0],
-                x[3][0],
+                dMg_dt,
+                dMl_dt,
                 cls.venting_mass(),
                 cls.added_heat_flux()
             )
         except Exception as e:
-            # In case of matrix solving errors, create a debug report
-            print(f"Error solving matrix equation: {e}")
-            print(f"Tank state: P={tank_state.pressure/1e5:.2f}bar, T={tank_state.temperature:.2f}K")
-            print(f"Tank phase: {tank_state.phase}")
-            print(f"Inflows: {len(fuel_flow_in)}, Outflows: {len(fuel_flow_out)}")
-            # Return default state derivatives to avoid crashing
+            # In case of matrix solving errors, create a detailed debug report
+            print(f"Error solving matrix equation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print("Returning default state derivatives")
             return StateDerivatives(0, 0, 0, 0, 0, tank_state.heat_flux)
 
     @classmethod
@@ -1417,6 +1490,7 @@ class TwoPhaseLimitUpperPressureModel(DynamicModel):
             return 0.0
 
         venting_flow = ((rho_l - rho_g) * heat_input) / denominator
+        return venting_flow
 
     @staticmethod
     def compute_gas_mass_derivative(
@@ -1447,3 +1521,346 @@ class TwoPhaseLimitUpperPressureModel(DynamicModel):
             return 0.0
 
         return -venting_flow / denominator
+
+class TwoPhaseRefuelModel(TwoPhaseModelBase):
+    """
+    Two-phase refuelling model using the novel specific isochoric two-phase heat capacity (c_v2P).
+
+    This model is based on the conventions of TwoPhaseModel but modifies the
+    energy equation row to use M * c_v2P and d(p_sat)/dT, as described in the
+    generalized thermodynamic model paper.
+    """
+
+    @classmethod
+    def compute_cv2phase(cls, tank_state: TankState) -> float:
+        """
+        Compute the two-phase isochoric heat capacity.
+
+        This includes a correction term for the isochoric path in two-phase region.
+        """
+        # Get hydrogen properties
+        hydrogen = tank_state.hydrogen
+
+        # Vapor mass fraction
+        total_mass = tank_state.gas_mass + tank_state.liquid_mass
+        if total_mass <= 0:
+            return 0.0  # Avoid division by zero
+        alpha = tank_state.gas_mass / total_mass
+
+        # Use CoolProp to get single-phase cv at saturation states
+        fluid = "hydrogen"  # Assuming hydrogen is the working fluid
+        temperature = tank_state.temperature
+
+        cv_g = PropsSI("CVMASS", "T", temperature, "Q", 1, fluid)
+        cv_l = PropsSI("CVMASS", "T", temperature, "Q", 0, fluid)
+
+        # Get saturated densities
+        rho_g = hydrogen.gas.density
+        rho_l = hydrogen.liquid.density
+
+        # Get derivatives of density wrt T at saturation
+        drho_g_dT = hydrogen.gas.dRho_dT
+        drho_l_dT = hydrogen.liquid.dRho_dT
+
+        # Get saturated enthalpies
+        h_g = hydrogen.gas.enthalpy
+        h_l = hydrogen.liquid.enthalpy
+
+        # Calculate correction term for isochoric path
+        denom = (1.0 / rho_g - 1.0 / rho_l)
+
+        # Avoid division by zero
+        if abs(denom) < 1e-10:
+            return alpha * cv_g + (1.0 - alpha) * cv_l
+
+        dvg_dT = -drho_g_dT / (rho_g**2)
+        dvl_dT = -drho_l_dT / (rho_l**2)
+
+        correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
+
+        return alpha * cv_g + (1.0 - alpha) * cv_l + correction
+
+    @classmethod
+    def compute_state_derivatives(
+        cls,
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow] = None
+    ) -> StateDerivatives:
+        """
+        Compute state derivatives for the two-phase refuel model.
+
+        This method handles both inflow and outflow fuel streams, with special focus on refueling.
+        """
+        if fuel_flow_out is None:
+            fuel_flow_out = []
+
+        print(f"\n==== TwoPhaseRefuelModel Debug ====")
+        print(f"Tank state: P={tank_state.pressure/1e5:.2f}bar, T={tank_state.temperature:.2f}K")
+        print(f"Tank phase: {tank_state.phase}")
+        print(f"Inflow rate: {sum([flow.mass_flow for flow in fuel_flow_in]):.6f} kg/s")
+        print(f"Outflow rate: {sum([flow.mass_flow for flow in fuel_flow_out]):.6f} kg/s")
+
+        # Setup matrices and solve the system
+        try:
+            a = cls.define_a_matrix(tank_state)
+            b = cls.define_b_vector(tank_state, fuel_flow_in, fuel_flow_out)
+
+            print(f"A matrix shape: {a.shape}")
+            print(f"b vector shape: {b.shape}")
+
+            x = np.linalg.solve(a, b)
+
+            # Extract derivatives from solution
+            dP_dt = x[0][0]
+            dT_dt = x[1][0]
+            dMg_dt = x[2][0]
+            dMl_dt = x[3][0]
+
+            print(f"Solution - dP_dt: {dP_dt:.2f} Pa/s, dT_dt: {dT_dt:.2f} K/s")
+            print(f"Solution - dMg_dt: {dMg_dt:.6f} kg/s, dMl_dt: {dMl_dt:.6f} kg/s")
+            print(f"=====================================\n")
+
+            return StateDerivatives(
+                dP_dt,
+                dT_dt,
+                dMg_dt,
+                dMl_dt,
+                cls.venting_mass(),
+                cls.added_heat_flux()
+            )
+
+        except Exception as e:
+            print(f"Error in TwoPhaseRefuelModel: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Return safe fallback values
+            return StateDerivatives(0, 0, 0, 0, 0, tank_state.heat_flux)
+
+    @staticmethod
+    def a12(hydrogen: TwoPhaseHydrogen) -> float:
+        """Calculate coefficient a12 in the A matrix (saturation pressure derivative)."""
+        return -hydrogen.dP_dT
+
+    @staticmethod
+    def a21(
+        gas_mass: float,
+        liquid_mass: float,
+        hydrogen: TwoPhaseHydrogen
+    ) -> float:
+        """Calculate coefficient a21 in the A matrix."""
+        term1 = (
+            gas_mass
+            * hydrogen.gas.dRho_dP
+            / hydrogen.gas.density ** 2
+        )
+        term2 = (
+            liquid_mass
+            * hydrogen.liquid.dRho_dP
+            / hydrogen.liquid.density ** 2
+        )
+        return -(term1 + term2)
+
+    @staticmethod
+    def a22(
+        gas_mass: float,
+        liquid_mass: float,
+        hydrogen: TwoPhaseHydrogen
+    ) -> float:
+        """Calculate coefficient a22 in the A matrix."""
+        term1 = (
+            gas_mass
+            * hydrogen.gas.dRho_dT
+            / hydrogen.gas.density ** 2
+        )
+        term2 = (
+            liquid_mass
+            * hydrogen.liquid.dRho_dT
+            / hydrogen.liquid.density ** 2
+        )
+        return -(term1 + term2)
+
+    @staticmethod
+    def a23(hydrogen: TwoPhaseHydrogen) -> float:
+        """Calculate coefficient a23 in the A matrix."""
+        return (
+            1.0 / hydrogen.gas.density
+            - 1.0 / hydrogen.liquid.density
+        )
+
+    @classmethod
+    def a42(
+        cls,
+        tank_state: TankState
+    ) -> float:
+        """
+        Calculate coefficient a42 in the A matrix using cv2phase.
+
+        This is the key difference from the standard TwoPhaseModel.
+        """
+        # Use two-phase isochoric heat capacity
+        cv2p = cls.compute_cv2phase(tank_state)
+        return tank_state.fuel_mass * cv2p
+
+    @staticmethod
+    def a43(hydrogen: TwoPhaseHydrogen) -> float:
+        """Calculate coefficient a43 in the A matrix."""
+        return -(
+            hydrogen.liquid.enthalpy
+            - hydrogen.gas.enthalpy
+        )
+
+    @classmethod
+    def define_a_matrix(cls, tank_state: TankState) -> np.ndarray:
+        """
+        Define the A matrix for the system of equations using cv2phase approach.
+        """
+        a12 = cls.a12(tank_state.hydrogen)
+        a21 = cls.a21(
+            tank_state.gas_mass,
+            tank_state.liquid_mass,
+            tank_state.hydrogen
+        )
+        a22 = cls.a22(
+            tank_state.gas_mass,
+            tank_state.liquid_mass,
+            tank_state.hydrogen
+        )
+        a23 = cls.a23(tank_state.hydrogen)
+        a42 = cls.a42(tank_state)
+        a43 = cls.a43(tank_state.hydrogen)
+
+        a = np.array([
+            [1.0, a12, 0.0, 0.0],
+            [a21, a22, a23, 0.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, a42, a43, 0.0]
+        ])
+
+        return a
+
+    @staticmethod
+    def y2(
+        fuel_flow_in: list[FuelFlow],
+        hydrogen: TwoPhaseHydrogen
+    ) -> float:
+        """Calculate the y2 element of the b vector."""
+        return sum([
+            -flow.mass_flow / hydrogen.liquid.density
+            for flow in fuel_flow_in
+        ])
+
+    @staticmethod
+    def y3(
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> float:
+        """Calculate the y3 element of the b vector."""
+        inflow_sum = sum([flow.mass_flow for flow in fuel_flow_in])
+        outflow_sum = sum([flow.mass_flow for flow in fuel_flow_out])
+        return inflow_sum - outflow_sum
+
+    @staticmethod
+    def y4(
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow] = None,
+        hydrogen: TwoPhaseHydrogen = None,
+        heat_flux: float = 0.0
+    ) -> float:
+        """Calculate the y4 element of the b vector."""
+        print(f"\n==== TwoPhaseRefuelModel.y4 Debug ====")
+        print(f"Tank state: P={hydrogen.gas.pressure/1e5:.2f}bar, T={hydrogen.gas.temperature:.2f}K")
+        print(f"Tank phase: twophase")
+
+        # Energy contribution from inflows
+        inflow_energy = 0
+        total_inflow = 0
+        for flow in fuel_flow_in:
+            total_inflow += flow.mass_flow
+
+            # First check if this flow has inlet_enthalpy value from the cryopump
+            if hasattr(flow, "inlet_enthalpy") and flow.inlet_enthalpy is not None:
+                # Use the raw enthalpy directly without modifications
+                h_in = flow.inlet_enthalpy
+                print(f"Using raw inlet_enthalpy: {h_in:.2f} J/kg")
+            # Then check if flow has direct_enthalpy (older approach)
+            elif hasattr(flow, "direct_enthalpy"):
+                # Get the raw enthalpy from the cryopump
+                h_in = flow.direct_enthalpy
+                print(f"Using direct_enthalpy: {h_in:.2f} J/kg")
+            # Then try regular enthalpy access methods
+            elif hasattr(flow.hydrogen, "enthalpy"):
+                h_in = flow.hydrogen.enthalpy
+                print(f"Using hydrogen.enthalpy: {h_in:.2f} J/kg")
+            elif hasattr(flow.hydrogen, "liquid") and hasattr(flow.hydrogen.liquid, "enthalpy"):
+                h_in = flow.hydrogen.liquid.enthalpy
+                print(f"Using hydrogen.liquid.enthalpy: {h_in:.2f} J/kg")
+            else:
+                # Default to standard conditions if we can't get enthalpy
+                h_in = PropsSI("H", "P", 101325, "T", 20+273.15, "hydrogen")
+                print(f"Using default enthalpy: {h_in:.2f} J/kg")
+
+            # For refueling with very cold hydrogen, calculate enthalpy difference
+            # using liquid enthalpy as the reference state in the tank
+            inflow_energy += flow.mass_flow * (h_in - hydrogen.liquid.enthalpy)
+            print(f"Inflow: {flow.mass_flow:.6f} kg/s, h_in: {h_in:.2f} J/kg, h_liq: {hydrogen.liquid.enthalpy:.2f} J/kg, energy: {flow.mass_flow * (h_in - hydrogen.liquid.enthalpy):.2f} W")
+
+        print(f"Inflow rate: {total_inflow:.6f} kg/s")
+
+        # Energy contribution from outflows
+        outflow_energy = 0
+        total_outflow = 0
+        if fuel_flow_out:  # Check if outflow list exists and is not empty
+            for i, flow in enumerate(fuel_flow_out):
+                total_outflow += flow.mass_flow
+
+                # Try to determine the phase of outflow
+                if hasattr(flow, "phase") and flow.phase == "liquid":
+                    h_out = hydrogen.liquid.enthalpy
+                    phase_str = "liquid"
+                else:
+                    # Default to gas phase for outflow
+                    h_out = hydrogen.gas.enthalpy
+                    phase_str = "gas"
+
+                flow_energy = -flow.mass_flow * h_out
+                outflow_energy += flow_energy
+                print(f"Outflow {i}: {flow.mass_flow:.6f} kg/s, phase: {phase_str}, h_out: {h_out:.2f} J/kg, energy: {flow_energy:.2f} W")
+
+        print(f"Total outflow rate: {total_outflow:.6f} kg/s, energy: {outflow_energy:.2f} W")
+        # Calculate the total energy change
+        total_energy = heat_flux + inflow_energy + outflow_energy
+        print(f"Energy balance: heat_flux={heat_flux:.2f} W + inflow_energy={inflow_energy:.2f} W + outflow_energy={outflow_energy:.2f} W = {total_energy:.2f} W")
+        print(f"=====================================\n")
+        return total_energy
+
+    @classmethod
+    def define_b_vector(
+        cls,
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> np.ndarray:
+        """Define the b vector for the system of equations."""
+        y2 = cls.y2(fuel_flow_in, tank_state.hydrogen)
+        y3 = cls.y3(fuel_flow_in, fuel_flow_out)
+        y4 = cls.y4(
+            fuel_flow_in,
+            fuel_flow_out,
+            tank_state.hydrogen,
+            tank_state.heat_flux
+        )
+
+        b = np.array([[0.0], [y2], [y3], [y4]])
+        return b
+
+    @classmethod
+    def venting_mass(cls) -> float:
+        """Return the venting mass flow rate."""
+        return 0.0
+
+    @classmethod
+    def added_heat_flux(cls) -> float:
+        """Return any additional heat flux."""
+        return 0.0
+

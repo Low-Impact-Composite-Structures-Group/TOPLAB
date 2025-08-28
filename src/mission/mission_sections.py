@@ -34,6 +34,16 @@ class OutFlow(FuelFlow):
 class InFlow(FuelFlow):
     hydrogen: Hydrogen
 
+@dataclass
+class InFlowWithDirectEnthalpy(FuelFlow):
+    """
+    InFlow variant that carries direct enthalpy values instead of hydrogen objects.
+    This is used specifically for the TwoPhaseRefuelModel to avoid issues with
+    crossing the saturation line during refueling.
+    """
+    hydrogen: Hydrogen  # Still needed for compatibility with existing code
+    direct_enthalpy: float = None  # Direct enthalpy value in J/kg
+
 
 @dataclass
 class MissionSection:

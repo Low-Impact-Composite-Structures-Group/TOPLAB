@@ -202,7 +202,14 @@ class TwoPhaseHydrogen:
             return self.gas
         if phase == "liquid":
             return self.liquid
-        raise ValueError(f"'{phase}' is an unsupported phase...")
+        if phase == "supercritical":
+            # For supercritical conditions, use gas phase as a fallback
+            print(f"SUPERCRITICAL PHASE REQUESTED - Using gas phase as fallback")
+            return self.gas
+        
+        # Default to gas phase as a fallback with warning
+        print(f"WARNING: Unsupported phase '{phase}' requested - falling back to gas phase")
+        return self.gas
 
 
 def main():

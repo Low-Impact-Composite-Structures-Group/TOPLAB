@@ -196,6 +196,11 @@ class TankState:
         return "gas"
 
     def __post_init__(self) -> None:
+        # Preserve using_refuel_model flag if source state had it
+        # Check if this state is coming from another state with using_refuel_model flag
+        if hasattr(self, 'source_state') and hasattr(self.source_state, 'using_refuel_model'):
+            self.using_refuel_model = self.source_state.using_refuel_model
+
         self.get_hydrogen_properties()
         self.complete_state_properties()
 

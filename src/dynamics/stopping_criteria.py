@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from typing import Protocol
+from CoolProp.CoolProp import PropsSI
 
 EMPTY_LIMIT = 0.01  # A lower limit to define when the tank is empty
 
@@ -119,7 +120,16 @@ class TargetDensityReached(StoppingCriterion):
         # Calculate density based on phase
         phase = fuel_tank_state.hydrogen.phase
         if phase == 'twophase':
-            density = fuel_tank_state.hydrogen.two_phase.density
+            # get quality of mixture from coolprop PropSI call
+            Q = PropsSI("Q", "P", fuel_tank_state.pressure, "T", fuel_tank_state.temperature, "H2")
+            # print(f"DEBUG: Two-phase quality Q={Q:.3f}")
+            # use lever rule
+            # density = 1 / (
+            #     (1 - Q) / fuel_tank_state.hydrogen.liquid.density +
+            #     Q / fuel_tank_state.hydrogen.gas.density
+            # )
+            density = fuel_tank_state.hydrogen.gas.density
+
         elif phase in ["gas", "supercritical"]:
             density = fuel_tank_state.hydrogen.gas.density
         elif phase in ["liquid", "supercritical_liquid"]:

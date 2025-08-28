@@ -4,7 +4,7 @@ from src.dynamics.dynamic_models import (DynamicModel,
                                          TwoPhaseLimitLowerPressureModel,
                                          TwoPhaseModel, SinglePhaseInOutModel,
                                          SinglePhaseLimitLowerPressureInOutModel,
-                                         TwoPhaseInOutModel, TwoPhaseLimitLowerPressureInOutModel,
+                                         TwoPhaseInOutModel, TwoPhaseRefuelModel,TwoPhaseLimitLowerPressureInOutModel,
                                          SinglePhaseLimitUpperPressureModel,
                                          TwoPhaseLimitUpperPressureModel)
 
@@ -55,8 +55,13 @@ class TwoPhaseFactory:
                 target_conditions.min_pressure >= tank_state.pressure):
                 return TwoPhaseLimitLowerPressureInOutModel
 
-            # Normal multi-flow
-            return TwoPhaseInOutModel
+            # For refueling scenario testing, use the new TwoPhaseRefuelModel instead
+            print("\n==== USING TWOPHASEREFUELMODEL ====")
+            print("Using TwoPhaseRefuelModel instead of TwoPhaseInOutModel for testing")
+            print("====================================\n")
+            # Mark the tank_state to indicate it's using the refuel model
+            setattr(tank_state, "using_refuel_model", True)
+            return TwoPhaseRefuelModel
 
         # Original single-flow logic
         # Check upper pressure limit first

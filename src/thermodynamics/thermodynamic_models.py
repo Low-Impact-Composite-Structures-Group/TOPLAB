@@ -4,7 +4,7 @@ from typing import Protocol
 
 import numpy as np
 import numpy.typing as npt
-from src.thermodynamics.thermal_resistances import SeriesResistances
+from src.thermodynamics.thermal_resistances import SeriesResistances, ParallelResistances
 
 
 class MissionSection(Protocol):

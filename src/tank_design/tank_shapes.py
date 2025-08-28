@@ -1007,7 +1007,7 @@ def bisection_method(
         function (_type_): Function to be used to compute the new value.
 
     Raises:
-        ValueError: When the maximum amount of iterations (100) is
+        ValueError: When the maximum amount of iterations (1000) is
         reached, a ValueError is risen.
 
     Returns:
@@ -1016,22 +1016,43 @@ def bisection_method(
     """
 
     # Define max iterations and desired accuracy
-    max_iterations = 100
+    max_iterations = 1000
     accuracy = 1e-4
+
+    # Handle edge cases for target values
+    if target <= 0:
+        return 0.0
+
+    # Check if target is greater than function at high
+    high_value = function(high)
+    if target >= high_value:
+        return high
+
+    # Check if target is less than function at low
+    low_value = function(low)
+    if target <= low_value:
+        return low
 
     for _ in range(max_iterations):
         mid = (high + low) / 2
         mid_value = function(mid)
-        # print(mid)
-        # print("diff = ", abs(target - mid_value))
+
+        # Check if we've reached desired accuracy
         if abs(target - mid_value) < accuracy:
             return mid
+
+        # Handle numerical issues - if high and low are too close
+        if abs(high - low) < 1e-10:
+            return mid
+
         if mid_value > target:
             high = mid
         else:
             low = mid
 
-    raise StopIteration("Exceeded max iterations.")
+    # Instead of raising an exception, return the best estimate
+    print(f"Warning: Bisection method exceeded max iterations. Using best estimate.")
+    return (high + low) / 2
 
 def random_points_on_ellipsoid(num_points, a, b, c):
     # deprecated

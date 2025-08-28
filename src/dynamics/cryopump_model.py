@@ -6,7 +6,7 @@ state of hydrogen after being compressed by a cryogenic pump during refueling.
 """
 
 from CoolProp.CoolProp import PropsSI
-from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester
 
 
 class CryoPumpModel:
@@ -22,24 +22,9 @@ class CryoPumpModel:
     def compute_pump_outlet_hydrogen(cls, tank_pressure: float, tank_temperature: float):
         """
         Calculate the hydrogen properties and pressure at pump outlet.
-
-        This method simulates a cryogenic pump compressing hydrogen from
-        a low-pressure reservoir to the target tank pressure. It accounts for:
-        1. Pump isentropic efficiency
-        2. Enthalpy rise during compression
-        3. Resulting temperature change
-
-        Args:
-            tank_pressure: Current pressure in the receiving tank (Pa)
-            tank_temperature: Current temperature in the receiving tank (K)
-
-        Returns:
-            tuple: (hydrogen_properties, new_pressure)
-                - hydrogen_properties: Hydrogen object with properties at pump outlet
-                - new_pressure: The outlet pressure (Pa)
         """
         fluid = "Hydrogen"
-        P1 = 3e5       # Pa (2 bar) - reservoir pressure
+        P1 = 3e5       # Pa (2 bar) - dewar pressure
         P2 = tank_pressure  # Target pressure (Pa)
         eta_p = 0.78   # Pump isentropic efficiency (78%)
 
@@ -60,13 +45,5 @@ class CryoPumpModel:
         p_crit = PropsSI("Pcrit", "", 0, "", 0, "hydrogen")
         T_crit = PropsSI("Tcrit", "", 0, "", 0, "hydrogen")
 
-        # If P2 less than critical point, boost to critical point
-        if P2 < p_crit:
-            P2 = p_crit
-            T2 = T_crit
-
-        # Use SinglePhaseRequester to avoid two-phase detection issues
-        hydrogen = SinglePhaseRequester().get_hydrogen_properties(P2, T2)
-
-        # Return both the hydrogen properties and the new pressure to use for the tank
-        return hydrogen, P2
+        # Return the enthalpy at the pump outlet
+        return h2

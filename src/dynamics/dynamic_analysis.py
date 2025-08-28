@@ -10,8 +10,8 @@ from src.dynamics.cryopump_model import CryoPumpModel
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester, HydrogenRetriever
 from src.mission.mission import Mission, MissionSection, InFlow
 
-# Use the compute_pump_outlet_hydrogen from CryoPumpModel
-compute_pump_outlet_hydrogen = CryoPumpModel.compute_pump_outlet_hydrogen
+# Use the compute_pump_outlet methods from CryoPumpModel directly
+# No need to assign to a variable anymore
 from src.mission.mission_sections import InFlow as ConcreteInFlow
 from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
@@ -124,6 +124,7 @@ class OutFlow(Protocol):
 class FuelFlow:
     mass_flow: Union[float, List[float]]
     hydrogen: Hydrogen
+    inlet_enthalpy: float = None  # Optional raw enthalpy value for inflows
 
 
 class MissionSectionAnalysis:
@@ -161,16 +162,20 @@ class MissionSectionAnalysis:
                     )
                 )
             elif hasattr(fuel_flow, "hydrogen"):  # InFlow
-                # Update hydrogen properties using our simplified cryopump model
-                hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_state.pressure, tank_state.temperature)
+                # Get enthalpy from our simplified cryopump model
+                enthalpy = MissionSectionAnalysis.calculate_inflow_enthalpy(
+                    tank_state.pressure, tank_state.temperature
+                )
 
-                # Update tank pressure with the pump outlet pressure
-                tank_state.pressure = new_pressure
+                print(f"Using raw enthalpy value: {enthalpy:.0f} J/kg for inflow")
 
+                # For InFlow, we pass both the hydrogen object (for compatibility)
+                # and the raw enthalpy value
                 flows.append(
                     FuelFlow(
                         fuel_flow.mass_flow,
-                        hydrogen
+                        fuel_flow.hydrogen,
+                        inlet_enthalpy=enthalpy
                     )
                 )
             else:
@@ -185,28 +190,20 @@ class MissionSectionAnalysis:
         return start + (end - start) * section_iter / steps
 
     @staticmethod
-    def update_inflow_hydrogen(flow, tank_pressure: float, tank_temperature: float = None) -> Optional[ConcreteInFlow]:
-        """Update hydrogen properties for an InFlow based on current tank pressure.
-        This uses our simplified cryopump model which calculates pump outlet conditions.
+    def calculate_inflow_enthalpy(tank_pressure: float, tank_temperature: float = None) -> float:
+        """Calculate the pump outlet enthalpy for an inflow based on current tank pressure.
+        This uses our simplified cryopump model to get the raw enthalpy value.
 
         Args:
-            flow: The flow to check
             tank_pressure: The current tank pressure (Pa)
             tank_temperature: The current tank temperature (K)
 
         Returns:
-            The updated InFlow if flow is an InFlow, None otherwise and new pressure
+            The calculated enthalpy value (J/kg)
         """
-        if isinstance(flow, ConcreteInFlow):
-            # Update hydrogen properties using our simplified cryopump model
-            if tank_temperature is None:
-                # Use a default temperature if none provided (this is just for backward compatibility)
-                tank_temperature = 50.0  # Default K
-
-            # Get hydrogen properties and new pressure from the pump model
-            flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_pressure, tank_temperature)
-            return flow, new_pressure
-        return None, tank_pressure
+        # Get enthalpy directly from our cryopump model
+        enthalpy = CryoPumpModel.compute_pump_outlet_hydrogen(tank_pressure, tank_temperature)
+        return enthalpy
 
     @classmethod
     def compute_state_derivatives(
@@ -235,9 +232,17 @@ class MissionSectionAnalysis:
             inflows = mission_section.get_inflows()
             outflows = mission_section.get_outflows()
 
-            # Process flows for interpolation if needed
+            # Process flows for interpolation if needed and add raw enthalpy values
             processed_inflows = cls.process_flows(inflows, tank_state, section_iter, steps)
             processed_outflows = cls.process_flows(outflows, tank_state, section_iter, steps)
+
+            # For debug purposes, check if any inflows have raw enthalpy values
+            for flow in processed_inflows:
+                if hasattr(flow, 'inlet_enthalpy') and flow.inlet_enthalpy is not None:
+                    print(f"Raw enthalpy for inflow: {flow.inlet_enthalpy:.0f} J/kg")
+
+            # Add a flag to the tank state to indicate that inlet enthalpy is available
+            setattr(tank_state, "use_raw_enthalpy", True)
 
             tank_state.compute_state_derivatives(
                 dynamic_model,
@@ -248,14 +253,24 @@ class MissionSectionAnalysis:
             )
         else:
             # Single flow case (existing logic)
+            flows = cls.define_fuel_flows(
+                mission_section.fuel_flows,
+                tank_state,
+                section_iter,
+                steps
+            )
+
+            # For debug purposes, check if any flows have raw enthalpy values
+            for flow in flows:
+                if hasattr(flow, 'inlet_enthalpy') and flow.inlet_enthalpy is not None:
+                    print(f"Raw enthalpy for flow: {flow.inlet_enthalpy:.0f} J/kg")
+
+            # Add a flag to the tank state to indicate that inlet enthalpy is available
+            setattr(tank_state, "use_raw_enthalpy", True)
+
             tank_state.compute_state_derivatives(
                 dynamic_model,
-                cls.define_fuel_flows(
-                    mission_section.fuel_flows,
-                    tank_state,
-                    section_iter,
-                    steps
-                ),
+                flows,
                 heat_flux * heat_flux_factor,
                 tank.compute_thermal_capacity(temperatures[0])
             )
@@ -271,12 +286,15 @@ class MissionSectionAnalysis:
 
         processed = []
         for flow in flows:
-            # Update hydrogen properties for InFlow using our simplified cryopump model
+            # Calculate raw enthalpy for inflows
             if hasattr(flow, 'hydrogen') and isinstance(flow, ConcreteInFlow):
-                # Update hydrogen properties to match current tank pressure and get new pressure
-                flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_state.pressure, tank_state.temperature)
-                # Update tank pressure with the pump outlet pressure
-                tank_state.pressure = new_pressure
+                # Get enthalpy directly from our cryopump model
+                enthalpy = cls.calculate_inflow_enthalpy(tank_state.pressure, tank_state.temperature)
+
+                # We'll track this as a separate property instead of modifying the hydrogen object
+                flow_enthalpy = enthalpy
+            else:
+                flow_enthalpy = None
 
             if isinstance(flow.mass_flow, list):
                 # Interpolate
@@ -285,11 +303,33 @@ class MissionSectionAnalysis:
                 )
                 # Create new flow with interpolated value
                 if hasattr(flow, 'hydrogen'):  # It's an InFlow
-                    processed.append(ConcreteInFlow(interpolated_flow, flow.hydrogen))
+                    # Create a FuelFlow with the raw enthalpy value
+                    processed.append(
+                        FuelFlow(
+                            interpolated_flow,
+                            flow.hydrogen,
+                            inlet_enthalpy=flow_enthalpy
+                        )
+                    )
                 else:  # It's an OutFlow
-                    processed.append(ConcreteOutFlow(interpolated_flow, flow.phase))
+                    processed.append(
+                        FuelFlow(
+                            interpolated_flow,
+                            tank_state.hydrogen.get_phase(flow.phase)
+                        )
+                    )
             else:
-                processed.append(flow)
+                if isinstance(flow, ConcreteInFlow):
+                    # Update with the raw enthalpy
+                    processed.append(
+                        FuelFlow(
+                            flow.mass_flow,
+                            flow.hydrogen,
+                            inlet_enthalpy=flow_enthalpy
+                        )
+                    )
+                else:
+                    processed.append(flow)
         return processed
 
     @classmethod
@@ -377,28 +417,18 @@ class MissionSectionAnalysis:
             multistep_method.timestep
         )
 
-        # Initial update of refuel flow properties using our simplified cryopump model
-        for flow in mission_section.fuel_flows:
-            if isinstance(flow, ConcreteInFlow):
-                # Update using our simplified cryopump model
-                flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_states.last_state.pressure, tank_states.last_state.temperature)
-                # Update tank pressure with the pump outlet pressure
-                tank_states.last_state.pressure = new_pressure
-                print(f"Initial refuel properties: T={flow.hydrogen.temperature:.2f}K, P={flow.hydrogen.pressure/1e5:.2f}bar, tank pressure updated to {new_pressure/1e5:.2f}bar")
+        # Initial calculation of refuel enthalpy using our simplified cryopump model
+        enthalpy = cls.calculate_inflow_enthalpy(tank_states.last_state.pressure, tank_states.last_state.temperature)
+        print(f"Initial refuel enthalpy calculated: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar")
 
         for section_iter in range(steps):
-            # Update hydrogen supply properties based on current tank pressure
-            # This simulates refueling where supply properties change with tank pressure
-            for flow in mission_section.fuel_flows:
-                if isinstance(flow, ConcreteInFlow) and section_iter > 0:
-                    # Update using our simplified cryopump model
-                    flow.hydrogen, new_pressure = compute_pump_outlet_hydrogen(tank_states.last_state.pressure, tank_states.last_state.temperature)
-                    # Update tank pressure with the pump outlet pressure
-                    tank_states.last_state.pressure = new_pressure
+            # We don't need to update flow objects here anymore - we'll calculate the enthalpy
+            # when we process the flows in compute_state_derivatives
 
-                    # Only print every 100 steps to avoid excessive output
-                    if section_iter % 100 == 0:
-                        print(f"Updated refuel: T={flow.hydrogen.temperature:.2f}K, P={flow.hydrogen.pressure/1e5:.2f}bar, tank pressure set to {new_pressure/1e5:.2f}bar at step {section_iter}")
+            # Print enthalpy updates occasionally for debugging
+            if section_iter > 0 and section_iter % 100 == 0:
+                enthalpy = cls.calculate_inflow_enthalpy(tank_states.last_state.pressure, tank_states.last_state.temperature)
+                print(f"Updated refuel enthalpy: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar at step {section_iter}")
 
             cls.compute_state_derivatives(
                 tank,
