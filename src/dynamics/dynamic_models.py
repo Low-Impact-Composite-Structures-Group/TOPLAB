@@ -734,18 +734,18 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         # Use much higher pressure change rate limit for refueling
         MAX_PRESSURE_CHANGE = 5e8  # Pa/s (5000 bar/s) for refueling, essentially unlimited
 
-        # Check if this is refueling or normal operation
-        # During refueling, the pressure should only increase
-        if dP_dt > 0:  # If pressure is increasing (refueling)
-            # Apply a very high limit
-            dP_dt = min(dP_dt, MAX_PRESSURE_CHANGE)  # Only limit extreme values
-        else:  # Draining or other operations
-            # Apply a more reasonable limit for draining
-            dP_dt = max(dP_dt, -1e6)  # -10 bar/s max for pressure drop
+        # # Check if this is refueling or normal operation
+        # # During refueling, the pressure should only increase
+        # if dP_dt > 0:  # If pressure is increasing (refueling)
+        #     # Apply a very high limit
+        #     dP_dt = 2*min(dP_dt, MAX_PRESSURE_CHANGE)  # Only limit extreme values
+        # else:  # Draining or other operations
+        #     # Apply a more reasonable limit for draining
+        #     dP_dt = max(dP_dt, -1e6)  # -10 bar/s max for pressure drop
 
-        # Limit temperature change rate (higher for refueling)
-        MAX_TEMP_CHANGE = 50.0  # K/s
-        dT_dt = np.clip(dT_dt, -MAX_TEMP_CHANGE, MAX_TEMP_CHANGE)
+        # # Limit temperature change rate (higher for refueling)
+        # MAX_TEMP_CHANGE = 50.0  # K/s
+        # dT_dt = np.clip(dT_dt, -MAX_TEMP_CHANGE, MAX_TEMP_CHANGE)
 
 
         return StateDerivatives(
@@ -1041,7 +1041,7 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
             if not hasattr(tank_state.hydrogen, "liquid") or not hasattr(tank_state.hydrogen, "gas"):
                 print(f"DETECTED TRANSITION STATE: Tank is marked as two-phase but hydrogen object is still single-phase")
                 is_in_transition = True
-                
+
                 # Create a proper TwoPhaseHydrogen object to replace the current one
                 from src.fluids.hydrogen_retrievers import TwoPhaseRequester
                 # This will properly create liquid and gas phase objects
@@ -1061,7 +1061,7 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
                         # Get saturation temperature at current pressure
                         t_sat = PropsSI("T", "P", tank_state.pressure, "Q", 0, "hydrogen")
                         print(f"Using saturation temperature {t_sat:.2f}K instead of {tank_state.temperature:.2f}K")
-                        
+
                         # Create two-phase hydrogen at saturation
                         new_hydrogen = TwoPhaseRequester().get_hydrogen_properties(
                             tank_state.pressure, t_sat
@@ -1154,24 +1154,24 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
                 print("Using simplified model for transition state...")
                 # For transition states, use a simpler model that doesn't rely on matrix operations
                 # Calculate estimated derivatives based on energy and mass balance
-                
+
                 # Temperature derivative based on heat input/output
                 dT_dt = -0.5  # K/s (cooling effect from expansion)
-                
+
                 # Pressure derivative based on inflow/outflow
                 dP_dt = 0  # Pa/s (at saturation line pressure is coupled to temperature)
-                
+
                 # Mass derivatives - all new mass goes to liquid phase during transition
                 total_inflow = sum([flow.mass_flow for flow in fuel_flow_in])
                 total_outflow = sum([flow.mass_flow for flow in fuel_flow_out])
                 net_flow = total_inflow - total_outflow
-                
+
                 # For transition, initially all new mass becomes liquid
                 dMl_dt = max(0.0, net_flow)  # Ensure non-negative liquid growth
                 dMg_dt = net_flow - dMl_dt    # Rest goes to gas phase
-                
+
                 print(f"Transition state derivatives: dP_dt={dP_dt:.2f}, dT_dt={dT_dt:.2f}, dMl_dt={dMl_dt:.6f}, dMg_dt={dMg_dt:.6f}")
-                
+
                 return StateDerivatives(
                     dP_dt,
                     dT_dt,
@@ -1180,12 +1180,12 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
                     cls.venting_mass(),
                     cls.added_heat_flux()
                 )
-            
+
             # Normal case - use the matrix approach
             import numpy as np
             a = cls.define_a_matrix(tank_state)
             b = cls.define_b_vector(tank_state, combined_flows)
-            
+
             print("Attempting to solve matrix equation...")
             x = np.linalg.solve(a, b)
 
@@ -1202,7 +1202,7 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
             # Limit pressure and temperature changes
             MAX_PRESSURE_RATE = 5e6  # Pa/s (50 bar/s)
             MAX_TEMPERATURE_RATE = 5.0  # K/s
-            
+
             dP_dt = np.clip(dP_dt, -MAX_PRESSURE_RATE, MAX_PRESSURE_RATE)
             dT_dt = np.clip(dT_dt, -MAX_TEMPERATURE_RATE, MAX_TEMPERATURE_RATE)
 
@@ -1220,28 +1220,28 @@ class TwoPhaseInOutModel(TwoPhaseModelBase):
             import traceback
             traceback.print_exc()
             print("Returning default state derivatives")
-            
+
             # Create safe fallback values that don't cause instability
             # Use a small negative temperature derivative
             dT_dt = -0.1  # K/s (slight cooling)
             # Keep pressure constant
             dP_dt = 0.0  # Pa/s
-            
+
             # Mass derivatives - distribute based on inflow/outflow
             total_inflow = sum([flow.mass_flow for flow in fuel_flow_in])
             total_outflow = sum([flow.mass_flow for flow in fuel_flow_out])
             net_flow = total_inflow - total_outflow
-            
+
             # Split the flow between phases, assuming half goes to each
             dMl_dt = net_flow * 0.5
             dMg_dt = net_flow * 0.5
-            
+
             return StateDerivatives(
-                dP_dt, 
-                dT_dt, 
+                dP_dt,
+                dT_dt,
                 dMg_dt,
-                dMl_dt, 
-                0, 
+                dMl_dt,
+                0,
                 tank_state.heat_flux
             )
 
@@ -1608,12 +1608,43 @@ class TwoPhaseLimitUpperPressureModel(DynamicModel):
 
 class TwoPhaseRefuelModel(TwoPhaseModelBase):
     """
-    Two-phase refuelling model using the novel specific isochoric two-phase heat capacity (c_v2P).
+    Two-phase refuelling model using the novel specific isochoric two-phase heat capacity (c_v2P)
+    with relaxation-based saturation constraint.
 
-    This model is based on the conventions of TwoPhaseModel but modifies the
-    energy equation row to use M * c_v2P and d(p_sat)/dT, as described in the
-    generalized thermodynamic model paper.
+    This model is based on the conventions of TwoPhaseModel but modifies the approach to handle
+    the saturation constraint using a relaxation time constant rather than strict enforcement.
+
+    Key differences from standard models:
+    1. Uses cv2phase for energy equation (as described in generalized thermodynamic model paper)
+    2. Implements relaxation approach: dP/dt = (P_sat(T) - P) / τ_relax + pressure_effects
+    3. Allows gradual approach to thermodynamic equilibrium during rapid processes like refueling
+
+    The relaxation approach is physically motivated by:
+    - Non-equilibrium effects during rapid refueling
+    - Finite heat and mass transfer rates
+    - Local temperature and pressure gradients within the tank
     """
+
+    # Class-level configuration for relaxation time constant
+    RELAXATION_TIME_CONSTANT = 0.1  # seconds - increased for better stability
+
+    @classmethod
+    def set_relaxation_time_constant(cls, tau_relax: float) -> None:
+        """
+        Set the relaxation time constant for the model.
+
+        Args:
+            tau_relax: Relaxation time constant in seconds
+                     - Smaller values (e.g., 0.01-0.1s): Faster equilibration, more responsive
+                     - Larger values (e.g., 1-10s): Slower equilibration, more stable
+        """
+        cls.RELAXATION_TIME_CONSTANT = tau_relax
+        print(f"TwoPhaseRefuelModel relaxation time constant set to {tau_relax:.3f} seconds")
+
+    @classmethod
+    def get_relaxation_time_constant(cls) -> float:
+        """Get the current relaxation time constant."""
+        return cls.RELAXATION_TIME_CONSTANT
 
     @classmethod
     def compute_cv2phase(cls, tank_state: TankState) -> float:
@@ -1724,7 +1755,7 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
     @staticmethod
     def a12(hydrogen: TwoPhaseHydrogen) -> float:
         """Calculate coefficient a12 in the A matrix (saturation pressure derivative)."""
-        return -hydrogen.dP_dT
+        return hydrogen.dP_dT
 
     @staticmethod
     def a21(
@@ -1798,15 +1829,23 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
     def define_a_matrix(cls, tank_state: TankState) -> np.ndarray:
         """
         Define the A matrix for the system of equations using cv2phase approach.
-        
-        For refueling: Use a weak saturation constraint that allows some deviation
-        from the saturation line to enable isothermal compression.
+
+        For refueling: Use a modified saturation constraint that allows for relaxation
+        while maintaining proper thermodynamic coupling.
         """
-        # Use a weakened saturation constraint instead of strict saturation
-        # This allows some deviation to enable isothermal compression
-        weak_saturation_factor = 0.1  # Weaken the constraint by 90%
-        a12 = -tank_state.hydrogen.dP_dT * weak_saturation_factor
-        
+        # Modified saturation constraint with relaxation:
+        # Use balanced approach: dP/dt - α*dP_sat/dT * dT/dt = (1-α)*relaxation_term
+        # where α is the coupling strength (0 = pure relaxation, 1 = strict saturation)
+
+        hydrogen = tank_state.hydrogen
+
+        # Use coupling strength parameter instead of simple relaxation factor
+        # This maintains proper matrix balance between A and b
+        coupling_strength = 0.7  # 0.7 maintains most thermodynamic coupling
+
+        a11 = 1.0  # Full coefficient for dP/dt
+        a12 = -coupling_strength * cls.a12(hydrogen)  # Coupled to dT/dt with proper sign
+
         a21 = cls.a21(
             tank_state.gas_mass,
             tank_state.liquid_mass,
@@ -1821,12 +1860,12 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         a42 = cls.a42(tank_state)
         a43 = cls.a43(tank_state.hydrogen)
 
-        # Matrix with weakened saturation constraint
+        # Matrix with balanced saturation constraint
         a = np.array([
-            [1.0, a12, 0.0, 0.0],  # Row 1: Weak saturation constraint
-            [a21, a22, a23, 0.0],  # Row 2: Energy constraint using cv2phase
+            [a11, a12, 0.0, 0.0],  # Row 1: Balanced saturation constraint
+            [a21, a22, a23, 0.0],  # Row 2: Volume constraint
             [0.0, 0.0, 1.0, 1.0],  # Row 3: Mass balance
-            [0.0, a42, a43, 0.0]   # Row 4: Gas phase mass balance
+            [0.0, a42, a43, 0.0]   # Row 4: Energy equation with cv2phase
         ])
 
         return a
@@ -1869,7 +1908,7 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         # Energy contribution from inflows
         inflow_energy = 0
         total_inflow = 0
-        
+
         # Improved handling for refueling with adaptive reference enthalpy
         for flow in fuel_flow_in:
             total_inflow += flow.mass_flow
@@ -1900,19 +1939,19 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
             if hasattr(hydrogen, 'tank_state') and hasattr(hydrogen.tank_state, 'gas_mass') and \
                hasattr(hydrogen.tank_state, 'liquid_mass'):
                 total_mass = max(hydrogen.tank_state.gas_mass + hydrogen.tank_state.liquid_mass, 1e-10)
-                
+
                 # Handle negative gas mass as indicator to use liquid reference
                 if hydrogen.tank_state.gas_mass < 0:
                     print(f"WARNING: Negative gas mass {hydrogen.tank_state.gas_mass:.6f}kg detected in energy calculation")
                     alpha = 0.0  # Force liquid-only reference
                 else:
                     alpha = hydrogen.tank_state.gas_mass / total_mass
-                    
+
                 # Blend between liquid and gas reference enthalpy based on composition
                 # When alpha is small (mostly liquid), use more liquid reference
                 blend_factor = max(0, min(1, 1-alpha))  # More liquid = more liquid reference
                 print(f"Gas mass fraction alpha: {alpha:.3f}, blend factor: {blend_factor:.3f}")
-                
+
                 # Calculate reference enthalpy as a blend of liquid and gas enthalpies
                 try:
                     h_ref = blend_factor * hydrogen.liquid.enthalpy + (1-blend_factor) * hydrogen.gas.enthalpy
@@ -1925,7 +1964,7 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
             else:
                 # For backward compatibility
                 inflow_energy += flow.mass_flow * (h_in - hydrogen.liquid.enthalpy)
-                
+
             print(f"Inflow: {flow.mass_flow:.6f} kg/s, h_in: {h_in:.2f} J/kg, energy contribution: {flow.mass_flow * (h_in - hydrogen.liquid.enthalpy):.2f} W")
 
         print(f"Inflow rate: {total_inflow:.6f} kg/s")
@@ -1958,6 +1997,66 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         return total_energy
 
     @classmethod
+    def compute_relaxation_pressure_rhs(
+        cls,
+        tank_state: TankState,
+        fuel_flow_in: list[FuelFlow],
+        fuel_flow_out: list[FuelFlow]
+    ) -> float:
+        """
+        Compute the right-hand side of the relaxation pressure equation.
+
+        dP/dt = (P_sat(T) - P) / τ_relax + pressure_rise_from_mass_addition
+
+        Returns the relaxation term plus pressure effects from mass flows.
+        """
+        # Use class-level relaxation time constant
+        tau_relax = cls.RELAXATION_TIME_CONSTANT
+
+        # Get current saturation pressure at tank temperature
+        from CoolProp.CoolProp import PropsSI
+        try:
+            P_sat = PropsSI("P", "T", tank_state.temperature, "Q", 0.5, "hydrogen")
+        except Exception as e:
+            # Fallback to current pressure if saturation pressure calculation fails
+            print(f"Warning: Could not calculate P_sat, using current pressure. Error: {e}")
+            P_sat = tank_state.pressure
+
+        # Relaxation term: drives pressure toward saturation value
+        relaxation_term = (P_sat - tank_state.pressure) / tau_relax
+
+        # Pressure rise from mass addition (simplified)
+        # This approximates the immediate pressure response to mass flows
+        total_inflow = sum([flow.mass_flow for flow in fuel_flow_in])
+        total_outflow = sum([flow.mass_flow for flow in fuel_flow_out])
+        net_mass_flow = total_inflow - total_outflow
+
+        # Estimate pressure rise from mass addition using bulk modulus approach
+        # dP ≈ (ρ * dV/dt) / (V * compressibility)
+        if tank_state.fuel_mass > 0 and tank_state.volume > 0:
+            # Use hydrogen compressibility (inverse of bulk modulus)
+            try:
+                if hasattr(tank_state.hydrogen, 'liquid') and hasattr(tank_state.hydrogen.liquid, 'dRho_dP'):
+                    compressibility = 1.0 / tank_state.hydrogen.liquid.dRho_dP
+                else:
+                    # Fallback compressibility for hydrogen
+                    compressibility = 1e-9  # Pa⁻¹
+
+                mass_effect = (net_mass_flow / tank_state.fuel_mass) / (compressibility * tank_state.volume)
+            except Exception:
+                mass_effect = 0.0
+        else:
+            mass_effect = 0.0
+
+        total_pressure_rate = relaxation_term + mass_effect
+
+        print(f"Relaxation: P_sat={P_sat/1e5:.2f}bar, P={tank_state.pressure/1e5:.2f}bar, "
+              f"τ={tau_relax:.2f}s, relaxation_term={relaxation_term/1e5:.2f}bar/s, "
+              f"mass_effect={mass_effect/1e5:.2f}bar/s, total={total_pressure_rate/1e5:.2f}bar/s")
+
+        return total_pressure_rate
+
+    @classmethod
     def define_b_vector(
         cls,
         tank_state: TankState,
@@ -1965,21 +2064,30 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         fuel_flow_out: list[FuelFlow]
     ) -> np.ndarray:
         """Define the b vector for the system of equations.
-        
-        Using weakened saturation constraint as primary equation.
+
+        Using balanced saturation constraint with proper relaxation term.
         """
-        y1 = 0.0  # Weakened saturation constraint RHS
-        
-        # Energy balance RHS using cv2phase approach
+        # For balanced saturation constraint:
+        # dP/dt - α*dP_sat/dT * dT/dt = (1-α)*relaxation_pressure_term
+        coupling_strength = 0.7  # Same as used in A matrix
+        relaxation_pressure_term = cls.compute_relaxation_pressure_rhs(tank_state, fuel_flow_in, fuel_flow_out)
+
+        # Right-hand side is the relaxation term weighted by (1 - coupling_strength)
+        y1 = (1.0 - coupling_strength) * relaxation_pressure_term
+
+        # Volume constraint RHS
         y2 = cls.y2(tank_state, fuel_flow_in, fuel_flow_out)
-        
-        y3 = cls.y3(fuel_flow_in, fuel_flow_out)        # Mass balance
+
+        # Mass balance RHS
+        y3 = cls.y3(fuel_flow_in, fuel_flow_out)
+
+        # Energy equation RHS using cv2phase approach
         y4 = cls.y4(
             fuel_flow_in,
             fuel_flow_out,
             tank_state.hydrogen,
             tank_state.heat_flux
-        )  # Gas phase mass balance
+        )
 
         b = np.array([[y1], [y2], [y3], [y4]])
         return b
