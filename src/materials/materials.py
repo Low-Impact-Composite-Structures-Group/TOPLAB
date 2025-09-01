@@ -87,18 +87,7 @@ class Metal(Material):
     def __post_init__(self):
         self.type = "metal"
 
-    @classmethod
-    def aluminum_6063T5(cls):
-        failure_stress = 185e6
-        density = 2700
-        specific_temperature = 200
-        molecular_weight = 26.981539
-        return cls(
-            failure_stress,
-            density,
-            specific_temperature,
-            molecular_weight
-        )
+
     @classmethod
     def aluminum(cls):
         failure_stress = 450e6
@@ -135,20 +124,6 @@ class Composite(Material):
             winding_angle
         )
 
-    @classmethod
-    def g10(cls, winding_angle: float):
-        # Values from internet and master thesis
-        failure_stress = 300.0e6
-        density = 1800
-        specific_temperature = 1000.0
-        molecular_weight = 100.0
-        return cls(
-            failure_stress,
-            density,
-            specific_temperature,
-            molecular_weight,
-            winding_angle
-        )
 
 
 
