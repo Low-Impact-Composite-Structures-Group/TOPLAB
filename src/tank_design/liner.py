@@ -201,6 +201,40 @@ class Liner:
             heat_transfer_coeff, surface_area
         ).value
 
+    def compute_thermal_resistances(
+        self,
+        temperatures: list[float],
+        num_layers: int = 1
+    ) -> list[float]:
+        """Compute multiple thermal resistances for discretized liner layers.
+
+        This method allows the liner to be divided into multiple thermal layers
+        for improved accuracy, similar to how insulation is discretized.
+
+        Args:
+            temperatures: List of temperatures at layer interfaces
+            num_layers: Number of layers to discretize the liner into
+
+        Returns:
+            list[float]: List of thermal resistance values for each layer
+        """
+        if len(temperatures) < 2:
+            raise ValueError("At least 2 temperatures required for thermal resistance calculation")
+
+        if len(temperatures) - 1 != num_layers:
+            raise ValueError(f"Temperature list length ({len(temperatures)}) should be num_layers + 1 ({num_layers + 1})")
+
+        thermal_resistances = []
+
+        # Calculate thermal resistance for each layer
+        for i in range(num_layers):
+            resistance = self.compute_thermal_resistance(
+                temperatures[i], temperatures[i + 1]
+            )
+            thermal_resistances.append(resistance)
+
+        return thermal_resistances
+
     @classmethod
     def from_thickness(
         cls, thickness: float, tank: TankShape, material: Optional[Metal] = None

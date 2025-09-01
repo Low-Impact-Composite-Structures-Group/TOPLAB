@@ -29,24 +29,24 @@ class Material:
             temperature (float): temperature of the solid [K].
 
         Returns:
-            float: specific heat of the solid at given temperature 
+            float: specific heat of the solid at given temperature
             [J/(kg*K)].
         """
         # The computation is based on the method suggested in Cryogenic
-        # Systems (Barron 1985), page 24. The method is also used by 
+        # Systems (Barron 1985), page 24. The method is also used by
         # Ahluwalia in paper of 2008.
 
         # Define the integral part of the function, which later can be
         # solved for the given temperature
         def integral_function(x: float) -> float:
             return (x ** 4 * math.exp(x)) / (math.exp(x) - 1) ** 2
-        
+
         # Solve the integral for the given temperature interval
         integral, error_estimate = integrate.quad(
             lambda x: integral_function(x),
             0, self.characteristic_temperature / temperature
         )
-        
+
         # Verify if the estimated error of the integral is not too large
         if abs(error_estimate) > 1e-5:
             raise StopIteration(
@@ -64,7 +64,7 @@ class Material:
     def determine_thermal_capacity(
         self, temperature: float, mass: float
     ) -> float:
-        """Compute the thermal capacity of the solid, for given mass and 
+        """Compute the thermal capacity of the solid, for given mass and
         temperature.
 
         Args:
@@ -88,14 +88,26 @@ class Metal(Material):
         self.type = "metal"
 
     @classmethod
+    def aluminum_6063T5(cls):
+        failure_stress = 185e6
+        density = 2700
+        specific_temperature = 200
+        molecular_weight = 26.981539
+        return cls(
+            failure_stress,
+            density,
+            specific_temperature,
+            molecular_weight
+        )
+    @classmethod
     def aluminum(cls):
         failure_stress = 450e6
         density = 2700
         specific_temperature = 389.4
         molecular_weight = 26.981539
         return cls(
-            failure_stress, 
-            density, 
+            failure_stress,
+            density,
             specific_temperature,
             molecular_weight
         )
@@ -116,8 +128,23 @@ class Composite(Material):
         specific_temperature = 1500
         molecular_weight = 12.01
         return cls(
-            failure_stress, 
-            density, 
+            failure_stress,
+            density,
+            specific_temperature,
+            molecular_weight,
+            winding_angle
+        )
+
+    @classmethod
+    def g10(cls, winding_angle: float):
+        # Values from internet and master thesis
+        failure_stress = 300.0e6
+        density = 1800
+        specific_temperature = 1000.0
+        molecular_weight = 100.0
+        return cls(
+            failure_stress,
+            density,
             specific_temperature,
             molecular_weight,
             winding_angle

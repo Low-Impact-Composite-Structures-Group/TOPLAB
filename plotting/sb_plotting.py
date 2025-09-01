@@ -454,7 +454,7 @@ class SeabornPlotter:
 
     def plot_density_temperature_combined(self, scenario_data, include_saturation_line=True,
                                  include_isobars=True, include_ref_data=False, figsize=(10, 8),
-                                 temperature_range=(30, 80), density_range=(0, 80)):
+                                 temperature_range=(15, 80), density_range=(0, 80)):
         """
         Create a combined density-temperature plot for discharge, refuel and dormancy phases.
 

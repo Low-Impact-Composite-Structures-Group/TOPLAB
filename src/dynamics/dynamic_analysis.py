@@ -429,11 +429,11 @@ class MissionSectionAnalysis:
             current_time = section_iter * multistep_method.timestep
             # Call the phase transition check method if it exists
             if hasattr(tank_states.last_state, 'check_phase_transition'):
-                print(f"DEBUG: Calling check_phase_transition at t={current_time:.1f}s, P={tank_states.last_state.pressure/1e5:.1f}bar, T={tank_states.last_state.temperature:.1f}K")
+                # print(f"DEBUG: Calling check_phase_transition at t={current_time:.1f}s, P={tank_states.last_state.pressure/1e5:.1f}bar, T={tank_states.last_state.temperature:.1f}K")
                 tank_states.last_state.check_phase_transition(current_time)
             else:
                 print(f"DEBUG: tank_states.last_state does not have check_phase_transition method, type: {type(tank_states.last_state)}")
-                
+
             # After phase transition check, update hydrogen object if needed
             if hasattr(tank_states.last_state, '_forced_phase') and tank_states.last_state._forced_phase:
                 if tank_states.last_state._forced_phase == "liquid" and getattr(tank_states.last_state, '_in_transition', False):
@@ -474,13 +474,13 @@ class MissionSectionAnalysis:
                 cls.compute_new_mass(multistep_method.timestep, tank_states),
                 multi_flow=getattr(tank_states.last_state, "multi_flow", False)
             )
-            
+
             # Copy any phase transition information from previous state BEFORE __post_init__ can overwrite
             if hasattr(tank_states.last_state, '_forced_phase'):
                 new_state._forced_phase = tank_states.last_state._forced_phase
             if hasattr(tank_states.last_state, '_in_transition'):
                 new_state._in_transition = tank_states.last_state._in_transition
-                
+
             # If we have a forced phase, we need to preserve the hydrogen object from the previous state
             # or immediately recreate it with the correct phase
             if hasattr(tank_states.last_state, '_forced_phase') and tank_states.last_state._forced_phase:
@@ -501,7 +501,7 @@ class MissionSectionAnalysis:
                             print(f"Created new liquid hydrogen object for new state")
                         except Exception as e:
                             print(f"Could not create liquid hydrogen for new state: {e}")
-                            
+
             # Add the new state to our collection
             tank_states.add_tank_state(new_state)
             if cls.stopping_criterion_is_met(
