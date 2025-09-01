@@ -17,11 +17,8 @@ from src.thermodynamics.tank_states import (InitialState, TankState,
                                             TankStates, TargetState)
 
 # The thermal capacity of the tank depends on the mass of the tank, as
-# such this needs to be iterated as the operating pressure of the
-# tank is refined. Here the maximum amount of iterations are defined
-# and the percentage change in capacity of the tank
-MAX_THERMAL_CAPACITY_ITERATIONS = 10
-THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
+# Note: With NIST temperature-dependent materials, thermal capacity iteration
+# is no longer needed - materials provide direct temperature-dependent specific heat
 LOWER_MASS_LIMIT = 500
 
 class FuelTank(Protocol):
@@ -530,65 +527,43 @@ class MissionAnalysis:
         heat_flux_factor: float
     ) -> TankStates:
 
-        # Iterate till the thermal capacity has converged
-        for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
+        # With NIST materials, thermal capacity is directly temperature-dependent
+        # No iteration needed - just run the analysis once
+        print("Using NIST materials - no thermal capacity iteration required")
 
-            # Define initial state of the tank
-            initial = initial_state
-            tank_states = TankStates(list(), multistep_method.timestep)
+        # Define initial state of the tank
+        initial = initial_state
+        tank_states = TankStates(list(), multistep_method.timestep)
 
-            for mission_section in mission.sections:
-                section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
-                if section_string == None:
-                    print(f"Now calculating singular mission section, thermal iteration index = {i}")
-                else:
-                    print(f"Now calculating mission section {section_string}, thermal iteration index = {i}")
-                tank_states += MissionSectionAnalysis().analyse_section(
-                    tank,
-                    initial,
-                    mission_section,
-                    stopping_criteria,
-                    target_conditions,
-                    multistep_method,
-                    dynamic_model_factory,
-                    thermal_model,
-                    heat_flux_factor
-                )
+        for mission_section in mission.sections:
+            section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
+            if section_string == None:
+                print(f"Now calculating singular mission section")
+            else:
+                print(f"Now calculating mission section {section_string}")
+            tank_states += MissionSectionAnalysis().analyse_section(
+                tank,
+                initial,
+                mission_section,
+                stopping_criteria,
+                target_conditions,
+                multistep_method,
+                dynamic_model_factory,
+                thermal_model,
+                heat_flux_factor
+            )
 
-                initial = InitialState(
-                    tank_states.last_pressure,
-                    tank_states.last_temperature,
-                    tank_states.last_fill,
-                    multi_flow=getattr(initial, "multi_flow", False)
-                )
+            initial = InitialState(
+                tank_states.last_pressure,
+                tank_states.last_temperature,
+                tank_states.last_fill,
+                multi_flow=getattr(initial, "multi_flow", False)
+            )
 
-            # Check for convergence in the thermal capacity of the tank
-            if cls.thermal_capacity_has_converged(tank, tank_states):
-                print(f"Thermal capacity has converged with {i+1} iterations")
-                return tank_states
-
-        raise ValueError("Thermal capacity has failed to converge")
-
-    @classmethod
-    def thermal_capacity_has_converged(
-        cls, tank: FuelTank, tank_states: TankStates
-    ) -> bool:
-
-        # Compute old thermal capacity
-        old = tank.compute_thermal_capacity(
-            tank_states.average_temperature
-        )
-
-        # Update thermal capacity
+        # Set the final operating pressure for thermal capacity calculation
         tank.set_operating_pressure(tank_states.max_pressure)
-        new = tank.compute_thermal_capacity(
-            tank_states.average_temperature
-        )
 
-        # Compute percentage change and verify convergence
-        if abs((old - new) / old) * 100 <= THERMAL_CAPACITY_THRESHOLD:
-            return True
-        return False
+        return tank_states
 
 
 class SwitchMissionAnalysis:

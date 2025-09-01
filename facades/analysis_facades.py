@@ -53,13 +53,10 @@ class Insulation(Protocol):
 
 
 @dataclass
-@dataclass
 class TankDimensions:
     radius: float
     body_length: float
     liner = None  # Optional liner
-    override_mass: float = None  # Optional mass override (kg)
-    override_area: float = None  # Optional surface area override (m²)
 
 @dataclass
 class GenericTankDimensions(TankDimensions):
@@ -128,79 +125,7 @@ class AnalysisFacade(Protocol):
                 liner=liner
             )
 
-        # Apply mass and area overrides if specified
-        if hasattr(tank_dimensions, 'override_mass') and tank_dimensions.override_mass is not None:
-            tank = cls._apply_tank_overrides(tank, tank_dimensions.override_mass, tank_dimensions.override_area)
-        elif hasattr(tank_dimensions, 'override_area') and tank_dimensions.override_area is not None:
-            tank = cls._apply_tank_overrides(tank, None, tank_dimensions.override_area)
-
         return tank
-
-    @classmethod
-    def _apply_tank_overrides(cls, original_tank, override_mass=None, override_area=None):
-        """
-        Apply mass and/or area overrides to a tank by wrapping it with a ModifiedTank.
-
-        Args:
-            original_tank: The original tank object
-            override_mass: Override value for structural mass (kg), or None to keep original
-            override_area: Override value for surface area (m²), or None to keep original
-
-        Returns:
-            Tank: Either the original tank or a ModifiedTank wrapper with overridden properties
-        """
-        if override_mass is None and override_area is None:
-            return original_tank
-
-        class ModifiedTank:
-            def __init__(self, original_tank, override_mass=None, override_area=None):
-                self.original = original_tank
-
-                # Store override values
-                if override_mass is not None:
-                    self._structural_mass = override_mass
-
-                if override_area is not None:
-                    # Calculate proportional scaling ratio for exposed_surface
-                    area_ratio = override_area / original_tank.surface_area
-                    self._surface_area = override_area
-                    self._exposed_surface = original_tank.exposed_surface * area_ratio
-
-                    # For spherical tanks, calculate consistent radius from new surface area
-                    # surface_area = 4 * π * radius²  =>  radius = sqrt(surface_area / (4 * π))
-                    import math
-                    self._radius = math.sqrt(override_area / (4 * math.pi))
-
-            @property
-            def structural_mass(self):
-                return getattr(self, '_structural_mass', self.original.structural_mass)
-
-            @property
-            def surface_area(self):
-                return getattr(self, '_surface_area', self.original.surface_area)
-
-            @property
-            def exposed_surface(self):
-                return getattr(self, '_exposed_surface', self.original.exposed_surface)
-
-            @property
-            def radius(self):
-                return getattr(self, '_radius', self.original.radius)
-
-            def __getattr__(self, name):
-                return getattr(self.original, name)
-
-            def __repr__(self):
-                overrides = []
-                if hasattr(self, '_structural_mass'):
-                    overrides.append(f"mass={self._structural_mass:.1f}kg")
-                if hasattr(self, '_surface_area'):
-                    overrides.append(f"area={self._surface_area:.3f}m²")
-                if overrides:
-                    return f"ModifiedTank({', '.join(overrides)}) wrapping {self.original.__class__.__name__}"
-                return repr(self.original)
-
-        return ModifiedTank(original_tank, override_mass, override_area)
 
     @staticmethod
     def _define_operating_pressure(
@@ -830,36 +755,26 @@ class MultiTankAnalysisFacade(AnalysisFacade):
 
                 # Convert InitialState to TankState because we need to access certain attributes
                 if isinstance(last_state_1, InitialState):
-                    # Check if we have an overridden mass
-                    if hasattr(last_state_1, 'override_mass'):
-                        # Use the overridden mass value
-                        override_mass = last_state_1.override_mass
-                    else:
-                        # Calculate normally
-                        override_mass = last_state_1.compute_fuel_mass(tanks[0].volume)
+                    # Calculate fuel mass normally
+                    fuel_mass = last_state_1.compute_fuel_mass(tanks[0].volume)
 
                     last_state_1 = TankState(
                         tanks[0],
                         last_state_1.temperature,
                         last_state_1.pressure,
-                        override_mass,  # Use the override mass here
+                        fuel_mass,
                         multi_flow=last_state_1.multi_flow
                     )
 
                 if isinstance(last_state_2, InitialState):
-                    # Check if we have an overridden mass
-                    if hasattr(last_state_2, 'override_mass'):
-                        # Use the overridden mass value
-                        override_mass = last_state_2.override_mass
-                    else:
-                        # Calculate normally
-                        override_mass = last_state_2.compute_fuel_mass(tanks[1].volume)
+                    # Calculate fuel mass normally
+                    fuel_mass = last_state_2.compute_fuel_mass(tanks[1].volume)
 
                     last_state_2 = TankState(
                         tanks[1],
                         last_state_2.temperature,
                         last_state_2.pressure,
-                        override_mass,  # Use the override mass here
+                        fuel_mass,
                         multi_flow=last_state_2.multi_flow
                     )
 

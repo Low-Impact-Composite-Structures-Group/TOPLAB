@@ -11,6 +11,7 @@ from src.mission.mission_sections import OutFlow, MissionSection, InFlow
 
 # Import tank components
 from src.materials.materials import Composite, Metal
+from src.materials.nist_materials import NISTMetal, NISTComposite
 from src.insulation.vacuum_insulation import VacuumInsulation
 from src.tank_design.liner import Liner
 
@@ -24,20 +25,9 @@ from facades.analysis_facades import (
 # Import our facades for analysis
 from facades.analysis_facades import MissionAnalysisFacade
 
-#################################################
-## OVERRIDE PARAMETERS (MODIFY THESE AS NEEDED) ##
-#################################################
-
-# Set these variables to override the default tank mass and area
-# Set to None to use the default values
-OVERRIDE_TANK_MASS = 150  # in kg (e.g., 30.0 for 30 kg tank mass)
-OVERRIDE_TANK_AREA = 4.1  # in m² (e.g., 2.0 for 2 m² surface area)
-# OVERRIDE_TANK_MASS = 150  # in kg (e.g., 30.0 for 30 kg tank mass)
-# OVERRIDE_TANK_AREA = 4.1  # in m² (e.g., 2.0 for 2 m² surface area)
-
-# Mass and area scaling factors (alternative to direct overrides)
-MASS_FACTOR = None  # Multiplier for tank mass (e.g., 0.5 for half the mass)
-AREA_FACTOR = None  # Multiplier for tank surface area (e.g., 1.5 for 50% more area)
+#################################
+## COMMON SIMULATION CONSTANTS ##
+#################################
 
 
 #################################
@@ -51,30 +41,21 @@ HOURS_TO_SECONDS = 3600.0  # seconds per hour
 NOMINAL_MASS = 35.0
 TANK_VOLUME = 0.5
 
-# Tank geometry configuration
-# For cylindrical tank with spherical end caps to achieve target volume
-TANK_RADIUS = 0.4  # m - Choose a reasonable radius for cylindrical tank
-
-# Calculate body length needed for target volume
-# Volume = cylinder volume + 2 hemisphere volumes
-# V_total = π * r² * L_body + (4/3) * π * r³
-# Solving for L_body: L_body = (V_total - (4/3) * π * r³) / (π * r²)
-hemisphere_volume = (4/3) * np.pi * TANK_RADIUS**3
-cylinder_volume_needed = TANK_VOLUME - hemisphere_volume
-TANK_BODY_LENGTH = cylinder_volume_needed / (np.pi * TANK_RADIUS**2)
+# Spherical tank geometry for target volume
+# For sphere: V = (4/3) * π * r³
+# Solving for radius: r = (3V/(4π))^(1/3)
+TANK_RADIUS = (3 * TANK_VOLUME / (4 * np.pi))**(1/3)
+TANK_BODY_LENGTH = 0.0  # Spherical tank (no cylindrical body)
 
 AMBIENT_TEMPERATURE = 298.15  # K
 
 # Verify the calculated volume
-calculated_volume = np.pi * TANK_RADIUS**2 * TANK_BODY_LENGTH + hemisphere_volume
-print(f"=== CYLINDRICAL TANK WITH SPHERICAL END CAPS ===")
+calculated_volume = (4/3) * np.pi * TANK_RADIUS**3
+print(f"=== SPHERICAL TANK ===")
 print(f"Tank radius: {TANK_RADIUS:.3f} m")
-print(f"Tank body length: {TANK_BODY_LENGTH:.3f} m")
 print(f"Target volume: {TANK_VOLUME:.3f} m³")
 print(f"Calculated volume: {calculated_volume:.3f} m³")
 print(f"Volume error: {abs(calculated_volume - TANK_VOLUME):.6f} m³")
-print(f"Cylinder volume: {cylinder_volume_needed:.3f} m³")
-print(f"Hemisphere volume: {hemisphere_volume:.3f} m³")
 
 # Simulation timesteps for different scenarios
 DISCHARGE_TIMESTEP = 5.0   # seconds - standard timestep for discharge
@@ -82,28 +63,29 @@ REFUEL_TIMESTEP = 0.5      # seconds - small timestep for refuel (rapid dynamics
 DORMANCY_TIMESTEP = 300.0   # seconds - larger timestep for dormancy (slower dynamics)
 
 
-# Use aluminum for the tank material
-tank_material = Composite.g10(np.radians(55))
+# Use NIST materials for improved temperature-dependent thermal properties
+# tank_material = NISTComposite.g10_nist(np.radians(55))
+tank_material = Composite.carbon(np.radians(55))
 
-# Create tank dimensions with cylindrical body and spherical end caps
-tank_dimensions = TankDimensions(TANK_RADIUS, TANK_BODY_LENGTH)  # Cylindrical tank with spherical caps
+# Create tank dimensions for spherical tank
+tank_dimensions = TankDimensions(TANK_RADIUS, TANK_BODY_LENGTH)  # Spherical tank
 
-# Create a liner with specified mass
-LINER_MASS = 100.0
-liner_by_mass = Liner.from_mass(LINER_MASS, tank_dimensions, Metal.aluminum_6063T5())
+# Create a liner with specified mass using NIST aluminum properties
+LINER_MASS = 1.0
+liner_by_mass = Liner.from_mass(LINER_MASS, tank_dimensions, NISTMetal.aluminum_5083_nist())
 
 # Assign the liner to tank_dimensions
 # comment this out for a linerless analysis
-tank_dimensions.liner = liner_by_mass
+# tank_dimensions.liner = liner_by_mass
 
-print(f"\n🔋 THERMAL CAPACITY ANALYSIS:")
+print(f"\n🔋 THERMAL CAPACITY ANALYSIS (NIST Materials):")
 print(f"==================================================")
 # Create a temporary tank to analyze thermal capacity
 from src.tank_design.tank_shapes import TankFactory
 temp_tank = TankFactory().create_tank(
-    tank_dimensions.radius, 
-    tank_dimensions.body_length, 
-    tank_material, 
+    tank_dimensions.radius,
+    tank_dimensions.body_length,
+    tank_material,
     700000  # 7 bar operating pressure
 )
 temp_tank.liner = liner_by_mass
@@ -122,43 +104,25 @@ if temp_tank.liner is not None:
 total_thermal_capacity = temp_tank.compute_thermal_capacity(analysis_temp)
 
 print(f"   Tank structural:  {tank_structural_capacity:.1f} J/K ({tank_structural_capacity/total_thermal_capacity*100:.1f}%)")
-print(f"   Liner:            {liner_thermal_capacity:.1f} J/K ({liner_thermal_capacity/total_thermal_capacity*100:.1f}%)")
+print(f"   Liner (NIST Al):  {liner_thermal_capacity:.1f} J/K ({liner_thermal_capacity/total_thermal_capacity*100:.1f}%)")
 print(f"   TOTAL:            {total_thermal_capacity:.1f} J/K")
 print(f"   Liner mass:       {LINER_MASS:.1f} kg")
-print(f"   Liner specific heat: {liner_by_mass.material.determine_specific_heat(analysis_temp):.1f} J/(kg·K)")
+print(f"   Al specific heat: {liner_by_mass.material.determine_specific_heat(analysis_temp):.1f} J/(kg·K)")
+print(f"   G10 specific heat: {tank_material.determine_specific_heat(analysis_temp):.1f} J/(kg·K)")
+print(f"==================================================")
+print(f"💡 Using NIST temperature-dependent materials for enhanced accuracy!")
+print(f"   - Aluminum: NIST Al 5083 polynomial fit data")
+print(f"   - G10: NIST composite polynomial fit data")
+print(f"   - Temperature range: 4-300K with Debye fallback")
 print(f"==================================================")
 print(f"💡 KEY INSIGHT: Liner has minimal thermal RESISTANCE but major thermal CAPACITY!")
 print(f"   - Thermal resistance controls steady-state heat transfer")
-print(f"   - Thermal capacity controls transient temperature response") 
+print(f"   - Thermal capacity controls transient temperature response")
 print(f"   - During refueling, liner stores/releases significant energy!")
 print(f"==================================================")
-
-# Apply overrides to tank_dimensions BEFORE analysis
-if OVERRIDE_TANK_MASS is not None:
-    tank_dimensions.override_mass = OVERRIDE_TANK_MASS
-    print(f"🔧 Tank mass override set: {OVERRIDE_TANK_MASS} kg")
-
-if OVERRIDE_TANK_AREA is not None:
-    tank_dimensions.override_area = OVERRIDE_TANK_AREA
-    print(f"🔧 Tank area override set: {OVERRIDE_TANK_AREA} m²")
-
-if MASS_FACTOR is not None:
-    # For mass factor, we need to calculate the override after creating a temporary tank
-    from src.tank_design.tank_shapes import TankFactory
-    temp_tank = TankFactory.create_tank(
-        TANK_RADIUS, 0.0, tank_material, 400e5, liner=liner_by_mass
-    )
-    tank_dimensions.override_mass = temp_tank.structural_mass * MASS_FACTOR
-    print(f"🔧 Tank mass factor override set: {tank_dimensions.override_mass} kg (factor: {MASS_FACTOR})")
-
-if AREA_FACTOR is not None:
-    # For area factor, calculate the override after creating a temporary tank
-    from src.tank_design.tank_shapes import TankFactory
-    temp_tank = TankFactory.create_tank(
-        TANK_RADIUS, 0.0, tank_material, 400e5, liner=liner_by_mass
-    )
-    tank_dimensions.override_area = temp_tank.surface_area * AREA_FACTOR
-    print(f"🔧 Tank area factor override set: {tank_dimensions.override_area} m² (factor: {AREA_FACTOR})")
+print(f"   - Thermal capacity controls transient temperature response")
+print(f"   - During refueling, liner stores/releases significant energy!")
+print(f"==================================================")
 
 # instantiate insulation
 insulation = VacuumInsulation()
@@ -166,81 +130,13 @@ insulation = VacuumInsulation()
 # Create a temporary tank to display properties
 from src.tank_design.tank_shapes import TankFactory
 temp_tank = TankFactory.create_tank(
-    TANK_RADIUS, 0.0, tank_material, 400e5, liner=liner_by_mass
+    TANK_RADIUS, TANK_BODY_LENGTH, tank_material, 900e5, liner=liner_by_mass
 )
-
-# Define a function to create a modified tank with overridden properties
-def create_modified_tank(original_tank):
-    """
-    Create a tank with overridden properties if specified.
-
-    Args:
-        original_tank: The original tank object
-
-    Returns:
-        Tank: Either the original tank or a modified version with overridden properties
-    """
-    # Check if any overrides are specified
-    if (OVERRIDE_TANK_MASS is None and OVERRIDE_TANK_AREA is None and
-        MASS_FACTOR is None and AREA_FACTOR is None):
-        return original_tank
-
-    # Create a class that wraps the original tank and overrides properties
-    class ModifiedTank(original_tank.__class__):
-        """A tank with overridden mass and/or surface area."""
-
-        def __init__(self, original):
-            # Copy all attributes from original tank
-            for attr_name, attr_value in original.__dict__.items():
-                setattr(self, attr_name, attr_value)
-
-            # Store original values
-            self._original_structural_mass = original.structural_mass
-            self._original_surface_area = original.surface_area
-
-            # Calculate overridden values
-            if OVERRIDE_TANK_MASS is not None:
-                self._structural_mass = OVERRIDE_TANK_MASS
-            elif MASS_FACTOR is not None:
-                self._structural_mass = original.structural_mass * MASS_FACTOR
-            else:
-                self._structural_mass = original.structural_mass
-
-            if OVERRIDE_TANK_AREA is not None:
-                self._surface_area = OVERRIDE_TANK_AREA
-            elif AREA_FACTOR is not None:
-                self._surface_area = original.surface_area * AREA_FACTOR
-            else:
-                self._surface_area = original.surface_area
-
-        @property
-        def structural_mass(self):
-            return self._structural_mass
-
-        @property
-        def surface_area(self):
-            return self._surface_area
-
-        def __repr__(self):
-            return f"ModifiedTank(structural_mass={self.structural_mass:.2f} kg, surface_area={self.surface_area:.2f} m²)"
-
-    # Create and return the modified tank
-    return ModifiedTank(original_tank)
-
-# Override the tank if needed
-temp_tank = create_modified_tank(temp_tank)
 
 # Print tank properties early in the execution
 print("\n===== TANK PROPERTIES =====")
 print(f"Tank structural mass: {temp_tank.structural_mass:.2f} kg")
 print(f"Tank surface area: {temp_tank.surface_area:.2f} m²")
-
-# Show if overrides were applied
-if OVERRIDE_TANK_MASS is not None or MASS_FACTOR is not None:
-    print(f"NOTE: Tank mass was overridden from {temp_tank._original_structural_mass:.2f} kg")
-
-if OVERRIDE_TANK_AREA is not None or AREA_FACTOR is not None:
-    print(f"NOTE: Tank surface area was overridden from {temp_tank._original_surface_area:.2f} m²")
 
 # Print thickness for each section
 for i, section in enumerate(temp_tank.sections):
@@ -305,7 +201,7 @@ fill_refuel = 0.0          # fraction - no liquid phase (0.0 = all gas)
 rho_stop_refuel = 78.0     # kg/m³ - stop density
 
 # Operating limits
-p_max_refuel = 400.0e+5    # Pa - maximum allowable pressure
+p_max_refuel = 9.0e+7       # Pa - maximum allowable pressure
 p_min_refuel = None        # Pa - minimum allowable pressure (None = no limit)
 
 # Mission parameters
@@ -357,7 +253,7 @@ altitude_dormancy = 0.0    # m - ground-level altitude
 
 # Define operating envelope for dormancy
 operating_window_dormancy = OperatingEnvelope(
-    max_pressure=450e5,      # Pa - maximum allowable pressure
+    max_pressure=5.0e+7,      # Pa - maximum allowable pressure
     min_pressure=15e5,       # Pa - minimum allowable pressure
     min_temperature=20       # K - minimum allowable temperature
 )
@@ -403,14 +299,7 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
         print("\nRunning simulation...")
         print(f"Discharge duration: {duration_hours_disch} hours with {DISCHARGE_TIMESTEP} second timesteps")
 
-        # Show tank properties being used in analysis
-        print(f"\n🔧 Tank Configuration for Analysis:")
-        if hasattr(tank_dimensions, 'override_mass') and tank_dimensions.override_mass is not None:
-            print(f"   Override mass: {tank_dimensions.override_mass} kg")
-        if hasattr(tank_dimensions, 'override_area') and tank_dimensions.override_area is not None:
-            print(f"   Override area: {tank_dimensions.override_area} m²")
-
-        # Run the analysis - overrides are now applied via tank_dimensions
+        # Run the analysis
         tank_performance = MissionAnalysisFacade.analyse(
             tank_dimensions=tank_dimensions,
             material=tank_material,
@@ -422,7 +311,7 @@ def perform_discharge_analysis(return_performances=False, show_plots=False):
             target_density=None
         )
 
-        # The overrides are now applied during analysis, not after
+        # The results are now available from the analysis
         # Extract results and plot
         tank_states = tank_performance.tank_states
 
@@ -467,7 +356,7 @@ def perform_refuel_analysis(return_performances=False, show_plots=False):
         print("\nInitial tank states:")
         print(f"T={initial_conditions_refuel.temperature:.1f}K, P={initial_conditions_refuel.pressure/1e5:.1f}bar")
 
-        # Run analysis - overrides are now applied via tank_dimensions
+        # Run analysis
         print("\nRunning simulation...")
 
         tank_performance = MissionAnalysisFacade.analyse(
@@ -597,7 +486,7 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
         # Ensure multi_flow is True for proper phase handling
         initial_conditions_dormancy.multi_flow = True
 
-        # Run analysis - overrides are now applied via tank_dimensions
+        # Run analysis
         print("\nRunning simulation...")
         print(f"Dormancy duration: {duration_hours_dormancy} hours with {DORMANCY_TIMESTEP} second timesteps")
 
@@ -823,7 +712,7 @@ def perform_complete_analysis(show_intermediate_plots=False):
     return discharge_performance, refuel_performance, dormancy_performance
 
 
-def run_analysis(mode="refuel", show_plots=False, mass_factor=None, area_factor=None, tank_mass=None, tank_area=None):
+def run_analysis(mode="refuel", show_plots=False):
     """
     Main entry point function for running simulations.
 
@@ -831,52 +720,22 @@ def run_analysis(mode="refuel", show_plots=False, mass_factor=None, area_factor=
         mode (str): Analysis mode - one of "refuel", "discharge", "dormancy",
                    "complete"
         show_plots (bool): Whether to display plots during execution
-        mass_factor (float, optional): Multiplier for tank mass (e.g., 0.5 for half the mass)
-        area_factor (float, optional): Multiplier for tank surface area (e.g., 1.5 for 50% more area)
-        tank_mass (float, optional): Override tank mass in kg
-        tank_area (float, optional): Override tank surface area in m²
 
     Returns:
         Object or tuple: Performance results from the selected analysis
     """
-    # Set global override variables
-    global OVERRIDE_TANK_MASS, OVERRIDE_TANK_AREA, MASS_FACTOR, AREA_FACTOR
-
-    # Store original values
-    original_mass = OVERRIDE_TANK_MASS
-    original_area = OVERRIDE_TANK_AREA
-    original_mass_factor = MASS_FACTOR
-    original_area_factor = AREA_FACTOR
-
-    # Apply overrides from parameters
-    if tank_mass is not None:
-        OVERRIDE_TANK_MASS = tank_mass
-    if tank_area is not None:
-        OVERRIDE_TANK_AREA = tank_area
-    if mass_factor is not None:
-        MASS_FACTOR = mass_factor
-    if area_factor is not None:
-        AREA_FACTOR = area_factor
-
-    try:
-        if mode == "refuel":
-            return perform_refuel_analysis(return_performances=True, show_plots=show_plots)
-        elif mode == "discharge":
-            return perform_discharge_analysis(return_performances=True, show_plots=show_plots)
-        elif mode == "dormancy":
-            return perform_dormancy_analysis(return_performances=True, show_plots=show_plots)
-        elif mode == "complete":
-            return perform_complete_analysis(show_intermediate_plots=show_plots)
-        else:
-            raise ValueError(f"Invalid analysis mode: {mode}. " +
-                            "Must be one of: 'refuel', 'discharge', 'dormancy', " +
-                            "'complete'.")
-    finally:
-        # Restore original values
-        OVERRIDE_TANK_MASS = original_mass
-        OVERRIDE_TANK_AREA = original_area
-        MASS_FACTOR = original_mass_factor
-        AREA_FACTOR = original_area_factor
+    if mode == "refuel":
+        return perform_refuel_analysis(return_performances=True, show_plots=show_plots)
+    elif mode == "discharge":
+        return perform_discharge_analysis(return_performances=True, show_plots=show_plots)
+    elif mode == "dormancy":
+        return perform_dormancy_analysis(return_performances=True, show_plots=show_plots)
+    elif mode == "complete":
+        return perform_complete_analysis(show_intermediate_plots=show_plots)
+    else:
+        raise ValueError(f"Invalid analysis mode: {mode}. " +
+                        "Must be one of: 'refuel', 'discharge', 'dormancy', " +
+                        "'complete'.")
 
 def main():
     run_analysis("complete", show_plots=True)
