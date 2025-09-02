@@ -354,6 +354,10 @@ def perform_analysis():
 
     plt.close(fig_req_flux.fig)
 
+    # save mission mass flow and tank states as png with higher dpi
+    fig_mass_flows.savefig(os.path.join(script_dir, '../../data/results/cc_results/mission_mass_flows.png'), dpi=1000)
+    fig_tank_states.savefig(os.path.join(script_dir, '../../data/results/cc_results/tank_states.png'), dpi=1000)
+
     plt.show()
 
 def get_hydrogen_saturation_line(min_temp=14.0, max_temp=33.0, num_points=100):
