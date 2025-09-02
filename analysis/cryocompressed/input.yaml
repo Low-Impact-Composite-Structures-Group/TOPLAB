@@ -1,7 +1,7 @@
 tank properties:
-  tank radius: 0.716 # [m]
+  tank radius: 5.0 # [m]
   insulation thickness: 0.04 # [m]
-  volume margin: 1.3 # [m^3/m^3]
+  volume margin: 1.7 # [m^3/m^3]
   head type: 'hemi' # 'se' or 'hemi'
   tank material type: 'Composite'
   tank material: 'carbon'
@@ -15,7 +15,7 @@ discharge:
   max pressure: 45000000 # [Pa]
   max temperature:  # [K]
   fuel flow: 0.001
-  mission: 'triathlon'
+  mission: 'atr72'
   mission type: 1 # 0 for single-section mission, 1 for multi-section mission
   mach number: 0.0
   altitude: 0.0 # [m]
@@ -25,6 +25,7 @@ discharge:
   outlet pressure: 2000000 # [Pa]
   outlet temperature: 200 # [K]
   constant heat flux: 5.0 # [W/m^2]
+  timestep: 1.0 # [s]
 refuelling:
   initial pressure: 2300000 # [Pa]
   initial temperature: 80 # [K]

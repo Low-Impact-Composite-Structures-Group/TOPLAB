@@ -431,15 +431,15 @@ class SeabornPlotter:
             interp_flows = interpolated_mass_flows
 
             # Create time points matching the length of interpolated_mass_flows
-            interp_times = np.linspace(0, total_duration, len(interp_flows))
-            ax.plot(interp_times, interp_flows, '--', color=BORDEAUX,
-                    label="Interpolated Flow Rate", linewidth=1.5, alpha=0.7)
+            # interp_times = np.linspace(0, total_duration, len(interp_flows))
+            # ax.plot(interp_times, interp_flows, '--', color=BORDEAUX,
+            #         label="Interpolated Flow Rate", linewidth=1.5, alpha=0.7)
 
         # Add a zero reference line
         ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
 
         # Set labels and title with standardized convention
-        ax.set_title("Mission Mass Flow Rate (Refuel (+) / Drain (-))")
+        ax.set_title("Mission Mass Flow Rate")
         ax.set_xlabel("Time [hour]")
         ax.set_ylabel("Mass Flow Rate [kg/s]")
 

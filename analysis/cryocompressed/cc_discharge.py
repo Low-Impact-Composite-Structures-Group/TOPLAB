@@ -7,6 +7,13 @@ from src.mission.mission import Mission
 from src.thermodynamics.tank_states import InitialState
 from src.tank_design.tank_shapes import WinnefeldTank, CylindricalTankSphericalCaps
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+from src.multistep_methods.linear_multistep_methods import EulerMethod
+from src.dynamics.dynamic_analysis import MissionAnalysis
+from src.dynamics.dynamic_model_factories import DynamicModelFactory
+from src.thermodynamics.thermodynamic_models import ThermodynamicModel
+from src.thermodynamics.internal_models import SingleZoneModel
+from src.thermodynamics.external_models import NaturalConvectionModel
+from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
 from CoolProp.CoolProp import PropsSI, PhaseSI # type: ignore
 import CoolProp.CoolProp as CP # type: ignore
 import matplotlib.pyplot as plt # type: ignore
@@ -60,6 +67,7 @@ def perform_analysis():
     outlet_pressure = config.get('discharge', {}).get('outlet pressure', None)
     outlet_temperature = config.get('discharge', {}).get('outlet temperature', None)
     constant_heat_flux = config.get('discharge', {}).get('constant heat flux', None)
+    timestep = config.get('discharge', {}).get('timestep', 60)  # Default to 60 seconds if not specified
 
     # Check for None values and print them
     parameters = {
@@ -85,7 +93,8 @@ def perform_analysis():
         'mission type': mission_type,
         'outlet pressure': outlet_pressure,
         'outlet temperature': outlet_temperature,
-        'constant heat flux': constant_heat_flux
+        'constant heat flux': constant_heat_flux,
+        'timestep': timestep
     }
 
     for param, value in parameters.items():
@@ -161,16 +170,50 @@ def perform_analysis():
     # Get heat load from area and constant heat flux
     constant_heat_flux = constant_heat_flux * total_surface_area
 
-    # perform the mission analysis
-    performance = MissionAnalysisFacade.analyse(
-        tank_dimensions,
-        tank_material,
+    # Print timestep being used
+    print(f"Using timestep: {timestep} seconds")
+
+    # Create analysis components with custom timestep
+    multistep_method = EulerMethod(timestep)
+    dynamic_model_factory = DynamicModelFactory()
+    thermal_model = ThermodynamicModel(
+        SingleZoneModel(),
+        NaturalConvectionModel(),
         insulation,
-        mission,
-        initial_state,
-        operating_window,
-        constant_heat_flux
+        constant_heat_flux=constant_heat_flux
     )
+
+    # Define stopping criteria and target conditions
+    stopping_criteria = [NoFuelMass(), TankIsEmpty()]
+    target_conditions = operating_window._define_target_conditions() if hasattr(operating_window, '_define_target_conditions') else None
+
+    # Create target state manually if the method doesn't exist
+    if target_conditions is None:
+        from src.thermodynamics.tank_states import TargetState
+        target_conditions = TargetState(
+            max_pressure=max_pressure,
+            min_pressure=min_pressure,
+            min_temperature=min_temperature,
+            fill=None,
+            mass=1.0  # Minimum mass limit
+        )
+
+    # perform the mission analysis using direct MissionAnalysis call
+    tank_states = MissionAnalysis.perform_analysis(
+        tank,
+        initial_state,
+        mission,
+        stopping_criteria,
+        target_conditions,
+        multistep_method,
+        dynamic_model_factory,
+        thermal_model,
+        heat_flux_factor=1.0
+    )
+
+    # Create performance object for compatibility with existing code
+    from src.efficiencies.tank_performance import TankPerformance
+    performance = TankPerformance(tank, insulation, tank_states)
 
     # set target enthalpy value from desired output conditions
     outlet_pressure_kpa = outlet_pressure / 1000
