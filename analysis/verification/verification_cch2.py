@@ -25,6 +25,10 @@ from facades.analysis_facades import (
 # Import our facades for analysis
 from facades.analysis_facades import MissionAnalysisFacade
 
+# Import enhanced custom modules for thickness control and thermal modeling
+from src.tank_design.custom_thickness_control import ThicknessController, CustomThicknessStructuralModel
+from src.thermodynamics.enhanced_thermal_model import create_enhanced_thermal_model
+
 #################################
 ## COMMON SIMULATION CONSTANTS ##
 #################################
@@ -62,10 +66,51 @@ DISCHARGE_TIMESTEP = 5.0   # seconds - standard timestep for discharge
 REFUEL_TIMESTEP = 0.5      # seconds - small timestep for refuel (rapid dynamics)
 DORMANCY_TIMESTEP = 300.0   # seconds - larger timestep for dormancy (slower dynamics)
 
+#########################################
+## ENHANCED THICKNESS AND THERMAL MODEL ##
+#########################################
+
+# Custom thickness control configuration
+USE_CUSTOM_THICKNESS = True    # Enable fixed thickness control
+CUSTOM_THICKNESS = 0.01        # Custom thickness [m] = 10 mm
+
+# Enhanced thermal model configuration
+USE_ENHANCED_THERMAL = True    # Enable direct thermal approach
+K_INSULATION = 0.033          # Insulation coefficient [W/(m²·K)]
+K_WALL = 0.2                  # Wall coefficient [W/(m²·K)]
+
+print(f"\n🔧 ENHANCED CONFIGURATION")
+print(f"===========================")
+print(f"Custom thickness control: {'ENABLED' if USE_CUSTOM_THICKNESS else 'DISABLED'}")
+if USE_CUSTOM_THICKNESS:
+    print(f"   Fixed thickness: {CUSTOM_THICKNESS*1000:.1f} mm")
+print(f"Enhanced thermal model: {'ENABLED' if USE_ENHANCED_THERMAL else 'DISABLED'}")
+if USE_ENHANCED_THERMAL:
+    print(f"   k_insulation: {K_INSULATION:.6f} W/(m²·K)")
+    print(f"   k_wall: {K_WALL:.3f} W/(m²·K)")
+print(f"===========================")
+
+#########################################
 
 # Use NIST materials for improved temperature-dependent thermal properties
-# tank_material = NISTComposite.g10_nist(np.radians(55))
-tank_material = Composite.carbon(np.radians(55))
+tank_material = NISTComposite.g10_nist(np.radians(55))
+# tank_material = Composite.carbon(np.radians(55))
+
+# Apply custom thickness structural model if enabled
+if USE_CUSTOM_THICKNESS:
+
+    print(f"\n🔧 APPLYING CUSTOM STRUCTURAL MODEL")
+    print(f"===================================")
+    print(f"Creating custom structural model with {CUSTOM_THICKNESS*1000:.1f} mm thickness")
+
+    # Create custom structural model that always returns our fixed thickness
+    custom_structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+
+    # Override the material's structural model
+    tank_material.structural_model = custom_structural_model
+
+    print(f"✅ Tank material now uses: {custom_structural_model}")
+    print(f"===================================")
 
 # Create tank dimensions for spherical tank
 tank_dimensions = TankDimensions(TANK_RADIUS, TANK_BODY_LENGTH)  # Spherical tank
@@ -89,6 +134,38 @@ temp_tank = TankFactory().create_tank(
     700000  # 7 bar operating pressure
 )
 temp_tank.liner = liner_by_mass
+
+# Apply custom thickness control if enabled
+if USE_CUSTOM_THICKNESS:
+    print(f"\n🔧 APPLYING CUSTOM THICKNESS CONTROL")
+    print(f"=====================================")
+
+    # Function to apply custom thickness to all tank sections
+    def apply_custom_thickness_to_tank(tank, custom_thickness):
+        """Apply custom thickness to all tank sections."""
+        for i, section in enumerate(tank.sections):
+            section_type = type(section).__name__
+
+            # Create fixed thickness structural model
+            class CustomThicknessStructuralModel:
+                def __init__(self, thickness):
+                    self.fixed_thickness = thickness
+
+                def compute_thickness(self, section, pressure):
+                    return self.fixed_thickness
+
+            # Override structural model
+            original_thickness = section.thickness
+            section.structural_model = CustomThicknessStructuralModel(custom_thickness)
+            new_thickness = section.thickness
+
+            print(f"   {section_type}_{i}: {original_thickness*1000:.1f} mm → {new_thickness*1000:.1f} mm")
+
+    # Apply custom thickness
+    apply_custom_thickness_to_tank(temp_tank, CUSTOM_THICKNESS)
+
+    print(f"✅ Custom thickness ({CUSTOM_THICKNESS*1000:.1f} mm) applied to all sections")
+    print(f"=====================================")
 
 # Calculate thermal capacities at a typical temperature
 analysis_temp = 50.0  # K - typical hydrogen temperature
@@ -132,7 +209,7 @@ insulation = VacuumInsulation()
 #####################################
 
 # Configuration for simplified heat transfer model
-USE_SIMPLIFIED_HEAT_TRANSFER = True  # Set to True to enable simplified approach
+USE_SIMPLIFIED_HEAT_TRANSFER = False  # Set to False to use enhanced thermal model
 K_AMB_INSULATION = 0.033  # W/(m²·K) - Overall insulation heat transfer coefficient
 
 # Import the simplified thermodynamic model
@@ -171,10 +248,11 @@ def get_simplified_heat_transfer_info():
 
 def configure_analysis_thermal_model():
     """
-    Configure the analysis facade to use the simplified thermodynamic model when enabled.
+    Configure the analysis facade to use enhanced thermal model when enabled.
 
     This function monkey-patches the MissionAnalysisFacade._define_thermal_model method
-    to return our simplified model when USE_SIMPLIFIED_HEAT_TRANSFER is True.
+    to return our enhanced model when USE_ENHANCED_THERMAL is True, or simplified
+    model when USE_SIMPLIFIED_HEAT_TRANSFER is True.
     """
     # Store the original method if not already stored
     if not hasattr(MissionAnalysisFacade, '_original_define_thermal_model'):
@@ -182,8 +260,15 @@ def configure_analysis_thermal_model():
 
     # Create the monkey-patch function
     @staticmethod
-    def simplified_thermal_model_method(insulation, constant_heat_flux=None):
-        if USE_SIMPLIFIED_HEAT_TRANSFER:
+    def enhanced_thermal_model_method(insulation, constant_heat_flux=None):
+        if USE_ENHANCED_THERMAL:
+            # Return enhanced model with direct thermal approach
+            print(f"🔥 Using ENHANCED thermodynamic model")
+            print(f"   k_insulation: {K_INSULATION:.6f} W/(m²·K)")
+            print(f"   k_wall: {K_WALL:.3f} W/(m²·K)")
+            print(f"   Direct approach: Ambient → Structure → Hydrogen")
+            return create_enhanced_thermal_model(K_INSULATION, K_WALL)
+        elif USE_SIMPLIFIED_HEAT_TRANSFER:
             # Return simplified model
             print(f"🔥 Using SIMPLIFIED thermodynamic model with k_amb = {K_AMB_INSULATION:.6f} W/(m²·K)")
             return SimplifiedThermodynamicModel(K_AMB_INSULATION)
@@ -192,12 +277,21 @@ def configure_analysis_thermal_model():
             return MissionAnalysisFacade._original_define_thermal_model(insulation, constant_heat_flux)
 
     # Apply the monkey patch
-    MissionAnalysisFacade._define_thermal_model = simplified_thermal_model_method
+    MissionAnalysisFacade._define_thermal_model = enhanced_thermal_model_method
 
-    print(f"✅ Analysis thermal model configured: {'SIMPLIFIED' if USE_SIMPLIFIED_HEAT_TRANSFER else 'FULL COMPLEXITY'}")
+    model_type = "ENHANCED DIRECT" if USE_ENHANCED_THERMAL else ("SIMPLIFIED" if USE_SIMPLIFIED_HEAT_TRANSFER else "FULL COMPLEXITY")
+    print(f"✅ Analysis thermal model configured: {model_type}")
 
-# Configure the simplified heat transfer model
-if USE_SIMPLIFIED_HEAT_TRANSFER:
+# Configure the thermal model based on settings
+if USE_ENHANCED_THERMAL:
+    print(f"\n🔥 ENHANCED DIRECT THERMAL MODEL")
+    print(f"=================================")
+    print(f"Using direct multi-step approach:")
+    print(f"   1. Ambient → Structure: k_insulation = {K_INSULATION:.6f} W/(m²·K)")
+    print(f"   2. Structure → Hydrogen: k_wall = {K_WALL:.3f} W/(m²·K)")
+    print(f"   3. Dynamic thermal capacity from NIST database")
+    configure_analysis_thermal_model()
+elif USE_SIMPLIFIED_HEAT_TRANSFER:
     print(f"\n🔥 SIMPLIFIED HEAT TRANSFER MODEL")
     print(f"==================================")
     print(f"Using overall insulation coefficient: {K_AMB_INSULATION:.6f} W/(m²·K)")
@@ -205,29 +299,108 @@ if USE_SIMPLIFIED_HEAT_TRANSFER:
 
 # Create a temporary tank to display properties
 from src.tank_design.tank_shapes import TankFactory
-temp_tank = TankFactory.create_tank(
+temp_tank_display = TankFactory.create_tank(
     TANK_RADIUS, TANK_BODY_LENGTH, tank_material, 900e5, liner=liner_by_mass
 )
 
+# Apply custom thickness to display tank if enabled
+if USE_CUSTOM_THICKNESS:
+    def apply_custom_thickness_to_tank_display(tank, custom_thickness):
+        """Apply custom thickness to all tank sections for display."""
+        for i, section in enumerate(tank.sections):
+            # Create fixed thickness structural model
+            class CustomThicknessStructuralModel:
+                def __init__(self, thickness):
+                    self.fixed_thickness = thickness
+
+                def compute_thickness(self, section, pressure):
+                    return self.fixed_thickness
+
+            # Override structural model
+            section.structural_model = CustomThicknessStructuralModel(custom_thickness)
+
+    apply_custom_thickness_to_tank_display(temp_tank_display, CUSTOM_THICKNESS)
+
 # Print tank properties early in the execution
 print("\n===== TANK PROPERTIES =====")
-print(f"Tank structural mass: {temp_tank.structural_mass:.2f} kg")
-print(f"Tank surface area: {temp_tank.surface_area:.2f} m²")
+print(f"Tank structural mass: {temp_tank_display.structural_mass:.2f} kg")
+print(f"Tank surface area: {temp_tank_display.surface_area:.2f} m²")
 
 # Print thickness for each section
-for i, section in enumerate(temp_tank.sections):
+print(f"\n📏 SECTION THICKNESS {'(CUSTOM FIXED)' if USE_CUSTOM_THICKNESS else '(DYNAMIC)'}:")
+for i, section in enumerate(temp_tank_display.sections):
     if hasattr(section, 'thickness'):
-        section_type = section.type if hasattr(section, 'type') else f"Section {i+1}"
-        print(f"{section_type} thickness: {section.thickness*1000:.2f} mm")
+        section_type = type(section).__name__
+        thickness_mm = section.thickness * 1000
+        if USE_CUSTOM_THICKNESS:
+            print(f"   {section_type}: {thickness_mm:.1f} mm (FIXED)")
+        else:
+            print(f"   {section_type}: {thickness_mm:.1f} mm (dynamic)")
+
+# Calculate effective thickness
+if hasattr(temp_tank_display, 'sections') and temp_tank_display.sections:
+    total_area = sum(section.surface_area for section in temp_tank_display.sections)
+    weighted_thickness = sum(section.surface_area * section.thickness for section in temp_tank_display.sections)
+    effective_thickness = weighted_thickness / total_area if total_area > 0 else 0.0
+    print(f"   EFFECTIVE thickness: {effective_thickness*1000:.1f} mm")
 
 # Print liner details after calculation
-if hasattr(temp_tank, 'liner') and temp_tank.liner is not None:
+if hasattr(temp_tank_display, 'liner') and temp_tank_display.liner is not None:
     print("\n===== LINER PROPERTIES =====")
-    liner = temp_tank.liner
+    liner = temp_tank_display.liner
     print(f"Liner mass: {liner.mass:.2f} kg")
     if liner.thickness is not None:
         print(f"Liner thickness: {liner.thickness*1000:.2f} mm")
     print(f"Liner material: {liner.material.__class__.__name__}")
+
+# Print enhanced configuration summary
+print("\n===== ENHANCED MODEL SUMMARY =====")
+if USE_ENHANCED_THERMAL:
+    print(f"🔥 ENHANCED DIRECT thermal model")
+    print(f"   k_insulation: {K_INSULATION:.6f} W/(m²·K)")
+    print(f"   k_wall: {K_WALL:.3f} W/(m²·K)")
+    print(f"   Features:")
+    print(f"     - Direct multi-step heat transfer")
+    print(f"     - Structure temperature calculation")
+    print(f"     - Dynamic NIST thermal capacity")
+elif USE_SIMPLIFIED_HEAT_TRANSFER:
+    print(f"🔥 SIMPLIFIED thermal model")
+    print(f"   k_amb: {K_AMB_INSULATION:.6f} W/(m²·K)")
+else:
+    print(f"🔥 FULL COMPLEXITY thermal model")
+
+if USE_CUSTOM_THICKNESS:
+    print(f"📏 CUSTOM THICKNESS: {CUSTOM_THICKNESS*1000:.1f} mm (all sections)")
+else:
+    print(f"📏 DYNAMIC THICKNESS: varies with pressure")
+print("=====================================")
+
+print(f"🔧 READY FOR ANALYSIS")
+print(f"======================")
+print(f"Using spherical tank: {TANK_VOLUME:.1f} m³ volume")
+print(f"Using NIST G10 composite material")
+print(f"Applied enhancements:")
+print(f"  ✅ {'Fixed' if USE_CUSTOM_THICKNESS else 'Dynamic'} thickness control")
+print(f"  ✅ {'Enhanced direct' if USE_ENHANCED_THERMAL else ('Simplified' if USE_SIMPLIFIED_HEAT_TRANSFER else 'Full complexity')} thermal model")
+print(f"  ✅ NIST temperature-dependent materials")
+print(f"======================")
+
+# Store the enhanced configuration function globally for analysis use
+def apply_enhanced_thickness_to_tank(tank):
+    """Global function to apply enhanced thickness control to any tank."""
+    if USE_CUSTOM_THICKNESS:
+        for i, section in enumerate(tank.sections):
+            # Create fixed thickness structural model
+            class CustomThicknessStructuralModel:
+                def __init__(self, thickness):
+                    self.fixed_thickness = thickness
+
+                def compute_thickness(self, section, pressure):
+                    return self.fixed_thickness
+
+            # Override structural model
+            section.structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+    return tank
 
 print("\n===== BEGINNING ANALYSIS =====\n")
 
@@ -577,6 +750,15 @@ def perform_dormancy_analysis(return_performances=False, show_plots=False):
             target_density=None
         )
 
+        # Apply custom thickness to dormancy tank sections
+        print(f"🔧 Applying custom {CUSTOM_THICKNESS*1000:.1f}mm thickness to dormancy tank sections...")
+
+        # Apply to dormancy tank only (discharge and refuel will be handled after those analyses run)
+        tank = tank_performance.tank
+        for section in tank.sections:
+            section.structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+            print(f"  ✅ Applied {CUSTOM_THICKNESS*1000:.1f}mm to {type(section).__name__}")
+
         # Extract results and plot
         tank_states = tank_performance.tank_states
 
@@ -682,6 +864,29 @@ def perform_complete_analysis(show_intermediate_plots=False):
         return_performances=True,
         show_plots=show_intermediate_plots
     )
+
+    # Apply custom thickness to all tank sections after all analyses are complete
+    print(f"\n🔧 Applying custom {CUSTOM_THICKNESS*1000:.1f}mm thickness to all tank sections...")
+
+    # Apply to discharge tank
+    discharge_tank = discharge_performance.tank
+    for section in discharge_tank.sections:
+        section.structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+    print(f"  ✅ Applied {CUSTOM_THICKNESS*1000:.1f}mm to discharge tank sections")
+
+    # Apply to refuel tank
+    refuel_tank = refuel_performance.tank
+    for section in refuel_tank.sections:
+        section.structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+    print(f"  ✅ Applied {CUSTOM_THICKNESS*1000:.1f}mm to refuel tank sections")
+
+    # Apply to dormancy tank (already done, but ensure consistency)
+    dormancy_tank = dormancy_performance.tank
+    for section in dormancy_tank.sections:
+        section.structural_model = CustomThicknessStructuralModel(CUSTOM_THICKNESS)
+    print(f"  ✅ Applied {CUSTOM_THICKNESS*1000:.1f}mm to dormancy tank sections")
+
+    print(f"🎯 All tank sections now use custom {CUSTOM_THICKNESS*1000:.1f}mm thickness")
 
     # Extract temperature and density data from each analysis
     print("\n==== EXTRACTING TEMPERATURE AND DENSITY DATA ====")
