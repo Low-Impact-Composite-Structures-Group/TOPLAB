@@ -444,8 +444,8 @@ class SeabornPlotter:
         ax.set_ylabel("Mass Flow Rate [kg/s]")
 
         # Add legend if we have multiple datasets
-        if interpolated_mass_flows is not None:
-            ax.legend(loc='best', framealpha=0.9)
+        # if interpolated_mass_flows is not None:
+        #     ax.legend(loc='best', framealpha=0.9)
 
         # Apply tight layout
         fig.tight_layout()
