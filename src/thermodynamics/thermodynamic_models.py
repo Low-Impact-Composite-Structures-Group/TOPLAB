@@ -510,6 +510,95 @@ class ThermodynamicModel:
         return temperatures
 
 
+class SimplifiedThermodynamicModel:
+    """
+    Simplified thermodynamic model that calculates heat transfer using:
+    Q_dot = k_amb * A * (T_amb - T_H2)
+
+    This bypasses the complex thermal resistance assembly and uses a single
+    overall heat transfer coefficient for the insulation.
+    """
+
+    def __init__(self, k_amb: float):
+        """
+        Initialize simplified model.
+
+        Args:
+            k_amb: Overall insulation heat transfer coefficient [W/(m²·K)]
+        """
+        self.k_amb = k_amb
+        self.insulation_layers = 1  # For compatibility with existing code
+        self.liner_layers = 1        # For compatibility with existing code
+        self.max_iterations = 1      # Only one iteration needed for simplified model
+        self.constant_heat_flux = None  # Not using constant heat flux
+
+    def compute_heat_flux(self, tank, tank_state, mission_section) -> tuple[float, list]:
+        """
+        Compute heat flux using simplified approach.
+
+        Args:
+            tank: Tank object with surface area property
+            tank_state: Tank state with temperature
+            mission_section: Mission section with ambient temperature
+
+        Returns:
+            tuple: (heat_flux [W/m²], temperature_profile [list])
+        """
+        # Get temperatures
+        T_amb = mission_section.temperature  # Ambient temperature [K]
+        T_H2 = tank_state.temperature       # Hydrogen temperature [K]
+
+        # Calculate temperature difference
+        delta_T = T_amb - T_H2
+
+        # Calculate heat flux using simplified approach: Q_dot = k_amb * (T_amb - T_H2)
+        # Note: This gives heat flux per unit area [W/m²]
+        heat_flux = self.k_amb * delta_T
+
+        # Create a simple temperature profile for compatibility
+        # Just use ambient and hydrogen temperatures
+        temperature_profile = [T_H2, T_amb]
+
+        if abs(delta_T) > 1e-6:  # Only print if there's meaningful heat transfer
+            print(f"\n=== SIMPLIFIED HEAT TRANSFER ===")
+            print(f"H2 temperature: {T_H2:.1f} K")
+            print(f"Ambient temperature: {T_amb:.1f} K")
+            print(f"Temperature difference: {delta_T:.1f} K")
+            print(f"Overall k_amb: {self.k_amb:.6f} W/(m²·K)")
+            print(f"Heat flux: {heat_flux:.3f} W/m²")
+
+            # Calculate total heat rate for reference
+            if hasattr(tank, 'surface_area'):
+                total_heat_rate = heat_flux * tank.surface_area
+                print(f"Tank surface area: {tank.surface_area:.3f} m²")
+                print(f"Total heat rate: {total_heat_rate:.2f} W")
+            print(f"=================================")
+
+        return heat_flux, temperature_profile
+
+    def compute_thermal_resistances(self, tank, tank_state, mission_section, temperatures):
+        """
+        Compatibility method - not used in simplified approach.
+
+        Returns empty list since we don't use thermal resistances.
+        """
+        return []
+
+    def _compute_total_temperature_interfaces(self, tank):
+        """
+        Compatibility method - simplified model only needs 2 temperature points.
+        """
+        return 2
+
+    def define_initial_temperatures(self, tank_temp, ambient_temp, num_interfaces):
+        """
+        Define temperature profile for compatibility.
+
+        For simplified model, we only need tank and ambient temperatures.
+        """
+        return [tank_temp, ambient_temp]
+
+
 def main():
     pass
 

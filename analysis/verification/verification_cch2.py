@@ -127,6 +127,82 @@ print(f"==================================================")
 # instantiate insulation
 insulation = VacuumInsulation()
 
+#####################################
+## SIMPLIFIED HEAT TRANSFER MODEL ##
+#####################################
+
+# Configuration for simplified heat transfer model
+USE_SIMPLIFIED_HEAT_TRANSFER = True  # Set to True to enable simplified approach
+K_AMB_INSULATION = 0.033  # W/(m²·K) - Overall insulation heat transfer coefficient
+
+# Import the simplified thermodynamic model
+from src.thermodynamics.thermodynamic_models import SimplifiedThermodynamicModel
+
+def enable_simplified_heat_transfer(k_amb: float = None):
+    """
+    Enable simplified heat transfer approach.
+
+    Args:
+        k_amb: Overall insulation heat transfer coefficient [W/(m²·K)]
+               If None, uses the default K_AMB_INSULATION value
+    """
+    global USE_SIMPLIFIED_HEAT_TRANSFER, K_AMB_INSULATION
+    USE_SIMPLIFIED_HEAT_TRANSFER = True
+
+    if k_amb is not None:
+        K_AMB_INSULATION = k_amb
+
+    print(f"✅ Simplified heat transfer ENABLED")
+    print(f"   Overall insulation coefficient: {K_AMB_INSULATION:.6f} W/(m²·K)")
+    print(f"   Heat flux calculation: Q_dot = k_amb * A * (T_amb - T_H2)")
+
+def disable_simplified_heat_transfer():
+    """Disable simplified heat transfer approach and use full thermal resistance model."""
+    global USE_SIMPLIFIED_HEAT_TRANSFER
+    USE_SIMPLIFIED_HEAT_TRANSFER = False
+    print(f"✅ Simplified heat transfer DISABLED - using full thermal resistance model")
+
+def get_simplified_heat_transfer_info():
+    """Get current simplified heat transfer configuration."""
+    if USE_SIMPLIFIED_HEAT_TRANSFER:
+        return f"Simplified heat transfer ENABLED: k_amb = {K_AMB_INSULATION:.6f} W/(m²·K)"
+    else:
+        return "Simplified heat transfer DISABLED - using full thermal resistance model"
+
+def configure_analysis_thermal_model():
+    """
+    Configure the analysis facade to use the simplified thermodynamic model when enabled.
+
+    This function monkey-patches the MissionAnalysisFacade._define_thermal_model method
+    to return our simplified model when USE_SIMPLIFIED_HEAT_TRANSFER is True.
+    """
+    # Store the original method if not already stored
+    if not hasattr(MissionAnalysisFacade, '_original_define_thermal_model'):
+        MissionAnalysisFacade._original_define_thermal_model = MissionAnalysisFacade._define_thermal_model
+
+    # Create the monkey-patch function
+    @staticmethod
+    def simplified_thermal_model_method(insulation, constant_heat_flux=None):
+        if USE_SIMPLIFIED_HEAT_TRANSFER:
+            # Return simplified model
+            print(f"🔥 Using SIMPLIFIED thermodynamic model with k_amb = {K_AMB_INSULATION:.6f} W/(m²·K)")
+            return SimplifiedThermodynamicModel(K_AMB_INSULATION)
+        else:
+            # Use original method
+            return MissionAnalysisFacade._original_define_thermal_model(insulation, constant_heat_flux)
+
+    # Apply the monkey patch
+    MissionAnalysisFacade._define_thermal_model = simplified_thermal_model_method
+
+    print(f"✅ Analysis thermal model configured: {'SIMPLIFIED' if USE_SIMPLIFIED_HEAT_TRANSFER else 'FULL COMPLEXITY'}")
+
+# Configure the simplified heat transfer model
+if USE_SIMPLIFIED_HEAT_TRANSFER:
+    print(f"\n🔥 SIMPLIFIED HEAT TRANSFER MODEL")
+    print(f"==================================")
+    print(f"Using overall insulation coefficient: {K_AMB_INSULATION:.6f} W/(m²·K)")
+    configure_analysis_thermal_model()
+
 # Create a temporary tank to display properties
 from src.tank_design.tank_shapes import TankFactory
 temp_tank = TankFactory.create_tank(
