@@ -114,7 +114,7 @@ class Liner:
     ) -> float:
         """Compute the thermal conductivity of the liner material.
 
-        Uses a realistic thermal conductivity value based on the material.
+        Uses temperature-dependent material properties from the liner material.
 
         Args:
             hot_temperature (float): Temperature at the hot side of the liner
@@ -123,10 +123,18 @@ class Liner:
         Returns:
             float: Thermal conductivity of the liner material in W/(m·K)
         """
-        # This is a simplified approach, using average temperature
+        # Use average temperature for thermal conductivity calculation
         avg_temperature = (hot_temperature + cold_temperature) / 2
 
-        # Use realistic thermal conductivity values based on material type
+        # Use material's temperature-dependent thermal conductivity if available
+        if hasattr(self.material, 'determine_thermal_conductivity'):
+            try:
+                return self.material.determine_thermal_conductivity(avg_temperature)
+            except Exception as e:
+                print(f"Warning: Could not compute liner thermal conductivity at {avg_temperature}K: {e}")
+                # Fallback to hardcoded values
+
+        # Fallback: Use realistic thermal conductivity values based on material type
         # Check if it's an aluminum instance (by checking the density ~2700 kg/m³)
         if isinstance(self.material, Metal) and abs(self.material.density - 2700) < 100:
             # Aluminum has high thermal conductivity ~200-240 W/(m·K) at room temperature

@@ -197,6 +197,36 @@ class TwoPhaseHydrogen:
     def heat_of_evaporation(self):
         return self.gas.enthalpy - self.liquid.enthalpy
 
+    def compute_homogeneous_density(self):
+        """
+        Compute homogeneous two-phase mixture density.
+
+        For a homogeneous mixture, we assume the hydrogen is completely mixed
+        throughout the tank. This uses the harmonic mean of densities which
+        provides a good approximation for a well-mixed two-phase system.
+        """
+        if self.liquid.density is None or self.gas.density is None:
+            raise ValueError("Cannot compute two-phase density: missing phase densities")
+        if self.liquid.density <= 0 or self.gas.density <= 0:
+            raise ValueError("Cannot compute two-phase density: non-positive phase densities")
+
+        # For homogeneous mixture, use harmonic mean
+        # This represents a well-mixed two-phase system
+        rho_l = self.liquid.density
+        rho_g = self.gas.density
+
+        # Harmonic mean provides good approximation for homogeneous mixture
+        homogeneous_density = 2 * rho_l * rho_g / (rho_l + rho_g)
+
+        return homogeneous_density
+
+    @property
+    def density(self):
+        """
+        Get the homogeneous mixture density for two-phase hydrogen.
+        """
+        return self.compute_homogeneous_density()
+
     def get_phase(self, phase: str) -> Hydrogen:
         if phase == "gas":
             return self.gas
@@ -206,7 +236,7 @@ class TwoPhaseHydrogen:
             # For supercritical conditions, use gas phase as a fallback
             print(f"SUPERCRITICAL PHASE REQUESTED - Using gas phase as fallback")
             return self.gas
-        
+
         # Default to gas phase as a fallback with warning
         print(f"WARNING: Unsupported phase '{phase}' requested - falling back to gas phase")
         return self.gas

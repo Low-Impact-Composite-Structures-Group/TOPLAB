@@ -72,11 +72,11 @@ DORMANCY_TIMESTEP = 300.0   # seconds - larger timestep for dormancy (slower dyn
 
 # Custom thickness control configuration
 USE_CUSTOM_THICKNESS = True    # Enable fixed thickness control
-CUSTOM_THICKNESS = 0.01        # Custom thickness [m] = 10 mm
+CUSTOM_THICKNESS = 0.026        # Custom thickness [m] = 10 mm
 
 # Enhanced thermal model configuration
 USE_ENHANCED_THERMAL = True    # Enable direct thermal approach
-K_INSULATION = 0.033          # Insulation coefficient [W/(m²·K)]
+K_INSULATION = 0.025          # Insulation coefficient [W/(m²·K)]
 K_WALL = 0.2                  # Wall coefficient [W/(m²·K)]
 
 print(f"\n🔧 ENHANCED CONFIGURATION")
@@ -117,11 +117,12 @@ tank_dimensions = TankDimensions(TANK_RADIUS, TANK_BODY_LENGTH)  # Spherical tan
 
 # Create a liner with specified mass using NIST aluminum properties
 LINER_MASS = 1.0
-liner_by_mass = Liner.from_mass(LINER_MASS, tank_dimensions, NISTMetal.aluminum_5083_nist())
+LINER_THICKNESS = 0.0125
+liner_by_thickness = Liner.from_thickness(LINER_THICKNESS, tank_dimensions, NISTMetal.aluminum_5083_nist())
 
 # Assign the liner to tank_dimensions
 # comment this out for a linerless analysis
-# tank_dimensions.liner = liner_by_mass
+tank_dimensions.liner = liner_by_thickness
 
 print(f"\n🔋 THERMAL CAPACITY ANALYSIS (NIST Materials):")
 print(f"==================================================")
@@ -133,7 +134,7 @@ temp_tank = TankFactory().create_tank(
     tank_material,
     700000  # 7 bar operating pressure
 )
-temp_tank.liner = liner_by_mass
+temp_tank.liner = liner_by_thickness
 
 # Apply custom thickness control if enabled
 if USE_CUSTOM_THICKNESS:
@@ -167,92 +168,29 @@ if USE_CUSTOM_THICKNESS:
     print(f"✅ Custom thickness ({CUSTOM_THICKNESS*1000:.1f} mm) applied to all sections")
     print(f"=====================================")
 
-# Calculate thermal capacities at a typical temperature
-analysis_temp = 50.0  # K - typical hydrogen temperature
-tank_structural_capacity = sum([
-    section.compute_thermal_capacity(analysis_temp)
-    for section in temp_tank.sections
-])
-liner_thermal_capacity = 0.0
-if temp_tank.liner is not None:
-    liner_thermal_capacity = temp_tank.liner.material.determine_thermal_capacity(
-        analysis_temp, temp_tank.liner.mass
-    )
-total_thermal_capacity = temp_tank.compute_thermal_capacity(analysis_temp)
 
-print(f"   Tank structural:  {tank_structural_capacity:.1f} J/K ({tank_structural_capacity/total_thermal_capacity*100:.1f}%)")
-print(f"   Liner (NIST Al):  {liner_thermal_capacity:.1f} J/K ({liner_thermal_capacity/total_thermal_capacity*100:.1f}%)")
-print(f"   TOTAL:            {total_thermal_capacity:.1f} J/K")
-print(f"   Liner mass:       {LINER_MASS:.1f} kg")
-print(f"   Al specific heat: {liner_by_mass.material.determine_specific_heat(analysis_temp):.1f} J/(kg·K)")
-print(f"   G10 specific heat: {tank_material.determine_specific_heat(analysis_temp):.1f} J/(kg·K)")
-print(f"==================================================")
-print(f"💡 Using NIST temperature-dependent materials for enhanced accuracy!")
-print(f"   - Aluminum: NIST Al 5083 polynomial fit data")
-print(f"   - G10: NIST composite polynomial fit data")
-print(f"   - Temperature range: 4-300K with Debye fallback")
-print(f"==================================================")
-print(f"💡 KEY INSIGHT: Liner has minimal thermal RESISTANCE but major thermal CAPACITY!")
-print(f"   - Thermal resistance controls steady-state heat transfer")
-print(f"   - Thermal capacity controls transient temperature response")
-print(f"   - During refueling, liner stores/releases significant energy!")
-print(f"==================================================")
-print(f"   - Thermal capacity controls transient temperature response")
-print(f"   - During refueling, liner stores/releases significant energy!")
-print(f"==================================================")
+# Create insulation with appropriate thermal coefficient
+# Use K_INSULATION for enhanced thermal model, fallback to default for other cases
+insulation_k_amb = K_INSULATION if USE_ENHANCED_THERMAL else 0.025
+print(f"\n🏠 INSULATION CONFIGURATION")
+print(f"=============================")
+print(f"Creating vacuum insulation with k_amb = {insulation_k_amb:.6f} W/(m²·K)")
 
-# instantiate insulation
-insulation = VacuumInsulation()
+# Get tank surface area for insulation
+tank_surface_area = temp_tank.surface_area
+insulation = VacuumInsulation(surface_area=4.1, k_amb=insulation_k_amb)
 
-#####################################
-## SIMPLIFIED HEAT TRANSFER MODEL ##
-#####################################
-
-# Configuration for simplified heat transfer model
-USE_SIMPLIFIED_HEAT_TRANSFER = False  # Set to False to use enhanced thermal model
-K_AMB_INSULATION = 0.033  # W/(m²·K) - Overall insulation heat transfer coefficient
-
-# Import the simplified thermodynamic model
-from src.thermodynamics.thermodynamic_models import SimplifiedThermodynamicModel
-
-def enable_simplified_heat_transfer(k_amb: float = None):
-    """
-    Enable simplified heat transfer approach.
-
-    Args:
-        k_amb: Overall insulation heat transfer coefficient [W/(m²·K)]
-               If None, uses the default K_AMB_INSULATION value
-    """
-    global USE_SIMPLIFIED_HEAT_TRANSFER, K_AMB_INSULATION
-    USE_SIMPLIFIED_HEAT_TRANSFER = True
-
-    if k_amb is not None:
-        K_AMB_INSULATION = k_amb
-
-    print(f"✅ Simplified heat transfer ENABLED")
-    print(f"   Overall insulation coefficient: {K_AMB_INSULATION:.6f} W/(m²·K)")
-    print(f"   Heat flux calculation: Q_dot = k_amb * A * (T_amb - T_H2)")
-
-def disable_simplified_heat_transfer():
-    """Disable simplified heat transfer approach and use full thermal resistance model."""
-    global USE_SIMPLIFIED_HEAT_TRANSFER
-    USE_SIMPLIFIED_HEAT_TRANSFER = False
-    print(f"✅ Simplified heat transfer DISABLED - using full thermal resistance model")
-
-def get_simplified_heat_transfer_info():
-    """Get current simplified heat transfer configuration."""
-    if USE_SIMPLIFIED_HEAT_TRANSFER:
-        return f"Simplified heat transfer ENABLED: k_amb = {K_AMB_INSULATION:.6f} W/(m²·K)"
-    else:
-        return "Simplified heat transfer DISABLED - using full thermal resistance model"
+print(f"✅ Vacuum insulation configured:")
+print(f"   Surface area: {tank_surface_area:.2f} m²")
+print(f"   Heat transfer coefficient: {insulation_k_amb:.6f} W/(m²·K)")
+print(f"=============================")
 
 def configure_analysis_thermal_model():
     """
     Configure the analysis facade to use enhanced thermal model when enabled.
 
     This function monkey-patches the MissionAnalysisFacade._define_thermal_model method
-    to return our enhanced model when USE_ENHANCED_THERMAL is True, or simplified
-    model when USE_SIMPLIFIED_HEAT_TRANSFER is True.
+    to return our enhanced model when USE_ENHANCED_THERMAL is True.
     """
     # Store the original method if not already stored
     if not hasattr(MissionAnalysisFacade, '_original_define_thermal_model'):
@@ -268,10 +206,6 @@ def configure_analysis_thermal_model():
             print(f"   k_wall: {K_WALL:.3f} W/(m²·K)")
             print(f"   Direct approach: Ambient → Structure → Hydrogen")
             return create_enhanced_thermal_model(K_INSULATION, K_WALL)
-        elif USE_SIMPLIFIED_HEAT_TRANSFER:
-            # Return simplified model
-            print(f"🔥 Using SIMPLIFIED thermodynamic model with k_amb = {K_AMB_INSULATION:.6f} W/(m²·K)")
-            return SimplifiedThermodynamicModel(K_AMB_INSULATION)
         else:
             # Use original method
             return MissionAnalysisFacade._original_define_thermal_model(insulation, constant_heat_flux)
@@ -279,8 +213,38 @@ def configure_analysis_thermal_model():
     # Apply the monkey patch
     MissionAnalysisFacade._define_thermal_model = enhanced_thermal_model_method
 
-    model_type = "ENHANCED DIRECT" if USE_ENHANCED_THERMAL else ("SIMPLIFIED" if USE_SIMPLIFIED_HEAT_TRANSFER else "FULL COMPLEXITY")
+    model_type = "ENHANCED DIRECT" if USE_ENHANCED_THERMAL else "FULL COMPLEXITY"
     print(f"✅ Analysis thermal model configured: {model_type}")
+
+def configure_analysis_tank_model():
+    """
+    Configure the analysis facade to apply custom thickness to tanks when enabled.
+
+    This function monkey-patches the MissionAnalysisFacade._define_tank method
+    to apply custom thickness to all tanks created during analysis.
+    """
+    # Store the original method if not already stored
+    if not hasattr(MissionAnalysisFacade, '_original_define_tank'):
+        MissionAnalysisFacade._original_define_tank = MissionAnalysisFacade._define_tank
+
+    # Create the monkey-patch function
+    @classmethod
+    def enhanced_tank_method(cls, tank_dimensions, material, target_state, initial_state):
+        # Create tank using original method
+        tank = cls._original_define_tank(tank_dimensions, material, target_state, initial_state)
+
+        # Apply custom thickness if enabled
+        if USE_CUSTOM_THICKNESS:
+            print(f"🔧 Applying {CUSTOM_THICKNESS*1000:.1f} mm custom thickness to simulation tank")
+            tank = apply_enhanced_thickness_to_tank(tank)
+
+        return tank
+
+    # Apply the monkey patch
+    MissionAnalysisFacade._define_tank = enhanced_tank_method
+
+    thickness_type = f"{CUSTOM_THICKNESS*1000:.1f} mm FIXED" if USE_CUSTOM_THICKNESS else "DYNAMIC"
+    print(f"✅ Analysis tank model configured: {thickness_type}")
 
 # Configure the thermal model based on settings
 if USE_ENHANCED_THERMAL:
@@ -291,16 +255,20 @@ if USE_ENHANCED_THERMAL:
     print(f"   2. Structure → Hydrogen: k_wall = {K_WALL:.3f} W/(m²·K)")
     print(f"   3. Dynamic thermal capacity from NIST database")
     configure_analysis_thermal_model()
-elif USE_SIMPLIFIED_HEAT_TRANSFER:
-    print(f"\n🔥 SIMPLIFIED HEAT TRANSFER MODEL")
-    print(f"==================================")
-    print(f"Using overall insulation coefficient: {K_AMB_INSULATION:.6f} W/(m²·K)")
-    configure_analysis_thermal_model()
+
+# Configure the tank model based on settings
+if USE_CUSTOM_THICKNESS:
+    print(f"\n🔧 ENHANCED TANK MODEL")
+    print(f"======================")
+    print(f"Using fixed thickness approach:")
+    print(f"   Fixed thickness: {CUSTOM_THICKNESS*1000:.1f} mm for all sections")
+    print(f"   Applied to simulation tanks automatically")
+    configure_analysis_tank_model()
 
 # Create a temporary tank to display properties
 from src.tank_design.tank_shapes import TankFactory
 temp_tank_display = TankFactory.create_tank(
-    TANK_RADIUS, TANK_BODY_LENGTH, tank_material, 900e5, liner=liner_by_mass
+    TANK_RADIUS, TANK_BODY_LENGTH, tank_material, 900e5, liner=liner_by_thickness
 )
 
 # Apply custom thickness to display tank if enabled
@@ -363,16 +331,16 @@ if USE_ENHANCED_THERMAL:
     print(f"     - Direct multi-step heat transfer")
     print(f"     - Structure temperature calculation")
     print(f"     - Dynamic NIST thermal capacity")
-elif USE_SIMPLIFIED_HEAT_TRANSFER:
-    print(f"🔥 SIMPLIFIED thermal model")
-    print(f"   k_amb: {K_AMB_INSULATION:.6f} W/(m²·K)")
 else:
     print(f"🔥 FULL COMPLEXITY thermal model")
+    print(f"   Using vacuum insulation k_amb: {insulation.k_amb:.6f} W/(m²·K)")
 
 if USE_CUSTOM_THICKNESS:
     print(f"📏 CUSTOM THICKNESS: {CUSTOM_THICKNESS*1000:.1f} mm (all sections)")
 else:
     print(f"📏 DYNAMIC THICKNESS: varies with pressure")
+
+print(f"🏠 INSULATION: {insulation.k_amb:.6f} W/(m²·K), area={insulation.surface_area:.2f} m²")
 print("=====================================")
 
 print(f"🔧 READY FOR ANALYSIS")
@@ -381,8 +349,9 @@ print(f"Using spherical tank: {TANK_VOLUME:.1f} m³ volume")
 print(f"Using NIST G10 composite material")
 print(f"Applied enhancements:")
 print(f"  ✅ {'Fixed' if USE_CUSTOM_THICKNESS else 'Dynamic'} thickness control")
-print(f"  ✅ {'Enhanced direct' if USE_ENHANCED_THERMAL else ('Simplified' if USE_SIMPLIFIED_HEAT_TRANSFER else 'Full complexity')} thermal model")
+print(f"  ✅ {'Enhanced direct' if USE_ENHANCED_THERMAL else 'Full complexity'} thermal model")
 print(f"  ✅ NIST temperature-dependent materials")
+print(f"  ✅ Simplified vacuum insulation interface")
 print(f"======================")
 
 # Store the enhanced configuration function globally for analysis use
@@ -502,7 +471,7 @@ altitude_dormancy = 0.0    # m - ground-level altitude
 
 # Define operating envelope for dormancy
 operating_window_dormancy = OperatingEnvelope(
-    max_pressure=5.0e+7,      # Pa - maximum allowable pressure
+    max_pressure=4.5e+7,      # Pa - maximum allowable pressure
     min_pressure=15e5,       # Pa - minimum allowable pressure
     min_temperature=20       # K - minimum allowable temperature
 )
@@ -794,6 +763,9 @@ def get_hydrogen_density_from_state(state, requester):
     """
     Helper function to consistently extract hydrogen density from a tank state.
 
+    For two-phase hydrogen, this uses the homogeneous mixture density which
+    assumes the hydrogen is completely mixed throughout the tank.
+
     Args:
         state: Tank state object containing hydrogen properties
         requester: SinglePhaseRequester for calculating properties if needed
@@ -817,9 +789,10 @@ def get_hydrogen_density_from_state(state, requester):
                     return state.hydrogen.liquid.density
                 else:
                     return state.hydrogen.density
-            else:
-                # Unknown phase - calculate from requester
-                return requester.get_property(state.pressure, state.temperature, "D")
+            elif state.hydrogen.phase == "twophase":
+                # Two-phase - use homogeneous mixture density
+                # This assumes the hydrogen is completely mixed throughout the tank
+                return state.hydrogen.density
         else:
             # No phase information - use direct density
             return state.hydrogen.density

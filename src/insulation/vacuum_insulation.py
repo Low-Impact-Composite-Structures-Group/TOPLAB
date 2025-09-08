@@ -13,13 +13,20 @@ class FuelTank(Protocol):
 
 @dataclass
 class VacuumInsulation:
-    """Vacuum insulation with constant heat transfer coefficient of 0.025 W/m²K.
+    """Vacuum insulation with configurable heat transfer coefficient.
 
     For vacuum insulation, thermal resistance is dominated by radiation heat transfer
-    and minimal residual gas conduction. The 0.025 W/m²K value represents the
+    and minimal residual gas conduction. The heat transfer coefficient represents the
     overall heat transfer coefficient (U-value) for the complete vacuum insulation
     system, not a material thermal conductivity.
     """
+    surface_area: float = None  # Surface area in m²
+    k_amb: float = 0.025        # Heat transfer coefficient in W/(m²·K)
+
+    def __post_init__(self):
+        """Initialize with default values if not provided."""
+        if self.k_amb is None:
+            self.k_amb = 0.025  # Default value W/(m²·K)
 
     def compute_heat_transfer_coefficient_value(
         self, hot_temperature: float, cold_temperature: float
@@ -33,8 +40,8 @@ class VacuumInsulation:
         Returns:
             float: Heat transfer coefficient in W/m²K
         """
-        # For vacuum insulation, 0.025 W/m²K is the overall heat transfer coefficient
-        return 0.025
+        # Return the configured heat transfer coefficient
+        return self.k_amb
 
     def compute_thermal_conductivity(
         self, hot_temperature: float, cold_temperature: float
@@ -91,8 +98,10 @@ class VacuumInsulation:
         ]
 
         # Convert to thermal resistances
+        # Use the surface area from the insulation object if available, otherwise use tank surface area
+        area = self.surface_area if self.surface_area is not None else tank.surface_area
         resistances = [
-            ThermalResistance(coefficient, tank.surface_area).value
+            ThermalResistance(coefficient, area).value
             for coefficient in heat_transfer_coefficients
         ]
         # print(f"Computed thermal resistances: {resistances}")

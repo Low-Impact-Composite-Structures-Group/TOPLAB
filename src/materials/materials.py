@@ -72,13 +72,25 @@ class Material:
             mass (float): mass of the solid [kg]
 
         Returns:
-            float: thermal capacity of the solid [J].
+            float: thermal capacity of the solid [J/K].
         """
         return (
             self.determine_specific_heat(temperature)
-            * temperature
             * mass
         )
+
+    def determine_thermal_conductivity(self, temperature: float) -> float:
+        """Compute the thermal conductivity of the material for given temperature.
+
+        Args:
+            temperature (float): temperature of the material [K].
+
+        Returns:
+            float: thermal conductivity of the material [W/(m·K)].
+        """
+        # Default implementation - should be overridden in subclasses
+        # This is a fallback for basic materials
+        return 50.0  # W/(m·K)
 
 
 @dataclass
@@ -87,6 +99,28 @@ class Metal(Material):
     def __post_init__(self):
         self.type = "metal"
 
+    def determine_thermal_conductivity(self, temperature: float) -> float:
+        """Compute the thermal conductivity of the metal for given temperature.
+
+        Args:
+            temperature (float): temperature of the metal [K].
+
+        Returns:
+            float: thermal conductivity of the metal [W/(m·K)].
+        """
+        # For basic aluminum, use a temperature-dependent approximation
+        # This will be overridden in NIST materials for better accuracy
+        if abs(self.density - 2700) < 100:  # Aluminum
+            # Aluminum thermal conductivity decreases with decreasing temperature
+            if temperature < 100:  # Cryogenic temperatures
+                return 180.0  # W/(m·K)
+            elif temperature < 200:
+                return 200.0  # W/(m·K)
+            else:
+                return 220.0  # W/(m·K)
+        else:
+            # Default for other metals
+            return 50.0  # W/(m·K)
 
     @classmethod
     def aluminum(cls):
@@ -108,6 +142,26 @@ class Composite(Material):
 
     def __post_init__(self):
         self.type = "composite"
+
+    def determine_thermal_conductivity(self, temperature: float) -> float:
+        """Compute the thermal conductivity of the composite for given temperature.
+
+        Args:
+            temperature (float): temperature of the composite [K].
+
+        Returns:
+            float: thermal conductivity of the composite [W/(m·K)].
+        """
+        # For basic G10 composite, use a temperature-dependent approximation
+        # This will be overridden in NIST materials for better accuracy
+        if temperature < 50:  # Very low temperatures
+            return 0.1  # W/(m·K)
+        elif temperature < 100:
+            return 0.15  # W/(m·K)
+        elif temperature < 200:
+            return 0.2  # W/(m·K)
+        else:
+            return 0.25  # W/(m·K)
 
     @classmethod
     def carbon(cls, winding_angle: float):

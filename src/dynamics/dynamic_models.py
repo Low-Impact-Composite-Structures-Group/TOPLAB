@@ -18,7 +18,7 @@ from src.fluids.energy_derivative_computer import EnergyDerivativeComputer
 from src.mission.mission_sections import OutFlow
 from CoolProp.CoolProp import PropsSI
 
-
+TEST_CP = 7000
 class OperatingEnvelope(Protocol):
     min_pressure: float
     max_pressure: float
@@ -774,7 +774,8 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
                 cls.a22(
                     tank_state.hydrogen,
                     tank_state.volume,
-                    tank_state.tank_thermal_capacity
+                    tank_state.tank_thermal_capacity,
+                    tank_state.fuel_mass
                 )
             ]
         ]
@@ -831,12 +832,21 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
     def a22(
         hydrogen: Hydrogen,
         tank_volume: float,
-        tank_thermal_capacity: float
+        tank_thermal_capacity: float,
+        fuel_mass: float = None
     ) -> float:
-        return (
-            tank_thermal_capacity
-            + tank_volume * hydrogen.density * hydrogen.dH_dT
-        )
+            print(f"current tank thermal capacity: {tank_thermal_capacity}, fuel mass: {fuel_mass}, hydrogen dH_dT: {hydrogen.dH_dT}")
+            return (
+                tank_thermal_capacity
+                + fuel_mass * hydrogen.dH_dT
+            )
+            # return (
+                # tank_thermal_capacity
+            # )
+            # return (
+            #     TEST_CP
+            #     + fuel_mass * hydrogen.dH_dT
+            # )
 
     @staticmethod
     def y1(
@@ -880,7 +890,7 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
 
         # Apply an enthalpy correction factor to limit extreme differences
         enthalpy_diff = h_in - h_tank
-        # MAX_ENTHALPY_DIFF = 100000  # 100 kJ/kg limit for enthalpy difference
+        # MAX_ENTHALPY_DIFF = 25000  # 25 kJ/kg limit for enthalpy difference
         # if abs(enthalpy_diff) > MAX_ENTHALPY_DIFF:
         #     # Scale down the difference while preserving sign
         #     correction_factor = MAX_ENTHALPY_DIFF / abs(enthalpy_diff)
@@ -1726,8 +1736,9 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
 
             x = np.linalg.solve(a, b)
 
-            # Extract derivatives from solution
-            dP_dt = x[0][0]
+            # Extract derivatives from solution - NO SCALING UNDOING
+            # The solution is already in proper units because scaling was applied to both A and b
+            dP_dt = x[0][0]  # Already in Pa/s
             dT_dt = x[1][0]
             dMg_dt = x[2][0]
             dMl_dt = x[3][0]
@@ -1812,10 +1823,19 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         Calculate coefficient a42 in the A matrix using cv2phase.
 
         This is the key difference from the standard TwoPhaseModel.
+        Includes both structure thermal capacity and hydrogen cv2phase.
         """
-        # Use two-phase isochoric heat capacity
+        # Use two-phase isochoric heat capacity for hydrogen
         cv2p = cls.compute_cv2phase(tank_state)
-        return tank_state.fuel_mass * cv2p
+        P_sat = PropsSI("P", "T", tank_state.temperature, "Q", 0.5, "hydrogen")
+
+        # Include both structure thermal capacity and hydrogen thermal capacity
+        # TEST_CP is the structure's heat capacity
+        # return TEST_CP + tank_state.fuel_mass * cv2p
+
+        return tank_state.tank_thermal_capacity + tank_state.gas_mass*tank_state.hydrogen.gas.dH_dT + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dT + (tank_state.gas_mass*tank_state.hydrogen.gas.dH_dP + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dP - tank_state.volume)*P_sat  # Approximate total fuel thermal capacity
+        # return TEST_CP + tank_state.gas_mass*tank_state.hydrogen.gas.dH_dT + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dT + (tank_state.gas_mass*tank_state.hydrogen.gas.dH_dP + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dP - tank_state.volume)*P_sat  # Approximate total fuel thermal capacity
+        # return tank_state.gas_mass*tank_state.hydrogen.gas.dH_dT + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dT + (tank_state.gas_mass*tank_state.hydrogen.gas.dH_dP + tank_state.liquid_mass*tank_state.hydrogen.liquid.dH_dP - tank_state.volume)*P_sat
 
     @staticmethod
     def a43(hydrogen: TwoPhaseHydrogen) -> float:
@@ -1839,9 +1859,9 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
 
         hydrogen = tank_state.hydrogen
 
-        # Use coupling strength parameter instead of simple relaxation factor
+        # Use moderate coupling strength parameter to prevent ill-conditioning
         # This maintains proper matrix balance between A and b
-        coupling_strength = 0.7  # 0.7 maintains most thermodynamic coupling
+        coupling_strength = 0.0  # Consistent with b vector definition
 
         a11 = 1.0  # Full coefficient for dP/dt
         a12 = -coupling_strength * cls.a12(hydrogen)  # Coupled to dT/dt with proper sign
@@ -1860,9 +1880,12 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         a42 = cls.a42(tank_state)
         a43 = cls.a43(tank_state.hydrogen)
 
-        # Matrix with balanced saturation constraint
+        # Apply scaling to improve conditioning
+        pressure_scale = 1e-6  # Scale pressure derivatives to bar/s range
+
+        # Matrix with balanced saturation constraint and improved scaling
         a = np.array([
-            [a11, a12, 0.0, 0.0],  # Row 1: Balanced saturation constraint
+            [a11 * pressure_scale, a12 * pressure_scale, 0.0, 0.0],  # Row 1: Balanced saturation constraint
             [a21, a22, a23, 0.0],  # Row 2: Volume constraint
             [0.0, 0.0, 1.0, 1.0],  # Row 3: Mass balance
             [0.0, a42, a43, 0.0]   # Row 4: Energy equation with cv2phase
@@ -2069,11 +2092,14 @@ class TwoPhaseRefuelModel(TwoPhaseModelBase):
         """
         # For balanced saturation constraint:
         # dP/dt - α*dP_sat/dT * dT/dt = (1-α)*relaxation_pressure_term
-        coupling_strength = 0.7  # Same as used in A matrix
+        coupling_strength = 0.5  # Same as used in A matrix
         relaxation_pressure_term = cls.compute_relaxation_pressure_rhs(tank_state, fuel_flow_in, fuel_flow_out)
 
+        # Apply the same pressure scaling as in A matrix
+        pressure_scale = 1e-6  # Scale pressure derivatives to bar/s range
+
         # Right-hand side is the relaxation term weighted by (1 - coupling_strength)
-        y1 = (1.0 - coupling_strength) * relaxation_pressure_term
+        y1 = (1.0 - coupling_strength) * relaxation_pressure_term * pressure_scale
 
         # Volume constraint RHS
         y2 = cls.y2(tank_state, fuel_flow_in, fuel_flow_out)
