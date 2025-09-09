@@ -12,11 +12,176 @@ hydrogen_tank_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..
 sys.path.insert(0, hydrogen_tank_path)
 from src.materials.nist_materials import NISTMetal, NISTComposite
 
-# ----------------- Model Switching Framework -----------------
+# ----------------- Scenario and Configuration Framework -----------------
+class ScenarioManager:
+    """
+    Manages scenario-specific parameters and initial conditions.
+    Scenarios: REFUEL, DISCHARGE, DORMANCY
+    """
+
+    def __init__(self):
+        self.scenarios = {
+            'REFUEL': {
+                'initial_conditions': {
+                    'p0': 15e5,      # Pa
+                    'T0': 66,        # K
+                    'Ts0': 298.15,   # K
+                },
+                'rho_stop': 78.0,    # kg/m³ - stopping density
+                'max_time': 700.0,   # seconds - maximum simulation time
+                'mass_flow_functions': {
+                    'mdot_fuel': lambda t: 0.07,  # kg/s
+                    'mdot_disch': lambda t: 0.0,
+                    'mdot_vent': lambda t: 0.0,
+                },
+                'Qdot_disch': lambda t: 0.0,
+                'description': 'Tank refueling scenario'
+            },
+            'DISCHARGE': {
+                'initial_conditions': {
+                    'p0': 50e5,      # Pa - placeholder
+                    'T0': 30,        # K - placeholder
+                    'Ts0': 298.15,   # K
+                },
+                'rho_stop': 5.0,     # kg/m³ - placeholder
+                'max_time': 600.0,   # seconds - maximum simulation time (placeholder)
+                'mass_flow_functions': {
+                    'mdot_fuel': lambda t: 0.0,
+                    'mdot_disch': lambda t: 0.05,  # kg/s - placeholder
+                    'mdot_vent': lambda t: 0.0,
+                },
+                'Qdot_disch': lambda t: 1000.0,  # W - placeholder
+                'description': 'Tank discharge scenario'
+            },
+            'DORMANCY': {
+                'initial_conditions': {
+                    'p0': 25e5,      # Pa - placeholder
+                    'T0': 25,        # K - placeholder
+                    'Ts0': 298.15,   # K
+                },
+                'rho_stop': 40.0,    # kg/m³ - placeholder
+                'max_time': 3600.0,  # seconds - maximum simulation time (1 hour, placeholder)
+                'mass_flow_functions': {
+                    'mdot_fuel': lambda t: 0.0,
+                    'mdot_disch': lambda t: 0.0,
+                    'mdot_vent': lambda t: 0.0,  # Will be config-dependent
+                },
+                'Qdot_disch': lambda t: 0.0,
+                'description': 'Tank dormancy scenario'
+            }
+        }
+        self.current_scenario = None
+
+    def set_scenario(self, scenario_name):
+        """Set the current scenario."""
+        if scenario_name not in self.scenarios:
+            raise ValueError(f"Unknown scenario: {scenario_name}. Available: {list(self.scenarios.keys())}")
+        self.current_scenario = scenario_name
+
+    def get_scenario_config(self):
+        """Get the current scenario configuration."""
+        if self.current_scenario is None:
+            raise ValueError("No scenario selected")
+        return self.scenarios[self.current_scenario]
+
+class ConfigurationManager:
+    """
+    Manages configuration switching based on pressure thresholds.
+    Configurations: A (normal), B (minimum pressure), C (maximum pressure)
+    Handles the three configuration-dependent algebraic equations.
+    """
+
+    def __init__(self, fluid, p_min=15e5, p_vent=450e5):
+        self.fluid = fluid
+        self.p_min = p_min    # Pa - minimum pressure threshold
+        self.p_vent = p_vent  # Pa - venting pressure threshold
+        self.current_config = None
+
+        # Configuration definitions
+        self.configurations = {
+            'A': {
+                'name': 'Normal Operating Mode',
+                'description': 'p = p(T,rho), qdot_dis = 0, mdot_vent = 0'
+            },
+            'B': {
+                'name': 'Minimum Pressure Mode',
+                'description': 'p = p_min, qdot_dis = config_B_value, mdot_vent = 0'
+            },
+            'C': {
+                'name': 'Maximum Pressure Mode',
+                'description': 'p = p_vent, qdot_dis = 0, mdot_vent = config_C_value'
+            }
+        }
+
+    def select_configuration(self, p, is_two_phase=False):
+        """
+        Select configuration based on pressure following flowchart logic.
+
+        Args:
+            p: Current pressure [Pa]
+            is_two_phase: Whether system is in two-phase region
+
+        Returns:
+            str: Configuration name ('A', 'B', or 'C')
+        """
+        # Following flowchart logic
+        if p <= self.p_min:
+            return 'B'
+        elif p >= self.p_vent:
+            return 'C'
+        else:
+            return 'A'
+
+    def get_algebraic_equations(self, config, T, rho, is_two_phase=False):
+        """
+        Compute the three configuration-dependent algebraic equations.
+
+        Args:
+            config: Configuration name ('A', 'B', or 'C')
+            T: Temperature [K]
+            rho: Density [kg/m³]
+            is_two_phase: Whether system is in two-phase region
+
+        Returns:
+            dict: Contains 'pressure', 'qdot_disch', 'mdot_vent'
+        """
+        if config == 'A':
+            # Normal operation: p = p(T,rho), qdot_dis = 0, mdot_vent = 0
+            if is_two_phase:
+                p = PropsSI("P", "T", T, "Q", 0, self.fluid)  # Saturation pressure
+            else:
+                p = PropsSI("P", "T", T, "Dmass", rho, self.fluid)
+            return {
+                'pressure': p,
+                'qdot_disch': 0.0,
+                'mdot_vent': 0.0
+            }
+
+        elif config == 'B':
+            # Minimum pressure mode: p = p_min, qdot_dis = config_B_value, mdot_vent = 0
+            # TODO: Implement config_B_value calculation
+            return {
+                'pressure': self.p_min,
+                'qdot_disch': 0.0,  # Placeholder - will be implemented later
+                'mdot_vent': 0.0
+            }
+
+        elif config == 'C':
+            # Maximum pressure mode: p = p_vent, qdot_dis = 0, mdot_vent = config_C_value
+            # TODO: Implement config_C_value calculation
+            return {
+                'pressure': self.p_vent,
+                'qdot_disch': 0.0,
+                'mdot_vent': 0.0  # Placeholder - will be implemented later
+            }
+
+        else:
+            raise ValueError(f"Unknown configuration: {config}")
+
 class ModelSwitcher:
     """
-    Simple model switching framework for handling different governing equations
-    based on thermodynamic state conditions.
+    Handles single-phase vs two-phase model switching.
+    This is separate from configuration switching.
     """
 
     def __init__(self, fluid):
@@ -55,12 +220,73 @@ class ModelSwitcher:
 
         return self.models[self.current_model]['ode_func'](t, y, *args)
 
-# ----------------- User parameters -----------------
+    def solve(self, t, y, *args):
+        """
+        Solve the complete ODE system by selecting appropriate model and computing all derivatives.
+
+        Args:
+            t: Time
+            y: State vector [m, T, Ts]
+            *args: Additional arguments
+
+        Returns:
+            [dm_dt, dT_dt, dTs_dt]
+        """
+        m, T, Ts = y
+        m = max(m, 1e-12)
+        T = max(T, 1.0)
+        Ts = max(Ts, 1.0)
+
+        rho = m / V_t
+
+        # Get thermodynamic properties for model selection
+        try:
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, self.fluid)
+            p = PropsSI("P", "T", T, "Dmass", rho, self.fluid)
+        except Exception as e:
+            print(f"CoolProp error at t={t:.3f}s: {e}")
+            print(f"  State: m={m:.3f}, T={T:.3f}, rho={rho:.3f}")
+            raise e
+
+        # Select appropriate model based on current state using simplified logic
+        if is_near_saturation(T, p, self.fluid):
+            selected_model = "two_phase"
+        else:
+            selected_model = "single_phase"
+
+        # Update the current model
+        self.current_model = selected_model
+
+        # Mass balance
+        mdot_f = mdot_fuel_func(t)
+        mdot_d = mdot_disch_func(t)
+        mdot_v = mdot_vent_func(t)
+        dm_dt = mdot_f - mdot_d - mdot_v
+
+        # Temperature balance using selected model
+        dT_dt = self.compute_dT_dt(t, y, *args)
+
+        # Solid temperature balance
+        c_liner = float(c_liner_func(Ts))
+        c_wall = float(c_wall_func(Ts))
+
+        # Calculate alpha_s based on current temperature conditions
+        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
+
+        numerator_Ts = (k_amb * A_out * T_amb
+                        - (k_amb * A_out + alpha_s * A_in) * Ts
+                        + alpha_s * A_in * T)
+
+        denom_Ts = m_liner * c_liner + m_wall * c_wall
+        dTs_dt = numerator_Ts / denom_Ts
+
+        return [dm_dt, dT_dt, dTs_dt]
+
+# ----------------- Simulation Setup and User Parameters -----------------
 fluid = "Hydrogen"      # Working fluid
 V_t = 0.5          # Vessel volume [m^3]
 
-# Heat transfer constants (example)
-# alpha_s = 10.0     # W/(m2 K) - now replaced by get_alpha_s function
+# Heat transfer constants
 A_in = 4.0         # m2
 A_out = 4.1        # m2
 k_amb = 0.025        # W/K
@@ -77,18 +303,40 @@ D_inner = 0.4      # Inner diameter [m] - tank liner
 D_outer = 0.45     # Outer diameter [m] - includes insulation/wall
 annular_fluid = "Hydrogen"  # Fluid in the gap (could be vacuum, air, etc.)
 
-# Initial conditions
-t0 = 0.0
-p0 = 15e5          # Pa (example) - GIVEN
-T0 = 66        # K (gas) - GIVEN
-Ts0 = T_amb     # K (liner/wall)
+# Configuration pressure thresholds
+p_min = 15e5        # Pa - minimum pressure threshold for configuration B
+p_vent = 450e5      # Pa - venting pressure threshold for configuration C
+
+# Initialize framework managers
+scenario_manager = ScenarioManager()
+config_manager = ConfigurationManager(fluid, p_min, p_vent)
+model_switcher = ModelSwitcher(fluid)
+
+# Set scenario - CHANGE THIS to switch scenarios
+CURRENT_SCENARIO = 'REFUEL'  # Options: 'REFUEL', 'DISCHARGE', 'DORMANCY'
+scenario_manager.set_scenario(CURRENT_SCENARIO)
+scenario_config = scenario_manager.get_scenario_config()
+
+# Get scenario-specific parameters
+initial_conditions = scenario_config['initial_conditions']
+p0 = initial_conditions['p0']
+T0 = initial_conditions['T0']
+Ts0 = initial_conditions['Ts0']
+rho_stop = scenario_config['rho_stop']
+max_time = scenario_config['max_time']
+
+# Get scenario-specific mass flow functions
+mdot_fuel_func = scenario_config['mass_flow_functions']['mdot_fuel']
+mdot_disch_func = scenario_config['mass_flow_functions']['mdot_disch']
+mdot_vent_func = scenario_config['mass_flow_functions']['mdot_vent']
+Qdot_disch_func = scenario_config['Qdot_disch']
 
 # Calculate initial density from given pressure and temperature
 rho0 = PropsSI("Dmass", "P", p0, "T", T0, fluid)
 m0 = rho0 * V_t
 
-# Time span - set high enough to let density event stop the simulation
-t_span = (0.0, 500.0)  # High enough to reach density target
+# Time span - from scenario configuration
+t_span = (0.0, max_time)
 
 # Stopping condition parameters
 # Define stopping density in kg/m³ (convert from g/L)
@@ -287,9 +535,9 @@ def test_alpha_s_function():
     print("Function test completed.")
 
 # ----------------- Model Implementations -----------------
-def single_phase_dT_dt(t, y, model_switcher):
+def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config):
     """
-    Single-phase energy balance (current implementation).
+    Single-phase energy balance.
     Uses cv for temperature derivative calculation.
     """
     m, T, Ts = y
@@ -297,20 +545,25 @@ def single_phase_dT_dt(t, y, model_switcher):
     T = max(T, 1.0)
 
     rho = m / V_t
+
+    # Get configuration-dependent algebraic equations
+    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=False)
+    p = config_eqs['pressure']
+
     h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
-    p = PropsSI("P", "T", T, "Dmass", rho, fluid)
     c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, fluid)
     nu = 1.0 / rho
 
+    # Get mass flow rates (may be config-dependent)
     mdot_f = mdot_fuel_func(t)
     mdot_d = mdot_disch_func(t)
-    mdot_v = mdot_vent_func(t)
+    mdot_v = config_eqs['mdot_vent']  # Configuration-dependent
 
     # Use pump outlet enthalpy for refueling
     h_fuel = compute_pump_outlet_hydrogen(p, T)
     h_dich = h
     h_vent = h
-    Qdot_disch = Qdot_disch_func(t)
+    Qdot_disch = config_eqs['qdot_disch']  # Configuration-dependent
 
     # Calculate alpha_s based on current temperature conditions
     alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
@@ -324,10 +577,10 @@ def single_phase_dT_dt(t, y, model_switcher):
 
     return numerator_T / (m * c_v)
 
-def two_phase_dT_dt(t, y, model_switcher):
+def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config):
     """
     Two-phase energy balance implementation.
-    Uses c_v2P (two-phase specific heat capacity) as described in the attachment.
+    Uses c_v2P (two-phase specific heat capacity).
     """
     m, T, Ts = y
     m = max(m, 1e-12)
@@ -335,8 +588,10 @@ def two_phase_dT_dt(t, y, model_switcher):
 
     rho = m / V_t
 
-    # In two-phase region, pressure is determined by saturation pressure at temperature
-    p = PropsSI("P", "T", T, "Q", 0, fluid)  # Saturation pressure
+    # Get configuration-dependent algebraic equations for two-phase
+    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=True)
+    p = config_eqs['pressure']
+
     h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
 
     # Calculate vapor fraction
@@ -351,29 +606,28 @@ def two_phase_dT_dt(t, y, model_switcher):
     c_v_vapor = PropsSI("Cvmass", "T", T, "Q", 1, fluid)   # Saturated vapor cv
 
     # Calculate two-phase specific heat capacity (c_v2P)
-    # Based on equation (11) from attachment: c_v2P = x * c_v_vapor + (1-x) * c_v_liquid
     c_v2P = x * c_v_vapor + (1.0 - x) * c_v_liquid
 
     # Calculate saturation pressure derivative (dp_sat/dT)
     dp_sat_dT = p / (t + 1e-6)
 
-
     nu = 1.0 / rho
 
+    # Get mass flow rates (may be config-dependent)
     mdot_f = mdot_fuel_func(t)
     mdot_d = mdot_disch_func(t)
-    mdot_v = mdot_vent_func(t)
+    mdot_v = config_eqs['mdot_vent']  # Configuration-dependent
 
     # Use pump outlet enthalpy for refueling
     h_fuel = compute_pump_outlet_hydrogen(p, T)
     h_dich = h
     h_vent = h
-    Qdot_disch = Qdot_disch_func(t)
+    Qdot_disch = config_eqs['qdot_disch']  # Configuration-dependent
 
     # Calculate alpha_s based on current temperature conditions
     alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
 
-    # Two-phase energy balance numerator (equation 12 from attachment)
+    # Two-phase energy balance numerator
     numerator_T = (mdot_f * (h_fuel - h)
                    - mdot_d * (h_dich - h)
                    - mdot_v * (h_vent - h)
@@ -417,9 +671,46 @@ def is_single_phase_condition(T, p, rho):
     """Single-phase condition: P not close to P_sat"""
     return not is_near_saturation(T, p, fluid)
 
-# Register the models
-model_switcher.register_model("single_phase", is_single_phase_condition, single_phase_dT_dt)
-model_switcher.register_model("two_phase", is_two_phase_condition, two_phase_dT_dt)
+# Wrapper functions to handle the new signature
+def single_phase_wrapper(t, y, model_switcher):
+    """Wrapper for single phase model to handle configuration management."""
+    # Get current state for configuration selection
+    m, T, Ts = y
+    rho = m / V_t
+
+    # Get preliminary pressure for configuration selection
+    try:
+        p_prelim = PropsSI("P", "T", T, "Dmass", rho, fluid)
+    except:
+        p_prelim = p0  # Fallback to initial pressure
+
+    # Select configuration
+    is_two_phase = is_near_saturation(T, p_prelim, fluid)
+    current_config = config_manager.select_configuration(p_prelim, is_two_phase)
+
+    return single_phase_dT_dt(t, y, model_switcher, config_manager, current_config)
+
+def two_phase_wrapper(t, y, model_switcher):
+    """Wrapper for two phase model to handle configuration management."""
+    # Get current state for configuration selection
+    m, T, Ts = y
+    rho = m / V_t
+
+    # Get preliminary pressure for configuration selection (saturation pressure)
+    try:
+        p_prelim = PropsSI("P", "T", T, "Q", 0, fluid)
+    except:
+        p_prelim = p0  # Fallback to initial pressure
+
+    # Select configuration
+    is_two_phase = True  # We're in two-phase wrapper
+    current_config = config_manager.select_configuration(p_prelim, is_two_phase)
+
+    return two_phase_dT_dt(t, y, model_switcher, config_manager, current_config)
+
+# Register the models with wrappers
+model_switcher.register_model("single_phase", is_single_phase_condition, single_phase_wrapper)
+model_switcher.register_model("two_phase", is_two_phase_condition, two_phase_wrapper)
 
 def compute_pump_outlet_hydrogen(tank_pressure: float, tank_temperature: float):
     """
@@ -464,65 +755,24 @@ def compute_pump_outlet_hydrogen(tank_pressure: float, tank_temperature: float):
 
 def odes(t, y):
     global step_counter  # Access the global step counter
-    
-    m, T, Ts = y
-    m = max(m, 1e-12)
-    T = max(T, 1.0)
-    Ts = max(Ts, 1.0)
-
-    rho = m / V_t
-
-    # Get thermodynamic properties for model selection
-    try:
-        h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
-        p = PropsSI("P", "T", T, "Dmass", rho, fluid)
-    except Exception as e:
-        print(f"CoolProp error at t={t:.3f}s: {e}")
-        print(f"  State: m={m:.3f}, T={T:.3f}, rho={rho:.3f}")
-        raise e
-
-    # Select appropriate model based on current state using simplified logic
-    if is_near_saturation(T, p, fluid):
-        selected_model = "two_phase"
-    else:
-        selected_model = "single_phase"
-
-    # Update the model switcher's current model
-    model_switcher.current_model = selected_model
 
     # Print state every N steps if enabled
     if PRINT_EVERY_N_STEPS > 0:
         step_counter += 1
         if step_counter % PRINT_EVERY_N_STEPS == 0:
-            print(f"Step {step_counter:4d} | t={t:7.2f}s | "
-                  f"m={m:6.2f}kg | ρ={rho:6.2f}kg/m³ | "
-                  f"T={T:6.2f}K | Ts={Ts:6.2f}K | "
-                  f"P={p/1e5:6.2f}bar | {selected_model}")
+            m, T, Ts = y
+            rho = m / V_t
+            try:
+                p = PropsSI("P", "T", T, "Dmass", rho, fluid)
+                selected_model = "two_phase" if is_near_saturation(T, p, fluid) else "single_phase"
+                print(f"Step {step_counter:4d} | t={t:7.2f}s | "
+                      f"m={m:6.2f}kg | ρ={rho:6.2f}kg/m³ | "
+                      f"T={T:6.2f}K | Ts={Ts:6.2f}K | "
+                      f"P={p/1e5:6.2f}bar | {selected_model}")
+            except:
+                print(f"Step {step_counter:4d} | t={t:7.2f}s | (CoolProp error)")
 
-    # Mass balance
-    mdot_f = mdot_fuel_func(t)
-    mdot_d = mdot_disch_func(t)
-    mdot_v = mdot_vent_func(t)
-    dm_dt = mdot_f - mdot_d - mdot_v
-
-    # Temperature balance using selected model
-    dT_dt = model_switcher.compute_dT_dt(t, y, model_switcher)
-
-    # Solid temperature balance
-    c_liner = float(c_liner_func(Ts))
-    c_wall = float(c_wall_func(Ts))
-
-    # Calculate alpha_s based on current temperature conditions
-    alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-
-    numerator_Ts = (k_amb * A_out * T_amb
-                    - (k_amb * A_out + alpha_s * A_in) * Ts
-                    + alpha_s * A_in * T)
-
-    denom_Ts = m_liner * c_liner + m_wall * c_wall
-    dTs_dt = numerator_Ts / denom_Ts
-
-    return [dm_dt, dT_dt, dTs_dt]
+    return model_switcher.solve(t, y, model_switcher)
 
 def density_event(t, y):
     """
@@ -599,12 +849,11 @@ print("Starting integration...")
 # Reset step counter before integration
 step_counter = 0
 
-# Set a reasonable maximum time to prevent infinite loops
-max_time = 500.0  # seconds
-t_span_limited = (t_span[0], min(t_span[1], max_time))
+# Use scenario-specified time span directly
+t_span_limited = t_span
 
 sol = solve_ivp(odes, t_span_limited, y0, method="Radau", atol=1e-10, rtol=1e-8,
-                dense_output=True, events=density_event, max_step=0.1)
+                dense_output=True, events=density_event, max_step=0.05)
 
 print(f"\nIntegration completed!")
 print(f"Solution completed. Success: {sol.success}")
