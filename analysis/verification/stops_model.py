@@ -34,7 +34,7 @@ class ScenarioManager:
                     'method': 'Radau',
                     'atol': 1e-10,
                     'rtol': 1e-8,
-                    'max_step': 0.05,
+                    'max_step': 0.5,
                     'min_step': None,
                     'first_step': None,
                     'dense_output': True,
@@ -74,17 +74,17 @@ class ScenarioManager:
             },
             'DORMANCY': {
                 'initial_conditions': {
-                    'p0': 25e5,      # Initial pressure [Pa]
-                    'T0': 25,        # Initial temperature [K]
+                    'p0': 400e5,     # Initial pressure [Pa] - 400 bar
+                    'T0': 53.25,        # Initial temperature [K]
                     'Ts0': 298.15,   # Initial solid temperature [K]
                 },
-                'rho_stop': 40.0,    # Stopping density [kg/m³]
-                'max_time': 3600.0,  # Maximum simulation time [s]
+                'rho_stop': 70.0,    # Stopping density [kg/m³]
+                'max_time': 216000.0,  # Maximum simulation time [s]
                 'solver_settings': {
                     'method': 'RK45',
                     'atol': 1e-8,
                     'rtol': 1e-6,
-                    'max_step': 1.0,
+                    'max_step': 100.0,
                     'min_step': None,
                     'first_step': None,
                     'dense_output': True,
@@ -92,10 +92,10 @@ class ScenarioManager:
                 'mass_flow_functions': {
                     'mdot_fuel': lambda t: 0.0,
                     'mdot_disch': lambda t: 0.0,
-                    'mdot_vent': lambda t: 0.0,
+                    'mdot_vent': lambda t: 0.0,  # Will be calculated by Config C
                 },
                 'Qdot_disch': lambda t: 0.0,
-                'description': 'Tank dormancy scenario'
+                'description': 'Tank dormancy scenario with venting (Config C)'
             }
         }
         self.current_scenario = None
@@ -211,11 +211,12 @@ class ConfigurationManager:
 
         elif config == 'C':
             # Maximum pressure mode: p = p_vent, qdot_dis = 0, mdot_vent = config_C_value
-            # TODO: Implement config_C_value calculation
+            # Calculate the required venting mass flow to maintain maximum pressure
+            mdot_vent = self._calculate_config_C_mdot_vent(T, rho, is_two_phase, t, Ts)
             return {
                 'pressure': self.p_vent,
                 'qdot_disch': 0.0,
-                'mdot_vent': 0.0
+                'mdot_vent': mdot_vent
             }
 
         else:
@@ -283,6 +284,79 @@ class ConfigurationManager:
 
         return qdot_disch
 
+    def _calculate_config_C_mdot_vent(self, T, rho, is_two_phase, t, Ts):
+        """
+        Calculate the venting mass flow for Configuration C (maximum pressure mode).
+
+        Configuration C equation: M_vent = Q_s / [T/ρ·(∂p/∂T)_ρ - ρ·cv·(∂T/∂ρ)_p + h_vent - h]
+
+        Uses the same mixed approach as Configuration B: ideal gas for term1, CoolProp for term2.
+
+        Args:
+            T: Temperature [K]
+            rho: Density [kg/m³]
+            is_two_phase: Whether the state is two-phase
+            t: Current time [s]
+            Ts: Solid temperature [K]
+
+        Returns:
+            mdot_vent: Venting mass flow rate [kg/s]
+        """
+        import CoolProp.CoolProp as cp
+
+        # For Configuration C, pressure is constrained to p_vent
+        p = self.p_vent
+        nu = 1.0 / rho  # Specific volume [m³/kg]
+
+        # Get thermodynamic properties at current state
+        if is_two_phase:
+            # For two-phase, use average cv and enthalpy
+            cv_liquid = cp.PropsSI("Cvmass", "T", T, "Q", 0, self.fluid)
+            cv_vapor = cp.PropsSI("Cvmass", "T", T, "Q", 1, self.fluid)
+            h_liquid = cp.PropsSI("Hmass", "T", T, "Q", 0, self.fluid)
+            h_vapor = cp.PropsSI("Hmass", "T", T, "Q", 1, self.fluid)
+            try:
+                x = cp.PropsSI("Q", "T", T, "Dmass", rho, self.fluid)
+                x = max(0.0, min(1.0, x))
+            except:
+                x = 0.5
+            cv = x * cv_vapor + (1.0 - x) * cv_liquid
+            h = x * h_vapor + (1.0 - x) * h_liquid
+            h_vent = h_vapor  # Venting vapor preferentially
+        else:
+            cv = cp.PropsSI("Cvmass", "P", p, "T", T, self.fluid)
+            h = cp.PropsSI("Hmass", "P", p, "T", T, self.fluid)
+            h_vent = h  # Single-phase venting
+
+        # Calculate alpha_s for heat transfer
+        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
+        Qs = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
+
+        # Term 1: T/ρ · (∂p/∂T)_ρ using ideal gas relationship for numerical stability
+        term1 = p * nu
+
+        # Term 2: ρ·cv·(∂T/∂ρ)_p using real CoolProp derivatives for accuracy
+        try:
+            dT_drho_p = cp.PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, self.fluid)
+        except:
+            # Fallback to ideal gas relationship if CoolProp fails
+            dT_drho_p = -T / rho
+        term2 = rho * cv * dT_drho_p
+
+        # Calculate denominator
+        denominator = term1 - term2 + h_vent - h
+
+        # Avoid division by zero
+        if abs(denominator) < 1e-12:
+            return 0.0
+
+        mdot_vent = Qs / denominator
+
+        # Ensure non-negative venting (can't vent negative mass)
+        mdot_vent = max(0.0, mdot_vent)
+
+        return mdot_vent
+
 
 class ModelSwitcher:
     """
@@ -290,8 +364,9 @@ class ModelSwitcher:
     This is separate from configuration switching.
     """
 
-    def __init__(self, fluid):
+    def __init__(self, fluid, config_manager=None):
         self.fluid = fluid
+        self.config_manager = config_manager
         self.models = {}
         self.current_model = None
 
@@ -324,15 +399,17 @@ class ModelSwitcher:
         if self.current_model is None:
             raise ValueError("No model selected. Call select_model first.")
 
-        return self.models[self.current_model]['ode_func'](t, y, *args)
+        return self.models[self.current_model]['ode_func'](t, y)
 
-    def solve(self, t, y, *args):
+    def solve(self, t, y, mdot_fuel_func, mdot_disch_func, *args):
         """
         Solve the complete ODE system by selecting appropriate model and computing all derivatives.
 
         Args:
             t: Time
             y: State vector [m, T, Ts]
+            mdot_fuel_func: Fuel mass flow function
+            mdot_disch_func: Discharge mass flow function
             *args: Additional arguments
 
         Returns:
@@ -357,20 +434,26 @@ class ModelSwitcher:
         # Select appropriate model based on current state using simplified logic
         if is_near_saturation(T, p, self.fluid):
             selected_model = "two_phase"
+            is_two_phase = True
         else:
             selected_model = "single_phase"
+            is_two_phase = False
 
         # Update the current model
         self.current_model = selected_model
 
-        # Mass balance
+        # Select configuration and get configuration-dependent mass flows
+        current_config = self.config_manager.select_configuration(p, is_two_phase)
+        config_eqs = self.config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=is_two_phase, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts)
+
+        # Mass balance using configuration-dependent flows
         mdot_f = mdot_fuel_func(t)
         mdot_d = mdot_disch_func(t)
-        mdot_v = mdot_vent_func(t)
+        mdot_v = config_eqs['mdot_vent']  # Configuration-dependent venting
         dm_dt = mdot_f - mdot_d - mdot_v
 
         # Temperature balance using selected model
-        dT_dt = self.compute_dT_dt(t, y, *args)
+        dT_dt = self.compute_dT_dt(t, y)
 
         # Solid temperature balance
         c_liner = float(c_liner_func(Ts))
@@ -400,9 +483,9 @@ T_amb = 298.15     # Ambient temperature [K]
 m_liner = 100.0    # Liner mass [kg]
 m_wall = 150.0     # Wall mass [kg]
 
-# Debug printing parameters
-PRINT_EVERY_N_STEPS = 50  # Print state every N integration steps (set to 0 to disable)
-step_counter = 0  # Global counter for tracking steps
+# Progress printing parameters
+PRINT_EVERY_N_STEPS = 50  # Print progress every N steps
+step_counter = 0  # Global counter
 
 # Geometric parameters for alpha_s calculation
 D_inner = 0.4      # Inner diameter [m]
@@ -416,10 +499,10 @@ p_vent = 450e5     # Venting pressure threshold for configuration C [Pa]
 # Initialize framework managers
 scenario_manager = ScenarioManager()
 config_manager = ConfigurationManager(fluid, p_min, p_vent)
-model_switcher = ModelSwitcher(fluid)
+model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Set scenario
-CURRENT_SCENARIO = 'DISCHARGE'  # Options: 'REFUEL', 'DISCHARGE', 'DORMANCY'
+CURRENT_SCENARIO = 'REFUEL'  # Options: 'REFUEL', 'DISCHARGE', 'DORMANCY'
 scenario_manager.set_scenario(CURRENT_SCENARIO)
 scenario_config = scenario_manager.get_scenario_config()
 
@@ -712,7 +795,7 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     return numerator_T / (m * c_v2P)
 
 # Initialize model switcher
-model_switcher = ModelSwitcher(fluid)
+model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Simplified Phase Detection
 def is_near_saturation(T, p, fluid):
@@ -746,7 +829,7 @@ def is_single_phase_condition(T, p, rho):
     return not is_near_saturation(T, p, fluid)
 
 # Wrapper functions to handle the new signature
-def single_phase_wrapper(t, y, model_switcher):
+def single_phase_wrapper(t, y):
     """Wrapper for single phase model to handle configuration management."""
     # Get current state for configuration selection
     m, T, Ts = y
@@ -764,7 +847,7 @@ def single_phase_wrapper(t, y, model_switcher):
 
     return single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager)
 
-def two_phase_wrapper(t, y, model_switcher):
+def two_phase_wrapper(t, y):
     """Wrapper for two phase model to handle configuration management."""
     # Get current state for configuration selection
     m, T, Ts = y
@@ -838,7 +921,7 @@ def odes(t, y):
             except:
                 print(f"Step {step_counter:4d} | t={t:7.2f}s | (CoolProp error)")
 
-    return model_switcher.solve(t, y, model_switcher)
+    return model_switcher.solve(t, y, mdot_fuel_func, mdot_disch_func)
 
 def density_event(t, y):
     """
@@ -853,21 +936,20 @@ def density_event(t, y):
 
 # Configure the event to stop integration when density threshold is reached
 density_event.terminal = True
-density_event.direction = -1  # Detect decreasing density for discharge scenarios
+
+# Set direction based on scenario:
+# REFUEL: +1 (density increasing), DISCHARGE/DORMANCY: -1 (density decreasing)
+if CURRENT_SCENARIO == 'REFUEL':
+    density_event.direction = +1  # Detect increasing density for refuel scenarios
+else:
+    density_event.direction = -1  # Detect decreasing density for discharge/dormancy scenarios
 
 # Initial state
 y0 = [m0, T0, Ts0]
 
-print(f"Starting simulation...")
-print(f"GIVEN initial conditions:")
-print(f"  Temperature: {T0:.2f} K")
-print(f"  Pressure: {p0/1e5:.2f} bar")
-print(f"  Solid Temperature: {Ts0:.2f} K")
-print(f"CALCULATED from CoolProp:")
-print(f"  Density: {rho0:.2f} kg/m³)")
-print(f"  Mass: {m0:.2f} kg")
-print(f"Density stopping condition: {rho_stop:.1f} kg/m³")
-print(f"Will stop when density reaches {rho_stop:.1f} kg/m³")
+print("Starting simulation...")
+print(f"Initial conditions: T={T0:.2f}K, P={p0/1e5:.2f}bar")
+print(f"Stopping condition: density {rho_stop:.1f}kg/m³")
 
 # Check initial model selection
 initial_p = PropsSI('P', 'T', T0, 'Dmass', rho0, fluid)
@@ -875,23 +957,14 @@ if is_near_saturation(T0, initial_p, fluid):
     initial_model = "two_phase"
 else:
     initial_model = "single_phase"
-print(f"Starting with {initial_model} model")
 
 try:
     p_sat_initial = PropsSI("P", "T", T0, "Q", 0, fluid)
 except:
-    print(f"Could not calculate saturation pressure at {T0:.2f} K (possibly above critical point)")
+    pass
 
 
-print("\nSolving ODEs...")
-print(f"Time span: {t_span[0]:.1f} to {t_span[1]:.1f} seconds")
-print("Integration method: Radau with enhanced stability tolerances")
-print(f"Density stopping condition: {rho_stop:.1f} kg/m³")
-if PRINT_EVERY_N_STEPS > 0:
-    print(f"Progress printing: Every {PRINT_EVERY_N_STEPS} integration steps")
-else:
-    print("Progress printing: Disabled")
-print("Starting integration...")
+print("Solving ODEs...")
 
 # Reset step counter before integration
 step_counter = 0
@@ -916,22 +989,12 @@ if solver_settings['min_step'] is not None:
 if solver_settings['first_step'] is not None:
     solver_kwargs['first_step'] = solver_settings['first_step']
 
-print(f"Solver settings for {CURRENT_SCENARIO} scenario:")
-print(f"  Method: {solver_settings['method']}")
-print(f"  Tolerances: atol={solver_settings['atol']:.0e}, rtol={solver_settings['rtol']:.0e}")
-print(f"  Max step: {solver_settings['max_step']}")
-
 sol = solve_ivp(odes, t_span_limited, y0, **solver_kwargs)
 
-print(f"\nIntegration completed!")
-print(f"Solution completed. Success: {sol.success}")
+print("Integration completed!")
 if not sol.success:
     print(f"Solution message: {sol.message}")
 else:
-    print(f"Number of function evaluations: {sol.nfev}")
-    print(f"Final time reached: {sol.t[-1]:.3f} seconds")
-    print(f"Integration took {len(sol.t)} internal timesteps")
-
     # Check if simulation was stopped by density event
     if hasattr(sol, 't_events') and len(sol.t_events) > 0 and len(sol.t_events[0]) > 0:
         stop_time = sol.t_events[0][0]
@@ -954,25 +1017,21 @@ else:
         print(f"Final density: {final_density:.2f} kg/m³ ({final_density/1000:.3f} g/L)")
 
 # Postprocess
-print("\nPostprocessing results...")
+print("\nPostprocessing...")
 
 # Determine the actual time span for evaluation based on whether simulation stopped early
 if hasattr(sol, 't_events') and len(sol.t_events) > 0 and len(sol.t_events[0]) > 0:
     # Simulation stopped due to density event
     actual_t_final = sol.t_events[0][0]
-    print(f"Using actual simulation time span: 0.0 to {actual_t_final:.2f} seconds")
 else:
     # Simulation completed full time span
     actual_t_final = t_span[1]
-    print(f"Using full time span: {t_span[0]:.1f} to {t_span[1]:.1f} seconds")
 
 t_eval = np.linspace(t_span[0], actual_t_final, 400)
-print(f"Evaluating solution at {len(t_eval)} time points...")
 y_eval = sol.sol(t_eval)
 m_sol, T_sol, Ts_sol = y_eval
 rho_sol = m_sol / V_t
 
-print("Computing pressure and model selection for each time point...")
 p_sol = []
 model_used = []  # Track which model was used at each time point
 for i, (T, rho) in enumerate(zip(T_sol, rho_sol)):
