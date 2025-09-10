@@ -12,6 +12,7 @@ import CoolProp as cp
 hydrogen_tank_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, hydrogen_tank_path)
 from src.materials.nist_materials import NISTMetal, NISTComposite
+from plotting.sb_plotting import SeabornPlotter
 
 # ----------------- Scenario and Configuration Framework -----------------
 class ScenarioManager:
@@ -25,7 +26,7 @@ class ScenarioManager:
             'REFUEL': {
                 'initial_conditions': {
                     'p0': 15e5,      # Initial pressure [Pa]
-                    'T0': 66,        # Initial temperature [K]
+                    'T0': 65.5,        # Initial temperature [K]
                     'Ts0': 298.15,   # Initial solid temperature [K]
                 },
                 'rho_stop': 78.0,    # Stopping density [kg/m³]
@@ -502,7 +503,8 @@ config_manager = ConfigurationManager(fluid, p_min, p_vent)
 model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Initialize NIST materials
-liner_material = NISTMetal.aluminum_6061T6_nist()
+liner_material = NISTMetal.aluminum_5083_nist()
+# liner_material = NISTMetal.aluminum_6061T6_nist()
 wall_material = NISTComposite.g10_nist(winding_angle=0.0)
 
 def c_liner_func(Ts):
@@ -638,8 +640,8 @@ def get_alpha_s(T_i, T_o, D_i, D_o, fluid="Air", p=101325):
     # For concentric cylinders: h_i = 2*k_eq / (D_i * ln(D_o/D_i))
     h_i = (2.0 * k_eq) / (D_i * np.log(D_o / D_i))
 
-    # return h_i
-    return 0.5  # Simplified return for testing
+    return h_i
+    # return 20.0  # Simplified return for testing
 
 # Remove the test function as it's not needed in production code
 
@@ -1418,7 +1420,6 @@ def plot_chained_scenarios(results, postprocessed_data=None):
              verticalalignment='top', fontfamily='monospace', fontsize=9)
 
     plt.tight_layout()
-    plt.show()
 
     # Print detailed statistics
     print(f"\n{'='*80}")
@@ -1442,6 +1443,87 @@ def plot_chained_scenarios(results, postprocessed_data=None):
             T_range = data['stats']['two_phase_temperature_range']
             print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
 
+def plot_combined_density_temperature(results, postprocessed_data=None):
+    """
+    Create a combined density-temperature plot using SeabornPlotter.
+
+    This function transforms the simulation results into the format expected by
+    plot_density_temperature_combined and creates a professional density-temperature plot.
+
+    Parameters
+    ----------
+    results : list
+        List of result dictionaries from run_hydrogen_tank_simulation()
+    postprocessed_data : list, optional
+        List of postprocessed data dictionaries. If None, will postprocess automatically.
+    """
+    if postprocessed_data is None:
+        postprocessed_data = [postprocess_simulation_result(result) for result in results]
+
+    # Initialize scenario data structure expected by SeabornPlotter
+    scenario_data = {
+        'discharge': {'temperatures': [], 'densities': [], 'pressures': []},
+        'refuel': {'temperatures': [], 'densities': [], 'pressures': []},
+        'dormancy': {'temperatures': [], 'densities': [], 'pressures': []}
+    }
+
+    # Map scenario names to consistent keys
+    scenario_mapping = {
+        'DISCHARGE': 'discharge',
+        'REFUEL': 'refuel',
+        'DORMANCY': 'dormancy'
+    }
+
+    print("\n==== PREPARING DATA FOR DENSITY-TEMPERATURE PLOT ====")
+
+    # Extract data from each scenario
+    for data in postprocessed_data:
+        scenario_name = data['scenario']
+
+        # Map to consistent naming
+        plot_key = scenario_mapping.get(scenario_name.upper(), scenario_name.lower())
+
+        if plot_key in scenario_data:
+            print(f"Processing {scenario_name} data...")
+
+            # Extract temperatures (K)
+            temperatures = data['T']
+            scenario_data[plot_key]['temperatures'] = list(temperatures)
+
+            # Extract pressures (Pa)
+            pressures = data['p']
+            scenario_data[plot_key]['pressures'] = list(pressures)
+
+            # Extract densities (kg/m³) and convert to g/L
+            densities_kg_m3 = data['rho']
+            densities_g_L = [rho for rho in densities_kg_m3]  # 1 kg/m³ = 1 g/L
+            scenario_data[plot_key]['densities'] = densities_g_L
+
+            print(f"  {scenario_name}: {len(temperatures)} data points")
+            print(f"    Temperature range: {min(temperatures):.1f} - {max(temperatures):.1f} K")
+            print(f"    Density range: {min(densities_g_L):.1f} - {max(densities_g_L):.1f} g/L")
+            print(f"    Pressure range: {min(pressures)/1e5:.1f} - {max(pressures)/1e5:.1f} bar")
+        else:
+            print(f"Warning: Unknown scenario '{scenario_name}', skipping...")
+
+    # Create the SeabornPlotter instance
+    print("\n==== CREATING COMBINED DENSITY-TEMPERATURE PLOT ====")
+    plotter = SeabornPlotter(font="Cambria", palette="delft")
+
+    # Create the plot with appropriate settings
+    fig = plotter.plot_density_temperature_combined(
+        scenario_data=scenario_data,
+        include_saturation_line=True,
+        include_isobars=True,
+        include_ref_data=True,
+        figsize=(12, 8),
+        temperature_range=(15, 80),  # Adjust based on your data range
+        density_range=(0, 80)        # Adjust based on your data range
+    )
+
+
+    return fig
+
 # ----------------- Main Execution (Example Usage) -----------------
 if __name__ == "__main__":
     # Example: Run single scenario
@@ -1463,4 +1545,9 @@ if __name__ == "__main__":
 
     # Plot all scenarios together
     plot_chained_scenarios(chained_results, chained_data)
+
+    # Create the combined density-temperature plot using SeabornPlotter
+    plot_combined_density_temperature(chained_results, chained_data)
+
+    plt.show()
 
