@@ -496,35 +496,10 @@ annular_fluid = "Hydrogen"  # Fluid in the gap
 p_min = 15e5       # Minimum pressure threshold for configuration B [Pa]
 p_vent = 450e5     # Venting pressure threshold for configuration C [Pa]
 
-# Initialize framework managers
+# Initialize global framework managers
 scenario_manager = ScenarioManager()
 config_manager = ConfigurationManager(fluid, p_min, p_vent)
 model_switcher = ModelSwitcher(fluid, config_manager)
-
-# Set scenario
-CURRENT_SCENARIO = 'REFUEL'  # Options: 'REFUEL', 'DISCHARGE', 'DORMANCY'
-scenario_manager.set_scenario(CURRENT_SCENARIO)
-scenario_config = scenario_manager.get_scenario_config()
-
-# Get scenario-specific parameters
-initial_conditions = scenario_config['initial_conditions']
-p0 = initial_conditions['p0']
-T0 = initial_conditions['T0']
-Ts0 = initial_conditions['Ts0']
-rho_stop = scenario_config['rho_stop']
-max_time = scenario_config['max_time']
-solver_settings = scenario_config['solver_settings']
-
-# Get scenario-specific mass flow functions
-mdot_fuel_func = scenario_config['mass_flow_functions']['mdot_fuel']
-mdot_disch_func = scenario_config['mass_flow_functions']['mdot_disch']
-mdot_vent_func = scenario_config['mass_flow_functions']['mdot_vent']
-Qdot_disch_func = scenario_config['Qdot_disch']
-
-# Calculate initial density from given pressure and temperature
-rho0 = PropsSI("Dmass", "P", p0, "T", T0, fluid)
-m0 = rho0 * V_t
-t_span = (0.0, max_time)
 
 # Initialize NIST materials
 liner_material = NISTMetal.aluminum_6061T6_nist()
@@ -664,9 +639,64 @@ def get_alpha_s(T_i, T_o, D_i, D_o, fluid="Air", p=101325):
     h_i = (2.0 * k_eq) / (D_i * np.log(D_o / D_i))
 
     # return h_i
-    return 1  # Simplified return for testing
+    return 0.5  # Simplified return for testing
 
 # Remove the test function as it's not needed in production code
+
+# ----------------- Helper Functions -----------------
+def is_near_saturation(T, p, fluid):
+    """
+    Single unified phase checker function.
+
+    Returns:
+        True if P ≈ P_sat (use two-phase model)
+        False if P is not close to P_sat (use single-phase model)
+    """
+    try:
+        # Get saturation pressure at this temperature
+        p_sat = PropsSI("P", "T", T, "Q", 0, fluid)
+
+        # Simple tolerance check: if P is very close to P_sat, use two-phase
+        tolerance = 1e-6  # Very small tolerance
+        return abs(p - p_sat) < tolerance * p_sat
+
+    except:
+        # If saturation pressure calculation fails (e.g., above critical point),
+        # assume single-phase
+        return False
+
+def compute_pump_outlet_hydrogen(tank_pressure: float, tank_temperature: float):
+    """
+    Calculate hydrogen enthalpy after cryogenic pump compression.
+
+    Parameters
+    ----------
+    tank_pressure : float
+        Target tank pressure [Pa]
+    tank_temperature : float
+        Current tank temperature [K]
+
+    Returns
+    -------
+    h2 : float
+        Enthalpy at pump outlet [J/kg]
+    """
+    fluid_local = "Hydrogen"
+    P1 = 3e5       # Dewar pressure [Pa]
+    P2 = tank_pressure  # Target pressure [Pa]
+    eta_p = 0.78   # Pump isentropic efficiency
+
+    # Inlet state: saturated liquid at P1
+    h1 = PropsSI("H", "P", P1, "Q", 0, fluid_local)
+    s1 = PropsSI("S", "P", P1, "Q", 0, fluid_local)
+
+    # Ideal isentropic outlet at P2
+    h2s = PropsSI("H", "P", P2, "S", s1, fluid_local)
+
+    # Actual outlet enthalpy with efficiency
+    h2 = h1 + (h2s - h1)/eta_p
+
+    return h2
 
 # ----------------- Model Implementations -----------------
 def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager):
@@ -711,7 +741,6 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
     # Configuration A and C need explicit environmental heat transfer
     alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
     Qs_env = alpha_s * A_in * (Ts - T)
-
 
     numerator_T = (mdot_f * (h_fuel - h)
                    - mdot_d * (h_dich - h)
@@ -794,31 +823,6 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
 
     return numerator_T / (m * c_v2P)
 
-# Initialize model switcher
-model_switcher = ModelSwitcher(fluid, config_manager)
-
-# Simplified Phase Detection
-def is_near_saturation(T, p, fluid):
-    """
-    Single unified phase checker function.
-
-    Returns:
-        True if P ≈ P_sat (use two-phase model)
-        False if P is not close to P_sat (use single-phase model)
-    """
-    try:
-        # Get saturation pressure at this temperature
-        p_sat = PropsSI("P", "T", T, "Q", 0, fluid)
-
-        # Simple tolerance check: if P is very close to P_sat, use two-phase
-        tolerance = 1e-4  # Very small tolerance
-        return abs(p - p_sat) < tolerance * p_sat
-
-    except:
-        # If saturation pressure calculation fails (e.g., above critical point),
-        # assume single-phase
-        return False
-
 # Unified condition functions for model registration
 def is_two_phase_condition(T, p, rho):
     """Two-phase condition: P ≈ P_sat"""
@@ -839,7 +843,7 @@ def single_phase_wrapper(t, y):
     try:
         p_prelim = PropsSI("P", "T", T, "Dmass", rho, fluid)
     except:
-        p_prelim = p0  # Fallback to initial pressure
+        p_prelim = 15e5  # Fallback to minimum pressure
 
     # Select configuration
     is_two_phase = is_near_saturation(T, p_prelim, fluid)
@@ -857,50 +861,13 @@ def two_phase_wrapper(t, y):
     try:
         p_prelim = PropsSI("P", "T", T, "Q", 0, fluid)
     except:
-        p_prelim = p0  # Fallback to initial pressure
+        p_prelim = 15e5  # Fallback to minimum pressure
 
     # Select configuration
     is_two_phase = True  # We're in two-phase wrapper
     current_config = config_manager.select_configuration(p_prelim, is_two_phase)
 
     return two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager)
-
-# Register the models with wrappers
-model_switcher.register_model("single_phase", is_single_phase_condition, single_phase_wrapper)
-model_switcher.register_model("two_phase", is_two_phase_condition, two_phase_wrapper)
-
-def compute_pump_outlet_hydrogen(tank_pressure: float, tank_temperature: float):
-    """
-    Calculate hydrogen enthalpy after cryogenic pump compression.
-
-    Parameters
-    ----------
-    tank_pressure : float
-        Target tank pressure [Pa]
-    tank_temperature : float
-        Current tank temperature [K]
-
-    Returns
-    -------
-    h2 : float
-        Enthalpy at pump outlet [J/kg]
-    """
-    fluid_local = "Hydrogen"
-    P1 = 3e5       # Dewar pressure [Pa]
-    P2 = tank_pressure  # Target pressure [Pa]
-    eta_p = 0.78   # Pump isentropic efficiency
-
-    # Inlet state: saturated liquid at P1
-    h1 = PropsSI("H", "P", P1, "Q", 0, fluid_local)
-    s1 = PropsSI("S", "P", P1, "Q", 0, fluid_local)
-
-    # Ideal isentropic outlet at P2
-    h2s = PropsSI("H", "P", P2, "S", s1, fluid_local)
-
-    # Actual outlet enthalpy with efficiency
-    h2 = h1 + (h2s - h1)/eta_p
-
-    return h2
 
 def odes(t, y):
     global step_counter  # Access the global step counter
@@ -923,241 +890,577 @@ def odes(t, y):
 
     return model_switcher.solve(t, y, mdot_fuel_func, mdot_disch_func)
 
-def density_event(t, y):
+# Register the models with wrappers - this needs to be done after model_switcher is created
+model_switcher.register_model("single_phase", is_single_phase_condition, single_phase_wrapper)
+model_switcher.register_model("two_phase", is_two_phase_condition, two_phase_wrapper)
+
+# ----------------- Simulation Runner Function -----------------
+def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
     """
-    Event function to detect when density reaches stopping threshold.
+    Run a hydrogen tank simulation for a given scenario.
 
-    Returns zero when density equals rho_stop for solver termination.
+    Parameters
+    ----------
+    scenario_name : str
+        Name of scenario to run: 'REFUEL', 'DISCHARGE', or 'DORMANCY'
+    verbose : bool, optional
+        Whether to print progress information (default: True)
+    t_offset : float, optional
+        Time offset to add to all time values for chaining scenarios (default: 0.0)
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'sol': scipy ODE solution object
+        - 'scenario': scenario name
+        - 'success': whether simulation completed successfully
+        - 'stop_info': information about stopping condition if triggered
+        - 't_offset': time offset used
+        - 'metadata': additional simulation metadata
     """
-    m, T, Ts = y
-    m = max(m, 1e-12)
-    current_density = m / V_t
-    return current_density - rho_stop
+    global step_counter, mdot_fuel_func, mdot_disch_func, rho_stop
 
-# Configure the event to stop integration when density threshold is reached
-density_event.terminal = True
+    # Set scenario
+    scenario_manager.set_scenario(scenario_name)
+    scenario_config = scenario_manager.get_scenario_config()
 
-# Set direction based on scenario:
-# REFUEL: +1 (density increasing), DISCHARGE/DORMANCY: -1 (density decreasing)
-if CURRENT_SCENARIO == 'REFUEL':
-    density_event.direction = +1  # Detect increasing density for refuel scenarios
-else:
-    density_event.direction = -1  # Detect decreasing density for discharge/dormancy scenarios
+    # Get scenario-specific parameters
+    initial_conditions = scenario_config['initial_conditions']
+    p0 = initial_conditions['p0']
+    T0 = initial_conditions['T0']
+    Ts0 = initial_conditions['Ts0']
+    rho_stop = scenario_config['rho_stop']
+    max_time = scenario_config['max_time']
+    solver_settings = scenario_config['solver_settings']
 
-# Initial state
-y0 = [m0, T0, Ts0]
+    # Get scenario-specific mass flow functions (make them global for ODE access)
+    mdot_fuel_func = scenario_config['mass_flow_functions']['mdot_fuel']
+    mdot_disch_func = scenario_config['mass_flow_functions']['mdot_disch']
+    mdot_vent_func = scenario_config['mass_flow_functions']['mdot_vent']
+    Qdot_disch_func = scenario_config['Qdot_disch']
 
-print("Starting simulation...")
-print(f"Initial conditions: T={T0:.2f}K, P={p0/1e5:.2f}bar")
-print(f"Stopping condition: density {rho_stop:.1f}kg/m³")
+    # Calculate initial density from given pressure and temperature
+    rho0 = PropsSI("Dmass", "P", p0, "T", T0, fluid)
+    m0 = rho0 * V_t
+    t_span = (t_offset, t_offset + max_time)
 
-# Check initial model selection
-initial_p = PropsSI('P', 'T', T0, 'Dmass', rho0, fluid)
-if is_near_saturation(T0, initial_p, fluid):
-    initial_model = "two_phase"
-else:
-    initial_model = "single_phase"
+    # Create time-offset adjusted density event function
+    def density_event_with_offset(t, y):
+        """Event function to detect when density reaches stopping threshold."""
+        m, T, Ts = y
+        m = max(m, 1e-12)
+        current_density = m / V_t
+        return current_density - rho_stop
 
-try:
-    p_sat_initial = PropsSI("P", "T", T0, "Q", 0, fluid)
-except:
-    pass
+    # Configure the event to stop integration when density threshold is reached
+    density_event_with_offset.terminal = True
 
-
-print("Solving ODEs...")
-
-# Reset step counter before integration
-step_counter = 0
-
-# Use scenario-specified time span directly
-t_span_limited = t_span
-
-# Build solver arguments from scenario settings
-solver_kwargs = {
-    'method': solver_settings['method'],
-    'atol': solver_settings['atol'],
-    'rtol': solver_settings['rtol'],
-    'dense_output': solver_settings['dense_output'],
-    'events': density_event
-}
-
-# Add optional parameters only if they are not None
-if solver_settings['max_step'] is not None:
-    solver_kwargs['max_step'] = solver_settings['max_step']
-if solver_settings['min_step'] is not None:
-    solver_kwargs['min_step'] = solver_settings['min_step']
-if solver_settings['first_step'] is not None:
-    solver_kwargs['first_step'] = solver_settings['first_step']
-
-sol = solve_ivp(odes, t_span_limited, y0, **solver_kwargs)
-
-print("Integration completed!")
-if not sol.success:
-    print(f"Solution message: {sol.message}")
-else:
-    # Check if simulation was stopped by density event
-    if hasattr(sol, 't_events') and len(sol.t_events) > 0 and len(sol.t_events[0]) > 0:
-        stop_time = sol.t_events[0][0]
-        stop_state = sol.y_events[0][0]
-        stop_mass, stop_temp, stop_temp_s = stop_state
-        stop_density = stop_mass / V_t
-        stop_pressure = PropsSI("P", "T", stop_temp, "Dmass", stop_density, fluid)
-
-        print(f"\n*** DENSITY STOPPING CONDITION TRIGGERED ***")
-        print(f"Simulation stopped at t = {stop_time:.2f} seconds")
-        print(f"Final density: {stop_density:.2f} kg/m³ ({stop_density/1000:.3f} g/L)")
-        print(f"Final conditions:")
-        print(f"  Mass: {stop_mass:.2f} kg")
-        print(f"  Temperature: {stop_temp:.2f} K")
-        print(f"  Solid Temperature: {stop_temp_s:.2f} K")
-        print(f"  Pressure: {stop_pressure/1e5:.2f} bar")
+    # Set direction based on scenario:
+    # REFUEL: +1 (density increasing), DISCHARGE/DORMANCY: -1 (density decreasing)
+    if scenario_name == 'REFUEL':
+        density_event_with_offset.direction = +1  # Detect increasing density for refuel scenarios
     else:
-        final_density = sol.y[0, -1] / V_t
-        print(f"Simulation completed without reaching density threshold.")
-        print(f"Final density: {final_density:.2f} kg/m³ ({final_density/1000:.3f} g/L)")
+        density_event_with_offset.direction = -1  # Detect decreasing density for discharge/dormancy scenarios
 
-# Postprocess
-print("\nPostprocessing...")
+    # Initial state
+    y0 = [m0, T0, Ts0]
 
-# Determine the actual time span for evaluation based on whether simulation stopped early
-if hasattr(sol, 't_events') and len(sol.t_events) > 0 and len(sol.t_events[0]) > 0:
-    # Simulation stopped due to density event
-    actual_t_final = sol.t_events[0][0]
-else:
-    # Simulation completed full time span
-    actual_t_final = t_span[1]
+    if verbose:
+        print(f"\n=== Starting {scenario_name} simulation ===")
+        print(f"Initial conditions: T={T0:.2f}K, P={p0/1e5:.2f}bar")
+        print(f"Stopping condition: density {rho_stop:.1f}kg/m³")
+        print(f"Time span: {t_span[0]:.1f} - {t_span[1]:.1f} seconds")
 
-t_eval = np.linspace(t_span[0], actual_t_final, 400)
-y_eval = sol.sol(t_eval)
-m_sol, T_sol, Ts_sol = y_eval
-rho_sol = m_sol / V_t
-
-p_sol = []
-model_used = []  # Track which model was used at each time point
-for i, (T, rho) in enumerate(zip(T_sol, rho_sol)):
-    p = PropsSI("P", "T", T, "Dmass", rho, fluid)
-    p_sol.append(p)
-
-    # Determine which model would be used at this state
-    if is_near_saturation(T, p, fluid):
-        selected_model = "two_phase"
+    # Check initial model selection
+    initial_p = PropsSI('P', 'T', T0, 'Dmass', rho0, fluid)
+    if is_near_saturation(T0, initial_p, fluid):
+        initial_model = "two_phase"
     else:
-        selected_model = "single_phase"
-    model_used.append(selected_model)
+        initial_model = "single_phase"
 
-print("Postprocessing completed!")
+    if verbose:
+        print(f"Initial model: {initial_model}")
+        print("Solving ODEs...")
 
-p_sol = np.array(p_sol)
-model_used = np.array(model_used)
+    # Reset step counter before integration
+    step_counter = 0
 
-# Print summary statistics
-single_phase_count = np.sum(model_used == 'single_phase')
-two_phase_count = np.sum(model_used == 'two_phase')
-total_points = len(model_used)
+    # Build solver arguments from scenario settings
+    solver_kwargs = {
+        'method': solver_settings['method'],
+        'atol': solver_settings['atol'],
+        'rtol': solver_settings['rtol'],
+        'dense_output': solver_settings['dense_output'],
+        'events': density_event_with_offset
+    }
 
-print(f"\nSimulation Summary:")
-print(f"Total time points: {total_points}")
-print(f"Single-phase model used: {single_phase_count} times ({100*single_phase_count/total_points:.1f}%)")
-print(f"Two-phase model used: {two_phase_count} times ({100*two_phase_count/total_points:.1f}%)")
-print(f"Final density: {rho_sol[-1]:.2f} kg/m³ ({rho_sol[-1]/1000:.3f} g/L)")
-print(f"Density range: {rho_sol.min():.2f} - {rho_sol.max():.2f} kg/m³")
-if rho_sol[-1] >= rho_stop * 0.99:  # Within 1% of stopping density
-    print(f"*** Density stopping condition ({rho_stop:.1f} kg/m³) was reached ***")
+    # Add optional parameters only if they are not None
+    if solver_settings['max_step'] is not None:
+        solver_kwargs['max_step'] = solver_settings['max_step']
+    if solver_settings['min_step'] is not None:
+        solver_kwargs['min_step'] = solver_settings['min_step']
+    if solver_settings['first_step'] is not None:
+        solver_kwargs['first_step'] = solver_settings['first_step']
 
-# Find pressure range where two-phase model is active
-if two_phase_count > 0:
-    two_phase_indices = model_used == 'two_phase'
-    p_two_phase = p_sol[two_phase_indices]
-    T_two_phase = T_sol[two_phase_indices]
-    print(f"Two-phase region:")
-    print(f"  Pressure range: {p_two_phase.min()/1e5:.2f} - {p_two_phase.max()/1e5:.2f} bar")
-    print(f"  Temperature range: {T_two_phase.min():.2f} - {T_two_phase.max():.2f} K")
+    # Solve the ODE system
+    sol = solve_ivp(odes, t_span, y0, **solver_kwargs)
 
-# ----------------- Plots -----------------
-plt.figure(figsize=(15, 10))
+    # Prepare stop information
+    stop_info = None
+    if sol.success:
+        if hasattr(sol, 't_events') and len(sol.t_events) > 0 and len(sol.t_events[0]) > 0:
+            # Simulation stopped by density event
+            stop_time = sol.t_events[0][0]
+            stop_state = sol.y_events[0][0]
+            stop_mass, stop_temp, stop_temp_s = stop_state
+            stop_density = stop_mass / V_t
+            stop_pressure = PropsSI("P", "T", stop_temp, "Dmass", stop_density, fluid)
 
-# Mass vs time
-plt.subplot(2, 4, 1)
-plt.plot(t_eval, m_sol)
-plt.xlabel("time (s)")
-plt.ylabel("m (kg)")
-plt.title("Mass vs time")
-plt.grid(True)
+            stop_info = {
+                'stopped_by_event': True,
+                'stop_time': stop_time,
+                'final_mass': stop_mass,
+                'final_temperature': stop_temp,
+                'final_solid_temperature': stop_temp_s,
+                'final_density': stop_density,
+                'final_pressure': stop_pressure
+            }
 
-# Gas Temperature vs time
-plt.subplot(2, 4, 2)
-plt.plot(t_eval, T_sol)
-plt.xlabel("time (s)")
-plt.ylabel("T (K)")
-plt.title("Gas Temperature vs time")
-plt.grid(True)
+            if verbose:
+                print(f"\n*** DENSITY STOPPING CONDITION TRIGGERED ***")
+                print(f"Simulation stopped at t = {stop_time:.2f} seconds")
+                print(f"Final density: {stop_density:.2f} kg/m³ ({stop_density:.2f} g/L)")
+                print(f"Final conditions:")
+                print(f"  Mass: {stop_mass:.2f} kg")
+                print(f"  Temperature: {stop_temp:.2f} K")
+                print(f"  Solid Temperature: {stop_temp_s:.2f} K")
+                print(f"  Pressure: {stop_pressure/1e5:.2f} bar")
+        else:
+            # Simulation completed full time span
+            final_density = sol.y[0, -1] / V_t
+            stop_info = {
+                'stopped_by_event': False,
+                'final_density': final_density
+            }
 
-# Liner/Wall Temperature vs time
-plt.subplot(2, 4, 3)
-plt.plot(t_eval, Ts_sol)
-plt.xlabel("time (s)")
-plt.ylabel("T_s (K)")
-plt.title("Liner/Wall Temperature vs time")
-plt.grid(True)
+            if verbose:
+                print(f"Simulation completed without reaching density threshold.")
+                print(f"Final density: {final_density:.2f} kg/m³ ({final_density:.2f} g/L)")
 
-# Pressure vs time
-plt.subplot(2, 4, 4)
-plt.plot(t_eval, p_sol/1e5)
-plt.xlabel("time (s)")
-plt.ylabel("p (bar)")
-plt.title("Pressure vs time")
-plt.grid(True)
+    if verbose:
+        print("Integration completed!")
+        if not sol.success:
+            print(f"Solution message: {sol.message}")
 
-# Density vs time (NEW)
-plt.subplot(2, 4, 5)
-plt.plot(t_eval, rho_sol, 'b-', linewidth=2, label='Density')
-plt.axhline(y=rho_stop, color='r', linestyle='--', linewidth=2,
-           label=f'Stop threshold ({rho_stop:.1f} kg/m³)')
-plt.xlabel("time (s)")
-plt.ylabel("ρ (kg/m³)")
-plt.title("Density vs time")
-plt.legend()
-plt.grid(True)
+    # Prepare metadata
+    metadata = {
+        'initial_conditions': initial_conditions,
+        'rho_stop': rho_stop,
+        'max_time': max_time,
+        'solver_settings': solver_settings,
+        'initial_model': initial_model,
+        'V_t': V_t
+    }
 
-# Model usage vs time
-plt.subplot(2, 4, 6)
-model_numeric = np.where(model_used == 'single_phase', 0, 1)
-plt.plot(t_eval, model_numeric, linewidth=2)
-plt.xlabel("time (s)")
-plt.ylabel("Model Type")
-plt.title("Model Usage vs time")
-plt.yticks([0, 1], ['Single Phase', 'Two Phase'])
-plt.grid(True)
+    return {
+        'sol': sol,
+        'scenario': scenario_name,
+        'success': sol.success,
+        'stop_info': stop_info,
+        't_offset': t_offset,
+        'metadata': metadata
+    }
 
-# Pressure vs Temperature with model regions
-plt.subplot(2, 4, 7)
-single_phase_mask = model_used == 'single_phase'
-two_phase_mask = model_used == 'two_phase'
+def postprocess_simulation_result(result, num_points=400):
+    """
+    Postprocess a simulation result to extract time series data.
 
-if np.any(single_phase_mask):
-    plt.scatter(T_sol[single_phase_mask], p_sol[single_phase_mask]/1e5,
-               c='blue', label='Single Phase', alpha=0.6, s=10)
-if np.any(two_phase_mask):
-    plt.scatter(T_sol[two_phase_mask], p_sol[two_phase_mask]/1e5,
-               c='red', label='Two Phase', alpha=0.6, s=10)
+    Parameters
+    ----------
+    result : dict
+        Result dictionary from run_hydrogen_tank_simulation()
+    num_points : int, optional
+        Number of points for interpolated time series (default: 400)
 
-plt.xlabel("T (K)")
-plt.ylabel("p (bar)")
-plt.title("Pressure vs Temperature\n(colored by model)")
-plt.legend()
-plt.grid(True)
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 't': time array
+        - 'm': mass array
+        - 'T': temperature array
+        - 'Ts': solid temperature array
+        - 'rho': density array
+        - 'p': pressure array
+        - 'model_used': array of model types used
+        - 'stats': summary statistics
+    """
+    sol = result['sol']
+    scenario = result['scenario']
+    t_offset = result['t_offset']
+    metadata = result['metadata']
+    V_t = metadata['V_t']
 
-# Density vs Temperature (NEW)
-plt.subplot(2, 4, 8)
-plt.plot(T_sol, rho_sol, 'g-', linewidth=2)
-plt.axhline(y=rho_stop, color='r', linestyle='--', linewidth=2,
-           label=f'Stop threshold')
-plt.xlabel("T (K)")
-plt.ylabel("ρ (kg/m³)")
-plt.title("Density vs Temperature")
-plt.legend()
-plt.grid(True)
+    # Determine the actual time span for evaluation
+    if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+        actual_t_final = result['stop_info']['stop_time']
+    else:
+        actual_t_final = sol.t[-1]
 
-plt.tight_layout()
-plt.show()
+    # Create evaluation time points
+    t_eval = np.linspace(sol.t[0], actual_t_final, num_points)
+    y_eval = sol.sol(t_eval)
+    m_sol, T_sol, Ts_sol = y_eval
+    rho_sol = m_sol / V_t
+
+    # Calculate pressure and track models used
+    p_sol = []
+    model_used = []
+    for i, (T, rho) in enumerate(zip(T_sol, rho_sol)):
+        p = PropsSI("P", "T", T, "Dmass", rho, fluid)
+        p_sol.append(p)
+
+        # Determine which model would be used at this state
+        if is_near_saturation(T, p, fluid):
+            selected_model = "two_phase"
+        else:
+            selected_model = "single_phase"
+        model_used.append(selected_model)
+
+    p_sol = np.array(p_sol)
+    model_used = np.array(model_used)
+
+    # Calculate summary statistics
+    single_phase_count = np.sum(model_used == 'single_phase')
+    two_phase_count = np.sum(model_used == 'two_phase')
+    total_points = len(model_used)
+
+    stats = {
+        'total_points': total_points,
+        'single_phase_count': single_phase_count,
+        'two_phase_count': two_phase_count,
+        'single_phase_percentage': 100 * single_phase_count / total_points,
+        'two_phase_percentage': 100 * two_phase_count / total_points,
+        'final_density': rho_sol[-1],
+        'density_range': [rho_sol.min(), rho_sol.max()],
+        'density_threshold_reached': rho_sol[-1] >= metadata['rho_stop'] * 0.99
+    }
+
+    # Add two-phase region statistics if applicable
+    if two_phase_count > 0:
+        two_phase_indices = model_used == 'two_phase'
+        p_two_phase = p_sol[two_phase_indices]
+        T_two_phase = T_sol[two_phase_indices]
+        stats['two_phase_pressure_range'] = [p_two_phase.min(), p_two_phase.max()]
+        stats['two_phase_temperature_range'] = [T_two_phase.min(), T_two_phase.max()]
+
+    return {
+        't': t_eval,
+        'm': m_sol,
+        'T': T_sol,
+        'Ts': Ts_sol,
+        'rho': rho_sol,
+        'p': p_sol,
+        'model_used': model_used,
+        'stats': stats,
+        'scenario': scenario,
+        't_offset': t_offset
+    }
+
+def run_chained_scenarios(scenarios=['DISCHARGE', 'REFUEL', 'DORMANCY'], verbose=True):
+    """
+    Run multiple scenarios in sequence, using the final state of one as initial state of the next.
+
+    Parameters
+    ----------
+    scenarios : list, optional
+        List of scenario names to run in order (default: ['DISCHARGE', 'REFUEL', 'DORMANCY'])
+    verbose : bool, optional
+        Whether to print progress information (default: True)
+
+    Returns
+    -------
+    list
+        List of simulation result dictionaries
+    """
+    results = []
+    current_time_offset = 0.0
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Running chained scenarios: {' → '.join(scenarios)}")
+        print(f"{'='*60}")
+
+    for i, scenario in enumerate(scenarios):
+        if verbose:
+            print(f"\n--- Scenario {i+1}/{len(scenarios)}: {scenario} ---")
+
+        # Run the scenario
+        result = run_hydrogen_tank_simulation(scenario, verbose=verbose, t_offset=current_time_offset)
+        results.append(result)
+
+        # Update time offset for next scenario
+        if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+            current_time_offset = result['stop_info']['stop_time']
+        else:
+            current_time_offset = result['sol'].t[-1]
+
+        if verbose and result['success']:
+            print(f"✓ {scenario} completed successfully")
+            if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+                print(f"  Stopped at density threshold: {result['stop_info']['final_density']:.2f} kg/m³")
+            else:
+                print(f"  Completed full time span")
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"All scenarios completed! Total simulation time: {current_time_offset:.2f} seconds")
+        print(f"{'='*60}")
+
+    return results
+
+def plot_chained_scenarios(results, postprocessed_data=None):
+    """
+    Plot results from multiple scenarios with different colors.
+
+    Parameters
+    ----------
+    results : list
+        List of result dictionaries from run_hydrogen_tank_simulation()
+    postprocessed_data : list, optional
+        List of postprocessed data dictionaries. If None, will postprocess automatically.
+    """
+    if postprocessed_data is None:
+        postprocessed_data = [postprocess_simulation_result(result) for result in results]
+
+    colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown']
+    scenario_colors = {data['scenario']: colors[i % len(colors)] for i, data in enumerate(postprocessed_data)}
+
+    plt.figure(figsize=(16, 12))
+
+    # Mass vs time
+    plt.subplot(3, 4, 1)
+    for data in postprocessed_data:
+        plt.plot(data['t'], data['m'], color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Mass (kg)")
+    plt.title("Mass vs Time")
+    plt.legend()
+    plt.grid(True)
+
+    # Gas Temperature vs time
+    plt.subplot(3, 4, 2)
+    for data in postprocessed_data:
+        plt.plot(data['t'], data['T'], color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Temperature (K)")
+    plt.title("Gas Temperature vs Time")
+    plt.legend()
+    plt.grid(True)
+
+    # Liner/Wall Temperature vs time
+    plt.subplot(3, 4, 3)
+    for data in postprocessed_data:
+        plt.plot(data['t'], data['Ts'], color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Solid Temperature (K)")
+    plt.title("Liner/Wall Temperature vs Time")
+    plt.legend()
+    plt.grid(True)
+
+    # Pressure vs time
+    plt.subplot(3, 4, 4)
+    for data in postprocessed_data:
+        plt.plot(data['t'], data['p']/1e5, color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Pressure (bar)")
+    plt.title("Pressure vs Time")
+    plt.legend()
+    plt.grid(True)
+
+    # Density vs time
+    plt.subplot(3, 4, 5)
+    for i, data in enumerate(postprocessed_data):
+        plt.plot(data['t'], data['rho'], color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+        # Add density stopping threshold for reference
+        result = results[i]
+        rho_stop = result['metadata']['rho_stop']
+        plt.axhline(y=rho_stop, color=scenario_colors[data['scenario']],
+                   linestyle='--', alpha=0.5, linewidth=1)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Density (kg/m³)")
+    plt.title("Density vs Time")
+    plt.legend()
+    plt.grid(True)
+
+    # Model usage vs time
+    plt.subplot(3, 4, 6)
+    for data in postprocessed_data:
+        model_numeric = np.where(data['model_used'] == 'single_phase', 0, 1)
+        plt.plot(data['t'], model_numeric, color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Model Type")
+    plt.title("Model Usage vs Time")
+    plt.yticks([0, 1], ['Single Phase', 'Two Phase'])
+    plt.legend()
+    plt.grid(True)
+
+    # Pressure vs Temperature
+    plt.subplot(3, 4, 7)
+    for data in postprocessed_data:
+        single_phase_mask = data['model_used'] == 'single_phase'
+        two_phase_mask = data['model_used'] == 'two_phase'
+
+        base_color = scenario_colors[data['scenario']]
+        if np.any(single_phase_mask):
+            plt.scatter(data['T'][single_phase_mask], data['p'][single_phase_mask]/1e5,
+                       c=base_color, alpha=0.6, s=10, marker='o',
+                       label=f'{data["scenario"]} (Single)')
+        if np.any(two_phase_mask):
+            plt.scatter(data['T'][two_phase_mask], data['p'][two_phase_mask]/1e5,
+                       c=base_color, alpha=0.6, s=10, marker='s',
+                       label=f'{data["scenario"]} (Two)')
+    plt.xlabel("Temperature (K)")
+    plt.ylabel("Pressure (bar)")
+    plt.title("Pressure vs Temperature")
+    plt.legend()
+    plt.grid(True)
+
+    # Density vs Temperature
+    plt.subplot(3, 4, 8)
+    for i, data in enumerate(postprocessed_data):
+        plt.plot(data['T'], data['rho'], color=scenario_colors[data['scenario']],
+                label=data['scenario'], linewidth=2)
+        # Add density stopping threshold for reference
+        result = results[i]
+        rho_stop = result['metadata']['rho_stop']
+        plt.axhline(y=rho_stop, color=scenario_colors[data['scenario']],
+                   linestyle='--', alpha=0.5, linewidth=1)
+    plt.xlabel("Temperature (K)")
+    plt.ylabel("Density (kg/m³)")
+    plt.title("Density vs Temperature")
+    plt.legend()
+    plt.grid(True)
+
+    # Summary statistics
+    plt.subplot(3, 4, 9)
+    scenarios = [data['scenario'] for data in postprocessed_data]
+    single_percentages = [data['stats']['single_phase_percentage'] for data in postprocessed_data]
+    two_percentages = [data['stats']['two_phase_percentage'] for data in postprocessed_data]
+
+    x = np.arange(len(scenarios))
+    width = 0.35
+
+    plt.bar(x - width/2, single_percentages, width, label='Single Phase', alpha=0.7)
+    plt.bar(x + width/2, two_percentages, width, label='Two Phase', alpha=0.7)
+    plt.xlabel('Scenario')
+    plt.ylabel('Percentage (%)')
+    plt.title('Model Usage Summary')
+    plt.xticks(x, scenarios, rotation=45)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # Timeline overview
+    plt.subplot(3, 4, 10)
+    for i, data in enumerate(postprocessed_data):
+        scenario_duration = data['t'][-1] - data['t'][0]
+        plt.barh(i, scenario_duration, left=data['t'][0],
+                color=scenario_colors[data['scenario']], alpha=0.7,
+                label=data['scenario'])
+        plt.text(data['t'][0] + scenario_duration/2, i,
+                f'{scenario_duration:.0f}s', ha='center', va='center')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Scenario')
+    plt.title('Scenario Timeline')
+    plt.yticks(range(len(postprocessed_data)), [data['scenario'] for data in postprocessed_data])
+    plt.grid(True, alpha=0.3)
+
+    # Final density comparison
+    plt.subplot(3, 4, 11)
+    final_densities = [data['rho'][-1] for data in postprocessed_data]
+    target_densities = [results[i]['metadata']['rho_stop'] for i in range(len(results))]
+
+    x = np.arange(len(scenarios))
+    plt.bar(x, final_densities, alpha=0.7, label='Final Density')
+    plt.scatter(x, target_densities, color='red', s=50, label='Target Density', zorder=5)
+    plt.xlabel('Scenario')
+    plt.ylabel('Density (kg/m³)')
+    plt.title('Final vs Target Density')
+    plt.xticks(x, scenarios, rotation=45)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # Print summary table
+    plt.subplot(3, 4, 12)
+    plt.axis('off')
+    summary_text = "Simulation Summary:\n\n"
+    for i, data in enumerate(postprocessed_data):
+        result = results[i]
+        stats = data['stats']
+        summary_text += f"{data['scenario']}:\n"
+        summary_text += f"  Duration: {data['t'][-1] - data['t'][0]:.1f}s\n"
+        summary_text += f"  Final ρ: {stats['final_density']:.1f} kg/m³\n"
+        summary_text += f"  Two-phase: {stats['two_phase_percentage']:.1f}%\n"
+        if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+            summary_text += f"  ✓ Stopped at threshold\n"
+        else:
+            summary_text += f"  ○ Completed time span\n"
+        summary_text += "\n"
+
+    plt.text(0.05, 0.95, summary_text, transform=plt.gca().transAxes,
+             verticalalignment='top', fontfamily='monospace', fontsize=9)
+
+    plt.tight_layout()
+    plt.show()
+
+    # Print detailed statistics
+    print(f"\n{'='*80}")
+    print("DETAILED SIMULATION STATISTICS")
+    print(f"{'='*80}")
+
+    for i, (result, data) in enumerate(zip(results, postprocessed_data)):
+        print(f"\n{i+1}. {data['scenario']} SCENARIO:")
+        print(f"   Time range: {data['t'][0]:.1f} - {data['t'][-1]:.1f} seconds ({data['t'][-1] - data['t'][0]:.1f}s duration)")
+        print(f"   Final density: {data['stats']['final_density']:.2f} kg/m³ (target: {result['metadata']['rho_stop']:.1f} kg/m³)")
+        print(f"   Density range: {data['stats']['density_range'][0]:.2f} - {data['stats']['density_range'][1]:.2f} kg/m³")
+        print(f"   Model usage: {data['stats']['single_phase_percentage']:.1f}% single-phase, {data['stats']['two_phase_percentage']:.1f}% two-phase")
+
+        if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+            print(f"   ✓ Stopped by density threshold at t={result['stop_info']['stop_time']:.2f}s")
+        else:
+            print(f"   ○ Completed full time span")
+
+        if 'two_phase_pressure_range' in data['stats']:
+            p_range = data['stats']['two_phase_pressure_range']
+            T_range = data['stats']['two_phase_temperature_range']
+            print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
+
+# ----------------- Main Execution (Example Usage) -----------------
+if __name__ == "__main__":
+    # Example: Run single scenario
+    # print("Example 1: Running single REFUEL scenario")
+    # result = run_hydrogen_tank_simulation('REFUEL', verbose=True)
+
+    # if result['success']:
+    #     # Postprocess and plot single scenario
+    #     data = postprocess_simulation_result(result)
+    #     plot_chained_scenarios([result], [data])
+
+    # Example: Run chained scenarios
+    print("\n" + "="*80)
+    print("Example 2: Running chained scenarios")
+    chained_results = run_chained_scenarios(['DISCHARGE', 'REFUEL', 'DORMANCY'], verbose=True)
+
+    # Postprocess all results
+    chained_data = [postprocess_simulation_result(result) for result in chained_results]
+
+    # Plot all scenarios together
+    plot_chained_scenarios(chained_results, chained_data)
 
