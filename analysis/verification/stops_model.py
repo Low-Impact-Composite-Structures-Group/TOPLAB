@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import sys
 import os
@@ -49,31 +48,6 @@ class ScenarioManager:
 
     def __init__(self):
         self.scenarios = {
-            'REFUEL': {
-                'initial_conditions': {
-                    'p0': 15.5e5,      # Initial pressure [Pa]
-                    'T0': 65.5,        # Initial temperature [K]
-                    'Ts0': "thermal_equilibrium",   # Initial solid temperature [K]
-                },
-                'rho_stop': 78.0,    # Stopping density [kg/m³]
-                'max_time': 700.0,   # Maximum simulation time [s]
-                'solver_settings': {
-                    'method': 'RK23',
-                    'atol': 1e-10,
-                    'rtol': 1e-8,
-                    'max_step': 0.05,
-                    'min_step': None,
-                    'first_step': None,
-                    'dense_output': True,
-                },
-                'mass_flow_functions': {
-                    'mdot_fuel': lambda t: 0.07,  # [kg/s]
-                    'mdot_disch': lambda t: 0.0,
-                    'mdot_vent': lambda t: 0.0,
-                },
-                'Qdot_disch': lambda t: 0.0,
-                'description': 'Tank refueling scenario'
-            },
             'DISCHARGE': {
                 'initial_conditions': {
                     'p0': 400e5,      # Initial pressure [Pa]
@@ -83,7 +57,7 @@ class ScenarioManager:
                 'rho_stop': 5.8,     # Stopping density [kg/m³]
                 'max_time': 40000.0, # Maximum simulation time [s]
                 'solver_settings': {
-                    'method': 'RK23',
+                    'method': 'RK45',
                     'atol': 1e-9,
                     'rtol': 1e-7,
                     'max_step': 10.0,
@@ -98,6 +72,31 @@ class ScenarioManager:
                 },
                 'Qdot_disch': lambda t: 1000.0,  # [W]
                 'description': 'Tank discharge scenario'
+            },
+            'REFUEL': {
+                'initial_conditions': {
+                    'p0': 15.3e5,      # Initial pressure [Pa]
+                    'T0': 65.5,        # Initial temperature [K]
+                    'Ts0': "thermal_equilibrium",   # Initial solid temperature [K]
+                },
+                'rho_stop': 78.0,    # Stopping density [kg/m³]
+                'max_time': 700.0,   # Maximum simulation time [s]
+                'solver_settings': {
+                    'method': 'RK45',
+                    'atol': 1e-10,
+                    'rtol': 1e-8,
+                    'max_step': 0.05,
+                    'min_step': None,
+                    'first_step': None,
+                    'dense_output': True,
+                },
+                'mass_flow_functions': {
+                    'mdot_fuel': lambda t: 0.07,  # [kg/s]
+                    'mdot_disch': lambda t: 0.0,
+                    'mdot_vent': lambda t: 0.0,
+                },
+                'Qdot_disch': lambda t: 0.0,
+                'description': 'Tank refueling scenario'
             },
             'DORMANCY': {
                 'initial_conditions': {
@@ -228,8 +227,6 @@ class ConfigurationManager:
 
         elif config == 'B':
             # Minimum pressure mode: p = p_min, qdot_disch= config_B_value, mdot_vent = 0
-            # Calculate the required discharge heat to maintain minimum pressure
-
             # Calculate Configuration B discharge heat
             qdot_disch = self._calculate_config_B_qdot_disch(T, rho, is_two_phase, t, mdot_disch_func, Ts)
 
@@ -258,9 +255,6 @@ class ConfigurationManager:
 
         Configuration B equation: Q_disch = M_disch · [T/ρ·(∂p/∂T)_ρ - ρ·cv·(∂T/∂ρ)_p] - Q_s
 
-        TODO: Investigate why we need ideal gas for term1 but CoolProp for term2 for numerical stability.
-        Mixed approach is required: ideal gas for term1, real thermodynamic derivatives for term2.
-
         Args:
             T: Temperature [K]
             rho: Density [kg/m³]
@@ -279,7 +273,6 @@ class ConfigurationManager:
 
         # For Configuration B, pressure is constrained to p_min
         p = self.p_min
-        nu = 1.0 / rho  # Specific volume [m³/kg]
 
         # Get thermodynamic properties at current state
         if is_two_phase:
@@ -296,19 +289,16 @@ class ConfigurationManager:
             cv = cp.PropsSI("Cvmass", "P", p, "T", T, self.fluid)
 
         # Calculate alpha_s for heat transfer
-        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-        # alpha_s = get_alpha_s_internal_model(T,p, Ts, None, 1.0, A_in)
+        alpha_s = get_alpha_s(T, Ts, diameter, convective_medium, p)
         Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
         # Term 1: T/ρ · (∂p/∂T)_ρ using real gas relationship
-        term1 = get_real_gas_work_term(T, rho, self.fluid)
+        dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
+        term1 = (T / rho) * dp_dT_rho
 
         # Term 2: ρ·cv·(∂T/∂ρ)_p using real CoolProp derivatives for accuracy
-        try:
-            dT_drho_p = cp.PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, self.fluid)
-        except:
-            # Fallback to ideal gas relationship if CoolProp fails
-            dT_drho_p = -T / rho
+        dT_drho_p = cp.PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, self.fluid)
+
         term2 = rho * cv * dT_drho_p
 
         qdot_disch = mdot_disch * (term1 - term2) - Qdot_s
@@ -337,7 +327,6 @@ class ConfigurationManager:
 
         # For Configuration C, pressure is constrained to p_vent
         p = self.p_vent
-        nu = 1.0 / rho  # Specific volume [m³/kg]
 
         # Get thermodynamic properties at current state
         if is_two_phase:
@@ -360,32 +349,29 @@ class ConfigurationManager:
             h_vent = h  # Single-phase venting
 
         # Calculate alpha_s for heat transfer
-        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-        # alpha_s = get_alpha_s_internal_model(T,p, Ts, None, 1.0, A_in)
+        alpha_s = get_alpha_s(T, Ts, diameter, convective_medium, p)
+
+        # compute heat transfered from solid to fluid
         Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
         # Term 1: T/ρ · (∂p/∂T)_ρ using real gas relationship
-        term1 = get_real_gas_work_term(T, rho, self.fluid)
+        dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
+        term1 = (T / rho) * dp_dT_rho
 
         # Term 2: ρ·cv·(∂T/∂ρ)_p using real CoolProp derivatives for accuracy
-        try:
-            dT_drho_p = cp.PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, self.fluid)
-        except:
-            # Fallback to ideal gas relationship if CoolProp fails
-            dT_drho_p = -T / rho
+        dT_drho_p = cp.PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, self.fluid)
+
         term2 = rho * cv * dT_drho_p
 
         # Calculate denominator
         denominator = term1 - term2 + h_vent - h
 
-        # Avoid division by zero
-        if abs(denominator) < 1e-12:
-            return 0.0
-
+        # compute mdot_vent
         mdot_vent = Qdot_s / denominator
 
-        # Ensure non-negative venting (can't vent negative mass)
-        mdot_vent = max(0.0, mdot_vent)
+        # kill simulation if mdot_vent is negative or NaN
+        if mdot_vent < 0 or np.isnan(mdot_vent):
+            raise ValueError("Negative or NaN venting mass flow calculated, stopping simulation.")
 
         return mdot_vent
 
@@ -457,50 +443,13 @@ class ModelSwitcher:
         # Algebraic equation (6): ρ = m/V_tank
         rho = m / V_t
 
-        try:
-            # Algebraic equation (7): h = h(T, ρ)
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, self.fluid)
-            p = PropsSI("P", "T", T, "Dmass", rho, self.fluid)
+        # try:
+        # Algebraic equation (7): h = h(T, ρ)
+        # h = PropsSI("Hmass", "T", T, "Dmass", rho, self.fluid)
+        p = PropsSI("P", "T", T, "Dmass", rho, self.fluid)
 
-            # Pre-calculate thermodynamic derivatives at current state
-            is_two_phase = is_near_saturation(T, p, self.fluid)
-
-            if is_two_phase:
-                # Two-phase: pre-calculate (T/ρ) * (dP_sat/dT)
-                h_vapor = PropsSI("Hmass", "T", T, "Q", 1, self.fluid)
-                h_liquid = PropsSI("Hmass", "T", T, "Q", 0, self.fluid)
-                rho_vapor = PropsSI("Dmass", "T", T, "Q", 1, self.fluid)
-                rho_liquid = PropsSI("Dmass", "T", T, "Q", 0, self.fluid)
-
-                L_v = h_vapor - h_liquid  # Latent heat
-                delta_v = (1.0/rho_vapor) - (1.0/rho_liquid)  # Specific volume difference
-                dp_sat_dT = L_v / (T * delta_v)  # Clausius-Clapeyron
-
-                thermo_coeff = (T / rho) * dp_sat_dT  # Pre-calculated coefficient
-            else:
-                # Single-phase: pre-calculate (∂P/∂T)_ρ
-                # Use finite difference approximation
-                dT = 0.01  # Small temperature perturbation
-                try:
-                    p_plus = PropsSI("P", "T", T + dT, "Dmass", rho, self.fluid)
-                    dp_dT = (p_plus - p) / dT
-                except:
-                    # Fallback using ideal gas approximation
-                    dp_dT = p / T
-
-                nu = 1.0 / rho  # Specific volume
-                thermo_coeff = nu * dp_dT  # Pre-calculated coefficient
-
-        except Exception as e:
-            print(f"CoolProp error at t={t:.3f}s: {e}")
-            print(f"  State: m={m:.3f}, T={T:.3f}, rho={rho:.3f}")
-            # Use fallback values to continue simulation
-            h = 500000.0  # Reasonable enthalpy fallback
-            is_two_phase = False
-            thermo_coeff = 0.1  # Small fallback coefficient
-            p = 1e5  # 1 bar fallback pressure
-
-        # Now solve the coupled system with pre-calculated thermodynamic coefficient
+        # Pre-calculate thermodynamic derivatives at current state
+        is_two_phase = is_near_saturation(T, p, self.fluid)
 
         # Select configuration for algebraic equations (8,9,10)
         current_config = self.config_manager.select_configuration(p, is_two_phase)
@@ -514,7 +463,7 @@ class ModelSwitcher:
         mdot_vent = config_eqs['mdot_vent']    # Config-dependent venting
 
         # Algebraic equations (4,5): Heat transfer (coupled with temperatures)
-        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p_config)
+        alpha_s = get_alpha_s(T, Ts, diameter, convective_medium, p_config)
         self.alpha_s_last = alpha_s  # Store for debugging
         Qdot_s = alpha_s * A_in * (Ts - T)     # Equation (4)
         Qdot_amb = k_amb * A_out * (T_amb - Ts) # Equation (5)
@@ -558,9 +507,8 @@ PRINT_EVERY_N_STEPS = 50  # Print progress every N steps
 step_counter = 0  # Global counter
 
 # Geometric parameters for alpha_s calculation
-D_inner = 1.0      # Inner diameter [m]
-D_outer = 1.0     # Outer diameter [m]
-annular_fluid = "Hydrogen"  # Fluid in the gap
+diameter = 1.0      # Inner diameter [m]  # Outer diameter [m]
+convective_medium = "Hydrogen"  # Fluid in the gap
 
 # Configuration pressure thresholds
 p_min = 15e5       # Minimum pressure threshold for configuration B [Pa]
@@ -572,52 +520,19 @@ config_manager = ConfigurationManager(fluid, p_min, p_vent)
 model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Initialize NIST materials
-liner_material = NISTMetal.aluminum_6061T6_nist()
+liner_material = NISTMetal.aluminum_5083_nist()
 wall_material = NISTComposite.g10_nist(winding_angle=0.0)
 
 def c_liner_func(Ts):
-    """Get specific heat of aluminum 6061-T6 liner using NIST data"""
+    """Get specific heat of aluminum 5083 liner using NIST data"""
     return liner_material.determine_specific_heat(Ts)
 
 def c_wall_func(Ts):
     """Get specific heat of G10 wall using NIST data"""
     return wall_material.determine_specific_heat(Ts)
 
-# ----------------- Real Gas Work Term Function -----------------
-def get_real_gas_work_term(T, rho, fluid):
-    """
-    Calculate the real gas work term (T/ρ) * (∂p/∂T)_ρ using CoolProp.
-
-    This replaces the ideal gas assumption p*v with proper real gas behavior.
-
-    Args:
-        T: Temperature [K]
-        rho: Density [kg/m³]
-        fluid: Fluid name for CoolProp
-
-    Returns:
-        work_term: (T/ρ) * (∂p/∂T)_ρ [Pa·m³/kg]
-    """
-    try:
-        # Calculate (∂p/∂T)_ρ using CoolProp
-        dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
-
-        # Calculate (T/ρ) * (∂p/∂T)_ρ
-        work_term = (T / rho) * dp_dT_rho
-
-        return work_term
-
-    except Exception as e:
-        # Fallback to ideal gas if CoolProp fails
-        print(f"Warning: CoolProp failed for real gas work term at T={T:.2f}K, rho={rho:.2f}kg/m³: {e}")
-        print("  Falling back to ideal gas approximation p/rho")
-
-        # Use ideal gas: p*v = p/rho (approximately)
-        p = PropsSI("P", "T", T, "Dmass", rho, fluid)
-        return p / rho
-
 # ----------------- Heat Transfer Coefficient Function -----------------
-def get_alpha_s(T, Ts, D, D_o, fluid="Air", p=101325):
+def get_alpha_s(T, Ts, D, fluid="Air", p=101325):
     """
     Compute equivalent inner convective heat transfer coefficient (h_i)
     for a horizontal concentric cylindrical annulus using
@@ -628,14 +543,10 @@ def get_alpha_s(T, Ts, D, D_o, fluid="Air", p=101325):
 
     Parameters
     ----------
-    T_i : float
+    T : float
         Inner cylinder surface temperature [K]
-    T_o : float
-        Outer cylinder surface temperature [K]
-    D_i : float
+    D : float
         Inner cylinder diameter [m]
-    D_o : float
-        Outer cylinder diameter [m]
     fluid : str, optional
         Fluid name for CoolProp (default = 'Air')
     p : float, optional
@@ -655,8 +566,7 @@ def get_alpha_s(T, Ts, D, D_o, fluid="Air", p=101325):
 
     References
     ----------
-    Kuehn, T.H., & Goldstein, R.J. (1976). Correlating equations for natural
-    convection heat transfer between horizontal circular cylinders.
+    Churchill & Chu (1975) Correlating equations for laminar and turbulent free convection from a horizontal cylinder
     """
 
     # Film temperature
@@ -677,231 +587,13 @@ def get_alpha_s(T, Ts, D, D_o, fluid="Air", p=101325):
     # Rayleigh number (based on diameter for horizontal cylinder)
     Ra_D = 9.81 * beta * abs(Ts - T) * D**3 / (nu * alpha)
 
-    # Churchill & Chu correlation for horizontal cylinder (valid 10^-5 < Ra < 10^12)
     Nu_D = (0.60 + (0.387 * Ra_D**(1/6)) /
            ( (1 + (0.559/Pr)**(9/16))**(8/27) ))**2
-    L = 2.0
-    # Rayleigh number (based on plate height L)
-    Ra_L = 9.81 * beta * abs(Ts - T) * L**3 / (nu * alpha)
-
-    # Churchill & Chu correlation for vertical plate (valid ~10^-1 < Ra < 10^12)
-    Nu_L = (0.825 + (0.387 * Ra_L**(1/6)) /
-            ( (1 + (0.492/Pr)**(9/16))**(8/27) ))**2
 
      # Heat transfer coefficient
-    h = Nu_L * k / D
+    h = Nu_D * k / D
     return h
 
-
-def get_alpha_s_internal_model(T_hydrogen, p_hydrogen, T_surface, fuel_height=None, characteristic_height=1.0, surface_area=None):
-    """
-    Compute heat transfer coefficient using the SingleZoneModel approach from internal_models.py.
-
-    This function emulates the logic from SingleZoneModel.get_thermal_resistances() to compute
-    the equivalent heat transfer coefficient for hydrogen convection based on phase state.
-
-    Parameters
-    ----------
-    T_hydrogen : float
-        Hydrogen temperature [K]
-    p_hydrogen : float
-        Hydrogen pressure [Pa]
-    T_surface : float
-        Surface temperature [K]
-    fuel_height : float, optional
-        Height of liquid fuel if two-phase (default: None, auto-detect phase)
-    characteristic_height : float, optional
-        Characteristic height for convection calculations [m] (default: 1.0)
-    surface_area : float, optional
-        Surface area [m²] (default: 1.0, returns coefficient per unit area)
-
-    Returns
-    -------
-    alpha_s : float
-        Heat transfer coefficient [W/m²·K]
-
-    Notes
-    -----
-    This function uses the same correlations as the SingleZoneModel:
-    - LiquidPhaseConvection: Nu = 0.0605 * Ra^(1/3) (Hochstein et al. 1986)
-    - GasPhaseConvection: Nu = 17 (Brewer 1991)
-    - For two-phase: parallel resistance combination
-
-    References
-    ----------
-    - Hochstein et al. (1986), Verstraete (2009)
-    - Brewer (1991)
-    - SingleZoneModel in internal_models.py
-    """
-
-    # Set default surface area if not provided
-    if surface_area is None:
-        surface_area = 1.0  # Return coefficient per unit area
-
-    # Determine phase state of hydrogen
-    try:
-        # Get critical properties for hydrogen
-        T_critical = PropsSI("TCRIT", "Hydrogen")  # ~33.2 K
-        p_critical = PropsSI("PCRIT", "Hydrogen")  # ~1.297 MPa
-
-        # Check if we're above critical conditions
-        if p_hydrogen > p_critical or T_hydrogen > T_critical:
-            # Supercritical - treat as gas
-            phase = "supercritical"
-            is_two_phase = False
-        else:
-            # Check if we're near saturation (two-phase)
-            try:
-                T_sat = PropsSI("T", "P", p_hydrogen, "Q", 0, "Hydrogen")
-                is_two_phase = abs(T_hydrogen - T_sat) < 1.0  # Within 1K of saturation
-            except:
-                # If saturation lookup fails, assume single phase
-                is_two_phase = False
-                # Determine phase based on temperature relative to saturation
-                try:
-                    T_sat_1bar = PropsSI("T", "P", 101325, "Q", 0, "Hydrogen")  # ~20.4 K
-                    if T_hydrogen < T_sat_1bar + 10:  # rough liquid estimate
-                        phase = "liquid"
-                    else:
-                        phase = "gas"
-                except:
-                    phase = "gas"  # default to gas if all else fails
-
-        if is_two_phase:
-            # Two-phase: get both liquid and gas properties
-            rho_liquid = PropsSI("D", "P", p_hydrogen, "Q", 0, "Hydrogen")
-            rho_gas = PropsSI("D", "P", p_hydrogen, "Q", 1, "Hydrogen")
-
-            # For two-phase, estimate fill fraction if not provided
-            if fuel_height is None:
-                fill_fraction = 0.5  # Default 50% liquid fill
-            else:
-                fill_fraction = fuel_height / characteristic_height
-                fill_fraction = max(0.0, min(1.0, fill_fraction))
-
-
-            # Get liquid properties at saturation
-            mu_liquid = PropsSI("V", "P", p_hydrogen, "Q", 0, "Hydrogen")
-            k_liquid = PropsSI("CONDUCTIVITY", "P", p_hydrogen, "Q", 0, "Hydrogen")
-            cp_liquid = PropsSI("C", "P", p_hydrogen, "Q", 0, "Hydrogen")
-            beta_liquid = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "P", p_hydrogen, "Q", 0, "Hydrogen")
-
-            # Get gas properties at saturation
-            mu_gas = PropsSI("V", "P", p_hydrogen, "Q", 1, "Hydrogen")
-            k_gas = PropsSI("CONDUCTIVITY", "P", p_hydrogen, "Q", 1, "Hydrogen")
-            cp_gas = PropsSI("C", "P", p_hydrogen, "Q", 1, "Hydrogen")
-            beta_gas = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "P", p_hydrogen, "Q", 1, "Hydrogen")
-
-            # Calculate liquid phase convection (Hochstein correlation)
-            nu_liquid = mu_liquid / rho_liquid
-            alpha_liquid = k_liquid / (rho_liquid * cp_liquid)
-            Pr_liquid = nu_liquid / alpha_liquid
-
-            # Rayleigh number for liquid phase
-            g = 9.81
-            Delta_T = abs(T_surface - T_hydrogen)
-            L_char_liquid = fuel_height if fuel_height is not None else characteristic_height * fill_fraction
-            L_char_liquid = max(L_char_liquid, 0.01)  # Minimum characteristic length
-
-            Ra_liquid = g * beta_liquid * Delta_T * L_char_liquid**3 * Pr_liquid / nu_liquid
-
-            # Liquid phase Nusselt number (Hochstein et al. 1986)
-            Nu_liquid = 0.0605 * Ra_liquid**(1/3)
-            h_liquid = Nu_liquid * k_liquid / L_char_liquid
-
-            # Calculate gas phase convection (Brewer correlation)
-            nu_gas = mu_gas / rho_gas
-            alpha_gas = k_gas / (rho_gas * cp_gas)
-
-            # Gas phase characteristic length
-            L_char_gas = characteristic_height - L_char_liquid
-            L_char_gas = max(L_char_gas, 0.01)  # Minimum characteristic length
-
-            # Gas phase Nusselt number (Brewer 1991)
-            Nu_gas = 17.0
-            h_gas = Nu_gas * k_gas / L_char_gas
-
-            # Compute thermal resistances
-            A_liquid = surface_area * fill_fraction
-            A_gas = surface_area * (1.0 - fill_fraction)
-
-            R_liquid = 1.0 / (h_liquid * A_liquid) if A_liquid > 0 else float('inf')
-            R_gas = 1.0 / (h_gas * A_gas) if A_gas > 0 else float('inf')
-
-            # Parallel resistance combination
-            if R_liquid == float('inf'):
-                R_total = R_gas
-            elif R_gas == float('inf'):
-                R_total = R_liquid
-            else:
-                R_total = 1.0 / (1.0/R_liquid + 1.0/R_gas)
-
-            # Convert back to heat transfer coefficient
-            alpha_s = 1.0 / (R_total * surface_area)
-
-        else:
-            # Single phase - determine if liquid or gas
-            if not locals().get('phase'):  # Only determine if not already set above
-                try:
-                    if T_hydrogen < T_sat:
-                        # Subcooled liquid
-                        phase = "liquid"
-                    else:
-                        # Superheated gas
-                        phase = "gas"
-                except:
-                    # If T_sat not available, default to gas
-                    phase = "gas"
-
-            if phase == "liquid":
-                # Liquid phase properties
-                rho = PropsSI("D", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-                mu = PropsSI("V", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-                k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-                cp = PropsSI("C", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-                beta = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-
-                # Liquid phase convection calculation
-                nu = mu / rho
-                alpha = k / (rho * cp)
-                Pr = nu / alpha
-
-                g = 9.81
-                Delta_T = abs(T_surface - T_hydrogen)
-                L_char = characteristic_height
-
-                Ra = g * beta * Delta_T * L_char**3 * Pr / nu
-
-                # Liquid phase Nusselt number (Hochstein et al. 1986)
-                Nu = 0.0605 * Ra**(1/3)
-                alpha_s = Nu * k / L_char
-
-            else:  # gas phase or supercritical
-                # Gas phase properties
-                rho = PropsSI("D", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-                k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-
-                # Gas phase convection calculation
-                # Use gas height (assume full tank height for single-phase gas)
-                L_char = characteristic_height
-
-                # Gas phase Nusselt number (Brewer 1991)
-                Nu = 17.0
-                alpha_s = Nu * k / L_char
-
-    except Exception as e:
-        print(f"Warning: Error in get_alpha_s_internal_model: {e}")
-        # Fallback to simple calculation
-        try:
-            k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
-            alpha_s = 10.0 * k / characteristic_height  # Simple fallback
-        except:
-            alpha_s = 50.0  # Final fallback value
-
-    return alpha_s
-
-
-# Remove the test function as it's not needed in production code
 
 # ----------------- Helper Functions -----------------
 def is_near_saturation(T, p, fluid):
@@ -982,7 +674,6 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
 
     h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
     c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, fluid)
-    nu = 1.0 / rho
 
     # Get mass flow rates (may be config-dependent)
     mdot_f = mdot_fuel_func(t)
@@ -1002,14 +693,15 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
     h_disch = h
     h_vent = h
 
-    # Use pre-calculated heat flows instead of computing them again
-    # (Qdot_s and Qdot_disch are passed as parameters)
-
     # Energy balance terms
     h_term = mdot_f * (h_fuel - h) - mdot_d * (h_disch - h) - mdot_v * (h_vent - h)
-    # PV work term
+
+    # compute work term
     net_mass_flow = mdot_f - mdot_d - mdot_v
-    work_term = get_real_gas_work_term(T, rho, fluid) * net_mass_flow
+    dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
+
+    # Calculate (T/ρ) * (∂p/∂T)_ρ
+    work_term = (T / rho) * dp_dT_rho * net_mass_flow
 
     numerator_T = h_term + work_term + Qdot_s + Qdot_disch
     dT_dt = numerator_T / (m * c_v)
@@ -1065,8 +757,6 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     # Clausius-Clapeyron: dp_sat/dT = L_v / (T * Δv)
     dp_sat_dT = L_v / (T * delta_v)
 
-    nu = 1.0 / rho
-
     # Get mass flow rates (may be config-dependent)
     mdot_f = mdot_fuel_func(t)
     mdot_d = mdot_disch_func(t)
@@ -1084,9 +774,6 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     h_disch = h
     h_vent = h
 
-    # Use pre-calculated heat flows instead of computing them again
-    # (Qdot_s and Qdot_disch are passed as parameters)
-
     # Energy balance terms
     h_term = mdot_f * (h_fuel - h) - mdot_d * (h_disch - h) - mdot_v * (h_vent - h)
 
@@ -1094,6 +781,7 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     net_mass_flow = mdot_f - mdot_d - mdot_v
     work_term = (T / rho) * dp_sat_dT * net_mass_flow
 
+    # (Qdot_s and Qdot_disch are passed as parameters)
     numerator_T = h_term + work_term + Qdot_s + Qdot_disch
 
     return numerator_T / (m * c_v2P)
@@ -1111,7 +799,7 @@ def is_single_phase_condition(T, p, rho):
 def single_phase_wrapper(t, y, Qdot_s, Qdot_disch):
     """Wrapper for single phase model to handle configuration management."""
     # Get current state for configuration selection
-    m, T, Ts = y
+    m, T, _ = y
     rho = m / V_t
 
     # Get preliminary pressure for configuration selection
@@ -1129,8 +817,7 @@ def single_phase_wrapper(t, y, Qdot_s, Qdot_disch):
 def two_phase_wrapper(t, y, Qdot_s, Qdot_disch):
     """Wrapper for two phase model to handle configuration management."""
     # Get current state for configuration selection
-    m, T, Ts = y
-    rho = m / V_t
+    _, T, _ = y
 
     # Get preliminary pressure for configuration selection (saturation pressure)
     try:
@@ -1222,8 +909,6 @@ def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
     # Get scenario-specific mass flow functions (make them global for ODE access)
     mdot_fuel_func = scenario_config['mass_flow_functions']['mdot_fuel']
     mdot_disch_func = scenario_config['mass_flow_functions']['mdot_disch']
-    mdot_vent_func = scenario_config['mass_flow_functions']['mdot_vent']
-    Qdot_disch_func = scenario_config['Qdot_disch']
 
     # Calculate initial density from given pressure and temperature
     rho0 = PropsSI("Dmass", "P", p0, "T", T0, fluid)
@@ -1809,18 +1494,10 @@ def plot_combined_density_temperature(results, postprocessed_data=None):
 
 # ----------------- Main Execution (Example Usage) -----------------
 if __name__ == "__main__":
-    # Example: Run single scenario
-    # print("Example 1: Running single REFUEL scenario")
-    # result = run_hydrogen_tank_simulation('REFUEL', verbose=True)
 
-    # if result['success']:
-    #     # Postprocess and plot single scenario
-    #     data = postprocess_simulation_result(result)
-    #     plot_chained_scenarios([result], [data])
-
-    # Example: Run chained scenarios
+    # Run chained scenarios
     print("\n" + "="*80)
-    print("Example 2: Running chained scenarios")
+    print("Running full operational cycle (3 scenarios: DISCHARGE → REFUEL → DORMANCY)")
     chained_results = run_chained_scenarios(['DISCHARGE', 'REFUEL', 'DORMANCY'], verbose=True)
 
     # Postprocess all results
