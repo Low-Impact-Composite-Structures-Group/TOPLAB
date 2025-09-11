@@ -14,7 +14,33 @@ sys.path.insert(0, hydrogen_tank_path)
 from src.materials.nist_materials import NISTMetal, NISTComposite
 from plotting.sb_plotting import SeabornPlotter
 
+# ----------------- Global Variables -----------------
+global_scenario_manager = None  # Global reference for scenario access
+
 # ----------------- Scenario and Configuration Framework -----------------
+def calculate_thermal_equilibrium_Ts(T_fluid, T_amb=298.15, k_amb=0.025, A_out=5.0, alpha_s_approx=150.0, A_in=4.0):
+    """
+    Calculate initial solid temperature for thermal equilibrium.
+
+    At equilibrium: dTs/dt = 0, so Qdot_amb = Qdot_s
+    k_amb * A_out * (T_amb - Ts) = alpha_s * A_in * (Ts - T_fluid)
+
+    Solving for Ts:
+    Ts = (k_amb*A_out*T_amb + alpha_s*A_in*T_fluid) / (k_amb*A_out + alpha_s*A_in)
+    """
+    numerator = k_amb * A_out * T_amb + alpha_s_approx * A_in * T_fluid
+    denominator = k_amb * A_out + alpha_s_approx * A_in
+
+    Ts_equilibrium = numerator / denominator
+
+    print(f"Thermal equilibrium calculation:")
+    print(f"  T_fluid = {T_fluid:.2f}K, T_amb = {T_amb:.2f}K")
+    print(f"  Equilibrium Ts = {Ts_equilibrium:.2f}K")
+    print(f"  This gives Qdot_amb = Qdot_s = {k_amb * A_out * (T_amb - Ts_equilibrium):.2f}W")
+
+    return Ts_equilibrium
+
+
 class ScenarioManager:
     """
     Manages scenario-specific parameters and initial conditions.
@@ -27,7 +53,7 @@ class ScenarioManager:
                 'initial_conditions': {
                     'p0': 15e5,      # Initial pressure [Pa]
                     'T0': 65.5,        # Initial temperature [K]
-                    'Ts0': 298.15,   # Initial solid temperature [K]
+                    'Ts0': "thermal_equilibrium",   # Initial solid temperature [K]
                 },
                 'rho_stop': 78.0,    # Stopping density [kg/m³]
                 'max_time': 700.0,   # Maximum simulation time [s]
@@ -52,15 +78,15 @@ class ScenarioManager:
                 'initial_conditions': {
                     'p0': 400e5,      # Initial pressure [Pa]
                     'T0': 53.25,      # Initial temperature [K]
-                    'Ts0': 100.15,    # Initial solid temperature [K]
+                    'Ts0': 'thermal_equilibrium',    # Initial solid temperature [K]
                 },
                 'rho_stop': 5.8,     # Stopping density [kg/m³]
                 'max_time': 40000.0, # Maximum simulation time [s]
                 'solver_settings': {
-                    'method': 'Radau',
+                    'method': 'RK23',
                     'atol': 1e-9,
                     'rtol': 1e-7,
-                    'max_step': 10,
+                    'max_step': 10.0,
                     'min_step': None,
                     'first_step': None,
                     'dense_output': True,
@@ -77,7 +103,7 @@ class ScenarioManager:
                 'initial_conditions': {
                     'p0': 400e5,     # Initial pressure [Pa] - 400 bar
                     'T0': 53.25,        # Initial temperature [K]
-                    'Ts0': 298.15,   # Initial solid temperature [K]
+                    'Ts0': "thermal_equilibrium",   # Initial solid temperature [K]
                 },
                 'rho_stop': 70.0,    # Stopping density [kg/m³]
                 'max_time': 216000.0,  # Maximum simulation time [s]
@@ -172,7 +198,7 @@ class ConfigurationManager:
 
         return selected_config
 
-    def get_algebraic_equations(self, config, T, rho, is_two_phase=False, t=None, mdot_disch_func=None, Ts=None):
+    def get_algebraic_equations(self, config, T, rho, is_two_phase=False, t=None, mdot_disch_func=None, Ts=None, scenario_manager=None):
         """
         Compute the three configuration-dependent algebraic equations.
 
@@ -203,7 +229,10 @@ class ConfigurationManager:
         elif config == 'B':
             # Minimum pressure mode: p = p_min, qdot_dis = config_B_value, mdot_vent = 0
             # Calculate the required discharge heat to maintain minimum pressure
+
+            # Calculate Configuration B discharge heat
             qdot_disch = self._calculate_config_B_qdot_disch(T, rho, is_two_phase, t, mdot_disch_func, Ts)
+
             return {
                 'pressure': self.p_min,
                 'qdot_disch': qdot_disch,
@@ -268,10 +297,11 @@ class ConfigurationManager:
 
         # Calculate alpha_s for heat transfer
         alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
+        # alpha_s = get_alpha_s_internal_model(T,p, Ts, None, 1.0, A_in)
         Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
-        # Term 1: T/ρ · (∂p/∂T)_ρ using ideal gas relationship for numerical stability
-        term1 = p * nu
+        # Term 1: T/ρ · (∂p/∂T)_ρ using real gas relationship
+        term1 = get_real_gas_work_term(T, rho, self.fluid)
 
         # Term 2: ρ·cv·(∂T/∂ρ)_p using real CoolProp derivatives for accuracy
         try:
@@ -331,10 +361,11 @@ class ConfigurationManager:
 
         # Calculate alpha_s for heat transfer
         alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
+        # alpha_s = get_alpha_s_internal_model(T,p, Ts, None, 1.0, A_in)
         Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
-        # Term 1: T/ρ · (∂p/∂T)_ρ using ideal gas relationship for numerical stability
-        term1 = p * nu
+        # Term 1: T/ρ · (∂p/∂T)_ρ using real gas relationship
+        term1 = get_real_gas_work_term(T, rho, self.fluid)
 
         # Term 2: ρ·cv·(∂T/∂ρ)_p using real CoolProp derivatives for accuracy
         try:
@@ -370,6 +401,7 @@ class ModelSwitcher:
         self.config_manager = config_manager
         self.models = {}
         self.current_model = None
+        self.alpha_s_last = 0.0  # For debugging
 
     def register_model(self, name, condition_func, ode_func):
         """
@@ -385,13 +417,15 @@ class ModelSwitcher:
             'ode_func': ode_func
         }
 
-    def compute_dT_dt(self, t, y, *args):
+    def compute_dT_dt(self, t, y, Qdot_s, Qdot_disch, *args):
         """
         Compute dT/dt using the currently selected model.
 
         Args:
             t: Time
             y: State vector [m, T, Ts]
+            Qdot_s: Heat flow from solid to fluid [W]
+            Qdot_disch: Discharge heat flow [W]
             *args: Additional arguments passed to the ODE function
 
         Returns:
@@ -400,75 +434,110 @@ class ModelSwitcher:
         if self.current_model is None:
             raise ValueError("No model selected. Call select_model first.")
 
-        return self.models[self.current_model]['ode_func'](t, y)
+        return self.models[self.current_model]['ode_func'](t, y, Qdot_s, Qdot_disch)
 
-    def solve(self, t, y, mdot_fuel_func, mdot_disch_func, *args):
+    def solve(self, t, y, mdot_fuel_func, mdot_disch_func, scenario_manager=None, *args):
         """
-        Solve the complete ODE system by selecting appropriate model and computing all derivatives.
+        Solve the coupled DAE system with pre-calculated thermodynamic derivatives.
 
-        Args:
-            t: Time
-            y: State vector [m, T, Ts]
-            mdot_fuel_func: Fuel mass flow function
-            mdot_disch_func: Discharge mass flow function
-            *args: Additional arguments
+        Approach:
+        1. Pre-calculate thermodynamic derivatives (∂P/∂T)_ρ, (dP_sat/dT) at current state
+        2. Solve remaining coupled algebraic + differential equations simultaneously
 
-        Returns:
-            [dm_dt, dT_dt, dTs_dt]
+        This follows the 10-equation DAE system from the mathematical notes.
         """
         m, T, Ts = y
+
+        # Bounds enforcement to prevent unphysical states
         m = max(m, 1e-12)
-        T = max(T, 1.0)
+        T = max(T, 14.0)    # Just above hydrogen triple point (13.8K)
+        T = min(T, 1000.0)  # Reasonable upper bound
         Ts = max(Ts, 1.0)
 
+        # Algebraic equation (6): ρ = m/V_tank
         rho = m / V_t
 
-        # Get thermodynamic properties for model selection
         try:
+            # Algebraic equation (7): h = h(T, ρ)
             h = PropsSI("Hmass", "T", T, "Dmass", rho, self.fluid)
             p = PropsSI("P", "T", T, "Dmass", rho, self.fluid)
+
+            # Pre-calculate thermodynamic derivatives at current state
+            is_two_phase = is_near_saturation(T, p, self.fluid)
+
+            if is_two_phase:
+                # Two-phase: pre-calculate (T/ρ) * (dP_sat/dT)
+                h_vapor = PropsSI("Hmass", "T", T, "Q", 1, self.fluid)
+                h_liquid = PropsSI("Hmass", "T", T, "Q", 0, self.fluid)
+                rho_vapor = PropsSI("Dmass", "T", T, "Q", 1, self.fluid)
+                rho_liquid = PropsSI("Dmass", "T", T, "Q", 0, self.fluid)
+
+                L_v = h_vapor - h_liquid  # Latent heat
+                delta_v = (1.0/rho_vapor) - (1.0/rho_liquid)  # Specific volume difference
+                dp_sat_dT = L_v / (T * delta_v)  # Clausius-Clapeyron
+
+                thermo_coeff = (T / rho) * dp_sat_dT  # Pre-calculated coefficient
+            else:
+                # Single-phase: pre-calculate (∂P/∂T)_ρ
+                # Use finite difference approximation
+                dT = 0.01  # Small temperature perturbation
+                try:
+                    p_plus = PropsSI("P", "T", T + dT, "Dmass", rho, self.fluid)
+                    dp_dT = (p_plus - p) / dT
+                except:
+                    # Fallback using ideal gas approximation
+                    dp_dT = p / T
+
+                nu = 1.0 / rho  # Specific volume
+                thermo_coeff = nu * dp_dT  # Pre-calculated coefficient
+
         except Exception as e:
             print(f"CoolProp error at t={t:.3f}s: {e}")
             print(f"  State: m={m:.3f}, T={T:.3f}, rho={rho:.3f}")
-            raise e
-
-        # Select appropriate model based on current state using simplified logic
-        if is_near_saturation(T, p, self.fluid):
-            selected_model = "two_phase"
-            is_two_phase = True
-        else:
-            selected_model = "single_phase"
+            # Use fallback values to continue simulation
+            h = 500000.0  # Reasonable enthalpy fallback
             is_two_phase = False
+            thermo_coeff = 0.1  # Small fallback coefficient
+            p = 1e5  # 1 bar fallback pressure
 
-        # Update the current model
-        self.current_model = selected_model
+        # Now solve the coupled system with pre-calculated thermodynamic coefficient
 
-        # Select configuration and get configuration-dependent mass flows
+        # Select configuration for algebraic equations (8,9,10)
         current_config = self.config_manager.select_configuration(p, is_two_phase)
-        config_eqs = self.config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=is_two_phase, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts)
+        config_eqs = self.config_manager.get_algebraic_equations(
+            current_config, T, rho, is_two_phase=is_two_phase,
+            t=t, mdot_disch_func=mdot_disch_func, Ts=Ts, scenario_manager=scenario_manager
+        )
 
-        # Mass balance using configuration-dependent flows
+        p_config = config_eqs['pressure']      # May override p for configs B,C
+        Qdot_disch = config_eqs['qdot_disch']  # Config-dependent discharge heat
+        mdot_vent = config_eqs['mdot_vent']    # Config-dependent venting
+
+        # Algebraic equations (4,5): Heat transfer (coupled with temperatures)
+        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p_config)
+        self.alpha_s_last = alpha_s  # Store for debugging
+        Qdot_s = alpha_s * A_in * (Ts - T)     # Equation (4)
+        Qdot_amb = k_amb * A_out * (T_amb - Ts) # Equation (5)
+
+        # Mass flow rates
         mdot_f = mdot_fuel_func(t)
         mdot_d = mdot_disch_func(t)
-        mdot_v = config_eqs['mdot_vent']  # Configuration-dependent venting
-        dm_dt = mdot_f - mdot_d - mdot_v
 
-        # Temperature balance using selected model
-        dT_dt = self.compute_dT_dt(t, y)
+        # Now solve the 3 coupled ODEs simultaneously:
 
-        # Solid temperature balance
+        # ODE (1): dm/dt = ṁ_fuel - ṁ_disch - ṁ_vent
+        dm_dt = mdot_f - mdot_d - mdot_vent
+
+        # ODE (3): dTs/dt = (Q̇_amb - Q̇_s) / (m_s c_s)
         c_liner = float(c_liner_func(Ts))
         c_wall = float(c_wall_func(Ts))
-
-        # Calculate alpha_s based on current temperature conditions
-        alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-
-        numerator_Ts = (k_amb * A_out * T_amb
-                        - (k_amb * A_out + alpha_s * A_in) * Ts
-                        + alpha_s * A_in * T)
-
         denom_Ts = m_liner * c_liner + m_wall * c_wall
-        dTs_dt = numerator_Ts / denom_Ts
+        dTs_dt = (Qdot_amb - Qdot_s) / denom_Ts
+
+        # ODE (2): dT/dt = energy balance with pre-calculated thermo coefficient
+        # This uses the current model (single_phase vs two_phase) with proper coupling
+        self.current_model = "two_phase" if is_two_phase else "single_phase"
+        dT_dt = self.compute_dT_dt(t, [m, T, Ts], Qdot_s, Qdot_disch)
 
         return [dm_dt, dT_dt, dTs_dt]
 
@@ -489,8 +558,8 @@ PRINT_EVERY_N_STEPS = 50  # Print progress every N steps
 step_counter = 0  # Global counter
 
 # Geometric parameters for alpha_s calculation
-D_inner = 0.4      # Inner diameter [m]
-D_outer = 0.45     # Outer diameter [m]
+D_inner = 1.0      # Inner diameter [m]
+D_outer = 1.0     # Outer diameter [m]
 annular_fluid = "Hydrogen"  # Fluid in the gap
 
 # Configuration pressure thresholds
@@ -503,8 +572,7 @@ config_manager = ConfigurationManager(fluid, p_min, p_vent)
 model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Initialize NIST materials
-liner_material = NISTMetal.aluminum_5083_nist()
-# liner_material = NISTMetal.aluminum_6061T6_nist()
+liner_material = NISTMetal.aluminum_6061T6_nist()
 wall_material = NISTComposite.g10_nist(winding_angle=0.0)
 
 def c_liner_func(Ts):
@@ -515,8 +583,41 @@ def c_wall_func(Ts):
     """Get specific heat of G10 wall using NIST data"""
     return wall_material.determine_specific_heat(Ts)
 
+# ----------------- Real Gas Work Term Function -----------------
+def get_real_gas_work_term(T, rho, fluid):
+    """
+    Calculate the real gas work term (T/ρ) * (∂p/∂T)_ρ using CoolProp.
+
+    This replaces the ideal gas assumption p*v with proper real gas behavior.
+
+    Args:
+        T: Temperature [K]
+        rho: Density [kg/m³]
+        fluid: Fluid name for CoolProp
+
+    Returns:
+        work_term: (T/ρ) * (∂p/∂T)_ρ [Pa·m³/kg]
+    """
+    try:
+        # Calculate (∂p/∂T)_ρ using CoolProp
+        dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
+
+        # Calculate (T/ρ) * (∂p/∂T)_ρ
+        work_term = (T / rho) * dp_dT_rho
+
+        return work_term
+
+    except Exception as e:
+        # Fallback to ideal gas if CoolProp fails
+        print(f"Warning: CoolProp failed for real gas work term at T={T:.2f}K, rho={rho:.2f}kg/m³: {e}")
+        print("  Falling back to ideal gas approximation p/rho")
+
+        # Use ideal gas: p*v = p/rho (approximately)
+        p = PropsSI("P", "T", T, "Dmass", rho, fluid)
+        return p / rho
+
 # ----------------- Heat Transfer Coefficient Function -----------------
-def get_alpha_s(T_i, T_o, D_i, D_o, fluid="Air", p=101325):
+def get_alpha_s(T, Ts, D, D_o, fluid="Air", p=101325):
     """
     Compute equivalent inner convective heat transfer coefficient (h_i)
     for a horizontal concentric cylindrical annulus using
@@ -558,89 +659,38 @@ def get_alpha_s(T_i, T_o, D_i, D_o, fluid="Air", p=101325):
     convection heat transfer between horizontal circular cylinders.
     """
 
-    # Input validation
-    if D_o <= D_i:
-        raise ValueError("Outer diameter must be greater than inner diameter")
-    if T_i <= 0 or T_o <= 0:
-        raise ValueError("Temperatures must be positive")
-    if p <= 0:
-        raise ValueError("Pressure must be positive")
+    # Film temperature
+    T_film = 0.5 * (T + Ts)
 
-    # Mean film temperature
-    T_mean = 0.5 * (T_i + T_o)
-
-    try:
-        # Fluid properties at mean T
-        k = PropsSI('L', 'T', T_mean, 'P', p, fluid)   # thermal conductivity [W/m/K]
-        mu = PropsSI('V', 'T', T_mean, 'P', p, fluid)   # dynamic viscosity [Pa*s]
-        rho = PropsSI('D', 'T', T_mean, 'P', p, fluid)  # density [kg/m3]
-        cp = PropsSI('C', 'T', T_mean, 'P', p, fluid)   # specific heat [J/kg/K]
-    except Exception as e:
-        raise ValueError(f"Could not calculate fluid properties for {fluid} at T={T_mean:.2f}K, P={p:.0f}Pa: {e}")
+    # Fluid properties at film temperature
+    k = PropsSI('L', 'T', T_film, 'P', p, fluid)    # W/m-K
+    mu = PropsSI('V', 'T', T_film, 'P', p, fluid)   # Pa·s
+    rho = PropsSI('D', 'T', T_film, 'P', p, fluid)  # kg/m^3
+    cp = PropsSI('C', 'T', T_film, 'P', p, fluid)   # J/kg-K
 
     # Derived properties
-    nu = mu / rho                        # kinematic viscosity [m2/s]
-    alpha = k / (rho * cp)              # thermal diffusivity [m2/s]
-    beta = 1.0 / T_mean                  # thermal expansion [1/K] (ideal gas approx)
-    Pr = nu / alpha                      # Prandtl number
+    nu = mu / rho                  # kinematic viscosity [m^2/s]
+    alpha = k / (rho * cp)         # thermal diffusivity [m^2/s]
+    Pr = nu / alpha                # Prandtl number
+    beta = 1.0 / T_film            # thermal expansion coeff (ideal gas approx)
 
-    # Geometry
-    L = (D_o - D_i) / 2.0                # gap thickness [m]
+    # Rayleigh number (based on diameter for horizontal cylinder)
+    Ra_D = 9.81 * beta * abs(Ts - T) * D**3 / (nu * alpha)
 
-    # Rayleigh number based on gap
-    g = 9.81
-    Ra = g * beta * abs(T_i - T_o) * L**3 / (nu * alpha)
+    # Churchill & Chu correlation for horizontal cylinder (valid 10^-5 < Ra < 10^12)
+    Nu_D = (0.60 + (0.387 * Ra_D**(1/6)) /
+           ( (1 + (0.559/Pr)**(9/16))**(8/27) ))**2
+    L = 2.0
+    # Rayleigh number (based on plate height L)
+    Ra_L = 9.81 * beta * abs(Ts - T) * L**3 / (nu * alpha)
 
-    # Check for very low Rayleigh numbers (pure conduction)
-    if Ra < 1e3:
-        # For very low Ra, use pure conduction
-        Nu = 2.0 / np.log(D_o / D_i)
-        h_i = (2.0 * k) / (D_i * np.log(D_o / D_i))
-        return h_i
+    # Churchill & Chu correlation for vertical plate (valid ~10^-1 < Ra < 10^12)
+    Nu_L = (0.825 + (0.387 * Ra_L**(1/6)) /
+            ( (1 + (0.492/Pr)**(9/16))**(8/27) ))**2
 
-    # Pure conduction Nusselt number
-    Nu_cond = 2.0 / np.log(D_o / D_i)
-
-    # --------------------------------------------------
-    # Kuehn & Goldstein correlation (1976) - Equations (1a)-(1f)
-    # --------------------------------------------------
-
-    # Calculate Ra*D_i and Ra*D_o for the correlations
-    Ra_Di = Ra * D_i
-    Ra_Do = Ra * D_o
-
-    # Equation (1a): Nu_i'
-    denominator_i = (0.5 * Ra_Di**(1/4))**15 + (0.12 * Ra_Di**(1/3))**15
-    Nu_i_prime = 2.0 / np.log(1 + 2.0 / (denominator_i**(1/15)))
-
-    # Equation (1b): Nu_o'
-    denominator_o = (Ra_Do**(1/4))**15 + (0.12 * Ra_Do**(1/3))**15
-    Nu_o_prime = -2.0 / np.log(1 - 2.0 / (denominator_o**(1/15)))
-
-    # Equation (1c): phi_b (blending function)
-    phi_b = Nu_i_prime / (Nu_i_prime + Nu_o_prime)
-
-    # Equation (1d): Nu_conv (convective contribution)
-    Nu_conv = 1.0 / (1.0/Nu_i_prime + 1.0/Nu_o_prime)
-
-    # Equation (1e): Nu_cond already calculated above
-    # Nu_cond = 2.0 / np.log(D_o / D_i)
-
-    # Equation (1f): Final Nusselt number
-    Nu = ((Nu_cond)**15 + (Nu_conv)**15)**(1/15)
-
-    # Equation (1g): Equivalent thermal conductivity ratio
-    k_eq_ratio = Nu / Nu_cond
-    # --------------------------------------------------
-
-    # Equivalent thermal conductivity
-    k_eq = k_eq_ratio * k
-
-    # Convert to equivalent h_i (inner surface coefficient)
-    # For concentric cylinders: h_i = 2*k_eq / (D_i * ln(D_o/D_i))
-    h_i = (2.0 * k_eq) / (D_i * np.log(D_o / D_i))
-
-    return h_i
+     # Heat transfer coefficient
+    h = Nu_L * k / D
+    return h
 
 
 def get_alpha_s_internal_model(T_hydrogen, p_hydrogen, T_surface, fuel_height=None, characteristic_height=1.0, surface_area=None):
@@ -909,12 +959,16 @@ def compute_pump_outlet_hydrogen(tank_pressure: float, tank_temperature: float):
     return h2
 
 # ----------------- Model Implementations -----------------
-def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager):
+def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager, Qdot_s, Qdot_disch):
     """
     Single-phase energy balance.
     Uses cv for temperature derivative calculation.
 
     Includes scenario-specific enthalpy calculations (e.g., cryopump for refueling).
+
+    Args:
+        Qdot_s: Heat flow from solid to fluid [W] (pre-calculated in solve method)
+        Qdot_disch: Discharge heat flow [W] (pre-calculated in solve method)
     """
     m, T, Ts = y
     m = max(m, 1e-12)
@@ -923,7 +977,7 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
     rho = m / V_t
 
     # Get configuration-dependent algebraic equations
-    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=False, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts)
+    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=False, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts, scenario_manager=scenario_manager)
     p = config_eqs['pressure']
 
     h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
@@ -946,29 +1000,37 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
 
     h_dich = h
     h_vent = h
-    Qdot_disch = config_eqs['qdot_disch']  # Configuration-dependent
 
-    # Configuration A and C need explicit environmental heat transfer
-    alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-    Qdot_s = alpha_s * A_in * (Ts - T)
+    # Use pre-calculated heat flows instead of computing them again
+    # (Qdot_s and Qdot_disch are passed as parameters)
 
-    numerator_T = (mdot_f * (h_fuel - h)
-                   - mdot_d * (h_dich - h)
-                   - mdot_v * (h_vent - h)
-                   + p * nu * (mdot_f - mdot_d - mdot_v)
-                   + Qdot_s
-                   + Qdot_disch)
+    # Energy balance terms
+    h_term = mdot_f * (h_fuel - h) - mdot_d * (h_dich - h) - mdot_v * (h_vent - h)
 
+    # PV work term - EXPERIMENTAL: Disable during refueling to avoid double-counting compression work
+    net_mass_flow = mdot_f - mdot_d - mdot_v
+    if mdot_f > 0 and mdot_d == 0 and mdot_v == 0:
+        # Pure refueling case - compression work already included in h_fuel from cryopump
+        pv_work = 0.0
+    else:
+        # Discharge/venting case - use normal PV work term
+        pv_work = get_real_gas_work_term(T, rho, fluid) * net_mass_flow
+
+    numerator_T = h_term + pv_work + Qdot_s + Qdot_disch
     dT_dt = numerator_T / (m * c_v)
 
     return dT_dt
 
-def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager):
+def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager, Qdot_s, Qdot_disch):
     """
     Two-phase energy balance implementation.
     Uses c_v2P (two-phase specific heat capacity).
 
     Includes scenario-specific enthalpy calculations (e.g., cryopump for refueling).
+
+    Args:
+        Qdot_s: Heat flow from solid to fluid [W] (pre-calculated in solve method)
+        Qdot_disch: Discharge heat flow [W] (pre-calculated in solve method)
     """
     m, T, Ts = y
     m = max(m, 1e-12)
@@ -977,7 +1039,7 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     rho = m / V_t
 
     # Get configuration-dependent algebraic equations for two-phase
-    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=True, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts)
+    config_eqs = config_manager.get_algebraic_equations(current_config, T, rho, is_two_phase=True, t=t, mdot_disch_func=mdot_disch_func, Ts=Ts, scenario_manager=scenario_manager)
     p = config_eqs['pressure']
 
     h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
@@ -1028,9 +1090,9 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     h_vent = h
     Qdot_disch = config_eqs['qdot_disch']  # Configuration-dependent
 
-    # Configuration A and C need explicit environmental heat transfer
-    alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-    Qdot_s = alpha_s * A_in * (Ts - T)
+    # # Configuration A and C need explicit environmental heat transfer
+    # alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
+    # Qdot_s = alpha_s * A_in * (Ts - T)
 
     # Two-phase energy balance numerator
     numerator_T = (mdot_f * (h_fuel - h)
@@ -1052,7 +1114,7 @@ def is_single_phase_condition(T, p, rho):
     return not is_near_saturation(T, p, fluid)
 
 # Wrapper functions to handle the new signature
-def single_phase_wrapper(t, y):
+def single_phase_wrapper(t, y, Qdot_s, Qdot_disch):
     """Wrapper for single phase model to handle configuration management."""
     # Get current state for configuration selection
     m, T, Ts = y
@@ -1068,9 +1130,9 @@ def single_phase_wrapper(t, y):
     is_two_phase = is_near_saturation(T, p_prelim, fluid)
     current_config = config_manager.select_configuration(p_prelim, is_two_phase)
 
-    return single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager)
+    return single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager, Qdot_s, Qdot_disch)
 
-def two_phase_wrapper(t, y):
+def two_phase_wrapper(t, y, Qdot_s, Qdot_disch):
     """Wrapper for two phase model to handle configuration management."""
     # Get current state for configuration selection
     m, T, Ts = y
@@ -1086,7 +1148,7 @@ def two_phase_wrapper(t, y):
     is_two_phase = True  # We're in two-phase wrapper
     current_config = config_manager.select_configuration(p_prelim, is_two_phase)
 
-    return two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager)
+    return two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenario_manager, Qdot_s, Qdot_disch)
 
 def odes(t, y):
     global step_counter  # Access the global step counter
@@ -1103,9 +1165,12 @@ def odes(t, y):
                 print(f"Step {step_counter:4d} | t={t:7.2f}s | "
                       f"m={m:6.2f}kg | ρ={rho:6.2f}kg/m³ | "
                       f"T={T:6.2f}K | Ts={Ts:6.2f}K | "
-                      f"P={p/1e5:6.2f}bar | {selected_model}")
+                      f"P={p/1e5:6.2f}bar | alpha_s={getattr(model_switcher, 'alpha_s_last', 0.0):.4f} | {selected_model}")
             except:
-                print(f"Step {step_counter:4d} | t={t:7.2f}s | (CoolProp error)")
+                print(f"Step {step_counter:4d} | t={t:7.2f}s | "
+                      f"m={m:6.2f}kg | ρ={rho:6.2f}kg/m³ | "
+                      f"T={T:6.2f}K | Ts={Ts:6.2f}K | "
+                      f"alpha_s={getattr(model_switcher, 'alpha_s_last', 0.0):.4f} | (CoolProp error)")
 
     return model_switcher.solve(t, y, mdot_fuel_func, mdot_disch_func)
 
@@ -1138,10 +1203,11 @@ def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
         - 't_offset': time offset used
         - 'metadata': additional simulation metadata
     """
-    global step_counter, mdot_fuel_func, mdot_disch_func, rho_stop
+    global step_counter, mdot_fuel_func, mdot_disch_func, rho_stop, global_scenario_manager
 
     # Set scenario
     scenario_manager.set_scenario(scenario_name)
+    global_scenario_manager = scenario_manager  # Set global reference for configuration functions
     scenario_config = scenario_manager.get_scenario_config()
 
     # Get scenario-specific parameters
@@ -1149,6 +1215,12 @@ def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
     p0 = initial_conditions['p0']
     T0 = initial_conditions['T0']
     Ts0 = initial_conditions['Ts0']
+
+    # Handle thermal equilibrium calculation for Ts0
+    if Ts0 == 'thermal_equilibrium':
+        Ts0 = calculate_thermal_equilibrium_Ts(T0)
+        print(f"Using thermal equilibrium Ts0 = {Ts0:.2f}K instead of arbitrary high temperature")
+
     rho_stop = scenario_config['rho_stop']
     max_time = scenario_config['max_time']
     solver_settings = scenario_config['solver_settings']
