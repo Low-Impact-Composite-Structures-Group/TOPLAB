@@ -268,7 +268,7 @@ class ConfigurationManager:
 
         # Calculate alpha_s for heat transfer
         alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-        Qs = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
+        Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
         # Term 1: T/ρ · (∂p/∂T)_ρ using ideal gas relationship for numerical stability
         term1 = p * nu
@@ -281,7 +281,7 @@ class ConfigurationManager:
             dT_drho_p = -T / rho
         term2 = rho * cv * dT_drho_p
 
-        qdot_disch = mdot_disch * (term1 - term2) - Qs
+        qdot_disch = mdot_disch * (term1 - term2) - Qdot_s
 
         return qdot_disch
 
@@ -331,7 +331,7 @@ class ConfigurationManager:
 
         # Calculate alpha_s for heat transfer
         alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-        Qs = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
+        Qdot_s = alpha_s * A_in * (Ts - T)  # Environmental heat leak [W]
 
         # Term 1: T/ρ · (∂p/∂T)_ρ using ideal gas relationship for numerical stability
         term1 = p * nu
@@ -351,7 +351,7 @@ class ConfigurationManager:
         if abs(denominator) < 1e-12:
             return 0.0
 
-        mdot_vent = Qs / denominator
+        mdot_vent = Qdot_s / denominator
 
         # Ensure non-negative venting (can't vent negative mass)
         mdot_vent = max(0.0, mdot_vent)
@@ -641,7 +641,215 @@ def get_alpha_s(T_i, T_o, D_i, D_o, fluid="Air", p=101325):
     h_i = (2.0 * k_eq) / (D_i * np.log(D_o / D_i))
 
     return h_i
-    # return 20.0  # Simplified return for testing
+
+
+def get_alpha_s_internal_model(T_hydrogen, p_hydrogen, T_surface, fuel_height=None, characteristic_height=1.0, surface_area=None):
+    """
+    Compute heat transfer coefficient using the SingleZoneModel approach from internal_models.py.
+
+    This function emulates the logic from SingleZoneModel.get_thermal_resistances() to compute
+    the equivalent heat transfer coefficient for hydrogen convection based on phase state.
+
+    Parameters
+    ----------
+    T_hydrogen : float
+        Hydrogen temperature [K]
+    p_hydrogen : float
+        Hydrogen pressure [Pa]
+    T_surface : float
+        Surface temperature [K]
+    fuel_height : float, optional
+        Height of liquid fuel if two-phase (default: None, auto-detect phase)
+    characteristic_height : float, optional
+        Characteristic height for convection calculations [m] (default: 1.0)
+    surface_area : float, optional
+        Surface area [m²] (default: 1.0, returns coefficient per unit area)
+
+    Returns
+    -------
+    alpha_s : float
+        Heat transfer coefficient [W/m²·K]
+
+    Notes
+    -----
+    This function uses the same correlations as the SingleZoneModel:
+    - LiquidPhaseConvection: Nu = 0.0605 * Ra^(1/3) (Hochstein et al. 1986)
+    - GasPhaseConvection: Nu = 17 (Brewer 1991)
+    - For two-phase: parallel resistance combination
+
+    References
+    ----------
+    - Hochstein et al. (1986), Verstraete (2009)
+    - Brewer (1991)
+    - SingleZoneModel in internal_models.py
+    """
+
+    # Set default surface area if not provided
+    if surface_area is None:
+        surface_area = 1.0  # Return coefficient per unit area
+
+    # Determine phase state of hydrogen
+    try:
+        # Get critical properties for hydrogen
+        T_critical = PropsSI("TCRIT", "Hydrogen")  # ~33.2 K
+        p_critical = PropsSI("PCRIT", "Hydrogen")  # ~1.297 MPa
+
+        # Check if we're above critical conditions
+        if p_hydrogen > p_critical or T_hydrogen > T_critical:
+            # Supercritical - treat as gas
+            phase = "supercritical"
+            is_two_phase = False
+        else:
+            # Check if we're near saturation (two-phase)
+            try:
+                T_sat = PropsSI("T", "P", p_hydrogen, "Q", 0, "Hydrogen")
+                is_two_phase = abs(T_hydrogen - T_sat) < 1.0  # Within 1K of saturation
+            except:
+                # If saturation lookup fails, assume single phase
+                is_two_phase = False
+                # Determine phase based on temperature relative to saturation
+                try:
+                    T_sat_1bar = PropsSI("T", "P", 101325, "Q", 0, "Hydrogen")  # ~20.4 K
+                    if T_hydrogen < T_sat_1bar + 10:  # rough liquid estimate
+                        phase = "liquid"
+                    else:
+                        phase = "gas"
+                except:
+                    phase = "gas"  # default to gas if all else fails
+
+        if is_two_phase:
+            # Two-phase: get both liquid and gas properties
+            rho_liquid = PropsSI("D", "P", p_hydrogen, "Q", 0, "Hydrogen")
+            rho_gas = PropsSI("D", "P", p_hydrogen, "Q", 1, "Hydrogen")
+
+            # For two-phase, estimate fill fraction if not provided
+            if fuel_height is None:
+                fill_fraction = 0.5  # Default 50% liquid fill
+            else:
+                fill_fraction = fuel_height / characteristic_height
+                fill_fraction = max(0.0, min(1.0, fill_fraction))
+
+
+            # Get liquid properties at saturation
+            mu_liquid = PropsSI("V", "P", p_hydrogen, "Q", 0, "Hydrogen")
+            k_liquid = PropsSI("CONDUCTIVITY", "P", p_hydrogen, "Q", 0, "Hydrogen")
+            cp_liquid = PropsSI("C", "P", p_hydrogen, "Q", 0, "Hydrogen")
+            beta_liquid = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "P", p_hydrogen, "Q", 0, "Hydrogen")
+
+            # Get gas properties at saturation
+            mu_gas = PropsSI("V", "P", p_hydrogen, "Q", 1, "Hydrogen")
+            k_gas = PropsSI("CONDUCTIVITY", "P", p_hydrogen, "Q", 1, "Hydrogen")
+            cp_gas = PropsSI("C", "P", p_hydrogen, "Q", 1, "Hydrogen")
+            beta_gas = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "P", p_hydrogen, "Q", 1, "Hydrogen")
+
+            # Calculate liquid phase convection (Hochstein correlation)
+            nu_liquid = mu_liquid / rho_liquid
+            alpha_liquid = k_liquid / (rho_liquid * cp_liquid)
+            Pr_liquid = nu_liquid / alpha_liquid
+
+            # Rayleigh number for liquid phase
+            g = 9.81
+            Delta_T = abs(T_surface - T_hydrogen)
+            L_char_liquid = fuel_height if fuel_height is not None else characteristic_height * fill_fraction
+            L_char_liquid = max(L_char_liquid, 0.01)  # Minimum characteristic length
+
+            Ra_liquid = g * beta_liquid * Delta_T * L_char_liquid**3 * Pr_liquid / nu_liquid
+
+            # Liquid phase Nusselt number (Hochstein et al. 1986)
+            Nu_liquid = 0.0605 * Ra_liquid**(1/3)
+            h_liquid = Nu_liquid * k_liquid / L_char_liquid
+
+            # Calculate gas phase convection (Brewer correlation)
+            nu_gas = mu_gas / rho_gas
+            alpha_gas = k_gas / (rho_gas * cp_gas)
+
+            # Gas phase characteristic length
+            L_char_gas = characteristic_height - L_char_liquid
+            L_char_gas = max(L_char_gas, 0.01)  # Minimum characteristic length
+
+            # Gas phase Nusselt number (Brewer 1991)
+            Nu_gas = 17.0
+            h_gas = Nu_gas * k_gas / L_char_gas
+
+            # Compute thermal resistances
+            A_liquid = surface_area * fill_fraction
+            A_gas = surface_area * (1.0 - fill_fraction)
+
+            R_liquid = 1.0 / (h_liquid * A_liquid) if A_liquid > 0 else float('inf')
+            R_gas = 1.0 / (h_gas * A_gas) if A_gas > 0 else float('inf')
+
+            # Parallel resistance combination
+            if R_liquid == float('inf'):
+                R_total = R_gas
+            elif R_gas == float('inf'):
+                R_total = R_liquid
+            else:
+                R_total = 1.0 / (1.0/R_liquid + 1.0/R_gas)
+
+            # Convert back to heat transfer coefficient
+            alpha_s = 1.0 / (R_total * surface_area)
+
+        else:
+            # Single phase - determine if liquid or gas
+            if not locals().get('phase'):  # Only determine if not already set above
+                try:
+                    if T_hydrogen < T_sat:
+                        # Subcooled liquid
+                        phase = "liquid"
+                    else:
+                        # Superheated gas
+                        phase = "gas"
+                except:
+                    # If T_sat not available, default to gas
+                    phase = "gas"
+
+            if phase == "liquid":
+                # Liquid phase properties
+                rho = PropsSI("D", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+                mu = PropsSI("V", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+                k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+                cp = PropsSI("C", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+                beta = PropsSI("ISOBARIC_EXPANSION_COEFFICIENT", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+
+                # Liquid phase convection calculation
+                nu = mu / rho
+                alpha = k / (rho * cp)
+                Pr = nu / alpha
+
+                g = 9.81
+                Delta_T = abs(T_surface - T_hydrogen)
+                L_char = characteristic_height
+
+                Ra = g * beta * Delta_T * L_char**3 * Pr / nu
+
+                # Liquid phase Nusselt number (Hochstein et al. 1986)
+                Nu = 0.0605 * Ra**(1/3)
+                alpha_s = Nu * k / L_char
+
+            else:  # gas phase or supercritical
+                # Gas phase properties
+                rho = PropsSI("D", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+                k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+
+                # Gas phase convection calculation
+                # Use gas height (assume full tank height for single-phase gas)
+                L_char = characteristic_height
+
+                # Gas phase Nusselt number (Brewer 1991)
+                Nu = 17.0
+                alpha_s = Nu * k / L_char
+
+    except Exception as e:
+        print(f"Warning: Error in get_alpha_s_internal_model: {e}")
+        # Fallback to simple calculation
+        try:
+            k = PropsSI("CONDUCTIVITY", "T", T_hydrogen, "P", p_hydrogen, "Hydrogen")
+            alpha_s = 10.0 * k / characteristic_height  # Simple fallback
+        except:
+            alpha_s = 50.0  # Final fallback value
+
+    return alpha_s
+
 
 # Remove the test function as it's not needed in production code
 
@@ -742,13 +950,13 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
 
     # Configuration A and C need explicit environmental heat transfer
     alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-    Qs_env = alpha_s * A_in * (Ts - T)
+    Qdot_s = alpha_s * A_in * (Ts - T)
 
     numerator_T = (mdot_f * (h_fuel - h)
                    - mdot_d * (h_dich - h)
                    - mdot_v * (h_vent - h)
                    + p * nu * (mdot_f - mdot_d - mdot_v)
-                   + Qs_env
+                   + Qdot_s
                    + Qdot_disch)
 
     dT_dt = numerator_T / (m * c_v)
@@ -788,8 +996,17 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
     # Calculate two-phase specific heat capacity (c_v2P)
     c_v2P = x * c_v_vapor + (1.0 - x) * c_v_liquid
 
-    # Calculate saturation pressure derivative (dp_sat/dT)
-    dp_sat_dT = p / (t + 1e-6)  # Simplified approximation
+    # Calculate saturation pressure derivative (dp_sat/dT) using Clausius-Clapeyron
+    h_vapor = PropsSI("Hmass", "T", T, "Q", 1, fluid)    # Saturated vapor enthalpy
+    h_liquid = PropsSI("Hmass", "T", T, "Q", 0, fluid)   # Saturated liquid enthalpy
+    rho_vapor = PropsSI("Dmass", "T", T, "Q", 1, fluid)  # Saturated vapor density
+    rho_liquid = PropsSI("Dmass", "T", T, "Q", 0, fluid) # Saturated liquid density
+
+    L_v = h_vapor - h_liquid  # Latent heat of vaporization [J/kg]
+    delta_v = (1.0/rho_vapor) - (1.0/rho_liquid)  # Specific volume difference [m³/kg]
+
+    # Clausius-Clapeyron: dp_sat/dT = L_v / (T * Δv)
+    dp_sat_dT = L_v / (T * delta_v)
 
     nu = 1.0 / rho
 
@@ -813,14 +1030,14 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
 
     # Configuration A and C need explicit environmental heat transfer
     alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-    Qs_env = alpha_s * A_in * (Ts - T)
+    Qdot_s = alpha_s * A_in * (Ts - T)
 
     # Two-phase energy balance numerator
     numerator_T = (mdot_f * (h_fuel - h)
                    - mdot_d * (h_dich - h)
                    - mdot_v * (h_vent - h)
                    + (T / rho) * dp_sat_dT * (mdot_f - mdot_d - mdot_v)
-                   + Qs_env
+                   + Qdot_s
                    + Qdot_disch)
 
     return numerator_T / (m * c_v2P)
