@@ -51,17 +51,17 @@ class ScenarioManager:
         self.scenarios = {
             'REFUEL': {
                 'initial_conditions': {
-                    'p0': 15e5,      # Initial pressure [Pa]
+                    'p0': 15.5e5,      # Initial pressure [Pa]
                     'T0': 65.5,        # Initial temperature [K]
                     'Ts0': "thermal_equilibrium",   # Initial solid temperature [K]
                 },
                 'rho_stop': 78.0,    # Stopping density [kg/m³]
                 'max_time': 700.0,   # Maximum simulation time [s]
                 'solver_settings': {
-                    'method': 'Radau',
+                    'method': 'RK23',
                     'atol': 1e-10,
                     'rtol': 1e-8,
-                    'max_step': 0.5,
+                    'max_step': 0.05,
                     'min_step': None,
                     'first_step': None,
                     'dense_output': True,
@@ -162,15 +162,15 @@ class ConfigurationManager:
         self.configurations = {
             'A': {
                 'name': 'Normal Operating Mode',
-                'description': 'p = p(T,rho), qdot_dis = 0, mdot_vent = 0'
+                'description': 'p = p(T,rho), qdot_disch= 0, mdot_vent = 0'
             },
             'B': {
                 'name': 'Minimum Pressure Mode',
-                'description': 'p = p_min, qdot_dis = config_B_value, mdot_vent = 0'
+                'description': 'p = p_min, qdot_disch= config_B_value, mdot_vent = 0'
             },
             'C': {
                 'name': 'Maximum Pressure Mode',
-                'description': 'p = p_vent, qdot_dis = 0, mdot_vent = config_C_value'
+                'description': 'p = p_vent, qdot_disch= 0, mdot_vent = config_C_value'
             }
         }
 
@@ -186,7 +186,7 @@ class ConfigurationManager:
             str: Configuration name ('A', 'B', or 'C')
         """
         # Following flowchart logic
-        if p <= self.p_min:
+        if p <= self.p_min and global_scenario_manager.current_scenario != 'REFUEL':
             return 'B'
         elif p >= self.p_vent:
             selected_config = 'C'  # Maximum pressure mode (venting)
@@ -215,7 +215,7 @@ class ConfigurationManager:
             dict: Contains 'pressure', 'qdot_disch', 'mdot_vent'
         """
         if config == 'A':
-            # Normal operation: p = p(T,rho), qdot_dis = 0, mdot_vent = 0
+            # Normal operation: p = p(T,rho), qdot_disch= 0, mdot_vent = 0
             if is_two_phase:
                 p = PropsSI("P", "T", T, "Q", 0, self.fluid)  # Saturation pressure
             else:
@@ -227,7 +227,7 @@ class ConfigurationManager:
             }
 
         elif config == 'B':
-            # Minimum pressure mode: p = p_min, qdot_dis = config_B_value, mdot_vent = 0
+            # Minimum pressure mode: p = p_min, qdot_disch= config_B_value, mdot_vent = 0
             # Calculate the required discharge heat to maintain minimum pressure
 
             # Calculate Configuration B discharge heat
@@ -240,7 +240,7 @@ class ConfigurationManager:
             }
 
         elif config == 'C':
-            # Maximum pressure mode: p = p_vent, qdot_dis = 0, mdot_vent = config_C_value
+            # Maximum pressure mode: p = p_vent, qdot_disch= 0, mdot_vent = config_C_value
             # Calculate the required venting mass flow to maintain maximum pressure
             mdot_vent = self._calculate_config_C_mdot_vent(T, rho, is_two_phase, t, Ts)
             return {
@@ -994,29 +994,24 @@ def single_phase_dT_dt(t, y, model_switcher, config_manager, current_config, sce
     if current_scenario == 'REFUEL':
         # Use pump outlet enthalpy for refueling (includes cryopump compression work)
         h_fuel = compute_pump_outlet_hydrogen(p, T)
+
     else:
         # For discharge and dormancy, use tank enthalpy (no cryopump)
         h_fuel = 0.0
 
-    h_dich = h
+    h_disch = h
     h_vent = h
 
     # Use pre-calculated heat flows instead of computing them again
     # (Qdot_s and Qdot_disch are passed as parameters)
 
     # Energy balance terms
-    h_term = mdot_f * (h_fuel - h) - mdot_d * (h_dich - h) - mdot_v * (h_vent - h)
-
-    # PV work term - EXPERIMENTAL: Disable during refueling to avoid double-counting compression work
+    h_term = mdot_f * (h_fuel - h) - mdot_d * (h_disch - h) - mdot_v * (h_vent - h)
+    # PV work term
     net_mass_flow = mdot_f - mdot_d - mdot_v
-    if mdot_f > 0 and mdot_d == 0 and mdot_v == 0:
-        # Pure refueling case - compression work already included in h_fuel from cryopump
-        pv_work = 0.0
-    else:
-        # Discharge/venting case - use normal PV work term
-        pv_work = get_real_gas_work_term(T, rho, fluid) * net_mass_flow
+    work_term = get_real_gas_work_term(T, rho, fluid) * net_mass_flow
 
-    numerator_T = h_term + pv_work + Qdot_s + Qdot_disch
+    numerator_T = h_term + work_term + Qdot_s + Qdot_disch
     dT_dt = numerator_T / (m * c_v)
 
     return dT_dt
@@ -1084,23 +1079,22 @@ def two_phase_dT_dt(t, y, model_switcher, config_manager, current_config, scenar
         h_fuel = compute_pump_outlet_hydrogen(p, T)
     else:
         # For discharge and dormancy, use tank enthalpy (no cryopump)
-        h_fuel = h
+        h_fuel = 0.0
 
-    h_dich = h
+    h_disch = h
     h_vent = h
-    Qdot_disch = config_eqs['qdot_disch']  # Configuration-dependent
 
-    # # Configuration A and C need explicit environmental heat transfer
-    # alpha_s = get_alpha_s(T, Ts, D_inner, D_outer, annular_fluid, p)
-    # Qdot_s = alpha_s * A_in * (Ts - T)
+    # Use pre-calculated heat flows instead of computing them again
+    # (Qdot_s and Qdot_disch are passed as parameters)
 
-    # Two-phase energy balance numerator
-    numerator_T = (mdot_f * (h_fuel - h)
-                   - mdot_d * (h_dich - h)
-                   - mdot_v * (h_vent - h)
-                   + (T / rho) * dp_sat_dT * (mdot_f - mdot_d - mdot_v)
-                   + Qdot_s
-                   + Qdot_disch)
+    # Energy balance terms
+    h_term = mdot_f * (h_fuel - h) - mdot_d * (h_disch - h) - mdot_v * (h_vent - h)
+
+    # PV work term - EXPERIMENTAL: Disable during refueling to avoid double-counting compression work
+    net_mass_flow = mdot_f - mdot_d - mdot_v
+    work_term = (T / rho) * dp_sat_dT * net_mass_flow
+
+    numerator_T = h_term + work_term + Qdot_s + Qdot_disch
 
     return numerator_T / (m * c_v2P)
 
