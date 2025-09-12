@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.materials.materials import Material, Metal, Composite
-from src.materials.aluminum5083_properties import specific_heat as aluminum_cp_nist, thermal_conductivity as aluminum_k_nist
-from src.materials.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
+from src.materials.nist_material_properties.aluminum5083_properties import specific_heat as aluminum_cp_nist, thermal_conductivity as aluminum_k_nist
+from src.materials.nist_material_properties.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
+from src.materials.nist_material_properties.aluminum3003f_properties import specific_heat as aluminum3003f_cp_nist, thermal_conductivity as aluminum3003f_k_nist
+from src.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as aluminum6061t6_cp_nist, thermal_conductivity as aluminum6061t6_k_nist
 
 
 @dataclass
@@ -38,13 +40,17 @@ class NISTMaterial(Material):
 
     def determine_specific_heat(self, temperature: float) -> float:
         """
-        Compute the specific heat using NIST data if available, fallback to Debye model.
+        Compute the specific heat using NIST data with strict error handling.
 
         Args:
             temperature: Temperature in Kelvin
 
         Returns:
             Specific heat in J/(kg·K)
+
+        Raises:
+            ValueError: If temperature is outside NIST range
+            RuntimeError: If NIST calculation fails or no NIST data available
         """
         if self._nist_cp_func is not None:
 
@@ -60,13 +66,17 @@ class NISTMaterial(Material):
 
     def determine_thermal_conductivity(self, temperature: float) -> float:
         """
-        Compute the thermal conductivity using NIST data if available, fallback to base model.
+        Compute the thermal conductivity using NIST data with strict error handling.
 
         Args:
             temperature: Temperature in Kelvin
 
         Returns:
             Thermal conductivity in W/(m·K)
+
+        Raises:
+            ValueError: If temperature is outside NIST range
+            RuntimeError: If NIST calculation fails
         """
         if self._nist_k_func is not None:
             try:
@@ -75,12 +85,12 @@ class NISTMaterial(Material):
                 if min_temp <= temperature <= max_temp:
                     return float(self._nist_k_func(temperature))
                 else:
-                    print(f"Warning: Temperature {temperature}K outside NIST range {min_temp}-{max_temp}K, using base model")
+                    raise ValueError(f"Temperature {temperature}K outside NIST range {min_temp}-{max_temp}K for thermal conductivity")
             except Exception as e:
-                print(f"Warning: NIST thermal conductivity calculation failed at {temperature}K: {e}, using base model")
+                raise RuntimeError(f"NIST thermal conductivity calculation failed at {temperature}K: {e}")
 
-        # Fallback to base class method
-        return super().determine_thermal_conductivity(temperature)
+        # If no NIST function, kill simulation - no fallback allowed
+        raise RuntimeError(f"No NIST thermal conductivity data available at {temperature}K - simulation cannot continue")
 
     def set_temperature_range(self, min_temp: float, max_temp: float):
         """Set the valid temperature range for NIST data."""
@@ -126,6 +136,56 @@ class NISTMetal(NISTMaterial, Metal):
         material.set_temperature_range(4, 300)  # NIST data range
         return material
 
+    @classmethod
+    def aluminum_3003F_nist(cls):
+        """
+        Create aluminum 3003F material using NIST temperature-dependent properties.
+
+        Uses polynomial fits for thermal conductivity and specific heat from NIST data.
+        Valid temperature range: 4-300K for equation range 1-300K.
+        """
+        # Aluminum 3003F properties
+        failure_stress = 110e6  # Pa - typical for aluminum 3003-F
+        density = 2730  # kg/m³ - aluminum 3003 density
+        characteristic_temperature = 1500  # K - kept for fallback
+        molecular_weight = 26.981539  # g/mol - aluminum
+
+        material = cls(
+            failure_stress=failure_stress,
+            density=density,
+            characteristic_temperature=characteristic_temperature,
+            molecular_weight=molecular_weight
+        )
+        material.set_nist_function(aluminum3003f_cp_nist)
+        material.set_nist_thermal_conductivity_function(aluminum3003f_k_nist)
+        material.set_temperature_range(4, 300)  # NIST data range
+        return material
+
+    @classmethod
+    def aluminum_6061T6_nist(cls):
+        """
+        Create aluminum 6061-T6 material using NIST temperature-dependent properties.
+
+        Uses polynomial fits for thermal conductivity and specific heat from NIST data.
+        Valid temperature range: 4-300K for equation range 1-300K.
+        """
+        # Aluminum 6061-T6 properties
+        failure_stress = 310e6  # Pa - typical for aluminum 6061-T6
+        density = 2700  # kg/m³ - aluminum 6061 density
+        characteristic_temperature = 1500  # K - kept for fallback
+        molecular_weight = 26.981539  # g/mol - aluminum
+
+        material = cls(
+            failure_stress=failure_stress,
+            density=density,
+            characteristic_temperature=characteristic_temperature,
+            molecular_weight=molecular_weight
+        )
+        material.set_nist_function(aluminum6061t6_cp_nist)
+        material.set_nist_thermal_conductivity_function(aluminum6061t6_k_nist)
+        material.set_temperature_range(4, 300)  # NIST data range
+        return material
+
 
 
 
@@ -155,26 +215,21 @@ class NISTComposite(NISTMaterial, Composite):
         """
         if self._nist_cp_func is not None:
             try:
-                # For composites, always try to use NIST data even outside range
+                # For composites, strict temperature range enforcement
                 min_temp, max_temp = self._temperature_range
                 if min_temp <= temperature <= max_temp:
                     return float(self._nist_cp_func(temperature))
                 else:
-                    # For composites, extrapolate using boundary values rather than Debye model
+                    # Kill simulation if temperature is outside NIST range
                     if temperature < min_temp:
-                        print(f"Warning: Temperature {temperature}K below NIST range, using {min_temp}K value")
-                        return float(self._nist_cp_func(min_temp))
+                        raise ValueError(f"Temperature {temperature}K below NIST range {min_temp}-{max_temp}K for composite material")
                     else:  # temperature > max_temp
-                        print(f"Warning: Temperature {temperature}K above NIST range, using {max_temp}K value")
-                        return float(self._nist_cp_func(max_temp))
+                        raise ValueError(f"Temperature {temperature}K above NIST range {min_temp}-{max_temp}K for composite material")
             except Exception as e:
-                print(f"Error: NIST calculation failed at {temperature}K: {e}")
-                # For composites, use a reasonable constant value rather than Debye model
-                return 1000.0  # J/(kg·K) - typical composite specific heat
+                raise RuntimeError(f"NIST calculation failed at {temperature}K: {e}")
 
-        # If no NIST function available, use a reasonable composite estimate
-        print(f"Warning: No NIST data available for composite at {temperature}K, using estimate")
-        return 1000.0  # J/(kg·K) - typical composite specific heat
+        # If no NIST function available, kill simulation
+        raise RuntimeError(f"No NIST data available for composite at {temperature}K - simulation cannot continue")
 
     @classmethod
     def g10_nist(cls, winding_angle: float):
