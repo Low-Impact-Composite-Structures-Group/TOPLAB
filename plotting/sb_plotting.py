@@ -739,3 +739,106 @@ class SeabornPlotter:
         fig.tight_layout()
 
         return fig
+
+    def plot_heat_exchanger_requirements(self, heat_flow_data, scenario_name=None,
+                                         ihex_data=None, ohex_data=None, plot_total=True, figsize=(10, 6)):
+        """
+        Plot heat exchanger requirements over time.
+
+        Args:
+            heat_flow_data: Dictionary containing heat flow data from simulation results
+                           Expected keys: 't', 'qdot_disch', 'qdot_ohex'
+            scenario_name: Optional scenario name for title
+            ihex_data: Optional separate iHEX data (time, heat_flow) tuple
+            ohex_data: Optional separate oHEX data (time, heat_flow) tuple for future use
+            plot_total: Boolean flag to plot total heat flow requirement (iHEX + oHEX) as dashed line
+            figsize: Figure size tuple (width, height)
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style, KONINGSBLAUW, BORDEAUX, BOSGROEN
+
+        # Apply consistent styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Convert time from seconds to hours for consistent plotting
+        SECONDS_TO_HOURS = 1 / 3600
+
+        # Plot iHEX heat flow requirement (Qdot_disch)
+        if ihex_data is not None:
+            # Use provided separate iHEX data
+            time_hours, ihex_heat_flow = ihex_data
+            ax.plot(time_hours, ihex_heat_flow, '-', color=KONINGSBLAUW,
+                    label="iHEX Heat Flow Requirement", linewidth=2)
+        elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+            # Use data from simulation results
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ax.plot(time_hours, heat_flow_data['qdot_disch'], '-', color=KONINGSBLAUW,
+                    label="iHEX Heat Flow Requirement", linewidth=2)
+
+        # Plot oHEX heat flow requirement
+        ohex_plotted = False
+        ohex_values = None
+        if ohex_data is not None:
+            # Use provided separate oHEX data
+            time_hours_ohex, ohex_heat_flow = ohex_data
+            ax.plot(time_hours_ohex, ohex_heat_flow, '-', color=BORDEAUX,
+                    label="oHEX Heat Flow Requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = ohex_heat_flow
+        elif 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
+            # Use data from simulation results (only if non-zero values exist)
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ax.plot(time_hours, heat_flow_data['qdot_ohex'], '-', color=BORDEAUX,
+                    label="oHEX Heat Flow Requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = heat_flow_data['qdot_ohex']
+
+        # Plot total heat flow requirement (iHEX + oHEX) if requested and both curves exist
+        if plot_total:
+            ihex_values = None
+            total_time_hours = None
+
+            # Get iHEX values
+            if ihex_data is not None:
+                total_time_hours, ihex_values = ihex_data
+            elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+                total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                ihex_values = heat_flow_data['qdot_disch']
+
+            # Get oHEX values for total calculation
+            if ohex_values is None and 'qdot_ohex' in heat_flow_data:
+                ohex_values = heat_flow_data['qdot_ohex']
+
+            # Calculate and plot total if we have both datasets
+            if ihex_values is not None and ohex_values is not None and len(ihex_values) == len(ohex_values):
+                total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values, ohex_values)]
+                ax.plot(total_time_hours, total_heat_flow, '--', color=BOSGROEN,
+                        label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        title = "Heat Exchanger Requirements"
+        if scenario_name:
+            title += f" - {scenario_name.capitalize()}"
+        ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Heat Flow Requirement [W]")
+
+        # Add legend if we have data to plot
+        if len(ax.get_lines()) > 1:  # More than just the reference line
+            ax.legend(loc='best', framealpha=0.9)
+
+        # Apply grid
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig

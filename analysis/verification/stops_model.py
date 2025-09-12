@@ -462,15 +462,24 @@ class ModelSwitcher:
         Qdot_disch = config_eqs['qdot_disch']  # Config-dependent discharge heat
         mdot_vent = config_eqs['mdot_vent']    # Config-dependent venting
 
+        # Mass flow rates
+        mdot_f = mdot_fuel_func(t)
+        mdot_d = mdot_disch_func(t)
+
+        # Collect heat flow data for plotting (global storage)
+        global heat_flow_data
+        heat_flow_data['t'].append(t)
+        heat_flow_data['qdot_disch'].append(Qdot_disch)
+        heat_flow_data['qdot_ohex'].append(0.0)  # Will be calculated in post-processing
+        heat_flow_data['mdot_disch'].append(mdot_d)
+        heat_flow_data['T'].append(T)
+        heat_flow_data['rho'].append(rho)
+
         # Algebraic equations (4,5): Heat transfer (coupled with temperatures)
         alpha_s = get_alpha_s(T, Ts, diameter, convective_medium, p_config)
         self.alpha_s_last = alpha_s  # Store for debugging
         Qdot_s = alpha_s * A_in * (Ts - T)     # Equation (4)
         Qdot_amb = k_amb * A_out * (T_amb - Ts) # Equation (5)
-
-        # Mass flow rates
-        mdot_f = mdot_fuel_func(t)
-        mdot_d = mdot_disch_func(t)
 
         # Now solve the 3 coupled ODEs simultaneously:
 
@@ -506,6 +515,101 @@ m_wall = 150.0     # Wall mass [kg]
 PRINT_EVERY_N_STEPS = 50  # Print progress every N steps
 step_counter = 0  # Global counter
 
+# oHEX (Outer Heat Exchanger) target conditions for heat requirement calculation
+OHEX_TARGET_TEMPERATURE = 200.0  # Target temperature [K]
+OHEX_TARGET_PRESSURE = 20e5      # Target pressure [Pa] (20 bar)
+
+# Heat flow data collection for plotting
+heat_flow_data = {
+    't': [],           # Time points [s]
+    'qdot_disch': [],  # iHEX heat flow requirement [W]
+    'qdot_ohex': [],   # oHEX heat flow requirement [W] (calculated in post-processing)
+    'mdot_disch': [],  # Discharge mass flow rate [kg/s] (needed for oHEX calculation)
+    'T': [],           # Fluid temperature [K] (needed for discharge enthalpy)
+    'rho': []          # Fluid density [kg/m³] (needed for discharge enthalpy)
+}
+
+def reset_heat_flow_data():
+    """Reset heat flow data collection before new simulation."""
+    global heat_flow_data
+    heat_flow_data['t'].clear()
+    heat_flow_data['qdot_disch'].clear()
+    heat_flow_data['qdot_ohex'].clear()
+    heat_flow_data['mdot_disch'].clear()
+    heat_flow_data['T'].clear()
+    heat_flow_data['rho'].clear()
+
+def get_heat_flow_data():
+    """Get current heat flow data for plotting."""
+    global heat_flow_data
+    return {
+        't': heat_flow_data['t'].copy(),
+        'qdot_disch': heat_flow_data['qdot_disch'].copy(),
+        'qdot_ohex': heat_flow_data['qdot_ohex'].copy(),
+        'mdot_disch': heat_flow_data['mdot_disch'].copy(),
+        'T': heat_flow_data['T'].copy(),
+        'rho': heat_flow_data['rho'].copy()
+    }
+
+def calculate_ohex_heat_requirements(heat_flow_data,
+                                   target_temperature=OHEX_TARGET_TEMPERATURE,
+                                   target_pressure=OHEX_TARGET_PRESSURE):
+    """
+    Calculate oHEX (Outer Heat Exchanger) heat requirements by post-processing simulation data.
+
+    The oHEX heat requirement is calculated as:
+    Q_oHEX = mdot_disch * (h_disch - h_target)
+
+    Where:
+    - mdot_disch: discharge mass flow rate [kg/s]
+    - h_disch: enthalpy of discharge stream at current T, rho [J/kg]
+    - h_target: enthalpy at target temperature and pressure [J/kg]
+
+    Parameters
+    ----------
+    heat_flow_data : dict
+        Dictionary containing simulation data with keys: 't', 'mdot_disch', 'T', 'rho'
+    target_temperature : float, optional
+        Target temperature for oHEX outlet [K] (default: OHEX_TARGET_TEMPERATURE)
+    target_pressure : float, optional
+        Target pressure for oHEX outlet [Pa] (default: OHEX_TARGET_PRESSURE)
+
+    Returns
+    -------
+    dict
+        Updated heat_flow_data dictionary with calculated 'qdot_ohex' values
+    """
+    if not heat_flow_data or len(heat_flow_data.get('T', [])) == 0:
+        return heat_flow_data
+
+    # Calculate target enthalpy (constant for all time points)
+    h_target = PropsSI("Hmass", "T", target_temperature, "P", target_pressure, fluid)
+
+    # Calculate oHEX heat requirement for each time point
+    qdot_ohex_calculated = []
+
+    for i, (T, rho, mdot_d) in enumerate(zip(heat_flow_data['T'],
+                                           heat_flow_data['rho'],
+                                           heat_flow_data['mdot_disch'])):
+        try:
+            # Calculate discharge enthalpy at current conditions
+            h_disch = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
+
+            # Calculate oHEX heat requirement: Q = mdot * (h_disch - h_target)
+            qdot_ohex = mdot_d * (h_target - h_disch)
+            qdot_ohex_calculated.append(qdot_ohex)
+
+        except Exception as e:
+            # Handle CoolProp errors gracefully
+            print(f"Warning: Could not calculate oHEX heat requirement at point {i}: {e}")
+            qdot_ohex_calculated.append(0.0)
+
+    # Update the heat flow data with calculated oHEX values
+    updated_data = heat_flow_data.copy()
+    updated_data['qdot_ohex'] = qdot_ohex_calculated
+
+    return updated_data
+
 # Geometric parameters for alpha_s calculation
 diameter = 1.0      # Inner diameter [m]  # Outer diameter [m]
 convective_medium = "Hydrogen"  # Fluid in the gap
@@ -534,12 +638,8 @@ def c_wall_func(Ts):
 # ----------------- Heat Transfer Coefficient Function -----------------
 def get_alpha_s(T, Ts, D, fluid="Air", p=101325):
     """
-    Compute equivalent inner convective heat transfer coefficient (h_i)
-    for a horizontal concentric cylindrical annulus using
-    Kuehn & Goldstein correlation (1976).
-
-    This function implements equations (1a)-(1g) from the Kuehn & Goldstein
-    correlation for natural convection in horizontal concentric cylindrical annuli.
+    Compute equivalent convective heat transfer coefficient (h_i)
+    for a horizontal cylinder annulus using the Churchill & Chu correlation.
 
     Parameters
     ----------
@@ -886,6 +986,9 @@ def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
     """
     global step_counter, mdot_fuel_func, mdot_disch_func, rho_stop, global_scenario_manager
 
+    # Reset heat flow data collection before simulation
+    reset_heat_flow_data()
+
     # Set scenario
     scenario_manager.set_scenario(scenario_name)
     global_scenario_manager = scenario_manager  # Set global reference for configuration functions
@@ -1039,7 +1142,8 @@ def run_hydrogen_tank_simulation(scenario_name, verbose=True, t_offset=0.0):
         'success': sol.success,
         'stop_info': stop_info,
         't_offset': t_offset,
-        'metadata': metadata
+        'metadata': metadata,
+        'heat_flow_data': get_heat_flow_data()  # Include heat flow data for plotting
     }
 
 def postprocess_simulation_result(result, num_points=400):
@@ -1125,6 +1229,10 @@ def postprocess_simulation_result(result, num_points=400):
         stats['two_phase_pressure_range'] = [p_two_phase.min(), p_two_phase.max()]
         stats['two_phase_temperature_range'] = [T_two_phase.min(), T_two_phase.max()]
 
+    # Get heat flow data and calculate oHEX requirements
+    raw_heat_flow_data = result.get('heat_flow_data', {'t': [], 'qdot_disch': [], 'qdot_ohex': []})
+    processed_heat_flow_data = calculate_ohex_heat_requirements(raw_heat_flow_data)
+
     return {
         't': t_eval,
         'm': m_sol,
@@ -1135,7 +1243,8 @@ def postprocess_simulation_result(result, num_points=400):
         'model_used': model_used,
         'stats': stats,
         'scenario': scenario,
-        't_offset': t_offset
+        't_offset': t_offset,
+        'heat_flow_data': processed_heat_flow_data
     }
 
 def run_chained_scenarios(scenarios=['DISCHARGE', 'REFUEL', 'DORMANCY'], verbose=True):
@@ -1508,6 +1617,36 @@ if __name__ == "__main__":
 
     # Create the combined density-temperature plot using SeabornPlotter
     plot_combined_density_temperature(chained_results, chained_data)
+
+    # Demonstrate the new heat exchanger requirements plotting
+    plotter = SeabornPlotter()
+
+    print(f"\nHeat Exchanger Analysis:")
+    print(f"oHEX Target Conditions: {OHEX_TARGET_TEMPERATURE}K, {OHEX_TARGET_PRESSURE/1e5:.1f} bar")
+
+    # Plot heat exchanger requirements only for discharge scenario
+    for i, (result, data) in enumerate(zip(chained_results, chained_data)):
+        scenario_name = result['scenario']
+
+        # Only create heat exchanger plot for discharge scenario
+        if scenario_name.upper() == 'DISCHARGE':
+            heat_flow_data = data.get('heat_flow_data', {})
+
+            if heat_flow_data and 'qdot_disch' in heat_flow_data:
+                fig_hex = plotter.plot_heat_exchanger_requirements(
+                    heat_flow_data,
+                    scenario_name=scenario_name,
+                    plot_total=True  # Enable total heat flow curve
+                )
+                print(f"Created heat exchanger plot for {scenario_name} scenario")
+
+                # Check if oHEX data was calculated
+                if any(q != 0.0 for q in heat_flow_data.get('qdot_ohex', [])):
+                    print(f"  - iHEX, oHEX, and total heat requirements plotted")
+                else:
+                    print(f"  - Only iHEX requirements plotted (oHEX data all zeros, no total curve)")
+            else:
+                print(f"No heat flow data available for {scenario_name} scenario")
 
     plt.show()
 
