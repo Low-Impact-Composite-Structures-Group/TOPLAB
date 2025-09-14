@@ -624,7 +624,7 @@ config_manager = ConfigurationManager(fluid, p_min, p_vent)
 model_switcher = ModelSwitcher(fluid, config_manager)
 
 # Initialize NIST materials
-liner_material = NISTMetal.aluminum_5083_nist()
+liner_material = NISTMetal.aluminum_6061T6_nist()
 wall_material = NISTComposite.g10_nist(winding_angle=0.0)
 
 def c_liner_func(Ts):
@@ -689,6 +689,13 @@ def get_alpha_s(T, Ts, D, fluid="Air", p=101325):
 
     Nu_D = (0.60 + (0.387 * Ra_D**(1/6)) /
            ( (1 + (0.559/Pr)**(9/16))**(8/27) ))**2
+
+
+    # den_1 = ((Ra_D**0.25)**(1/5)+(0.12*Ra_D**(1/3))**15)**(1/15)
+    # den_2 = np.log(1 - 2/den_1)
+
+    # Nu_Do = -2/den_2
+
 
      # Heat transfer coefficient
     h = Nu_D * k / D
@@ -1301,7 +1308,7 @@ def run_chained_scenarios(scenarios=['DISCHARGE', 'REFUEL', 'DORMANCY'], verbose
 
 def plot_chained_scenarios(results, postprocessed_data=None):
     """
-    Plot results from multiple scenarios with different colors.
+    Plot results from multiple scenarios with different colors using SeabornPlotter.
 
     Parameters
     ----------
@@ -1313,212 +1320,16 @@ def plot_chained_scenarios(results, postprocessed_data=None):
     if postprocessed_data is None:
         postprocessed_data = [postprocess_simulation_result(result) for result in results]
 
-    colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown']
-    scenario_colors = {data['scenario']: colors[i % len(colors)] for i, data in enumerate(postprocessed_data)}
+    # Create SeabornPlotter instance
+    plotter = SeabornPlotter(font="Cambria", palette="delft")
 
-    plt.figure(figsize=(16, 12))
+    # Create the plot using the plotter method
+    fig = plotter.plot_chained_scenarios(results, postprocessed_data)
 
-    # Mass vs time
-    plt.subplot(3, 4, 1)
-    for data in postprocessed_data:
-        plt.plot(data['t'], data['m'], color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Mass (kg)")
-    plt.title("Mass vs Time")
-    plt.legend()
-    plt.grid(True)
+    # Print detailed statistics using the plotter method
+    plotter.print_detailed_simulation_statistics(results, postprocessed_data)
 
-    # Gas Temperature vs time
-    plt.subplot(3, 4, 2)
-    for data in postprocessed_data:
-        plt.plot(data['t'], data['T'], color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Temperature (K)")
-    plt.title("Gas Temperature vs Time")
-    plt.legend()
-    plt.grid(True)
-
-    # Liner/Wall Temperature vs time
-    plt.subplot(3, 4, 3)
-    for data in postprocessed_data:
-        plt.plot(data['t'], data['Ts'], color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Solid Temperature (K)")
-    plt.title("Liner/Wall Temperature vs Time")
-    plt.legend()
-    plt.grid(True)
-
-    # Pressure vs time
-    plt.subplot(3, 4, 4)
-    for data in postprocessed_data:
-        plt.plot(data['t'], data['p']/1e5, color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Pressure (bar)")
-    plt.title("Pressure vs Time")
-    plt.legend()
-    plt.grid(True)
-
-    # Density vs time
-    plt.subplot(3, 4, 5)
-    for i, data in enumerate(postprocessed_data):
-        plt.plot(data['t'], data['rho'], color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-        # Add density stopping threshold for reference
-        result = results[i]
-        rho_stop = result['metadata']['rho_stop']
-        plt.axhline(y=rho_stop, color=scenario_colors[data['scenario']],
-                   linestyle='--', alpha=0.5, linewidth=1)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Density (kg/m³)")
-    plt.title("Density vs Time")
-    plt.legend()
-    plt.grid(True)
-
-    # Model usage vs time
-    plt.subplot(3, 4, 6)
-    for data in postprocessed_data:
-        model_numeric = np.where(data['model_used'] == 'single_phase', 0, 1)
-        plt.plot(data['t'], model_numeric, color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Model Type")
-    plt.title("Model Usage vs Time")
-    plt.yticks([0, 1], ['Single Phase', 'Two Phase'])
-    plt.legend()
-    plt.grid(True)
-
-    # Pressure vs Temperature
-    plt.subplot(3, 4, 7)
-    for data in postprocessed_data:
-        single_phase_mask = data['model_used'] == 'single_phase'
-        two_phase_mask = data['model_used'] == 'two_phase'
-
-        base_color = scenario_colors[data['scenario']]
-        if np.any(single_phase_mask):
-            plt.scatter(data['T'][single_phase_mask], data['p'][single_phase_mask]/1e5,
-                       c=base_color, alpha=0.6, s=10, marker='o',
-                       label=f'{data["scenario"]} (Single)')
-        if np.any(two_phase_mask):
-            plt.scatter(data['T'][two_phase_mask], data['p'][two_phase_mask]/1e5,
-                       c=base_color, alpha=0.6, s=10, marker='s',
-                       label=f'{data["scenario"]} (Two)')
-    plt.xlabel("Temperature (K)")
-    plt.ylabel("Pressure (bar)")
-    plt.title("Pressure vs Temperature")
-    plt.legend()
-    plt.grid(True)
-
-    # Density vs Temperature
-    plt.subplot(3, 4, 8)
-    for i, data in enumerate(postprocessed_data):
-        plt.plot(data['T'], data['rho'], color=scenario_colors[data['scenario']],
-                label=data['scenario'], linewidth=2)
-        # Add density stopping threshold for reference
-        result = results[i]
-        rho_stop = result['metadata']['rho_stop']
-        plt.axhline(y=rho_stop, color=scenario_colors[data['scenario']],
-                   linestyle='--', alpha=0.5, linewidth=1)
-    plt.xlabel("Temperature (K)")
-    plt.ylabel("Density (kg/m³)")
-    plt.title("Density vs Temperature")
-    plt.legend()
-    plt.grid(True)
-
-    # Summary statistics
-    plt.subplot(3, 4, 9)
-    scenarios = [data['scenario'] for data in postprocessed_data]
-    single_percentages = [data['stats']['single_phase_percentage'] for data in postprocessed_data]
-    two_percentages = [data['stats']['two_phase_percentage'] for data in postprocessed_data]
-
-    x = np.arange(len(scenarios))
-    width = 0.35
-
-    plt.bar(x - width/2, single_percentages, width, label='Single Phase', alpha=0.7)
-    plt.bar(x + width/2, two_percentages, width, label='Two Phase', alpha=0.7)
-    plt.xlabel('Scenario')
-    plt.ylabel('Percentage (%)')
-    plt.title('Model Usage Summary')
-    plt.xticks(x, scenarios, rotation=45)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    # Timeline overview
-    plt.subplot(3, 4, 10)
-    for i, data in enumerate(postprocessed_data):
-        scenario_duration = data['t'][-1] - data['t'][0]
-        plt.barh(i, scenario_duration, left=data['t'][0],
-                color=scenario_colors[data['scenario']], alpha=0.7,
-                label=data['scenario'])
-        plt.text(data['t'][0] + scenario_duration/2, i,
-                f'{scenario_duration:.0f}s', ha='center', va='center')
-    plt.xlabel('Time (s)')
-    plt.ylabel('Scenario')
-    plt.title('Scenario Timeline')
-    plt.yticks(range(len(postprocessed_data)), [data['scenario'] for data in postprocessed_data])
-    plt.grid(True, alpha=0.3)
-
-    # Final density comparison
-    plt.subplot(3, 4, 11)
-    final_densities = [data['rho'][-1] for data in postprocessed_data]
-    target_densities = [results[i]['metadata']['rho_stop'] for i in range(len(results))]
-
-    x = np.arange(len(scenarios))
-    plt.bar(x, final_densities, alpha=0.7, label='Final Density')
-    plt.scatter(x, target_densities, color='red', s=50, label='Target Density', zorder=5)
-    plt.xlabel('Scenario')
-    plt.ylabel('Density (kg/m³)')
-    plt.title('Final vs Target Density')
-    plt.xticks(x, scenarios, rotation=45)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    # Print summary table
-    plt.subplot(3, 4, 12)
-    plt.axis('off')
-    summary_text = "Simulation Summary:\n\n"
-    for i, data in enumerate(postprocessed_data):
-        result = results[i]
-        stats = data['stats']
-        summary_text += f"{data['scenario']}:\n"
-        summary_text += f"  Duration: {data['t'][-1] - data['t'][0]:.1f}s\n"
-        summary_text += f"  Final ρ: {stats['final_density']:.1f} kg/m³\n"
-        summary_text += f"  Two-phase: {stats['two_phase_percentage']:.1f}%\n"
-        if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
-            summary_text += f"  ✓ Stopped at threshold\n"
-        else:
-            summary_text += f"  ○ Completed time span\n"
-        summary_text += "\n"
-
-    plt.text(0.05, 0.95, summary_text, transform=plt.gca().transAxes,
-             verticalalignment='top', fontfamily='monospace', fontsize=9)
-
-    plt.tight_layout()
-
-    # Print detailed statistics
-    print(f"\n{'='*80}")
-    print("DETAILED SIMULATION STATISTICS")
-    print(f"{'='*80}")
-
-    for i, (result, data) in enumerate(zip(results, postprocessed_data)):
-        print(f"\n{i+1}. {data['scenario']} SCENARIO:")
-        print(f"   Time range: {data['t'][0]:.1f} - {data['t'][-1]:.1f} seconds ({data['t'][-1] - data['t'][0]:.1f}s duration)")
-        print(f"   Final density: {data['stats']['final_density']:.2f} kg/m³ (target: {result['metadata']['rho_stop']:.1f} kg/m³)")
-        print(f"   Density range: {data['stats']['density_range'][0]:.2f} - {data['stats']['density_range'][1]:.2f} kg/m³")
-        print(f"   Model usage: {data['stats']['single_phase_percentage']:.1f}% single-phase, {data['stats']['two_phase_percentage']:.1f}% two-phase")
-
-        if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
-            print(f"   ✓ Stopped by density threshold at t={result['stop_info']['stop_time']:.2f}s")
-        else:
-            print(f"   ○ Completed full time span")
-
-        if 'two_phase_pressure_range' in data['stats']:
-            p_range = data['stats']['two_phase_pressure_range']
-            T_range = data['stats']['two_phase_temperature_range']
-            print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
+    return fig
 
 def plot_combined_density_temperature(results, postprocessed_data=None):
     """
@@ -1597,7 +1408,6 @@ def plot_combined_density_temperature(results, postprocessed_data=None):
         temperature_range=(15, 80),  # Adjust based on your data range
         density_range=(0, 80)        # Adjust based on your data range
     )
-
 
     return fig
 

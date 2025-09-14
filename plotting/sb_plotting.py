@@ -842,3 +842,250 @@ class SeabornPlotter:
         fig.tight_layout()
 
         return fig
+
+    def plot_chained_scenarios(self, results, postprocessed_data=None, figsize=(16, 12)):
+        """
+        Plot results from multiple scenarios with different colors using SeabornPlotter styling.
+
+        Parameters
+        ----------
+        results : list
+            List of result dictionaries from run_hydrogen_tank_simulation()
+        postprocessed_data : list, optional
+            List of postprocessed data dictionaries. If None, will postprocess automatically.
+        figsize : tuple, optional
+            Figure size (width, height) in inches
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
+
+        if postprocessed_data is None:
+            raise ValueError("postprocessed_data must be provided for plotting")
+
+        # Color mapping for scenarios using Delft palette colors
+        scenario_colors = {
+            'DISCHARGE': DONKERGRIJS,
+            'REFUEL': BORDEAUX,
+            'DORMANCY': KONINGSBLAUW
+        }
+
+        # Apply consistent styling
+        from plotting.plot_style_sb import configure_plot_style
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        fig, axes = plt.subplots(3, 4, figsize=figsize)
+        axes = axes.flatten()  # Make indexing easier
+
+        # 1. Mass vs time
+        ax = axes[0]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['m'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Mass (kg)")
+        ax.set_title("Mass vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 2. Gas Temperature vs time
+        ax = axes[1]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['T'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Gas Temperature vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 3. Liner/Wall Temperature vs time
+        ax = axes[2]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['Ts'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Solid Temperature (K)")
+        ax.set_title("Liner/Wall Temperature vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 4. Pressure vs time
+        ax = axes[3]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['p']/1e5, color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 5. Density vs time
+        ax = axes[4]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['rho'], color=color, label=data['scenario'], linewidth=2)
+            # Add density stopping threshold for reference
+            result = results[i]
+            rho_stop = result['metadata']['rho_stop']
+            ax.axhline(y=rho_stop, color=color, linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 6. Model usage vs time
+        ax = axes[5]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            model_numeric = np.where(data['model_used'] == 'single_phase', 0, 1)
+            ax.plot(data['t'], model_numeric, color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Model Type")
+        ax.set_title("Model Usage vs Time")
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['Single Phase', 'Two Phase'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 7. Pressure vs Temperature
+        ax = axes[6]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            single_phase_mask = data['model_used'] == 'single_phase'
+            two_phase_mask = data['model_used'] == 'two_phase'
+
+            if np.any(single_phase_mask):
+                ax.scatter(data['T'][single_phase_mask], data['p'][single_phase_mask]/1e5,
+                          c=color, alpha=0.6, s=10, marker='o',
+                          label=f'{data["scenario"]} (Single)')
+            if np.any(two_phase_mask):
+                ax.scatter(data['T'][two_phase_mask], data['p'][two_phase_mask]/1e5,
+                          c=color, alpha=0.6, s=10, marker='s',
+                          label=f'{data["scenario"]} (Two)')
+        ax.set_xlabel("Temperature (K)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure vs Temperature")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 8. Density vs Temperature
+        ax = axes[7]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['T'], data['rho'], color=color, label=data['scenario'], linewidth=2)
+            # Add density stopping threshold for reference
+            result = results[i]
+            rho_stop = result['metadata']['rho_stop']
+            ax.axhline(y=rho_stop, color=color, linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_xlabel("Temperature (K)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density vs Temperature")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 9. Summary statistics
+        ax = axes[8]
+        scenarios = [data['scenario'] for data in postprocessed_data]
+        single_percentages = [data['stats']['single_phase_percentage'] for data in postprocessed_data]
+        two_percentages = [data['stats']['two_phase_percentage'] for data in postprocessed_data]
+
+        x = np.arange(len(scenarios))
+        width = 0.35
+
+        ax.bar(x - width/2, single_percentages, width, label='Single Phase', alpha=0.7, color=KONINGSBLAUW)
+        ax.bar(x + width/2, two_percentages, width, label='Two Phase', alpha=0.7, color=BORDEAUX)
+        ax.set_xlabel('Scenario')
+        ax.set_ylabel('Percentage (%)')
+        ax.set_title('Model Usage Summary')
+        ax.set_xticks(x)
+        ax.set_xticklabels(scenarios, rotation=45)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 10. Timeline overview
+        ax = axes[9]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            scenario_duration = data['t'][-1] - data['t'][0]
+            ax.barh(i, scenario_duration, left=data['t'][0], color=color, alpha=0.7, label=data['scenario'])
+            ax.text(data['t'][0] + scenario_duration/2, i, f'{scenario_duration:.0f}s',
+                    ha='center', va='center', fontweight='bold')
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Scenario')
+        ax.set_title('Scenario Timeline')
+        ax.set_yticks(range(len(postprocessed_data)))
+        ax.set_yticklabels([data['scenario'] for data in postprocessed_data])
+        ax.grid(True, alpha=0.3)
+
+        # 11. Final density comparison
+        ax = axes[10]
+        final_densities = [data['rho'][-1] for data in postprocessed_data]
+        target_densities = [results[i]['metadata']['rho_stop'] for i in range(len(results))]
+
+        x = np.arange(len(scenarios))
+        colors = [scenario_colors.get(scenario, KONINGSBLAUW) for scenario in scenarios]
+        ax.bar(x, final_densities, alpha=0.7, label='Final Density', color=colors)
+        ax.scatter(x, target_densities, color='red', s=50, label='Target Density', zorder=5)
+        ax.set_xlabel('Scenario')
+        ax.set_ylabel('Density (kg/m³)')
+        ax.set_title('Final vs Target Density')
+        ax.set_xticks(x)
+        ax.set_xticklabels(scenarios, rotation=45)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 12. Summary text
+        ax = axes[11]
+        ax.axis('off')
+        summary_text = "Simulation Summary:\n\n"
+        for i, data in enumerate(postprocessed_data):
+            result = results[i]
+            stats = data['stats']
+            summary_text += f"{data['scenario']}:\n"
+            summary_text += f"  Duration: {data['t'][-1] - data['t'][0]:.1f}s\n"
+            summary_text += f"  Final ρ: {stats['final_density']:.1f} kg/m³\n"
+            summary_text += f"  Two-phase: {stats['two_phase_percentage']:.1f}%\n"
+            if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+                summary_text += f"  ✓ Stopped at threshold\n"
+            else:
+                summary_text += f"  ○ Completed time span\n"
+            summary_text += "\n"
+
+        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
+                verticalalignment='top', fontfamily='monospace', fontsize=9)
+
+        plt.tight_layout()
+        return fig
+
+    def print_detailed_simulation_statistics(self, results, postprocessed_data):
+        """
+        Print detailed statistics for simulation results.
+
+        Parameters
+        ----------
+        results : list
+            List of result dictionaries from run_hydrogen_tank_simulation()
+        postprocessed_data : list
+            List of postprocessed data dictionaries
+        """
+        print(f"\n{'='*80}")
+        print("DETAILED SIMULATION STATISTICS")
+        print(f"{'='*80}")
+
+        for i, (result, data) in enumerate(zip(results, postprocessed_data)):
+            print(f"\n{i+1}. {data['scenario']} SCENARIO:")
+            print(f"   Time range: {data['t'][0]:.1f} - {data['t'][-1]:.1f} seconds ({data['t'][-1] - data['t'][0]:.1f}s duration)")
+            print(f"   Final density: {data['stats']['final_density']:.2f} kg/m³ (target: {result['metadata']['rho_stop']:.1f} kg/m³)")
+            print(f"   Density range: {data['stats']['density_range'][0]:.2f} - {data['stats']['density_range'][1]:.2f} kg/m³")
+            print(f"   Model usage: {data['stats']['single_phase_percentage']:.1f}% single-phase, {data['stats']['two_phase_percentage']:.1f}% two-phase")
+
+            if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+                print(f"   ✓ Stopped by density threshold at t={result['stop_info']['stop_time']:.2f}s")
+            else:
+                print(f"   ○ Completed full time span")
+
+            if 'two_phase_pressure_range' in data['stats']:
+                p_range = data['stats']['two_phase_pressure_range']
+                T_range = data['stats']['two_phase_temperature_range']
+                print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
