@@ -1089,3 +1089,114 @@ class SeabornPlotter:
                 p_range = data['stats']['two_phase_pressure_range']
                 T_range = data['stats']['two_phase_temperature_range']
                 print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
+
+    def plot_refuel_analysis(self, times, masses, temperatures, densities, pressures,
+                           initial_conditions, figsize=(14, 10)):
+        """
+        Create comprehensive plots for refuel scenario analysis.
+
+        Parameters
+        ----------
+        times : array_like
+            Time points [s]
+        masses : array_like
+            Mass values [kg]
+        temperatures : array_like
+            Temperature values [K]
+        densities : array_like
+            Density values [kg/m³]
+        pressures : array_like
+            Pressure values [bar]
+        initial_conditions : dict
+            Dictionary with 'pressure', 'temperature', 'density' keys
+        figsize : tuple, optional
+            Figure size (width, height) in inches
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
+
+        # Apply consistent styling
+        from plotting.plot_style_sb import configure_plot_style
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create subplot grid
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle("CCH2 Refuel Scenario Analysis", fontsize=16, fontweight='bold')
+
+        # 1. Mass vs Time
+        ax = axes[0, 0]
+        ax.plot(times, masses, color=BORDEAUX, linewidth=2.5, label='Tank Mass')
+        ax.axhline(y=initial_conditions['density'] * 0.5, color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Target Mass (78 kg/m³)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Mass (kg)")
+        ax.set_title("Mass Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for mass gain
+        mass_gain = masses[-1] - masses[0]
+        ax.annotate(f'Mass gain: {mass_gain:.2f} kg', xy=(times[-1] * 0.7, masses[-1] * 0.9),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=BORDEAUX, alpha=0.2))
+
+        # 2. Temperature vs Time
+        ax = axes[0, 1]
+        ax.plot(times, temperatures, color=ORANJE, linewidth=2.5, label='Tank Temperature')
+        ax.axhline(y=initial_conditions['temperature'], color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Initial Temperature')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Temperature Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for temperature change
+        temp_change = temperatures[-1] - temperatures[0]
+        ax.annotate(f'ΔT: {temp_change:+.2f} K', xy=(times[-1] * 0.7, temperatures[-1] * 1.02),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=ORANJE, alpha=0.2))
+
+        # 3. Pressure vs Time
+        ax = axes[1, 0]
+        ax.plot(times, pressures, color=KONINGSBLAUW, linewidth=2.5, label='Tank Pressure')
+        ax.axhline(y=initial_conditions['pressure'], color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Initial Pressure')
+        ax.axhline(y=15.0, color='red', linestyle=':', alpha=0.7, label='Min Pressure (15 bar)')
+        ax.axhline(y=450.0, color='red', linestyle=':', alpha=0.7, label='Vent Pressure (450 bar)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for pressure change
+        pressure_change = pressures[-1] - pressures[0]
+        ax.annotate(f'ΔP: {pressure_change:+.1f} bar', xy=(times[-1] * 0.7, pressures[-1] * 1.05),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=KONINGSBLAUW, alpha=0.2))
+
+        # 4. Density vs Time
+        ax = axes[1, 1]
+        ax.plot(times, densities, color=BOSGROEN, linewidth=2.5, label='Tank Density')
+        ax.axhline(y=initial_conditions['density'], color='red',
+                   linestyle='--', alpha=0.7, label='Target Density (78 kg/m³)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for density change
+        density_change = densities[-1] - densities[0]
+        ax.annotate(f'Δρ: {density_change:+.2f} kg/m³', xy=(times[-1] * 0.7, densities[-1] * 0.95),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=BOSGROEN, alpha=0.2))
+
+        # Add summary text box
+        summary_text = f"""Refuel Scenario Summary:
+Duration: {times[-1]:.1f} s
+Mass added: {mass_gain:.2f} kg
+Final density: {densities[-1]:.1f} kg/m³
+Config B disabled (REFUEL mode)"""
+
+        fig.text(0.02, 0.02, summary_text, fontsize=10, verticalalignment='bottom',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8))
+
+        plt.tight_layout()
+        return fig
