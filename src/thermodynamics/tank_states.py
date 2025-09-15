@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from statistics import mean
 from typing import Protocol
 
-from src.fluids.hydrogen_retrievers import HydrogenRetriever
+from src.fluids.hydrogen_retrievers import HydrogenRetriever, IsochoricHydrogenRequester
+from src.fluids.convective_mediums import IsochoricHydrogen
 
 SECONDS_TO_HOURS = 1 / 60 ** 2
 PASCAL_TO_BAR = 1e-5
@@ -69,17 +70,17 @@ class InitialState:
                 else:
                     # Transition is old enough, we can update normally
                     self._recent_phase_transition = False
-        
+
         original_phase = getattr(self.hydrogen, 'phase', 'unknown') if hasattr(self, 'hydrogen') else 'none'
-        
+
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
-        
+
         new_phase = getattr(self.hydrogen, 'phase', 'unknown')
         if original_phase != 'none' and original_phase != new_phase:
             print(f"WARNING: get_hydrogen_properties() changed phase from {original_phase} to {new_phase}")
-        
+
         return self.hydrogen
 
     def compute_fuel_mass(self, tank_volume: float) -> float:
@@ -166,7 +167,7 @@ class TankState:
             return 0.0
         if self.phase == "liquid":
             return 1.0
-        
+
         # For supercritical phase, treat as single-phase gas (fill = 0)
         # because supercritical fluids behave more like dense gases
         if hasattr(self.hydrogen, 'phase') and 'supercritical' in self.hydrogen.phase:
@@ -199,7 +200,7 @@ class TankState:
             else:
                 # Last resort: use fuel mass to estimate
                 return min(1.0, self.fuel_mass / (self.volume * 70))  # 70 kg/m³ ~ liquid H2 density
-        
+
         # Ensure fill value is not negative
         if fill_value < 0:
             fill_value = 0
@@ -221,7 +222,7 @@ class TankState:
         # Direct phase check for safety
         if self.phase == "liquid":
             return True
-            
+
         # Safe check that doesn't require accessing phase-specific properties
         try:
             return self.fill >= 1
@@ -240,13 +241,13 @@ class TankState:
         # Safe check that doesn't try to access phase-specific properties
         if hasattr(self, 'fuel_mass') and self.fuel_mass <= 0:
             return True
-            
+
         # For single-phase tanks (gas or liquid), check based on fuel mass or volume
         if self.phase in ["gas", "liquid"]:
             # Tank can have gas phase and still have significant mass
             # Only consider empty if fuel mass is very small
             return self.fuel_mass <= 1e-6  # Very small threshold for numerical precision
-            
+
         # For two-phase, use fill-based check
         try:
             return self.fill == 0 or self.fuel_height == 0
@@ -262,7 +263,7 @@ class TankState:
 
         if 'TwoPhase' in hydrogen_class_name:
             return "twophase"
-        
+
         # Check if hydrogen object has phase attribute
         if hasattr(self.hydrogen, 'phase'):
             phase = self.hydrogen.phase
@@ -270,7 +271,7 @@ class TankState:
             if 'supercritical' in phase:
                 return "gas"  # Treat supercritical as gas for thermal resistance
             return phase
-        
+
         # Check phase based on available properties
         try:
             # Try to access gas properties - if this works, it's gas or supercritical
@@ -284,7 +285,7 @@ class TankState:
             except (ValueError, AttributeError):
                 # If both fail, default to gas for CCH2 analysis
                 return "gas"
-    
+
     def check_phase_transition(self, current_time):
         """
         Check if phase transition should occur based on natural thermodynamic conditions.
@@ -301,19 +302,19 @@ class TankState:
             from src.fluids.hydrogen_retrievers import PhaseRequester
             phase_requester = PhaseRequester()
             natural_phase = phase_requester.get_fluid_phase(self.temperature, self.pressure)
-            
+
             # Debug: Always print the phase comparison
             print(f"PHASE CHECK: current={self.phase}, natural={natural_phase}, P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
-            
+
             # Only transition if the natural phase is different from current phase
             if natural_phase != self.phase:
                 print(f"NATURAL PHASE TRANSITION: {self.phase} → {natural_phase}")
                 print(f"  Conditions: P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
-                
+
                 # Update hydrogen properties to match the new phase
                 from src.fluids.hydrogen_retrievers import HydrogenRetriever
                 retriever = HydrogenRetriever()
-                
+
                 try:
                     new_hydrogen = retriever.get_hydrogen_properties(self.pressure, self.temperature)
                     self.hydrogen = new_hydrogen
@@ -321,7 +322,7 @@ class TankState:
                     self._recent_phase_transition = True
                     self._transition_time = current_time
                     print(f"Successfully transitioned to {natural_phase} phase")
-                    
+
                     # If transitioning to two-phase, initialize gas/liquid masses properly
                     if natural_phase == "twophase" and hasattr(self, 'fuel_mass'):
                         # Estimate initial gas/liquid split based on conditions
@@ -334,12 +335,12 @@ class TankState:
                             # Start with 50/50 volume split as initial guess
                             vol_fraction_gas = 0.5
                             vol_fraction_liquid = 0.5
-                            
+
                             # Calculate masses based on volume fractions
                             total_volume = self.volume
                             mass_gas = rho_gas * vol_fraction_gas * total_volume
                             mass_liquid = rho_liquid * vol_fraction_liquid * total_volume
-                            
+
                             # Normalize to match total fuel mass
                             mass_total_calc = mass_gas + mass_liquid
                             if mass_total_calc > 0:
@@ -348,18 +349,18 @@ class TankState:
                             else:
                                 self.gas_mass = total_mass * 0.5
                                 self.liquid_mass = total_mass * 0.5
-                                
+
                             print(f"Initialized two-phase: gas={self.gas_mass:.3f}kg, liquid={self.liquid_mass:.3f}kg")
                         else:
                             # Fallback if hydrogen object doesn't have gas/liquid components
                             self.gas_mass = total_mass * 0.5
                             self.liquid_mass = total_mass * 0.5
                             print(f"Fallback two-phase initialization: gas={self.gas_mass:.3f}kg, liquid={self.liquid_mass:.3f}kg")
-                            
+
                 except Exception as e:
                     print(f"Could not complete phase transition to {natural_phase}: {e}")
                     # Keep the current phase but log the issue
-                    
+
         except Exception as e:
             print(f"Error in natural phase detection: {e}")
             # Continue with current phase - no artificial forcing
@@ -388,17 +389,17 @@ class TankState:
                 else:
                     # Transition is old enough, we can update normally
                     self._recent_phase_transition = False
-        
+
         original_phase = getattr(self.hydrogen, 'phase', 'unknown') if hasattr(self, 'hydrogen') else 'none'
-        
+
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
-        
+
         new_phase = getattr(self.hydrogen, 'phase', 'unknown')
         if original_phase != 'none' and original_phase != new_phase:
             print(f"WARNING: get_hydrogen_properties() changed phase from {original_phase} to {new_phase}")
-        
+
         return self.hydrogen
 
     def compute_state_derivatives(
@@ -649,6 +650,264 @@ class TankStates:
             derivative.heat_flux
             for derivative in self.state_derivatives
         ]
+
+
+@dataclass
+class IsochoricTankState:
+    """
+    IsochoricTankState represents the tank state for the stops_model approach.
+
+    This state class handles the [m, T, Ts] state vector from the stops_model:
+    - m: Total fuel mass [kg]
+    - T: Fluid temperature [K]
+    - Ts: Solid temperature [K] (tank structure temperature)
+
+    Unlike the standard TankState, this class:
+    - Uses IsochoricHydrogen for thermodynamic properties
+    - Tracks solid temperature evolution
+    - Supports configuration-dependent behavior (A/B/C configurations)
+    - Handles near-saturation conditions with isochoric assumptions
+    """
+    tank: Tank
+    fuel_mass: float  # m in stops_model state vector
+    temperature: float  # T in stops_model state vector
+    solid_temperature: float  # Ts in stops_model state vector
+    pressure: float = None  # Computed from EOS
+    configuration: str = "A"  # Configuration A, B, or C from stops_model
+    scenario: str = "DISCHARGE"  # DISCHARGE, REFUEL, or DORMANCY
+
+    # Additional properties for isochoric analysis
+    hydrogen: 'IsochoricHydrogen' = None
+    derivatives: 'IsochoricStateDerivatives' = None
+
+    @property
+    def volume(self):
+        return self.tank.volume
+
+    @property
+    def density(self):
+        """Fuel density [kg/m³]"""
+        return self.fuel_mass / self.volume
+
+    @property
+    def state_vector(self):
+        """Returns the [m, T, Ts] state vector for ODE integration"""
+        return [self.fuel_mass, self.temperature, self.solid_temperature]
+
+    @classmethod
+    def from_state_vector(cls, tank: Tank, state_vector: list, **kwargs):
+        """Create IsochoricTankState from [m, T, Ts] state vector"""
+        m, T, Ts = state_vector
+        return cls(
+            tank=tank,
+            fuel_mass=m,
+            temperature=T,
+            solid_temperature=Ts,
+            **kwargs
+        )
+
+    def __post_init__(self):
+        """Initialize hydrogen properties and compute pressure"""
+        self.get_hydrogen_properties()
+        self.compute_pressure()
+
+    def get_hydrogen_properties(self):
+        """Get IsochoricHydrogen properties for current state"""
+        if self.hydrogen is None or self._needs_hydrogen_update():
+            requester = IsochoricHydrogenRequester()
+
+            # If pressure is not set, estimate it first
+            if self.pressure is None:
+                self.compute_pressure()
+
+            self.hydrogen = requester.get_hydrogen_properties(
+                self.pressure, self.temperature, self.density
+            )
+
+    def compute_pressure(self):
+        """Compute pressure from equation of state"""
+        if self.pressure is None:
+            from CoolProp.CoolProp import PropsSI
+            try:
+                self.pressure = PropsSI("P", "T", self.temperature, "Dmass", self.density, "hydrogen")
+            except Exception as e:
+                # Fallback for extreme conditions
+                self.pressure = 1e5  # Default to 1 bar
+
+    def _needs_hydrogen_update(self) -> bool:
+        """Check if hydrogen properties need to be updated"""
+        if self.hydrogen is None:
+            return True
+
+        # Check if temperature or density changed significantly
+        temp_change = abs(self.temperature - self.hydrogen.temperature) / self.hydrogen.temperature
+        density_change = abs(self.density - self.hydrogen.density) / self.hydrogen.density
+
+        return temp_change > 0.01 or density_change > 0.01  # 1% threshold
+
+    def update_from_state_vector(self, state_vector: list):
+        """Update state from [m, T, Ts] vector (for ODE integration)"""
+        self.fuel_mass, self.temperature, self.solid_temperature = state_vector
+
+        # Recompute derived properties
+        self.compute_pressure()
+        self.get_hydrogen_properties()
+
+    def is_configuration_B(self, p_min: float) -> bool:
+        """Check if pressure is below minimum threshold (Configuration B)"""
+        return self.pressure <= p_min
+
+    def is_configuration_C(self, p_vent: float) -> bool:
+        """Check if pressure is above venting threshold (Configuration C)"""
+        return self.pressure >= p_vent
+
+    def determine_configuration(self, p_min: float, p_vent: float) -> str:
+        """Determine current configuration based on pressure thresholds"""
+        if self.is_configuration_C(p_vent):
+            return "C"
+        elif self.is_configuration_B(p_min):
+            return "B"
+        else:
+            return "A"
+
+    def get_effective_cv(self) -> float:
+        """Get effective specific heat for isochoric process"""
+        if self.hydrogen is not None:
+            return self.hydrogen.get_effective_cv()
+        else:
+            # Fallback
+            from CoolProp.CoolProp import PropsSI
+            return PropsSI("Cvmass", "T", self.temperature, "Dmass", self.density, "hydrogen")
+
+
+@dataclass
+class IsochoricStateDerivatives:
+    """
+    State derivatives for the isochoric ODE system.
+
+    Represents d/dt[m, T, Ts] from the stops_model:
+    - fuel_mass_derivative: dm/dt [kg/s]
+    - temperature_derivative: dT/dt [K/s]
+    - solid_temperature_derivative: dTs/dt [K/s]
+    """
+    fuel_mass_derivative: float  # dm/dt
+    temperature_derivative: float  # dT/dt
+    solid_temperature_derivative: float  # dTs/dt
+
+    # Additional information for analysis
+    heat_flux: float = 0.0  # Heat flux from solid to fluid [W]
+    discharge_heat_flux: float = 0.0  # Heat flux for discharge [W]
+    alpha_s: float = 0.0  # Heat transfer coefficient [W/m²-K]
+
+    @property
+    def state_derivative_vector(self):
+        """Returns [dm/dt, dT/dt, dTs/dt] for ODE integration"""
+        return [
+            self.fuel_mass_derivative,
+            self.temperature_derivative,
+            self.solid_temperature_derivative
+        ]
+
+
+@dataclass
+class IsochoricInitialState:
+    """
+    Initial state for isochoric analysis.
+
+    Similar to InitialState but for the stops_model approach with solid temperature.
+    """
+    fuel_mass: float  # Initial fuel mass [kg]
+    temperature: float  # Initial fluid temperature [K]
+    solid_temperature: float  # Initial solid temperature [K]
+    pressure: float = None  # Computed from EOS if not provided
+    scenario: str = "DISCHARGE"  # Scenario name
+
+    def to_isochoric_tank_state(self, tank: Tank) -> IsochoricTankState:
+        """Convert to IsochoricTankState"""
+        return IsochoricTankState(
+            tank=tank,
+            fuel_mass=self.fuel_mass,
+            temperature=self.temperature,
+            solid_temperature=self.solid_temperature,
+            pressure=self.pressure,
+            scenario=self.scenario
+        )
+
+    def get_state_vector(self):
+        """Get [m, T, Ts] initial state vector"""
+        return [self.fuel_mass, self.temperature, self.solid_temperature]
+
+
+@dataclass
+class IsochoricTankStates:
+    """
+    Collection of IsochoricTankState objects for time series analysis.
+
+    Similar to TankStates but for the isochoric approach.
+    """
+    states: list[IsochoricTankState]
+    timestep: float
+
+    def __add__(self, other: 'IsochoricTankStates') -> 'IsochoricTankStates':
+        if len(self.states) == 0:
+            self.states = other.states
+            return self
+        if len(other.states) > 0:
+            self.states += other.states
+        return self
+
+    def add_state(self, state: IsochoricTankState):
+        """Add a new state to the collection"""
+        self.states.append(state)
+
+    @property
+    def last_state(self) -> IsochoricTankState:
+        return self.states[-1]
+
+    @property
+    def first_state(self) -> IsochoricTankState:
+        return self.states[0]
+
+    @property
+    def times(self) -> list[float]:
+        """Time values [s]"""
+        return [i * self.timestep for i in range(len(self.states))]
+
+    @property
+    def fuel_masses(self) -> list[float]:
+        return [state.fuel_mass for state in self.states]
+
+    @property
+    def temperatures(self) -> list[float]:
+        return [state.temperature for state in self.states]
+
+    @property
+    def solid_temperatures(self) -> list[float]:
+        return [state.solid_temperature for state in self.states]
+
+    @property
+    def pressures(self) -> list[float]:
+        return [state.pressure for state in self.states]
+
+    @property
+    def densities(self) -> list[float]:
+        return [state.density for state in self.states]
+
+    @property
+    def configurations(self) -> list[str]:
+        return [state.configuration for state in self.states]
+
+    @property
+    def max_pressure(self) -> float:
+        return max(self.pressures)
+
+    @property
+    def min_temperature(self) -> float:
+        return min(self.temperatures)
+
+    @property
+    def state_derivatives(self) -> list[IsochoricStateDerivatives]:
+        return [state.derivatives for state in self.states if state.derivatives is not None]
 
 
 def main():

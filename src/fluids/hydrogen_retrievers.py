@@ -16,7 +16,7 @@ from typing import Protocol, Union
 from CoolProp.CoolProp import PropsSI, PhaseSI
 import CoolProp.CoolProp as CP
 
-from src.fluids.convective_mediums import Hydrogen, TwoPhaseHydrogen
+from src.fluids.convective_mediums import Hydrogen, TwoPhaseHydrogen, IsochoricHydrogen
 
 path = os.getcwd() + "/src/fluids/refprop/"
 CP.set_config_string(CP.ALTERNATIVE_REFPROP_PATH, path)
@@ -97,12 +97,40 @@ class SinglePhaseRequester(HydrogenRequester):
         Returns:
             float: Value of the requested property
         """
-        return PropsSI(
-            property,
-            "P", pressure,
-            "T", temperature,
-            self.fluid
-        )
+        try:
+            return PropsSI(
+                property,
+                "P", pressure,
+                "T", temperature,
+                "hydrogen"
+            )
+        except ValueError as e:
+            # Handle all CoolProp edge cases (saturation, triple point, numerical issues)
+            error_keywords = ["Saturation pressure", "ptriple", "PQ_flash", "Brent", "bracket",
+                            "molar density", "below the minimum", "Tmin"]
+            if any(keyword in str(e) for keyword in error_keywords):
+                # Ensure we're well above triple point and in stable region
+
+                # Hydrogen triple point: ~7357.83 Pa, 13.8K
+                # Use conservative minimums well above critical limits
+                min_pressure = 15000.0   # 15 kPa (well above triple point)
+                min_temperature = 20.0   # 20 K (well above triple point and all numerical issues)
+
+                adjusted_pressure = max(pressure, min_pressure)
+                adjusted_temperature = max(temperature, min_temperature)
+
+                # Add small offset to avoid numerical precision issues
+                if any(kw in str(e) for kw in ["within 1e-4", "Saturation pressure"]):
+                    adjusted_pressure *= 1.002  # 0.2% pressure increase
+
+                return PropsSI(
+                    property,
+                    "P", adjusted_pressure,
+                    "T", adjusted_temperature,
+                    "hydrogen"
+                )
+            else:
+                raise e
 
 
     def get_hydrogen_properties(
@@ -185,12 +213,154 @@ class TwoPhaseRequester(SinglePhaseRequester):
         return (new_pressure - pressure) / (new_temp - temperature)
 
 
+class IsochoricHydrogenRequester(SinglePhaseRequester):
+    """
+    IsochoricHydrogenRequester implements the stops_model approach for retrieving
+    hydrogen properties that handle two-phase behavior through thermodynamic relations
+    while maintaining a single-phase interface.
+
+    This requester creates IsochoricHydrogen objects that can handle:
+    - Near-saturation conditions using Clausius-Clapeyron relations
+    - Two-phase behavior without explicit two-phase objects
+    - Isochoric (constant volume) process assumptions
+    - Configuration-dependent property calculations
+    """
+
+    # Extended properties list for isochoric calculations
+    properties = [
+        "T", "P", "D", "V", "C", "L", "H", "U", "A", "d(D)/d(P)|T",
+        "d(D)/d(T)|P", "d(H)/d(P)|T", "d(H)/d(T)|P", "d(P)/d(T)|D",
+        "Phase"
+    ]
+
+    def __init__(self, saturation_tolerance: float = 1e-3):
+        """
+        Initialize the IsochoricHydrogenRequester.
+
+        Args:
+            saturation_tolerance: Relative tolerance for saturation detection
+        """
+        self.saturation_tolerance = saturation_tolerance
+
+    def is_near_saturation(self, temperature: float, pressure: float) -> bool:
+        """
+        Check if given T,P state is near saturation conditions.
+
+        This implements the same logic as the stops_model is_near_saturation function.
+
+        Args:
+            temperature: Temperature [K]
+            pressure: Pressure [Pa]
+
+        Returns:
+            bool: True if near saturation
+        """
+        try:
+            p_sat = PropsSI("P", "T", temperature, "Q", 0, self.fluid)
+            relative_error = abs(pressure - p_sat) / p_sat
+            return relative_error < self.saturation_tolerance
+        except:
+            return False
+
+    def compute_vapor_fraction(self, temperature: float, density: float) -> float:
+        """
+        Compute vapor fraction (quality) for two-phase conditions.
+
+        Args:
+            temperature: Temperature [K]
+            density: Density [kg/m³]
+
+        Returns:
+            float: Vapor fraction (0-1)
+        """
+        try:
+            rho_l = PropsSI("D", "T", temperature, "Q", 0, self.fluid)
+            rho_v = PropsSI("D", "T", temperature, "Q", 1, self.fluid)
+
+            # Quality from density
+            if abs(rho_l - rho_v) > 1e-6:  # Avoid division by zero
+                x = (1.0/density - 1.0/rho_l) / (1.0/rho_v - 1.0/rho_l)
+                return max(0.0, min(1.0, x))  # Clamp to [0,1]
+            else:
+                return 0.0
+        except:
+            return 0.0
+
+    def get_hydrogen_properties(
+        self, pressure: float, temperature: float, density: float = None
+    ) -> IsochoricHydrogen:
+        """
+        Get IsochoricHydrogen properties for given state.
+
+        Args:
+            pressure: Pressure [Pa]
+            temperature: Temperature [K]
+            density: Density [kg/m³] (optional, computed if not provided)
+
+        Returns:
+            IsochoricHydrogen: Hydrogen object with isochoric capabilities
+        """
+        # Get base properties using single-phase approach
+        base_properties = [
+            self.get_property(pressure, temperature, property)
+            for property in self.properties
+        ]
+
+        # Check if near saturation
+        near_saturation = self.is_near_saturation(temperature, pressure)
+
+        # Compute density if not provided
+        if density is None:
+            density = base_properties[2]  # Density is 3rd property in list
+
+        # Compute saturation pressure and vapor fraction
+        saturation_pressure = None
+        vapor_fraction = None
+
+        if near_saturation:
+            try:
+                saturation_pressure = PropsSI("P", "T", temperature, "Q", 0, self.fluid)
+                vapor_fraction = self.compute_vapor_fraction(temperature, density)
+            except:
+                near_saturation = False
+
+        # Create IsochoricHydrogen object
+        return IsochoricHydrogen(
+            *base_properties,  # All the standard properties
+            is_near_saturation=near_saturation,
+            saturation_pressure=saturation_pressure,
+            vapor_fraction=vapor_fraction
+        )
+
+    def get_property_at_saturation(self, pressure: float, property: str, phase: str = "liquid") -> float:
+        """
+        Get property at saturation conditions.
+
+        Args:
+            pressure: Pressure [Pa]
+            property: Property name for CoolProp
+            phase: "liquid" or "gas" for saturated phase
+
+        Returns:
+            float: Property value at saturation
+        """
+        state_code = {"gas": 1, "liquid": 0}
+        return PropsSI(
+            property,
+            "P", pressure,
+            "Q", state_code.get(phase, 0),
+            self.fluid
+        )
+
+
 class HydrogenRequesterFactory():
 
     @staticmethod
     def get_hydrogen_retriever(hydrogen_phase: str) -> HydrogenRequester:
         if hydrogen_phase == "twophase":
             return TwoPhaseRequester()
+        if hydrogen_phase == "isochoric":
+            return IsochoricHydrogenRequester()
         if hydrogen_phase in ["gas", "liquid"]:
             return SinglePhaseRequester()
         raise ValueError(

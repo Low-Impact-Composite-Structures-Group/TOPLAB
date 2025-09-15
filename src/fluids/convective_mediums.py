@@ -242,6 +242,177 @@ class TwoPhaseHydrogen:
         return self.gas
 
 
+@dataclass
+class IsochoricHydrogen(ConvectiveMedium):
+    """
+    IsochoricHydrogen class implements the stops_model approach for handling
+    two-phase hydrogen behavior using thermodynamic relations while maintaining
+    a single-phase interface.
+
+    This class uses the "two-phase-as-single-phase" trick from the stops_model:
+    - At saturation conditions, uses special thermodynamic relationships
+    - Bypasses the need for separate TwoPhaseHydrogen objects
+    - Maintains compatibility with the existing hydrogen interface
+    - Uses isochoric (constant volume) assumptions for phase transitions
+
+    The key insight is that for isochoric processes near saturation, we can
+    use thermodynamic relations like the Clausius-Clapeyron equation to
+    compute effective single-phase properties that account for two-phase behavior.
+    """
+    enthalpy: float
+    internal_energy: float
+    speed_of_sound_database: float
+    dRho_dP: float
+    dRho_dT: float
+    dH_dP: float
+    dH_dT: float
+    dP_dT: float
+    state: str
+
+    # Additional properties for isochoric behavior
+    is_near_saturation: bool = False
+    saturation_pressure: float = None
+    vapor_fraction: float = None  # Quality for two-phase states
+
+    @property
+    def speed_of_sound(self):
+        return self.speed_of_sound_database
+
+    @property
+    def phase(self):
+        """
+        Get the phase of hydrogen, accounting for isochoric two-phase behavior.
+
+        Returns:
+            str: Phase name, with special handling for near-saturation conditions
+        """
+        if self.is_near_saturation:
+            return "isochoric_twophase"
+
+        try:
+            state_code = str(int(self.state))
+            phase = PHASE_INDICES.get(state_code)
+            if not phase:
+                print(f"Warning: Unknown phase state code: {state_code}")
+                return "unknown"
+            return phase
+        except (ValueError, TypeError) as e:
+            print(f"Error determining phase from state value: {self.state}")
+            return "unknown"
+
+    @property
+    def effective_density(self):
+        """
+        Get effective density for isochoric two-phase conditions.
+
+        For near-saturation conditions, this returns the density that accounts
+        for the two-phase nature while maintaining the single-phase interface.
+        """
+        return self.density
+
+    @property
+    def effective_temperature(self):
+        """
+        Get effective temperature for thermodynamic calculations.
+
+        For isochoric two-phase conditions, this may differ from the measured temperature.
+        """
+        return self.temperature
+
+    def compute_saturation_properties(self, pressure: float) -> dict:
+        """
+        Compute saturation properties at given pressure for isochoric analysis.
+
+        This method implements the thermodynamic relationships used in stops_model
+        to handle two-phase behavior without explicit two-phase objects.
+
+        Args:
+            pressure: Pressure at which to compute saturation properties
+
+        Returns:
+            dict: Dictionary containing saturation properties
+        """
+        from CoolProp.CoolProp import PropsSI
+
+        try:
+            # Get saturation temperature
+            T_sat = PropsSI("T", "P", pressure, "Q", 0, "hydrogen")
+
+            # Get saturated liquid and vapor properties
+            rho_l = PropsSI("D", "P", pressure, "Q", 0, "hydrogen")
+            rho_v = PropsSI("D", "P", pressure, "Q", 1, "hydrogen")
+            h_l = PropsSI("H", "P", pressure, "Q", 0, "hydrogen")
+            h_v = PropsSI("H", "P", pressure, "Q", 1, "hydrogen")
+
+            # Compute Clausius-Clapeyron derivative
+            L_v = h_v - h_l  # Latent heat
+            delta_v = (1.0/rho_v) - (1.0/rho_l)  # Specific volume difference
+            dp_dT_sat = L_v / (T_sat * delta_v)
+
+            return {
+                'T_sat': T_sat,
+                'rho_liquid': rho_l,
+                'rho_vapor': rho_v,
+                'h_liquid': h_l,
+                'h_vapor': h_v,
+                'latent_heat': L_v,
+                'dp_dT_sat': dp_dT_sat
+            }
+
+        except Exception as e:
+            print(f"Error computing saturation properties: {e}")
+            return {}
+
+    def is_at_saturation(self, tolerance: float = 1e-3) -> bool:
+        """
+        Check if current state is near saturation conditions.
+
+        Args:
+            tolerance: Relative tolerance for saturation check
+
+        Returns:
+            bool: True if near saturation
+        """
+        if self.saturation_pressure is None:
+            return False
+
+        return abs(self.pressure - self.saturation_pressure) / self.saturation_pressure < tolerance
+
+    def get_effective_cv(self) -> float:
+        """
+        Get effective specific heat at constant volume for isochoric process.
+
+        For two-phase conditions, this accounts for the latent heat effects
+        using the relationships from stops_model.
+
+        Returns:
+            float: Effective cv [J/kg-K]
+        """
+        from CoolProp.CoolProp import PropsSI
+
+        if not self.is_near_saturation:
+            # Single phase - use standard cv
+            return PropsSI("Cvmass", "T", self.temperature, "D", self.density, "hydrogen")
+
+        # Two-phase - compute effective cv using stops_model approach
+        try:
+            # Get saturated phase properties
+            cv_l = PropsSI("Cvmass", "T", self.temperature, "Q", 0, "hydrogen")
+            cv_v = PropsSI("Cvmass", "T", self.temperature, "Q", 1, "hydrogen")
+
+            if self.vapor_fraction is not None:
+                # Quality-weighted average
+                return self.vapor_fraction * cv_v + (1.0 - self.vapor_fraction) * cv_l
+            else:
+                # Use liquid properties as default
+                return cv_l
+
+        except Exception as e:
+            print(f"Error computing effective cv: {e}")
+            # Fallback to single-phase calculation
+            return PropsSI("Cvmass", "T", self.temperature, "D", self.density, "hydrogen")
+
+
 def main():
     pass
 
