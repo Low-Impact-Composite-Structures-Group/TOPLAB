@@ -223,8 +223,8 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
                 dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v)
 
                 # Debug print for Configuration B activation
-                if time % 100 < 0.1:  # Print occasionally
-                    print(f"🔧 Configuration B: t={time:.1f}s, P={p/1e5:.1f}→{p_constrained/1e5:.1f}bar, qdot_B={qdot_disch_B/1000:.1f}kW")
+                # if time % 100 < 0.1:  # Print occasionally
+                #     print(f"🔧 Configuration B: t={time:.1f}s, P={p/1e5:.1f}→{p_constrained/1e5:.1f}bar, qdot_B={qdot_disch_B/1000:.1f}kW")
 
             except Exception as e:
                 # Fallback to normal calculation if CoolProp fails

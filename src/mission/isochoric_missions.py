@@ -439,10 +439,9 @@ class IsochoricMissionAnalysis:
         Returns:
             IsochoricTankStates: Analysis results
         """
-        print("🔧 Creating initial state...")
         # Create initial state
         initial_state = self.mission.create_initial_state()
-        print(f"✅ Initial state created: m={initial_state.fuel_mass:.2f}kg, T={initial_state.temperature:.2f}K")
+        print(f" Initial state created: m={initial_state.fuel_mass:.2f}kg, T={initial_state.temperature:.2f}K")
 
         # Initialize results storage
         all_times = []
@@ -473,20 +472,20 @@ class IsochoricMissionAnalysis:
             # Create ODE system for this section
             def ode_system(t, y):
                 """ODE system function for scipy integration"""
-                # Debug: Print integration progress every 5000 seconds
-                if t % 5000 < 0.1:
+                # Debug: Print integration progress every N seconds
+                if t % 1000 < 0.1:
                     rho = y[0] / 0.5  # density = mass / volume
                     try:
                         from CoolProp.CoolProp import PropsSI
                         p = PropsSI("P", "T", y[1], "Dmass", rho, "hydrogen") / 1e5  # Convert to bar
-                        print(f"🔧 ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P={p:.1f}bar, ρ={rho:.1f}kg/m³")
+                        print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P={p:.1f}bar, ρ={rho:.1f}kg/m³")
                     except:
-                        print(f"🔧 ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P=?bar, ρ={rho:.1f}kg/m³")
+                        print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P=?bar, ρ={rho:.1f}kg/m³")
 
                 # Validate state vector
                 if y[0] <= 0 or y[1] <= 0 or y[2] <= 0:
                     rho = max(y[0], 0.001) / 0.5  # Avoid division by zero
-                    print(f"⚠️ Invalid state at t={t:.1f}s: m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, ρ={rho:.1f}kg/m³")
+                    print(f" Invalid state at t={t:.1f}s: m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, ρ={rho:.1f}kg/m³")
                     return np.array([0.0, 0.0, 0.0])
 
                 # Convert state vector to IsochoricTankState
@@ -517,8 +516,8 @@ class IsochoricMissionAnalysis:
                     )
 
                     # Debug: Print derivatives occasionally
-                    if t % 10000 < 0.1:
-                        print(f"📊 Derivatives at t={t:.1f}s: dm/dt={derivatives.fuel_mass_derivative:.4f}, dT/dt={derivatives.temperature_derivative:.4f}, dTs/dt={derivatives.solid_temperature_derivative:.4f}")
+                    # if t % 10000 < 0.1:
+                    #     print(f"📊 Derivatives at t={t:.1f}s: dm/dt={derivatives.fuel_mass_derivative:.4f}, dT/dt={derivatives.temperature_derivative:.4f}, dTs/dt={derivatives.solid_temperature_derivative:.4f}")
 
                     return [
                         derivatives.fuel_mass_derivative,
@@ -573,14 +572,14 @@ class IsochoricMissionAnalysis:
                 target_for_log = 5.8 if self.mission.scenario == "DISCHARGE" else 70.0
 
             # Set the ODE function and integrate this section
-            print(f"🔧 Setting up integration for section: t_span={t_span}, y0={y0}")
-            print(f"🎯 Adding density stopping event: target = {target_for_log} kg/m³")
+            print(f" Setting up integration for section: t_span={t_span}, y0={y0}")
+            print(f" Adding density stopping event: target = {target_for_log} kg/m³")
             self.mission.integration_method.set_ode_function(ode_system)
-            print("🚀 Starting ODE integration...")
+            print(" Starting ODE solver...")
             section_results = self.mission.integration_method.integrate_full(
                 t_span, y0, t_eval, events=density_stopping_event
             )
-            print(f"✅ Integration completed! Final time: {section_results.t[-1]:.1f}s")
+            print(f"Full solution completed. Final time: {section_results.t[-1]:.1f}s")
 
             # Store results
             section_times = current_time + section_results.t
