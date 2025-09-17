@@ -236,11 +236,16 @@ class NISTComposite(NISTMaterial, Composite):
         """
         Create G10 composite material using NIST temperature-dependent specific heat.
 
+        NOTE: Using high-performance CFRP strength (2000 MPa carbon fiber)
+        instead of actual G10 strength (310 MPa) to investigate mass reduction.
+        All other properties (density, thermal) remain G10 for thermal analysis.
+
         Args:
             winding_angle: Fiber winding angle in radians
         """
-        failure_stress = 3.10264e+8  # Pa - original value
-        density = 1800  # kg/m³ - original value
+        # HIGH-PERFORMANCE CFRP STRENGTH
+        failure_stress = 2000e6  # Pa - carbon fiber strength (was 310e6 for G10)
+        density = 1800  # kg/m³ - keeping G10 density for thermal consistency
         characteristic_temperature = 1500.0  # K - original value for fallback
         molecular_weight = 12.01  # g/mol - original value
 

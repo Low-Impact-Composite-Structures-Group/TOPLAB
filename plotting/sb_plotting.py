@@ -1,12 +1,19 @@
 from typing import Protocol, Union, List, Optional, Tuple
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 from CoolProp.CoolProp import PropsSI, PhaseSI
-from plotting.plot_style_sb import DELFT_PALETTE
+from plotting.plot_style_sb import (
+    DELFT_PALETTE, DONKERBLAUW, TURKOOIS, KONINGSBLAUW, PAARS, ROZE,
+    BORDEAUX, ROOD, ORANJE, GEEL, GROEN, BOSGROEN, DONKERGRIJS
+)
 
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import pandas as pd
+
+# Define additional light colors for annotations
+LICHTBLAUW = "#ADD8E6"  # Light Blue
+LICHTGRIJS = "#D3D3D3"  # Light Gray
 
 
 # Import from our custom seaborn style module
@@ -1199,4 +1206,122 @@ Config B disabled (REFUEL mode)"""
                 bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8))
 
         plt.tight_layout()
+        return fig
+
+    def plot_phi_optimization_results(self, phi_values: List[float], volumes: List[float],
+                                    converged: List[bool], save_path: Optional[str] = None) -> plt.Figure:
+        """Plot phi optimization results showing volume vs aspect ratio trade-offs.
+
+        Args:
+            phi_values: List of phi parameter values tested
+            volumes: List of corresponding tank volumes [m³]
+            converged: List of boolean convergence flags
+            save_path: Optional path to save the figure
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create figure with custom styling
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+        # Plot 1: Volume vs Phi
+        colors = [BOSGROEN if conv else ROOD for conv in converged]
+        ax1.scatter(phi_values, volumes, c=colors, s=100, alpha=0.7,
+                   edgecolors=DONKERGRIJS, linewidths=1)
+        ax1.plot(phi_values, volumes, color=KONINGSBLAUW, linestyle='--',
+                alpha=0.7, linewidth=2, label='Optimization Path')
+
+        # Mark optimal point
+        optimal_idx = np.argmin(volumes)
+        ax1.scatter(phi_values[optimal_idx], volumes[optimal_idx],
+                   c=ORANJE, s=200, marker='*', edgecolors=DONKERGRIJS,
+                   linewidths=2, label=f'Optimal (φ={phi_values[optimal_idx]:.1f})')
+
+        ax1.set_xlabel('Phi Parameter (φ = radius/body_length)', fontsize=12)
+        ax1.set_ylabel('Tank Volume [m³]', fontsize=12)
+        ax1.set_title('Phi-Based Optimization Results\nVolume vs Aspect Ratio',
+                     fontsize=14, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+
+        # Add value annotations
+        for i, (phi, vol) in enumerate(zip(phi_values, volumes)):
+            ax1.annotate(f'φ={phi:.1f}\nV={vol:.3f}m³',
+                        xy=(phi, vol), xytext=(10, 10),
+                        textcoords='offset points', fontsize=9,
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor=LICHTBLAUW, alpha=0.8))
+
+        # Plot 2: Tank shape visualization
+        ax2.set_xlim(-1.5, 1.5)
+        ax2.set_ylim(-1.5, 1.5)
+        ax2.set_aspect('equal')
+
+        # Plot representative tank shapes for different phi values
+        if len(phi_values) >= 3:
+            phi_examples = [phi_values[0], phi_values[len(phi_values)//2], phi_values[-1]]
+            colors_shapes = [ROOD, KONINGSBLAUW, BOSGROEN]
+            y_positions = [1.0, 0.0, -1.0]
+
+            for i, (phi, color, y_pos) in enumerate(zip(phi_examples, colors_shapes, y_positions)):
+                # Calculate representative dimensions (scaled for visualization)
+                scale = 0.3  # Scale factor for visualization
+                radius = 0.5 * scale
+                body_length = radius / phi
+
+                # Draw cylindrical body
+                cylinder = plt.Rectangle((-body_length/2, y_pos - radius), body_length, 2*radius,
+                                       facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                ax2.add_patch(cylinder)
+
+                # Draw hemispherical caps
+                left_cap = plt.Circle((-body_length/2, y_pos), radius,
+                                     facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                right_cap = plt.Circle((body_length/2, y_pos), radius,
+                                      facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                ax2.add_patch(left_cap)
+                ax2.add_patch(right_cap)
+
+                # Add labels
+                ax2.text(0, y_pos + radius + 0.2, f'φ = {phi:.1f}',
+                         ha='center', va='bottom', fontweight='bold', fontsize=10)
+                volume_idx = phi_values.index(phi) if phi in phi_values else 0
+                ax2.text(0, y_pos - radius - 0.2, f'V = {volumes[volume_idx]:.3f} m³',
+                         ha='center', va='top', fontsize=9)
+
+        ax2.set_title('Tank Shape Evolution\n(Cylindrical <- φ -> Spherical)',
+                 fontsize=14, fontweight='bold')
+        ax2.set_xlabel('More Cylindrical <- Shape -> More Spherical', fontsize=12)
+        ax2.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+        # Add shape descriptions
+        if len(phi_values) >= 3:
+            ax2.text(-1.2, 1.4, 'Cylindrical\n(Low φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=ROOD, alpha=0.7))
+            ax2.text(0, 1.4, 'Balanced\n(Mid φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=KONINGSBLAUW, alpha=0.7))
+            ax2.text(1.2, 1.4, 'Spherical\n(High φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=BOSGROEN, alpha=0.7))
+
+        plt.tight_layout()
+
+        # Add summary statistics as text box
+        volume_reduction = (max(volumes) - min(volumes))/max(volumes)*100
+        optimal_phi = phi_values[optimal_idx]
+        optimal_volume = volumes[optimal_idx]
+
+        summary_text = f"""Optimization Summary:
+φ range: [{min(phi_values):.1f}, {max(phi_values):.1f}]
+Volume reduction: {volume_reduction:.1f}%
+Optimal: φ = {optimal_phi:.1f}, V = {optimal_volume:.3f} m³
+Converged: {sum(converged)}/{len(converged)} solutions"""
+
+        fig.text(0.02, 0.02, summary_text, fontsize=10, verticalalignment='bottom',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor=LICHTGRIJS, alpha=0.8))
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Phi optimization plot saved to: {save_path}")
+
         return fig
