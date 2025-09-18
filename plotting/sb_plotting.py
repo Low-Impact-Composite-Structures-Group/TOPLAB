@@ -1325,3 +1325,366 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             print(f"Phi optimization plot saved to: {save_path}")
 
         return fig
+
+    def plot_baseline_tank_states(self, times, masses, temperatures, pressures, densities,
+                                 target_density=None, figsize=(12, 10)) -> plt.Figure:
+        """Create 4-panel baseline tank states plot.
+
+        Args:
+            times: Time array [hours]
+            masses: Mass array [kg]
+            temperatures: Temperature array [K]
+            pressures: Pressure array [bar]
+            densities: Density array [kg/m³]
+            target_density: Optional target density line [kg/m³]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create subplots
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle('Baseline CCH2 Discharge Analysis', fontsize=16, fontweight='bold')
+
+        # Mass vs time
+        axes[0, 0].plot(times, masses, color=BORDEAUX, linewidth=2)
+        axes[0, 0].set_xlabel('Time [h]')
+        axes[0, 0].set_ylabel('Mass [kg]')
+        axes[0, 0].set_title('H₂ Mass Evolution')
+        axes[0, 0].grid(True, alpha=0.3)
+
+        # Temperature vs time
+        axes[0, 1].plot(times, temperatures, color=KONINGSBLAUW, linewidth=2)
+        axes[0, 1].set_xlabel('Time [h]')
+        axes[0, 1].set_ylabel('Temperature [K]')
+        axes[0, 1].set_title('Temperature Evolution')
+        axes[0, 1].grid(True, alpha=0.3)
+
+        # Pressure vs time
+        axes[1, 0].plot(times, pressures, color=BOSGROEN, linewidth=2)
+        axes[1, 0].set_xlabel('Time [h]')
+        axes[1, 0].set_ylabel('Pressure [bar]')
+        axes[1, 0].set_title('Pressure Evolution')
+        axes[1, 0].grid(True, alpha=0.3)
+
+        # Density vs time
+        axes[1, 1].plot(times, densities, color=ORANJE, linewidth=2)
+        if target_density:
+            axes[1, 1].axhline(y=target_density, color='red', linestyle='--',
+                              label=f'Target: {target_density} kg/m³')
+            axes[1, 1].legend()
+        axes[1, 1].set_xlabel('Time [h]')
+        axes[1, 1].set_ylabel('Density [kg/m³]')
+        axes[1, 1].set_title('Density Evolution')
+        axes[1, 1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_density_temperature(self, temperatures, densities,
+                                         include_saturation_line=True, include_isobars=True,
+                                         figsize=(8, 6)) -> plt.Figure:
+        """Create density-temperature plot for baseline analysis with isobars.
+
+        Args:
+            temperatures: Temperature array [K]
+            densities: Density array [kg/m³]
+            include_saturation_line: Whether to include saturation line
+            include_isobars: Whether to include isobar lines
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Plot discharge process
+        ax.plot(temperatures, densities, color=DONKERGRIJS, linewidth=2,
+                marker='o', markersize=3, label='Discharge Process')
+
+        # Add saturation line if requested
+        if include_saturation_line:
+            try:
+                fluid = 'PARAHYDROGEN'
+                T_triple = PropsSI('Ttriple', fluid)
+                T_crit = PropsSI('Tcrit', fluid)
+
+                # Create temperature range
+                temps = np.linspace(T_triple, T_crit, 100)
+
+                # Create complete continuous saturation curve
+                sat_temps = []
+                sat_densities = []
+
+                # First add the saturated liquid branch (low to high temperature)
+                for temp in temps:
+                    try:
+                        density = PropsSI('D', 'T', temp, 'Q', 0, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Then add the saturated vapor branch (high to low temperature)
+                for temp in reversed(temps):
+                    try:
+                        density = PropsSI('D', 'T', temp, 'Q', 1, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Plot the complete continuous saturation dome
+                if len(sat_temps) > 0:
+                    ax.plot(sat_temps, sat_densities, '--', color=ORANJE,
+                            linewidth=1.5, label="Saturation Line", alpha=0.8)
+
+            except Exception as e:
+                print(f"Warning: Could not add saturation line: {e}")
+
+        # Add isobar lines if requested
+        if include_isobars:
+            # Define key pressure levels in bar based on the analysis
+            pressure_levels = [15, 100, 400, 450]
+
+            # Create temperature range based on data
+            temp_min = min(temperatures) - 10
+            temp_max = max(temperatures) + 10
+            temps = np.linspace(temp_min, temp_max, 100)
+
+            for pressure in pressure_levels:
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities_iso = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'PARAHYDROGEN')
+                        densities_iso.append(density)
+                    except:
+                        densities_iso.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities_iso)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities_iso)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot isobar line with dotted gray
+                    ax.plot(valid_temps, valid_densities, ':', color='gray',
+                           alpha=0.7, linewidth=1)
+
+                    # Add pressure labels
+                    if pressure in [400, 450]:
+                        # Place label at 75% of the way through the line
+                        idx = int(len(valid_temps) * 0.75)
+                    else:
+                        # For other pressures, use the midpoint
+                        idx = len(valid_temps) // 2
+
+                    if idx < len(valid_temps):
+                        ax.text(valid_temps[idx], valid_densities[idx],
+                                f"{pressure} bar", fontsize=10, alpha=0.8,
+                                horizontalalignment='center', verticalalignment='center',
+                                color='gray', bbox=dict(facecolor='white', alpha=0.7,
+                                                       edgecolor=None, pad=1))
+
+        ax.set_xlabel('Temperature [K]')
+        ax.set_ylabel('Density [kg/m³]')
+        ax.set_title('Density vs Temperature - Discharge Process')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Add annotations for start and end points
+        if len(densities) > 0 and len(temperatures) > 0:
+            ax.annotate('Start', xy=(temperatures[0], densities[0]),
+                        xytext=(10, 10), textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', color='green'))
+            ax.annotate('End', xy=(temperatures[-1], densities[-1]),
+                        xytext=(10, 10), textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', color='red'))
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_fuel_flow(self, mission_sections, figsize=(14, 10)) -> plt.Figure:
+        """Create fuel flow profile plot for baseline analysis.
+
+        Args:
+            mission_sections: Mission sections with durations and fuel flows
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Extract mission profile data
+        mission_times = []
+        mission_flows = []
+        analysis_times = []
+        analysis_flows = []
+
+        current_time = 0.0
+        analysis_time = 0.0
+        section_names = ['Taxi-out', 'Takeoff', 'Climb', 'Cruise', 'Initial Descent',
+                        'Approach', 'Go-around', 'Climb-2', 'Cruise-2', 'Final Descent', 'Taxi-in']
+
+        for i, section in enumerate(mission_sections):
+            duration = section.duration  # already in seconds
+            section_start = current_time
+            section_end = current_time + duration
+
+            # Extract fuel flow from section
+            fuel_flow = section.fuel_flows[0].mass_flow  # Get the OutFlow mass_flow
+
+            if isinstance(fuel_flow, list):
+                # Linear ramp section
+                start_flow = abs(fuel_flow[0])
+                end_flow = abs(fuel_flow[1])
+
+                # Mission profile (step representation)
+                mission_times.extend([section_start, section_end])
+                mission_flows.extend([start_flow, end_flow])
+
+                # Analysis resolution with interpolation
+                timestep = 1.0  # Use 1 second timestep for analysis resolution
+                section_steps = int(duration / timestep)
+                for step in range(section_steps):
+                    # Linear interpolation within section
+                    interpolated_flow = start_flow + (end_flow - start_flow) * step / section_steps
+                    analysis_times.append(analysis_time)
+                    analysis_flows.append(interpolated_flow)
+                    analysis_time += timestep
+            else:
+                # Constant flow section
+                flow_rate = abs(fuel_flow)
+
+                # Mission profile
+                mission_times.extend([section_start, section_end])
+                mission_flows.extend([flow_rate, flow_rate])
+
+                # Analysis resolution
+                timestep = 1.0
+                section_steps = int(duration / timestep)
+                for step in range(section_steps):
+                    analysis_times.append(analysis_time)
+                    analysis_flows.append(flow_rate)
+                    analysis_time += timestep
+
+            current_time += duration
+
+        # Convert to hours for plotting
+        mission_times_hr = np.array(mission_times) / 3600.0
+        analysis_times_hr = np.array(analysis_times) / 3600.0
+        total_time_hours = current_time / 3600.0
+
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
+
+        # Top panel: ATR72 Mission Profile
+        ax1.plot(mission_times_hr, mission_flows, linewidth=3, color=KONINGSBLAUW,
+                label='ATR72 Mission Profile')
+        ax1.fill_between(mission_times_hr, 0, mission_flows, alpha=0.3, color=KONINGSBLAUW)
+
+        # Add section labels
+        cumulative_time = 0
+        for i, (section, name) in enumerate(zip(mission_sections, section_names)):
+            section_center = (cumulative_time + section.duration / 2) / 3600.0
+            if i % 2 == 0:  # Alternate label heights to avoid overlap
+                ax1.annotate(name, xy=(section_center, max(mission_flows) * 0.9),
+                           ha='center', va='bottom', rotation=45, fontsize=10, color='darkred')
+            else:
+                ax1.annotate(name, xy=(section_center, max(mission_flows) * 0.7),
+                           ha='center', va='bottom', rotation=45, fontsize=10, color='darkred')
+            cumulative_time += section.duration
+
+        ax1.set_xlabel('Time [h]')
+        ax1.set_ylabel('Discharge Rate [kg/s]')
+        ax1.set_title('ATR72 Mission Fuel Flow Profile (11 Sections)')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        ax1.set_xlim(0, total_time_hours)
+
+        # Bottom panel: Analysis Resolution with Linear Interpolation
+        ax2.plot(analysis_times_hr, analysis_flows, linewidth=1, color=BORDEAUX,
+                label='Analysis Resolution (Δt = 1s)')
+        ax2.set_xlabel('Time [h]')
+        ax2.set_ylabel('Discharge Rate [kg/s]')
+        ax2.set_title('Interpolated Flow Profile (Analysis Timesteps)')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        ax2.set_xlim(0, total_time_hours)
+
+        # Calculate total fuel for summary
+        total_fuel = sum(flow * 1.0 for flow in analysis_flows)  # Approximate total fuel
+
+        fig.suptitle(f'ATR72 Mission Profile Analysis\nTotal Duration: {total_time_hours:.2f}h, Total Fuel: {total_fuel:.1f}kg',
+                    fontsize=14, fontweight='bold')
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_optimization_progress(self, optimization_data, target_fuel,
+                                          figsize=(8, 6)) -> plt.Figure:
+        """Create optimization progress plot for baseline analysis.
+
+        Args:
+            optimization_data: Dictionary with optimization progress data
+            target_fuel: Target fuel requirement [kg]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Extract data
+        iterations = optimization_data['iterations']
+        fuel_consumed = optimization_data['fuel_consumed']
+        phi_values = optimization_data['phi_values']
+        converged = optimization_data['converged']
+
+        # Plot non-converged points
+        non_converged_fuel = [f for i, f in enumerate(fuel_consumed) if not converged[i]]
+        non_converged_phi = [p for i, p in enumerate(phi_values) if not converged[i]]
+
+        if non_converged_fuel:
+            ax.scatter(non_converged_phi, non_converged_fuel,
+                      color=ROOD, alpha=0.6, s=50, label='Non-converged', marker='x')
+
+        # Plot converged points
+        converged_fuel = [f for i, f in enumerate(fuel_consumed) if converged[i]]
+        converged_phi = [p for i, p in enumerate(phi_values) if converged[i]]
+
+        if converged_fuel:
+            ax.scatter(converged_phi, converged_fuel,
+                      color=BOSGROEN, alpha=0.8, s=80, label='Converged', marker='o')
+
+        # Connect points with iteration order
+        ax.plot(phi_values, fuel_consumed, 'k--', alpha=0.3, linewidth=1, label='Iteration Path')
+
+        # Add iteration numbers as annotations
+        for i, (phi, fuel, iteration) in enumerate(zip(phi_values, fuel_consumed, iterations)):
+            ax.annotate(f'{iteration}', (phi, fuel),
+                       xytext=(5, 5), textcoords='offset points',
+                       fontsize=8, alpha=0.7)
+
+        # Add target fuel requirement line
+        ax.axhline(y=target_fuel, color=ORANJE, linestyle='--',
+                  linewidth=2, label=f'Required Fuel: {target_fuel:.1f} kg')
+
+        ax.set_xlabel('Phi (radius/body_length) [-]')
+        ax.set_ylabel('Fuel Consumed [kg]')
+        ax.set_title('Optimization Progress: Fuel Mass vs Phi Parameter')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        plt.tight_layout()
+        return fig

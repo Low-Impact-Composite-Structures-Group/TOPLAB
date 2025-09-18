@@ -59,7 +59,7 @@ class BaselineCCH2Analysis:
         # Pressures for analysis
         self.initial_pressure = 400e5    # Pa (400 bar) - initial storage pressure
         self.max_allowable_pressure = 450e5  # Pa (450 bar) - maximum pressure for structural design (pvent)
-        self.initial_temperature = 70.0  # K - cryogenic temperature
+        self.initial_temperature = 55.0  # K - cryogenic temperature
 
         # Stopping condition
         self.stopping_density = 5.8      # kg/m³ - same as verification
@@ -137,6 +137,10 @@ class BaselineCCH2Analysis:
         self.max_allowable_pressure = 450e5  # Pa (450 bar) - maximum pressure for structural design (pvent)
         self.initial_temperature = 70.0  # K
         self.initial_mass_fraction = 0.0  # Pure gas behavior
+
+        # Constraint management for venting avoidance
+        self.original_initial_pressure = 40e6  # Store original value for reset
+        self.pressure_reduction_factor = 0.95  # Factor to reduce pressure when venting detected
 
         # Target conditions
         self.target_density = 5.8  # kg/m³ (stopping condition)
@@ -411,6 +415,21 @@ class BaselineCCH2Analysis:
         if not tank_states.states:
             raise ValueError(f"Analysis failed for radius {radius:.4f} m: Results contain no tank states")
 
+        # *** NEW: Check for pressure constraint violation (no venting allowed) ***
+        max_pressure = 0.0
+        venting_detected = False
+        for state in tank_states.states:
+            if state.pressure > max_pressure:
+                max_pressure = state.pressure
+            # Check if pressure exceeds venting threshold (Configuration C)
+            if state.pressure >= self.max_allowable_pressure:
+                venting_detected = True
+                break
+
+        if venting_detected:
+            max_pressure_bar = max_pressure / 1e5
+            raise ValueError(f"VENTING CONSTRAINT VIOLATED: radius {radius:.4f} m - max pressure {max_pressure_bar:.1f} bar exceeds pvent {self.max_allowable_pressure/1e5:.0f} bar")
+
         # Get final mass and density
         final_mass = tank_states.states[-1].fuel_mass
         final_density = final_mass / volume
@@ -425,6 +444,10 @@ class BaselineCCH2Analysis:
 
         if final_temperature < 10.0:  # Temperature too low is also problematic
             raise ValueError(f"Analysis failed for radius {radius:.4f} m: Unphysical temperature detected (T={final_temperature:.1f}K)")
+
+        # Report maximum pressure for successful designs
+        max_pressure_bar = max_pressure / 1e5
+        print(f"  Max pressure during discharge: {max_pressure_bar:.1f} bar (limit: {self.max_allowable_pressure/1e5:.0f} bar)")
 
         return tank_states, final_mass, final_density
 
@@ -463,11 +486,14 @@ class BaselineCCH2Analysis:
         # Test each phi value systematically
         for phi_idx, current_phi in enumerate(phi_range):
             current_volume = initial_volume  # Reset volume for each phi
+            self.reset_initial_pressure()  # Reset pressure for each phi test
             print(f"\n--- Testing Phi = {current_phi:.3f} ({phi_idx+1}/{len(phi_range)}) ---")
 
             # Try to converge at this phi value
             max_volume_iterations = 15
             phi_converged = False
+            venting_attempts = 0  # Track pressure reduction attempts
+            max_venting_attempts = 3  # Maximum pressure reductions allowed
 
             for vol_iter in range(max_volume_iterations):
                 iteration_count += 1
@@ -484,6 +510,23 @@ class BaselineCCH2Analysis:
                     if "Tank too small" in str(e):
                         print(f"Tank too small, increasing volume")
                         current_volume *= 1.2  # Increase volume by 20%
+                        continue
+                    elif "VENTING CONSTRAINT VIOLATED" in str(e):
+                        print(f"❌ Venting detected - trying constraint satisfaction methods")
+                        # Try two systematic approaches to avoid venting:
+                        # 1. First few attempts: increase volume (reduces density, lowers pressure)
+                        # 2. After multiple volume attempts: reduce initial pressure
+                        if venting_attempts < max_venting_attempts and vol_iter < 8:
+                            print(f"  → Approach 1: Increasing tank volume to reduce pressure")
+                            current_volume *= 1.3  # Increase volume more aggressively to reduce pressure
+                        else:
+                            print(f"  → Approach 2: Reducing initial pressure (attempt {venting_attempts+1}/{max_venting_attempts})")
+                            if venting_attempts < max_venting_attempts:
+                                self.reduce_initial_pressure_for_constraint()
+                                venting_attempts += 1
+                            else:
+                                print(f"  ❌ All constraint satisfaction methods exhausted for phi={current_phi:.3f}")
+                                break  # Move to next phi value
                         continue
                     else:
                         print(f"Simulation failed: {e}")
@@ -565,6 +608,18 @@ class BaselineCCH2Analysis:
             print(f"   Volume: {best_volume:.3f} m³")
 
         return best_radius, best_body_length, best_states
+
+    def reduce_initial_pressure_for_constraint(self):
+        """Reduce initial pressure to avoid venting constraint violations."""
+        old_pressure = self.initial_pressure
+        self.initial_pressure *= self.pressure_reduction_factor
+        new_pressure_bar = self.initial_pressure / 1e5
+        old_pressure_bar = old_pressure / 1e5
+        print(f"🔧 Reducing initial pressure: {old_pressure_bar:.0f} → {new_pressure_bar:.0f} bar to avoid venting")
+
+    def reset_initial_pressure(self):
+        """Reset initial pressure to original value for next phi test."""
+        self.initial_pressure = self.original_initial_pressure
 
     def print_results(self, radius: float, body_length: float, tank_states: any):
         """Print analysis results.
