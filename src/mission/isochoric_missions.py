@@ -39,6 +39,11 @@ class IsochoricMissionParameters:
 
     These parameters define the operational conditions, tank characteristics,
     and analysis settings for stops_model missions.
+
+    Integration Control:
+    - use_density_stopping_events: Controls whether sections terminate early when
+      density thresholds are reached. Set to False for full mission profiles
+      where natural section durations should be respected.
     """
     # Tank parameters
     tank_volume: float = 0.5  # [m³]
@@ -57,6 +62,9 @@ class IsochoricMissionParameters:
     time_step: float = 1.0  # [s]
     rtol: float = 1e-6  # Relative tolerance for scipy solver
     atol: float = 1e-9  # Absolute tolerance for scipy solver
+
+    # Integration control
+    use_density_stopping_events: bool = False  # Whether to terminate sections early at density thresholds (default: False for predictable mission durations)
 
 
 class IsochoricMission(Mission):
@@ -114,7 +122,11 @@ class IsochoricMission(Mission):
 
     def get_fuel_flow_function(self, section: MissionSection) -> Callable[[float], float]:
         """
-        Create fuel flow function for this mission section.
+        Create fuel flow function for this mission section using lambda functions.
+
+        This creates explicit time-dependent functions for each flow type:
+        - Constant flow: lambda t: constant_rate
+        - Linear flow: lambda t: start_rate + (end_rate - start_rate) * (t / duration)
 
         Args:
             section: Mission section
@@ -122,28 +134,54 @@ class IsochoricMission(Mission):
         Returns:
             Callable: Function that returns fuel inflow rate [kg/s] at given time
         """
-        def fuel_flow_func(time: float) -> float:
-            # For isochoric missions, positive flow is inflow (refueling)
-            total_inflow = 0.0
-            for flow in section.fuel_flows:
-                if isinstance(flow, InFlow):
-                    if isinstance(flow.mass_flow, list):
-                        # Linear interpolation for time-varying flow
-                        if len(flow.mass_flow) >= 2:
-                            # Simple linear interpolation
-                            flow_rate = flow.mass_flow[0] + (flow.mass_flow[-1] - flow.mass_flow[0]) * (time / section.duration)
-                        else:
-                            flow_rate = flow.mass_flow[0]
-                    else:
-                        flow_rate = flow.mass_flow
-                    total_inflow += flow_rate
-            return total_inflow
+        # Collect all fuel inflow functions for this section
+        flow_functions = []
 
-        return fuel_flow_func
+        for flow in section.fuel_flows:
+            if isinstance(flow, InFlow):
+                if isinstance(flow.mass_flow, list) and len(flow.mass_flow) >= 2:
+                    # Time-varying flow: create linear lambda function
+                    start_rate = flow.mass_flow[0]
+                    end_rate = flow.mass_flow[-1]
+                    duration = section.duration
+
+                    if abs(end_rate - start_rate) < 1e-12:
+                        # Effectively constant (avoid division issues)
+                        flow_func = lambda t, rate=start_rate: rate
+                    else:
+                        # Linear interpolation lambda
+                        flow_func = lambda t, s=start_rate, e=end_rate, d=duration: (
+                            s + (e - s) * min(max(t, 0.0), d) / d
+                        )
+
+                elif isinstance(flow.mass_flow, list) and len(flow.mass_flow) == 1:
+                    # Single-element list: constant flow
+                    rate = flow.mass_flow[0]
+                    flow_func = lambda t, rate=rate: rate
+                else:
+                    # Scalar: constant flow
+                    rate = flow.mass_flow
+                    flow_func = lambda t, rate=rate: rate
+
+                flow_functions.append(flow_func)
+
+        # Return combined flow function
+        if len(flow_functions) == 0:
+            return lambda t: 0.0
+        elif len(flow_functions) == 1:
+            return flow_functions[0]
+        else:
+            # Multiple flows: sum them
+            return lambda t: sum(func(t) for func in flow_functions)
 
     def get_discharge_flow_function(self, section: MissionSection) -> Callable[[float], float]:
         """
-        Create discharge flow function for this mission section.
+        Create discharge flow function for this mission section using lambda functions.
+
+        This creates explicit time-dependent functions for each flow type:
+        - Constant flow: lambda t: constant_rate
+        - Linear flow: lambda t: start_rate + (end_rate - start_rate) * (t / duration)
+        - Future: Quadratic, exponential, or other time-dependent functions
 
         Args:
             section: Mission section
@@ -151,24 +189,45 @@ class IsochoricMission(Mission):
         Returns:
             Callable: Function that returns discharge outflow rate [kg/s] at given time
         """
-        def discharge_flow_func(time: float) -> float:
-            # For isochoric missions, positive flow is outflow (discharge)
-            total_outflow = 0.0
-            for flow in section.fuel_flows:
-                if isinstance(flow, OutFlow):
-                    if isinstance(flow.mass_flow, list):
-                        # Linear interpolation for time-varying flow
-                        if len(flow.mass_flow) >= 2:
-                            flow_rate = flow.mass_flow[0] + (flow.mass_flow[-1] - flow.mass_flow[0]) * (time / section.duration)
-                        else:
-                            flow_rate = flow.mass_flow[0]
-                    else:
-                        flow_rate = flow.mass_flow
-                    # Convert negative outflow to positive discharge
-                    total_outflow += abs(flow_rate)
-            return total_outflow
+        # Collect all discharge flow functions for this section
+        flow_functions = []
 
-        return discharge_flow_func
+        for flow in section.fuel_flows:
+            if isinstance(flow, OutFlow):
+                if isinstance(flow.mass_flow, list) and len(flow.mass_flow) >= 2:
+                    # Time-varying flow: create linear lambda function
+                    start_rate = abs(flow.mass_flow[0])
+                    end_rate = abs(flow.mass_flow[-1])
+                    duration = section.duration
+
+                    if abs(end_rate - start_rate) < 1e-12:
+                        # Effectively constant (avoid division issues)
+                        flow_func = lambda t, rate=start_rate: rate
+                    else:
+                        # Linear interpolation lambda
+                        flow_func = lambda t, s=start_rate, e=end_rate, d=duration: (
+                            s + (e - s) * min(max(t, 0.0), d) / d
+                        )
+
+                elif isinstance(flow.mass_flow, list) and len(flow.mass_flow) == 1:
+                    # Single-element list: constant flow
+                    rate = abs(flow.mass_flow[0])
+                    flow_func = lambda t, rate=rate: rate
+                else:
+                    # Scalar: constant flow
+                    rate = abs(flow.mass_flow)
+                    flow_func = lambda t, rate=rate: rate
+
+                flow_functions.append(flow_func)
+
+        # Return combined flow function
+        if len(flow_functions) == 0:
+            return lambda t: 0.0
+        elif len(flow_functions) == 1:
+            return flow_functions[0]
+        else:
+            # Multiple flows: sum them
+            return lambda t: sum(func(t) for func in flow_functions)
 
 
 class DischargeMission(IsochoricMission):
@@ -473,20 +532,38 @@ class IsochoricMissionAnalysis:
             def ode_system(t, y):
                 """ODE system function for scipy integration"""
                 # Debug: Print integration progress every N seconds
-                if t % 1000 < 0.1:
-                    rho = y[0] / 0.5  # density = mass / volume
-                    try:
-                        from CoolProp.CoolProp import PropsSI
-                        p = PropsSI("P", "T", y[1], "Dmass", rho, "hydrogen") / 1e5  # Convert to bar
-                        print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P={p:.1f}bar, ρ={rho:.1f}kg/m³")
-                    except:
-                        print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P=?bar, ρ={rho:.1f}kg/m³")
+                # if t % 1000 < 0.1:
+                #     rho = y[0] / 0.5  # density = mass / volume
+                #     try:
+                #         from CoolProp.CoolProp import PropsSI
+                #         p = PropsSI("P", "T", y[1], "Dmass", rho, "hydrogen") / 1e5  # Convert to bar
+                #         print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P={p:.1f}bar, ρ={rho:.1f}kg/m³")
+                #     except:
+                #         print(f" ODE Step: t={t:.1f}s, m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, P=?bar, ρ={rho:.1f}kg/m³")
 
-                # Validate state vector
+                # Validate state vector and apply bounds
+                min_mass = 0.1  # kg - minimum safe mass to prevent numerical instability
+                min_temp = 10.0  # K - minimum physical temperature
+                max_temp = 1000.0  # K - maximum reasonable temperature
+
+                # Apply mass bounds
+                if y[0] <= min_mass:
+                    y[0] = max(y[0], min_mass)
+                    # When mass is at minimum, stop discharge but allow thermal evolution
+                    bounded_mass = True
+                else:
+                    bounded_mass = False
+
+                # Apply temperature bounds
+                y[1] = max(min(y[1], max_temp), min_temp)
+                y[2] = max(min(y[2], max_temp), min_temp)
+
+                # Check for critical invalid states
                 if y[0] <= 0 or y[1] <= 0 or y[2] <= 0:
-                    rho = max(y[0], 0.001) / 0.5  # Avoid division by zero
-                    print(f" Invalid state at t={t:.1f}s: m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, ρ={rho:.1f}kg/m³")
-                    return np.array([0.0, 0.0, 0.0])
+                    rho = max(y[0], 0.001) / self.parameters.tank_volume
+                    print(f" ⚠️  Critical state at t={t:.1f}s: m={y[0]:.2f}kg, T={y[1]:.2f}K, Ts={y[2]:.2f}K, ρ={rho:.1f}kg/m³")
+                    # Return small positive derivatives to prevent solver from crashing
+                    return np.array([-0.001, 0.001, 0.001])
 
                 # Convert state vector to IsochoricTankState
                 try:
@@ -506,23 +583,42 @@ class IsochoricMissionAnalysis:
 
                 # Compute dynamic model derivatives
                 try:
+                    # Create wrapper functions that convert absolute time to section-relative time
+                    def section_fuel_flow_func(abs_time):
+                        section_time = abs_time - current_time  # Convert to section-relative time
+                        return fuel_flow_func(section_time)
+
+                    def section_discharge_flow_func(abs_time):
+                        section_time = abs_time - current_time  # Convert to section-relative time
+                        return discharge_flow_func(section_time)
+
                     derivatives = self.mission.dynamic_model_switcher.compute_state_derivatives(
                         current_time + t,
                         state,
-                        fuel_flow_func,
-                        discharge_flow_func,
+                        section_fuel_flow_func,
+                        section_discharge_flow_func,
                         Q_solid=Q_solid,
                         dTs_dt=dTs_dt
                     )
 
+                    # Apply bounds to mass derivative to prevent negative mass
+                    mass_derivative = derivatives.fuel_mass_derivative
+                    if bounded_mass and mass_derivative < 0:
+                        # If we're at minimum mass, don't allow further discharge
+                        mass_derivative = 0.0
+
+                    # Bound temperature derivatives to prevent explosive growth
+                    temp_derivative = max(min(derivatives.temperature_derivative, 100.0), -100.0)  # K/s
+                    solid_temp_derivative = max(min(derivatives.solid_temperature_derivative, 10.0), -10.0)  # K/s
+
                     # Debug: Print derivatives occasionally
-                    # if t % 10000 < 0.1:
-                    #     print(f"📊 Derivatives at t={t:.1f}s: dm/dt={derivatives.fuel_mass_derivative:.4f}, dT/dt={derivatives.temperature_derivative:.4f}, dTs/dt={derivatives.solid_temperature_derivative:.4f}")
+                    # if t % 100 < 0.1:
+                    #     print(f"📊 Derivatives at t={t:.1f}s: dm/dt={mass_derivative:.4f}, dT/dt={temp_derivative:.4f}, dTs/dt={solid_temp_derivative:.4f}")
 
                     return [
-                        derivatives.fuel_mass_derivative,
-                        derivatives.temperature_derivative,
-                        derivatives.solid_temperature_derivative
+                        mass_derivative,
+                        temp_derivative,
+                        solid_temp_derivative
                     ]
                 except Exception as e:
                     print(f"❌ Derivative computation failed at t={t:.1f}s: {str(e)[:100]}")
@@ -573,11 +669,19 @@ class IsochoricMissionAnalysis:
 
             # Set the ODE function and integrate this section
             print(f" Setting up integration for section: t_span={t_span}, y0={y0}")
-            print(f" Adding density stopping event: target = {target_for_log} kg/m³")
+
+            # Configure integration based on density stopping event setting
+            if self.mission.parameters.use_density_stopping_events:
+                print(f" Adding density stopping event: target = {target_for_log} kg/m³")
+                integration_events = density_stopping_event
+            else:
+                print(" Density stopping events disabled - running full section duration")
+                integration_events = None
+
             self.mission.integration_method.set_ode_function(ode_system)
             print(" Starting ODE solver...")
             section_results = self.mission.integration_method.integrate_full(
-                t_span, y0, t_eval, events=density_stopping_event
+                t_span, y0, t_eval, events=integration_events
             )
             print(f"Full solution completed. Final time: {section_results.t[-1]:.1f}s")
 

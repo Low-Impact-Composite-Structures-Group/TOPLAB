@@ -316,7 +316,8 @@ class CCH2DischargeAnalysis:
             ambient_temperature=self.config.AMBIENT_TEMPERATURE,
             time_step=self.config.Discharge.TIME_STEP,
             rtol=self.config.Solver.RTOL,
-            atol=self.config.Solver.ATOL
+            atol=self.config.Solver.ATOL,
+            use_density_stopping_events=True  # Enable density stopping for verification analysis
         )
 
         # 3. Create discharge mission with calculated parameters
@@ -780,7 +781,8 @@ class CCH2RefuelAnalysis:
             ambient_temperature=self.config.AMBIENT_TEMPERATURE,
             time_step=self.config.Refuel.TIME_STEP,
             rtol=self.config.Solver.RTOL,
-            atol=self.config.Solver.ATOL
+            atol=self.config.Solver.ATOL,
+            use_density_stopping_events=True  # Enable density stopping for verification analysis
         )
 
         # 3. Create refuel mission with calculated parameters
@@ -1235,7 +1237,8 @@ class CCH2DormancyAnalysis:
             ambient_temperature=self.config.AMBIENT_TEMPERATURE,
             time_step=self.config.Dormancy.TIME_STEP,
             rtol=self.config.Solver.RTOL,
-            atol=self.config.Solver.ATOL
+            atol=self.config.Solver.ATOL,
+            use_density_stopping_events=True  # Enable density stopping for verification analysis
         )
 
         # Note: Dormancy missions don't need the DischargeMission or RefuelMission classes
