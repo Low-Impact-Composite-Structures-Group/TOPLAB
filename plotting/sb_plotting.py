@@ -1448,15 +1448,23 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Add isobar lines if requested
         if include_isobars:
-            # Define key pressure levels in bar based on the analysis
-            pressure_levels = [15, 100, 400, 450]
+            # Define pressure levels in bar
+            regular_pressure_levels = [100, 400]  # Regular pressure levels
+            special_pressures = {
+                15: {'color': PAARS, 'label': '15 bar (Min Pressure)', 'style': '-'},
+                500: {'color': TURKOOIS, 'label': '500 bar (Vent Pressure)', 'style': '-'}
+            }
 
             # Create temperature range based on data
             temp_min = min(temperatures) - 10
             temp_max = max(temperatures) + 10
             temps = np.linspace(temp_min, temp_max, 100)
 
-            for pressure in pressure_levels:
+            # Track legend entries to avoid duplicates
+            isobar_legend_added = False
+
+            # Plot regular isobars first
+            for pressure in regular_pressure_levels:
                 pressure_pa = pressure * 1e5  # Convert bar to Pa
                 densities_iso = []
 
@@ -1474,18 +1482,14 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                 valid_densities = np.array(densities_iso)[valid_indices]
 
                 if len(valid_temps) > 0:
-                    # Plot isobar line with dotted gray
+                    # Plot regular isobar line with dotted gray
+                    label = 'Isobars' if not isobar_legend_added else None
                     ax.plot(valid_temps, valid_densities, ':', color='gray',
-                           alpha=0.7, linewidth=1)
+                           alpha=0.7, linewidth=1, label=label)
+                    isobar_legend_added = True
 
                     # Add pressure labels
-                    if pressure in [400, 450]:
-                        # Place label at 75% of the way through the line
-                        idx = int(len(valid_temps) * 0.75)
-                    else:
-                        # For other pressures, use the midpoint
-                        idx = len(valid_temps) // 2
-
+                    idx = int(len(valid_temps) * 0.75) if pressure == 400 else len(valid_temps) // 2
                     if idx < len(valid_temps):
                         ax.text(valid_temps[idx], valid_densities[idx],
                                 f"{pressure} bar", fontsize=10, alpha=0.8,
@@ -1493,20 +1497,58 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                                 color='gray', bbox=dict(facecolor='white', alpha=0.7,
                                                        edgecolor=None, pad=1))
 
+            # Plot special pressure isobars (minimum and venting)
+            for pressure, props in special_pressures.items():
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities_iso = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'PARAHYDROGEN')
+                        densities_iso.append(density)
+                    except:
+                        densities_iso.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities_iso)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities_iso)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot special isobar with distinctive color and style
+                    ax.plot(valid_temps, valid_densities, props['style'],
+                           color=props['color'], alpha=0.8, linewidth=2,
+                           label=props['label'])
+
+                    # Add pressure labels with matching color
+                    idx = int(len(valid_temps) * 0.25) if pressure == 15 else int(len(valid_temps) * 0.85)
+                    if idx < len(valid_temps):
+                        ax.text(valid_temps[idx], valid_densities[idx],
+                                f"{pressure} bar", fontsize=11, fontweight='bold',
+                                horizontalalignment='center', verticalalignment='center',
+                                color=props['color'],
+                                bbox=dict(facecolor='white', alpha=0.9,
+                                         edgecolor=props['color'], pad=2))
+
         ax.set_xlabel('Temperature [K]')
         ax.set_ylabel('Density [kg/m³]')
         ax.set_title('Density vs Temperature - Discharge Process')
         ax.grid(True, alpha=0.3)
         ax.legend()
 
-        # Add annotations for start and end points
+        # Add annotations for start and end points with boxes
         if len(densities) > 0 and len(temperatures) > 0:
             ax.annotate('Start', xy=(temperatures[0], densities[0]),
                         xytext=(10, 10), textcoords='offset points',
-                        arrowprops=dict(arrowstyle='->', color='green'))
+                        arrowprops=dict(arrowstyle='->', color='black'),
+                        bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', pad=2),
+                        fontweight='bold')
             ax.annotate('End', xy=(temperatures[-1], densities[-1]),
                         xytext=(10, 10), textcoords='offset points',
-                        arrowprops=dict(arrowstyle='->', color='red'))
+                        arrowprops=dict(arrowstyle='->', color='black'),
+                        bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', pad=2),
+                        fontweight='bold')
 
         plt.tight_layout()
         return fig
