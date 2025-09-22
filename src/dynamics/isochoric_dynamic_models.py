@@ -188,7 +188,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
 
         # Heat transfer terms (from kwargs or computed)
         Q_solid = kwargs.get('Q_solid', 0.0)  # Heat from solid to fluid [W]
-        Q_discharge = kwargs.get('Q_discharge', 0.0)  # Discharge heat requirement [W]
+        Q_discharge = kwargs.get('Q_discharge', 0.0)  # Fallback only - should not be needed
 
         # Configuration-dependent discharge heat calculation
         dm_dt = net_mass_flow
@@ -434,11 +434,57 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
 
         # Heat transfer terms
         Q_solid = kwargs.get('Q_solid', 0.0)
-        Q_discharge = kwargs.get('Q_discharge', 0.0)
+        Q_discharge = kwargs.get('Q_discharge', 0.0)  # Fallback only
 
-        # Compute derivatives
+        # Configuration-dependent discharge heat calculation
         dm_dt = net_mass_flow
-        dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+
+        # Initialize discharge heat for this timestep
+        actual_qdot_disch = 0.0
+
+        if config == "B" and self.scenario != "REFUEL":
+            # Configuration B: Use special discharge heat calculation from stops_model
+            # Q_disch = M_disch · [T/ρ·(dp_sat/dT) + h_disch - h] - Q_s
+            # This enforces pressure constraint indirectly through the energy balance
+            # NOTE: Configuration B is DISABLED during REFUEL scenarios
+
+            try:
+                # For two-phase: T/ρ term uses saturation pressure derivative
+                term1 = (T / rho) * dp_sat_dT
+
+                # Enthalpy difference term (discharge - current)
+                h_disch = h  # Discharge at current state
+                term2 = h_disch - h  # This is zero, but kept for clarity with formula
+
+                # Configuration B discharge heat (stops_model equation for two-phase)
+                qdot_disch_B = mdot_discharge * (term1 + term2) - Q_solid
+                actual_qdot_disch = qdot_disch_B
+
+                # Use Configuration B discharge heat instead of normal Q_discharge
+                dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v2P)
+
+                # Debug print for Configuration B activation
+                # if time % 100 < 0.1:  # Print occasionally
+                #     print(f"🔧 Two-Phase Configuration B: t={time:.1f}s, P={p_sat/1e5:.1f}bar, qdot_B={qdot_disch_B/1000:.1f}kW")
+
+            except Exception as e:
+                # Fallback to normal calculation if CoolProp fails
+                print(f"⚠️  Two-Phase Configuration B error: {e}, using normal calculation")
+                dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+                actual_qdot_disch = 0.0  # No special discharge heat in fallback
+        else:
+            # Configuration A or C: No discharge heat required (qdot_disch = 0)
+            dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+            actual_qdot_disch = 0.0
+
+        # Capture heat flow data for plotting (for ALL configurations)
+        if _heat_flow_data is not None:
+            _heat_flow_data['t'].append(time)
+            _heat_flow_data['qdot_disch'].append(actual_qdot_disch)
+            _heat_flow_data['qdot_ohex'].append(0.0)  # Will be calculated in post-processing
+            _heat_flow_data['mdot_disch'].append(mdot_discharge)
+            _heat_flow_data['T'].append(T)
+            _heat_flow_data['rho'].append(rho)
 
         # Solid temperature derivative
         dTs_dt = kwargs.get('dTs_dt', 0.0)
