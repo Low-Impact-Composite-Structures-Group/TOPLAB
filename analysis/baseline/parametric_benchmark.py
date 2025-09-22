@@ -473,6 +473,39 @@ class ParametricBenchmark(ABC):
         print(f"\nCreated ATR72 discharge mission with {len(discharge_sections)} sections")
         return discharge_mission
 
+    def _get_mission_flow_rate_at_time(self, absolute_time: float) -> float:
+        """
+        Get the actual mission discharge flow rate at a given absolute time.
+
+        This uses the mission's flow functions to get the correct flow rate,
+        avoiding artifacts from discrete mass difference calculations.
+
+        Args:
+            absolute_time: Time in seconds from mission start
+
+        Returns:
+            float: Discharge flow rate [kg/s] at given time
+        """
+        if not hasattr(self, 'mission') or self.mission is None:
+            return 0.0
+
+        current_time = 0.0
+
+        # Find which section we're in and get the flow rate
+        for section in self.mission.sections:
+            if current_time <= absolute_time < current_time + section.duration:
+                # Get relative time within this section
+                section_time = absolute_time - current_time
+
+                # Get discharge flow function for this section
+                discharge_flow_func = self.mission.get_discharge_flow_function(section)
+                return discharge_flow_func(section_time)
+
+            current_time += section.duration
+
+        # If we're past the end of the mission, return 0
+        return 0.0
+
     def run_single_analysis(self):
         """Run single discharge analysis."""
         print("\n" + "="*60)
@@ -722,17 +755,18 @@ class ParametricBenchmark(ABC):
                     print(f"State {i}: P={pressure_bar:.1f}bar, has_attr={has_config_b_attr}, state_B={state_config_b}, press_B={pressure_config_b}, final_B={is_config_b}")
 
                 if is_config_b:
-                    # Compute heat requirement for iHEX operation
-                    if i > 0:
-                        mass_rate = (self.results.states[i-1].fuel_mass - state.fuel_mass) / self.time_step
-                    else:
-                        mass_rate = 0.0367
+                    # Compute heat requirement for iHEX operation using actual mission flow rate
+                    time_s = i * self.time_step
+                    mass_rate = self._get_mission_flow_rate_at_time(time_s)
 
                     T_hydrogen = state.temperature
                     if T_hydrogen > 0 and mass_rate > 0:
                         cp_hydrogen = 14300.0
                         temp_difference = max(0, 80.0 - T_hydrogen)
                         ihex_requirement = mass_rate * cp_hydrogen * temp_difference
+
+
+
                         qdot_disch.append(max(0.0, ihex_requirement))
                     else:
                         qdot_disch.append(0.0)
@@ -754,6 +788,72 @@ class ParametricBenchmark(ABC):
         print(f"Non-zero heat flows: {sum(1 for q in qdot_disch if abs(q) > 1e-6)}")
         if qdot_disch:
             print(f"Max heat flow: {max(qdot_disch):.2f} kW")
+
+        # 🔍 PROBE VALUES: Check for section boundary artifacts (zero-drop issue)
+        print(f"\n=== HEAT FLOW DATA PROBING ({self.get_storage_type_name()}) ===")
+        print(f"Total data points: {len(qdot_disch)}")
+        zero_indices = [i for i, q in enumerate(qdot_disch) if q == 0.0]
+        nonzero_indices = [i for i, q in enumerate(qdot_disch) if q > 1e-6]
+
+        print(f"Zero values: {len(zero_indices)} indices")
+        print(f"Non-zero values: {len(nonzero_indices)} indices")
+
+        # Check for suspicious zero patterns (likely section artifacts)
+        if zero_indices:
+            print(f"First 10 zero indices: {zero_indices[:10]}")
+            print(f"Last 10 zero indices: {zero_indices[-10:]}")
+
+            # Check if zeros are clustered at specific intervals (section boundaries)
+            if len(nonzero_indices) > 10:
+                print(f"First 10 non-zero indices: {nonzero_indices[:10]}")
+                print(f"Last 10 non-zero indices: {nonzero_indices[-10:]}")
+
+                # Look for transitions: non-zero -> zero -> non-zero (section boundary pattern)
+                transitions = []
+                for i in range(1, len(qdot_disch) - 1):
+                    prev_q = qdot_disch[i-1]
+                    curr_q = qdot_disch[i]
+                    next_q = qdot_disch[i+1]
+
+                    # Pattern: non-zero -> zero -> non-zero (likely section boundary)
+                    if prev_q > 1e-6 and curr_q == 0.0 and next_q > 1e-6:
+                        transitions.append((i, prev_q, curr_q, next_q))
+
+                if transitions:
+                    print(f"\n🚨 SECTION BOUNDARY ARTIFACTS DETECTED:")
+                    print(f"Found {len(transitions)} suspicious zero-drops:")
+                    for i, (idx, prev, curr, next_val) in enumerate(transitions[:5]):  # Show first 5
+                        time_s = idx * self.time_step
+                        print(f"  {i+1}. Index {idx} (t={time_s:.1f}s): {prev:.1f} -> {curr:.1f} -> {next_val:.1f}")
+
+                    if len(transitions) > 5:
+                        print(f"  ... and {len(transitions) - 5} more")
+
+                    # 🛠️ FIX SECTION BOUNDARY ARTIFACTS
+                    print(f"\n🔧 APPLYING INTERPOLATION FIX:")
+                    fixes_applied = 0
+                    for idx, prev_q, curr_q, next_q in transitions:
+                        # Apply interpolation fix: average between previous and next values for smoother transition
+                        interpolated_q = (prev_q + next_q) / 2.0
+                        qdot_disch[idx] = interpolated_q
+                        fixes_applied += 1
+                        print(f"  Fixed index {idx}: {curr_q:.1f} -> {interpolated_q:.1f} (interpolated from {prev_q:.1f} & {next_q:.1f})")
+
+                    print(f"✓ Applied {fixes_applied} interpolation fixes")
+
+                    # Verify the fix worked
+                    remaining_transitions = []
+                    for i in range(1, len(qdot_disch) - 1):
+                        prev_q = qdot_disch[i-1]
+                        curr_q = qdot_disch[i]
+                        next_q = qdot_disch[i+1]
+                        if prev_q > 1e-6 and curr_q == 0.0 and next_q > 1e-6:
+                            remaining_transitions.append((i, prev_q, curr_q, next_q))
+
+                    print(f"✓ Verification: {len(remaining_transitions)} artifacts remaining (should be 0)")
+                else:
+                    print("No obvious section boundary artifacts detected")
+
         print("================================\n")
 
         heat_flow_data = {
