@@ -506,6 +506,59 @@ class ParametricBenchmark(ABC):
         # If we're past the end of the mission, return 0
         return 0.0
 
+    def _calculate_ohex_requirements(self, times_seconds: list) -> list:
+        """
+        Calculate OHEX (Outboard Heat Exchanger) heat requirements.
+
+        Uses enthalpy difference method: Q_oHEX = mdot * (h_target - h_current)
+        where h_target is at standard fuel cell inlet conditions (200K, 20 bar).
+
+        Args:
+            times_seconds: Time array in seconds
+
+        Returns:
+            list: OHEX heat requirements [W] for each time point
+        """
+        # OHEX target conditions (fuel cell inlet requirements)
+        OHEX_TARGET_TEMPERATURE = 200.0   # K - typical fuel cell inlet temperature
+        OHEX_TARGET_PRESSURE = 20e5       # Pa - 20 bar fuel cell inlet pressure
+
+        try:
+            # Calculate target enthalpy (constant for all time points)
+            h_target = PropsSI("Hmass", "T", OHEX_TARGET_TEMPERATURE, "P", OHEX_TARGET_PRESSURE, "hydrogen")
+        except Exception as e:
+            print(f"Warning: Could not calculate OHEX target enthalpy: {e}")
+            return [0.0] * len(times_seconds)
+
+        qdot_ohex = []
+
+        for i, state in enumerate(self.results.states):
+            try:
+                # Get current state conditions
+                T_current = state.temperature
+                rho_current = state.fuel_mass / self.tank_volume  # kg/m³
+
+                # Get mass flow rate from mission profile
+                time_s = i * self.time_step
+                mass_rate = self._get_mission_flow_rate_at_time(time_s)
+
+                if T_current > 0 and rho_current > 0 and mass_rate > 0:
+                    # Calculate current pressure and enthalpy
+                    p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "hydrogen")
+                    h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "hydrogen")
+
+                    # Calculate OHEX heat requirement
+                    q_ohex = mass_rate * (h_target - h_current)  # [W]
+                    qdot_ohex.append(max(0.0, q_ohex))  # Ensure non-negative
+                else:
+                    qdot_ohex.append(0.0)
+
+            except Exception as e:
+                # Silently handle CoolProp errors (common at extreme conditions)
+                qdot_ohex.append(0.0)
+
+        return qdot_ohex
+
     def run_single_analysis(self):
         """Run single discharge analysis."""
         print("\n" + "="*60)
@@ -856,18 +909,42 @@ class ParametricBenchmark(ABC):
 
         print("================================\n")
 
+        # Calculate OHEX heat requirements for all storage types
+        print("Calculating OHEX (Outboard Heat Exchanger) requirements...")
+        qdot_ohex = self._calculate_ohex_requirements(times_seconds)
+
+        if qdot_ohex and any(q > 1e-6 for q in qdot_ohex):
+            max_ohex = max(qdot_ohex)
+            print(f"OHEX calculation complete: max = {max_ohex/1000:.1f} kW")
+        else:
+            print("OHEX calculation complete: all values zero or failed")
+
+        # Determine what curves to plot based on storage type
+        storage_name = self.get_storage_type_name()
+        has_ihex = "CH2" not in storage_name  # CH2 has no iHEX (no Configuration B)
+
         heat_flow_data = {
             't': times_seconds,
-            'qdot_disch': qdot_disch,
-            'qdot_ohex': [0.0] * len(times_seconds)
+            'qdot_disch': qdot_disch if has_ihex else [0.0] * len(times_seconds),
+            'qdot_ohex': qdot_ohex
         }
+
+        # Configure plotting based on storage type
+        if has_ihex:
+            # sLH2 and CCH2: Show iHEX + oHEX + total (3 curves)
+            plot_total = True
+            print(f"Plotting 3 curves for {storage_name}: iHEX, oHEX, and total")
+        else:
+            # CH2: Show only oHEX + total (2 curves, total coincides with oHEX)
+            plot_total = True
+            print(f"Plotting 2 curves for {storage_name}: oHEX and total (coincident)")
 
         fig = sb_plotter.plot_heat_exchanger_requirements(
             heat_flow_data=heat_flow_data,
-            scenario_name=f"{self.get_storage_type_name()} Discharge",
+            scenario_name=f"{storage_name} discharge",
             ihex_data=None,
             ohex_data=None,
-            plot_total=False,
+            plot_total=plot_total,
             figsize=(10, 6)
         )
 
