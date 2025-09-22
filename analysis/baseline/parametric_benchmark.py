@@ -559,6 +559,77 @@ class ParametricBenchmark(ABC):
 
         return qdot_ohex
 
+    def _calculate_energy_requirements(self, times_seconds: list, heat_flow_data: dict) -> dict:
+        """
+        Calculate total energy requirements by integrating heat flow curves.
+
+        Uses trapezoidal rule to compute area under the heat exchanger requirement curves.
+
+        Args:
+            times_seconds: Time array in seconds
+            heat_flow_data: Dictionary with 'qdot_disch' (iHEX) and 'qdot_ohex' (oHEX) data
+
+        Returns:
+            dict: Energy requirements in MJ and kWh for iHEX, oHEX, and total
+        """
+        import numpy as np
+
+        # Convert time to hours for integration
+        times_hours = np.array(times_seconds) / 3600.0
+
+        # Get heat flow data
+        qdot_ihex = np.array(heat_flow_data.get('qdot_disch', []))
+        qdot_ohex = np.array(heat_flow_data.get('qdot_ohex', []))
+
+        # Ensure arrays have same length
+        min_length = min(len(times_hours), len(qdot_ihex), len(qdot_ohex))
+        times_hours = times_hours[:min_length]
+        qdot_ihex = qdot_ihex[:min_length]
+        qdot_ohex = qdot_ohex[:min_length]
+
+        energy_results = {}
+
+        # Calculate iHEX energy (area under iHEX curve)
+        if len(qdot_ihex) > 1 and any(q > 1e-6 for q in qdot_ihex):
+            # Convert W to kW and integrate over time (hours) to get kWh
+            qdot_ihex_kw = qdot_ihex / 1000.0  # W to kW
+            energy_ihex_kwh = np.trapz(qdot_ihex_kw, times_hours)  # kWh
+            energy_ihex_mj = energy_ihex_kwh * 3.6  # kWh to MJ
+        else:
+            energy_ihex_kwh = 0.0
+            energy_ihex_mj = 0.0
+
+        # Calculate oHEX energy (area under oHEX curve)
+        if len(qdot_ohex) > 1 and any(q > 1e-6 for q in qdot_ohex):
+            # Convert W to kW and integrate over time (hours) to get kWh
+            qdot_ohex_kw = qdot_ohex / 1000.0  # W to kW
+            energy_ohex_kwh = np.trapz(qdot_ohex_kw, times_hours)  # kWh
+            energy_ohex_mj = energy_ohex_kwh * 3.6  # kWh to MJ
+        else:
+            energy_ohex_kwh = 0.0
+            energy_ohex_mj = 0.0
+
+        # Calculate total energy
+        energy_total_kwh = energy_ihex_kwh + energy_ohex_kwh
+        energy_total_mj = energy_ihex_mj + energy_ohex_mj
+
+        energy_results = {
+            'ihex': {
+                'kwh': energy_ihex_kwh,
+                'mj': energy_ihex_mj
+            },
+            'ohex': {
+                'kwh': energy_ohex_kwh,
+                'mj': energy_ohex_mj
+            },
+            'total': {
+                'kwh': energy_total_kwh,
+                'mj': energy_total_mj
+            }
+        }
+
+        return energy_results
+
     def run_single_analysis(self):
         """Run single discharge analysis."""
         print("\n" + "="*60)
@@ -762,16 +833,29 @@ class ParametricBenchmark(ABC):
 
     def plot_heat_exchanger_requirements(self, save_path=None):
         """
-        Plot iHEX heat exchanger requirements.
+        Plot heat exchanger requirements for sLH2 and CCH2 storage types.
 
-        Computes and visualizes heat flow requirements for maintaining hydrogen
-        temperature during discharge when Configuration B is active.
+        CH2 (compressed hydrogen) operates at ambient temperature and maintains
+        high pressure throughout the mission, so it requires no heat exchange
+        and this method will skip plotting for CH2.
 
         Args:
             save_path: Optional path to save plot file
         """
         if not self.results or len(self.results.states) == 0:
             print("No data available for heat exchanger plot")
+            return
+
+        # Skip heat exchanger analysis entirely for CH2 (compressed hydrogen)
+        storage_name = self.get_storage_type_name()
+        if "Compressed H2 (CH2)" in storage_name:
+            print(f"\n=== HEAT EXCHANGER ANALYSIS SKIPPED FOR {storage_name} ===")
+            print("CH2 operates at ambient temperature and maintains high pressure")
+            print("throughout the mission, requiring no heat exchanger systems.")
+            print("No iHEX needed: Pressure stays well above minimum threshold")
+            print("No oHEX needed: Storage temperature is already near ambient")
+            print("Energy requirements: 0.00 kWh (0.0 MJ) - no thermal management")
+            print("=" * 65)
             return
 
         sb_plotter = SeabornPlotter()
@@ -921,7 +1005,7 @@ class ParametricBenchmark(ABC):
 
         # Determine what curves to plot based on storage type
         storage_name = self.get_storage_type_name()
-        has_ihex = "CH2" not in storage_name  # CH2 has no iHEX (no Configuration B)
+        has_ihex = "Compressed H2 (CH2)" not in storage_name  # Only pure CH2 has no iHEX (no Configuration B)
 
         heat_flow_data = {
             't': times_seconds,
@@ -938,6 +1022,35 @@ class ParametricBenchmark(ABC):
             # CH2: Show only oHEX + total (2 curves, total coincides with oHEX)
             plot_total = True
             print(f"Plotting 2 curves for {storage_name}: oHEX and total (coincident)")
+
+        # Calculate energy requirements (area under curves)
+        print("\nCalculating energy requirements (area under heat exchanger curves)...")
+        energy_results = self._calculate_energy_requirements(times_seconds, heat_flow_data)
+
+        # Print energy summary
+        print(f"\n=== ENERGY REQUIREMENTS SUMMARY ({storage_name}) ===")
+
+        if has_ihex and energy_results['ihex']['kwh'] > 0.001:
+            print(f"iHEX Energy:  {energy_results['ihex']['kwh']:.2f} kWh  ({energy_results['ihex']['mj']:.1f} MJ)")
+        elif has_ihex:
+            print(f"iHEX Energy:  0.00 kWh  (0.0 MJ)")
+
+        if energy_results['ohex']['kwh'] > 0.001:
+            print(f"oHEX Energy:  {energy_results['ohex']['kwh']:.2f} kWh  ({energy_results['ohex']['mj']:.1f} MJ)")
+        else:
+            print(f"oHEX Energy:  0.00 kWh  (0.0 MJ)")
+
+        print(f"Total Energy: {energy_results['total']['kwh']:.2f} kWh  ({energy_results['total']['mj']:.1f} MJ)")
+
+        # Energy breakdown percentage
+        if energy_results['total']['kwh'] > 0.001:
+            ihex_pct = (energy_results['ihex']['kwh'] / energy_results['total']['kwh']) * 100 if has_ihex else 0
+            ohex_pct = (energy_results['ohex']['kwh'] / energy_results['total']['kwh']) * 100
+            if has_ihex:
+                print(f"Energy Split: iHEX {ihex_pct:.1f}% | oHEX {ohex_pct:.1f}%")
+            else:
+                print(f"Energy Split: oHEX {ohex_pct:.1f}% (Pure CH2 has no iHEX)")
+        print("=" * 60)
 
         fig = sb_plotter.plot_heat_exchanger_requirements(
             heat_flow_data=heat_flow_data,
