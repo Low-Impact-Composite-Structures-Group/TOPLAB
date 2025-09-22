@@ -1730,3 +1730,133 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         plt.tight_layout()
         return fig
+
+    def plot_bisection_optimization_progress(self, optimization_data, target_density,
+                                           density_tolerance=2.0, figsize=(12, 8)) -> plt.Figure:
+        """Create bisection optimization progress plot for radius search.
+
+        Shows the convergence of the bisection search algorithm including:
+        - Radius vs final density with feasible/infeasible regions
+        - Range width convergence showing bisection narrowing
+        - Phase visualization (bound search vs bisection)
+
+        Args:
+            optimization_data: Dictionary with bisection optimization progress data
+            target_density: Minimum target density requirement [kg/m³]
+            density_tolerance: Density tolerance for convergence [kg/m³]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, gridspec_kw={'height_ratios': [3, 1]})
+
+        # Extract data
+        iterations = optimization_data['iterations']
+        radii = optimization_data['radii']
+        final_densities = optimization_data['final_densities']
+        feasible = optimization_data['feasible']
+        phases = optimization_data['phase']
+        converged = optimization_data['converged']
+        range_widths = optimization_data['range_widths']
+
+        # Separate bound search and bisection phases
+        bound_search_mask = [p == 'bound_search' for p in phases]
+        bisection_mask = [p == 'bisection' for p in phases]
+
+        # Plot bound search points (Phase 1 & 2)
+        if any(bound_search_mask):
+            bound_radii = [r for r, is_bound in zip(radii, bound_search_mask) if is_bound]
+            bound_densities = [d for d, is_bound in zip(final_densities, bound_search_mask) if is_bound]
+            bound_feasible = [f for f, is_bound in zip(feasible, bound_search_mask) if is_bound]
+            bound_converged = [c for c, is_bound in zip(converged, bound_search_mask) if is_bound]
+
+            # Plot bound search - feasible points
+            feasible_bound_radii = [r for r, f, c in zip(bound_radii, bound_feasible, bound_converged) if f and c]
+            feasible_bound_densities = [d for d, f, c in zip(bound_densities, bound_feasible, bound_converged) if f and c]
+            if feasible_bound_radii:
+                ax1.scatter(feasible_bound_radii, feasible_bound_densities,
+                          color=GROEN, alpha=0.7, s=80, marker='s', label='Bound Search (Feasible)', zorder=5)
+
+            # Plot bound search - infeasible points
+            infeasible_bound_radii = [r for r, f, c in zip(bound_radii, bound_feasible, bound_converged) if not (f and c)]
+            infeasible_bound_densities = [d for d, f, c in zip(bound_densities, bound_feasible, bound_converged) if not (f and c)]
+            if infeasible_bound_radii:
+                ax1.scatter(infeasible_bound_radii, infeasible_bound_densities,
+                          color=ROOD, alpha=0.7, s=80, marker='s', label='Bound Search (Infeasible)', zorder=5)
+
+        # Plot bisection points (Phase 3)
+        if any(bisection_mask):
+            bisection_radii = [r for r, is_bisection in zip(radii, bisection_mask) if is_bisection]
+            bisection_densities = [d for d, is_bisection in zip(final_densities, bisection_mask) if is_bisection]
+            bisection_feasible = [f for f, is_bisection in zip(feasible, bisection_mask) if is_bisection]
+            bisection_converged = [c for c, is_bisection in zip(converged, bisection_mask) if is_bisection]
+
+            # Plot bisection - feasible points
+            feasible_bisection_radii = [r for r, f, c in zip(bisection_radii, bisection_feasible, bisection_converged) if f and c]
+            feasible_bisection_densities = [d for d, f, c in zip(bisection_densities, bisection_feasible, bisection_converged) if f and c]
+            if feasible_bisection_radii:
+                ax1.scatter(feasible_bisection_radii, feasible_bisection_densities,
+                          color=BOSGROEN, alpha=0.8, s=100, marker='o', label='Bisection (Feasible)', zorder=6)
+
+            # Plot bisection - infeasible points
+            infeasible_bisection_radii = [r for r, f, c in zip(bisection_radii, bisection_feasible, bisection_converged) if not (f and c)]
+            infeasible_bisection_densities = [d for d, f, c in zip(bisection_densities, bisection_feasible, bisection_converged) if not (f and c)]
+            if infeasible_bisection_radii:
+                ax1.scatter(infeasible_bisection_radii, infeasible_bisection_densities,
+                          color=ORANJE, alpha=0.8, s=100, marker='o', label='Bisection (Infeasible)', zorder=6)
+
+        # Connect points with iteration order (show search path)
+        if len(radii) > 1:
+            ax1.plot(radii, final_densities, 'k--', alpha=0.4, linewidth=1, 
+                    label='Search Path', zorder=3)
+
+        # Add iteration numbers as annotations for bisection points
+        bisection_iter = 0
+        for i, (r, d, phase) in enumerate(zip(radii, final_densities, phases)):
+            if phase == 'bisection':
+                bisection_iter += 1
+                ax1.annotate(f'{bisection_iter}', (r, d),
+                           xytext=(8, 8), textcoords='offset points',
+                           fontsize=9, alpha=0.8, fontweight='bold')
+
+        # Add target density and tolerance lines
+        ax1.axhline(y=target_density, color=DONKERBLAUW, linestyle='-',
+                   linewidth=2, label=f'Target Density: {target_density:.1f} kg/m³', zorder=4)
+
+        # Add tolerance band
+        ax1.axhline(y=target_density + density_tolerance, color=DONKERBLAUW, linestyle='--',
+                   linewidth=1, alpha=0.7, label=f'Tolerance: ±{density_tolerance:.1f} kg/m³', zorder=4)
+        ax1.axhline(y=target_density - density_tolerance, color=DONKERBLAUW, linestyle='--',
+                   linewidth=1, alpha=0.7, zorder=4)
+
+        # Fill tolerance band
+        ax1.fill_between([min(radii) * 0.95, max(radii) * 1.05], 
+                        target_density - density_tolerance, target_density + density_tolerance,
+                        color=DONKERBLAUW, alpha=0.1, zorder=1)
+
+        ax1.set_xlabel('Tank Radius [m]')
+        ax1.set_ylabel('Final Density [kg/m³]')
+        ax1.set_title('Bisection Optimization Progress: Radius vs Final Density')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+
+        # Lower subplot: Range width convergence
+        bisection_iterations = [i for i, phase in enumerate(phases) if phase == 'bisection']
+        bisection_range_widths = [range_widths[i] for i in bisection_iterations]
+
+        if bisection_range_widths:
+            ax2.plot(range(1, len(bisection_range_widths) + 1), bisection_range_widths,
+                    color=BOSGROEN, marker='o', linewidth=2, markersize=6,
+                    label='Search Range Width')
+            ax2.set_xlabel('Bisection Iteration')
+            ax2.set_ylabel('Range Width [m]')
+            ax2.set_title('Bisection Convergence: Search Range Narrowing')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend()
+            ax2.set_yscale('log')  # Log scale to show exponential convergence
+
+        plt.tight_layout()
+        return fig

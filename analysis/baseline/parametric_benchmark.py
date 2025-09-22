@@ -1067,6 +1067,66 @@ class ParametricBenchmark(ABC):
         else:
             plt.show()
 
+    def plot_optimization_progress(self, save_path=None):
+        """
+        Run optimization and visualize the bisection search progress.
+        
+        This method runs the full bisection optimization to find the optimal radius
+        and plots the convergence progress showing how the algorithm narrows down
+        the search range to find the minimum feasible tank radius.
+        
+        Args:
+            save_path: Optional path to save plot file
+        """
+        print(f"\n{'='*80}")
+        print(f"OPTIMIZATION PROGRESS VISUALIZATION - {self.get_storage_type_name().upper()}")
+        print(f"{'='*80}")
+        
+        # Run optimization to capture progress data
+        optimization_results = find_optimal_radius_for_storage_type(self.__class__)
+        
+        if not optimization_results['search_successful']:
+            print("⚠️  Optimization failed - cannot generate progress plot")
+            print(f"Failure reason: {optimization_results.get('failure_reason', 'Unknown')}")
+            return None
+            
+        # Extract optimization progress data
+        optimization_progress = optimization_results['optimization_progress']
+        target_density = optimization_results['minimum_density_target']
+        density_tolerance = optimization_results['density_tolerance']
+        
+        # Create progress plot using SeabornPlotter
+        from plotting.sb_plotting import SeabornPlotter
+        sb_plotter = SeabornPlotter()
+        
+        print(f"Creating optimization progress plot...")
+        print(f"Total evaluations: {optimization_results['evaluation_count']}")
+        print(f"Optimal radius found: {optimization_results['optimal_radius']:.3f}m")
+        
+        try:
+            fig = sb_plotter.plot_bisection_optimization_progress(
+                optimization_data=optimization_progress,
+                target_density=target_density,
+                density_tolerance=density_tolerance,
+                figsize=(12, 8)
+            )
+            
+            # Update title to include storage type
+            fig.suptitle(f'{self.get_storage_type_name()} Bisection Optimization Progress',
+                        fontsize=16, fontweight='bold', y=0.95)
+            
+            if save_path:
+                plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                print(f"Optimization progress plot saved to: {save_path}")
+            else:
+                plt.show()
+                
+            return fig
+            
+        except Exception as e:
+            print(f"Plotting failed: {e}")
+            return None
+
     def run_analysis(self, include_plots=True):
         """Run complete benchmark analysis."""
         # Run single discharge analysis
@@ -1282,6 +1342,19 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
     search_results = []
     evaluation_count = 0
+    
+    # Initialize optimization progress tracking for plotting
+    optimization_progress = {
+        'iterations': [],
+        'radii': [],
+        'final_densities': [],
+        'structural_masses': [],
+        'feasible': [],
+        'phase': [],  # 'bound_search', 'bisection'
+        'converged': [],
+        'density_margins': [],
+        'range_widths': []  # Track bisection range convergence
+    }
 
     # Phase 1: Find feasible upper bound
     print("\n=== PHASE 1: FINDING FEASIBLE UPPER BOUND ===")
@@ -1294,6 +1367,17 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
         search_results.append(result)
+        
+        # Record progress data for plotting
+        optimization_progress['iterations'].append(evaluation_count)
+        optimization_progress['radii'].append(r_test)
+        optimization_progress['final_densities'].append(result.get('final_density', 0))
+        optimization_progress['structural_masses'].append(result.get('structural_mass', 0))
+        optimization_progress['feasible'].append(result.get('feasible', False))
+        optimization_progress['phase'].append('bound_search')
+        optimization_progress['converged'].append(result.get('success', False))
+        optimization_progress['density_margins'].append(result.get('density_margin', 0))
+        optimization_progress['range_widths'].append(max_radius - min_radius)
 
         if result['success']:
             print(f"  ✓ Success: ρ={result['final_density']:.2f} kg/m³, P_max={result['max_pressure_bar']:.1f} bar")
@@ -1335,6 +1419,17 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
         search_results.append(result)
+        
+        # Record progress data for plotting
+        optimization_progress['iterations'].append(evaluation_count)
+        optimization_progress['radii'].append(r_test)
+        optimization_progress['final_densities'].append(result.get('final_density', 0))
+        optimization_progress['structural_masses'].append(result.get('structural_mass', 0))
+        optimization_progress['feasible'].append(result.get('feasible', False))
+        optimization_progress['phase'].append('bound_search')
+        optimization_progress['converged'].append(result.get('success', False))
+        optimization_progress['density_margins'].append(result.get('density_margin', 0))
+        optimization_progress['range_widths'].append(r_max - r_test if r_max else 0)
 
         if result['success'] and result['feasible']:
             print(f"  ✓ Still feasible: ρ={result['final_density']:.2f} kg/m³")
@@ -1365,6 +1460,17 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_mid, minimum_density, venting_threshold)
         search_results.append(result)
+        
+        # Record bisection progress data for plotting
+        optimization_progress['iterations'].append(evaluation_count)
+        optimization_progress['radii'].append(r_mid)
+        optimization_progress['final_densities'].append(result.get('final_density', 0))
+        optimization_progress['structural_masses'].append(result.get('structural_mass', 0))
+        optimization_progress['feasible'].append(result.get('feasible', False))
+        optimization_progress['phase'].append('bisection')
+        optimization_progress['converged'].append(result.get('success', False))
+        optimization_progress['density_margins'].append(result.get('density_margin', 0))
+        optimization_progress['range_widths'].append(r_max - r_min)
 
         if result['success'] and result['feasible']:
             r_max = r_mid  # Feasible, try smaller radius
@@ -1430,5 +1536,8 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
         'search_results': search_results,
         'search_successful': optimal_radius is not None,
         'storage_type': storage_name,
-        'evaluation_count': evaluation_count
+        'evaluation_count': evaluation_count,
+        'optimization_progress': optimization_progress,
+        'minimum_density_target': minimum_density,
+        'density_tolerance': density_tolerance
     }
