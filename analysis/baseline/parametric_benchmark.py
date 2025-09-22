@@ -353,11 +353,12 @@ class ParametricBenchmark(ABC):
 
         # Get storage-specific venting pressure
         p_vent = self.get_venting_pressure()
+        p_min = self.get_minimum_pressure()
 
         # Create mission parameters
         mission_params = IsochoricMissionParameters(
             tank_volume=self.tank_volume,
-            p_min=15e5,
+            p_min=p_min,
             p_vent=p_vent,
             initial_mass=initial_mass,
             initial_temperature=initial_temperature,
@@ -741,13 +742,14 @@ class ParametricBenchmark(ABC):
                 print(f"Warning: iHEX computation failed at t={i * self.time_step}s: {e}")
                 qdot_disch.append(0.0)
 
-        print(f"\n=== iHEX Debug Information ({self.get_storage_type_name()}) ===")
+        print(f"\n=== Configuration Debug Information ({self.get_storage_type_name()}) ===")
         print(f"Min pressure during mission: {min_pressure:.1f} bar")
         print(f"Max pressure during mission: {max_pressure:.1f} bar")
-        print(f"iHEX activation threshold (p_min): 15.0 bar")
-        print(f"Configuration B: iHEX active when P ≤ 15.0 bar")
+        p_min_bar = self.get_minimum_pressure() / 1e5
+        print(f"Configuration B threshold (p_min): {p_min_bar:.1f} bar")
+        print(f"Configuration B: Pressure maintenance when P ≤ {p_min_bar:.1f} bar")
         print(f"Configuration C: Venting active when P ≥ {venting_pressure_bar:.1f} bar")
-        print(f"States where iHEX was activated (Config B): {activation_count} out of {len(self.results.states)}")
+        print(f"States where Configuration B was active: {activation_count} out of {len(self.results.states)}")
         print(f"Non-zero heat flows: {sum(1 for q in qdot_disch if abs(q) > 1e-6)}")
         if qdot_disch:
             print(f"Max heat flow: {max(qdot_disch):.2f} kW")
