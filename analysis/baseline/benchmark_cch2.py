@@ -2,17 +2,22 @@
 Cryocompressed hydrogen (CCH2) benchmark analysis using parametric framework.
 
 This module implements the CCH2 variant of the parametric benchmark analysis,
-using the same advanced radius optimization and mission simulation framework
-but with CCH2-specific initial conditions and requirements.
+using the same mission simulation and optimization framework but with
+CCH2-specific initial conditions and requirements.
 
 CCH2 Characteristics:
-- Initial conditions: 400 bar, 55 K (cryocompressed state)
-- Minimum density requirement: 5.0 kg/m³ (configuration B threshold)
-- Two-phase storage with potential phase transitions
-- Configuration B/C logic for heat exchanger operation
+- Initial conditions: 400 bar, 53.25 K (cryocompressed state)
+- Minimum density requirement: 5.8 kg/m³
+- Pressure maintenance threshold: 15 bar (p_min)
+- Venting pressure: 500 bar (p_max)
+- Vacuum insulation: 0.025 W/m²K ambient HTC
+- Search range: 0.2m to 1.5m radius
+
+Expected Result: Efficient high-pressure storage with good gravimetric efficiency
+due to high initial density and pressure maintenance capabilities.
 
 Authors: Dante Raso (2025)
-Based on baseline_cch2.py framework using parametric_benchmark.py base class
+Based on parametric_benchmark.py framework
 """
 
 # Standard library imports
@@ -41,15 +46,15 @@ class BenchmarkCCH2Analysis(ParametricBenchmark):
 
     def get_initial_pressure(self) -> float:
         """Get initial hydrogen pressure for CCH2."""
-        return 400e5  # 400 bar - typical CCH2 storage pressure
+        return 400e5  # 400 bar - cryocompressed storage pressure
 
     def get_initial_temperature(self) -> float:
         """Get initial hydrogen temperature for CCH2."""
-        return 55.0  # 55 K - cryogenic temperature for CCH2
+        return 53.25  # 53.25 K - cryogenic temperature for CCH2
 
     def get_minimum_density(self) -> float:
         """Get minimum acceptable final density for CCH2."""
-        return 5.0  # 5.0 kg/m³ - Configuration B threshold
+        return 5.8  # 5.8 kg/m³ - minimum density requirement
 
     def get_storage_type_name(self) -> str:
         """Get storage type name for displays."""
@@ -58,26 +63,57 @@ class BenchmarkCCH2Analysis(ParametricBenchmark):
     def get_optimization_parameters(self) -> Dict[str, Any]:
         """Get CCH2-specific optimization parameters."""
         return {
-            'initial_radius': 0.4,      # Start searching from 0.4 m
-            'max_radius': 1.0,          # Search up to 1.0 m
-            'radius_increment': 0.05,   # 50 mm steps for coarse search
-            'max_iterations': 30,       # Maximum iterations
-            'target_density_margin': 0.3  # Target 0.3 kg/m³ above minimum
+            'min_radius': 0.2,              # Minimum search radius [m]
+            'max_radius': 1.5,              # Maximum search radius [m]
+            'radius_precision': 0.005,      # Precision: ±5mm
+            'density_tolerance': 2.0,       # Within 2 kg/m³ of minimum is acceptable
+            'max_evaluations': 20           # Maximum function evaluations
         }
 
     def get_minimum_pressure(self) -> float:
         """Get minimum allowable pressure for CCH2."""
-        return 15e5  # 15 bar - safe for cryocompressed operation
+        return 15e5  # 15 bar - Configuration B threshold
+
+    def get_venting_pressure(self) -> float:
+        """Get venting pressure for CCH2."""
+        return 500e5  # 500 bar venting pressure for CCH2
 
     def get_ambient_htc(self) -> float:
         """Get ambient heat transfer coefficient for CCH2."""
-        return 0.025  # 0.025 W/m²K - vacuum insulation typical for cryocompressed
+        return 0.025  # 0.025 W/m²K - vacuum insulation for cryocompressed
+
+
+def quick_test(radius=1.0, include_plots=False):
+    """Quick test function to run analysis with a specific radius without optimization."""
+    print(f"Quick CCH2 Test - Radius: {radius:.3f}m")
+    print("="*50)
+
+    analysis = BenchmarkCCH2Analysis(tank_radius=radius)
+    success = analysis.run_single_analysis()
+
+    if success:
+        analysis.print_results()
+
+        if include_plots:
+            try:
+                print("\nGenerating plots...")
+                analysis.run_analysis(include_plots=True)
+            except Exception as e:
+                print(f"Plotting failed: {e}")
+    else:
+        print("Analysis failed")
+
+    return analysis if success else None
 
 
 def main():
     """Main execution function for CCH2 benchmark analysis."""
     print("Starting Cryocompressed Hydrogen (CCH2) Benchmark Analysis")
     print("="*80)
+
+    # Test optimization directly
+    print("Testing new bisection optimization...")
+    print("Expected: Much faster than old brute-force approach")
 
     # Run optimal radius search for CCH2
     search_results = find_optimal_radius_for_storage_type(BenchmarkCCH2Analysis)
@@ -93,6 +129,19 @@ def main():
 
         # Print comprehensive results
         analysis.print_results()
+
+        # Calculate gravimetric efficiency comparison
+        final_state = analysis.results.states[-1]
+        fuel_mass = final_state.fuel_mass
+        gravimetric_eff = fuel_mass / (fuel_mass + analysis.total_structural_mass) * 100
+
+        print(f"\nCCH2 Performance Summary:")
+        print(f"  Optimal radius: {optimal_data['radius']:.3f} m")
+        print(f"  Tank volume: {optimal_data['volume']:.3f} m³")
+        print(f"  Structural mass: {optimal_data['structural_mass']:.1f} kg")
+        print(f"  Final fuel mass: {fuel_mass:.1f} kg")
+        print(f"  Gravimetric efficiency: {gravimetric_eff:.1f}%")
+        print(f"  Final density: {optimal_data['final_density']:.1f} kg/m³")
 
         # Generate plots for optimal configuration
         try:

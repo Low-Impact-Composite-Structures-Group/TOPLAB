@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+import warnings
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 
@@ -868,9 +869,95 @@ def check_minimum_density(results, tank_volume, minimum_density):
     return density_violation, final_density
 
 
+def safe_analysis_run(analysis_class, radius, minimum_density, venting_threshold):
+    """
+    Run analysis with CoolProp error detection and constraint checking.
+
+    Args:
+        analysis_class: Storage-specific analysis class
+        radius: Tank radius to test [m]
+        minimum_density: Minimum acceptable density [kg/m³]
+        venting_threshold: Venting pressure threshold [Pa]
+
+    Returns:
+        dict: Analysis results with success/feasible flags
+    """
+    try:
+        # Capture CoolProp warnings and other warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
+            # Create and run analysis
+            analysis = analysis_class(tank_radius=radius)
+            success = analysis.run_single_analysis()
+
+            # Check for CoolProp warnings/errors (common patterns)
+            coolprop_issues = []
+            for warn in w:
+                warn_msg = str(warn.message).lower()
+                if any(keyword in warn_msg for keyword in ['coolprop', 'saturation', 'convergence', 'iteration', 'invalid']):
+                    coolprop_issues.append(str(warn.message))
+
+            if coolprop_issues:
+                return {
+                    'success': False,
+                    'feasible': False,
+                    'reason': f'CoolProp_issues: {len(coolprop_issues)} warnings',
+                    'details': coolprop_issues[:3],  # First 3 warnings for debugging
+                    'radius': radius
+                }
+
+            if not success:
+                return {
+                    'success': False,
+                    'feasible': False,
+                    'reason': 'Analysis_failed',
+                    'radius': radius
+                }
+
+            # Check constraints
+            venting_occurred, max_pressure, venting_times = check_for_venting(analysis.results, venting_threshold)
+            density_violation, final_density = check_minimum_density(
+                analysis.results, analysis.tank_volume, minimum_density
+            )
+
+            feasible = not venting_occurred and not density_violation
+
+            return {
+                'success': True,
+                'feasible': feasible,
+                'final_density': final_density,
+                'max_pressure': max_pressure,
+                'max_pressure_bar': max_pressure / 1e5,
+                'venting_occurred': venting_occurred,
+                'density_violation': density_violation,
+                'venting_times': venting_times,
+                'analysis': analysis,
+                'results': analysis.results,
+                'radius': radius,
+                'volume': analysis.tank_volume,
+                'structural_mass': analysis.total_structural_mass,
+                'density_margin': final_density - minimum_density if not density_violation else None
+            }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'feasible': False,
+            'reason': f'Exception: {str(e)[:100]}',  # Truncate long error messages
+            'radius': radius
+        }
+
+
 def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
     """
-    Search for optimal tank radius for specific storage type.
+    Search for optimal tank radius using robust bisection method.
+
+    This approach is much faster and more robust than brute-force search:
+    - Handles CoolProp errors/warnings automatically
+    - Uses bisection for O(log N) convergence
+    - Finds minimum feasible radius efficiently
+    - Stops when within tolerance (2 kg/m³)
 
     Args:
         analysis_class: Storage-specific analysis class
@@ -882,211 +969,176 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
     # Create temporary instance to get storage-specific parameters
     temp_analysis = analysis_class()
 
-    # Get optimization parameters from storage type
-    opt_params = temp_analysis.get_optimization_parameters()
-
-    # Override with any provided parameters
-    opt_params.update(optimization_params)
-
-    # Extract parameters
-    initial_radius = opt_params.get('initial_radius', 0.5)
-    max_radius = opt_params.get('max_radius', 2.0)
-    radius_increment = opt_params.get('radius_increment', 0.05)
-    max_iterations = opt_params.get('max_iterations', 50)
-    target_density_margin = opt_params.get('target_density_margin', 0.5)
-
-    # Get minimum density and storage name from temporary instance
+    # Get parameters
     minimum_density = temp_analysis.get_minimum_density()
+    venting_threshold = temp_analysis.get_venting_pressure()
     storage_name = temp_analysis.get_storage_type_name()
 
+    # Optimization bounds (updated defaults)
+    min_radius = optimization_params.get('min_radius', 0.5)
+    max_radius = optimization_params.get('max_radius', 1.5)
+    precision = optimization_params.get('radius_precision', 0.005)  # 5mm
+    density_tolerance = optimization_params.get('density_tolerance', 2.0)  # 2 kg/m³
+    max_evaluations = optimization_params.get('max_evaluations', 20)
+
     print("\n" + "="*80)
-    print(f"OPTIMAL RADIUS SEARCH - {storage_name.upper()}")
+    print(f"ROBUST BISECTION SEARCH - {storage_name.upper()}")
     print("="*80)
-    print(f"Starting search from radius {initial_radius:.3f}m to {max_radius:.3f}m")
-    print(f"Coarse increment: {radius_increment:.3f}m, Max iterations: {max_iterations}")
+    print(f"Search range: {min_radius:.3f}m to {max_radius:.3f}m")
+    print(f"Precision: ±{precision*1000:.0f}mm, Density tolerance: ±{density_tolerance:.1f} kg/m³")
     print(f"Requirements: No venting AND final density ≥ {minimum_density:.1f} kg/m³")
-    print(f"Target: Final density = {minimum_density + target_density_margin:.1f} kg/m³ (optimal efficiency)")
+    print(f"CoolProp error detection: ENABLED")
     print("-"*80)
 
     search_results = []
-    current_radius = initial_radius
-    iteration = 0
-    feasible_solutions = []
+    evaluation_count = 0
 
-    # Phase 1: Coarse search to identify feasible range
-    print("\n=== PHASE 1: COARSE SEARCH ===")
+    # Phase 1: Find feasible upper bound
+    print("\n=== PHASE 1: FINDING FEASIBLE UPPER BOUND ===")
+    r_max = None
+    r_test = max_radius
 
-    while current_radius <= max_radius and iteration < max_iterations:
-        iteration += 1
+    while r_test >= min_radius and evaluation_count < max_evaluations:
+        evaluation_count += 1
+        print(f"Testing upper bound: R={r_test:.3f}m")
 
-        print(f"\nIteration {iteration}: Testing radius {current_radius:.3f}m")
-        print("-" * 50)
+        result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
+        search_results.append(result)
 
-        try:
-            # Create and run analysis
-            analysis = analysis_class(tank_radius=current_radius)
-            results = analysis.run_single_analysis()
-
-            if results:
-                # Check for venting using storage-specific threshold
-                venting_threshold = analysis.get_venting_pressure()
-                venting_occurred, max_pressure, venting_times = check_for_venting(analysis.results, venting_threshold)
-
-                # Check for minimum density violation
-                density_violation, final_density = check_minimum_density(
-                    analysis.results, analysis.tank_volume, minimum_density
-                )
-
-                # Store results
-                iteration_data = {
-                    'radius': current_radius,
-                    'volume': analysis.tank_volume,
-                    'structural_mass': analysis.total_structural_mass,
-                    'venting_occurred': venting_occurred,
-                    'max_pressure': max_pressure,
-                    'max_pressure_bar': max_pressure / 1e5,
-                    'venting_times': venting_times,
-                    'density_violation': density_violation,
-                    'final_density': final_density,
-                    'analysis': analysis,
-                    'results': analysis.results,
-                    'density_margin': final_density - minimum_density
-                }
-                search_results.append(iteration_data)
-
-                # Print iteration results
-                print(f"  Volume: {analysis.tank_volume:.3f} m³")
-                print(f"  Structural mass: {analysis.total_structural_mass:.1f} kg")
-                print(f"  Max pressure: {max_pressure/1e5:.1f} bar")
-                print(f"  Final density: {final_density:.2f} kg/m³ (margin: +{final_density - minimum_density:.2f})")
-                print(f"  Venting occurred: {'YES' if venting_occurred else 'NO'}")
-                print(f"  Density violation: {'YES' if density_violation else 'NO'}")
-                if venting_times:
-                    print(f"  Venting duration: {len(venting_times)} seconds ({len(venting_times):.1f}% of mission)")
-
-                # Check if this is a feasible solution
-                if not venting_occurred and not density_violation:
-                    feasible_solutions.append(iteration_data)
-                    print(f"  ✓ FEASIBLE: Added to candidate list (margin: +{final_density - minimum_density:.2f} kg/m³)")
-                else:
-                    issues = []
-                    if venting_occurred:
-                        issues.append("venting detected")
-                    if density_violation:
-                        issues.append(f"density too low ({final_density:.2f} < {minimum_density:.1f})")
-                    print(f"  ✗ Issues: {', '.join(issues)}")
-
+        if result['success']:
+            print(f"  ✓ Success: ρ={result['final_density']:.2f} kg/m³, P_max={result['max_pressure_bar']:.1f} bar")
+            if result['feasible']:
+                r_max = r_test
+                print(f"  ✓ FEASIBLE upper bound found: R={r_max:.3f}m")
+                break
             else:
-                print(f"  ✗ Analysis failed for radius {current_radius:.3f}m")
+                issues = []
+                if result['venting_occurred']:
+                    issues.append("venting")
+                if result['density_violation']:
+                    issues.append("low density")
+                print(f"  ✗ Infeasible: {', '.join(issues)}")
+        else:
+            print(f"  ✗ Failed: {result['reason']}")
 
-        except Exception as e:
-            print(f"  ✗ Error at radius {current_radius:.3f}m: {e}")
+        r_test -= 0.1  # Step down by 100mm to find feasible region
 
-        current_radius += radius_increment
+    if r_max is None:
+        print(f"✗ No feasible solution found in range {min_radius:.3f}m to {max_radius:.3f}m")
+        return {
+            'optimal_radius': None,
+            'optimal_results': None,
+            'search_results': search_results,
+            'search_successful': False,
+            'storage_type': storage_name,
+            'failure_reason': 'No feasible upper bound found'
+        }
 
-    # Phase 2: Fine search within feasible range if we found multiple solutions
-    optimal_radius = None
-    optimal_results = None
+    # Phase 2: Find infeasible lower bound
+    print(f"\n=== PHASE 2: FINDING INFEASIBLE LOWER BOUND ===")
+    r_min = min_radius
+    r_test = r_max - 0.1
 
-    if len(feasible_solutions) >= 2:
-        print(f"\n=== PHASE 2: FINE SEARCH OPTIMIZATION ===")
-        print(f"Found {len(feasible_solutions)} feasible solutions")
-        print("Performing fine search to find optimal density...")
+    while r_test >= min_radius and evaluation_count < max_evaluations:
+        evaluation_count += 1
+        print(f"Testing lower bound: R={r_test:.3f}m")
 
-        # Find the range for fine search
-        feasible_solutions.sort(key=lambda x: x['radius'])
-        smallest_feasible = feasible_solutions[0]
+        result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
+        search_results.append(result)
 
-        # Search between the smallest feasible radius and a slightly smaller radius
-        fine_start = max(initial_radius, smallest_feasible['radius'] - radius_increment)
-        fine_end = smallest_feasible['radius']
-        fine_increment = 0.005  # 5mm precision
+        if result['success'] and result['feasible']:
+            print(f"  ✓ Still feasible: ρ={result['final_density']:.2f} kg/m³")
+            r_max = r_test  # Update upper feasible bound
+        else:
+            r_min = r_test  # Found infeasible lower bound
+            if result['success']:
+                print(f"  ✓ Infeasible lower bound: R={r_min:.3f}m")
+            else:
+                print(f"  ✓ Failed lower bound: R={r_min:.3f}m ({result['reason']})")
+            break
 
-        print(f"Fine search range: {fine_start:.3f}m to {fine_end:.3f}m (increment: {fine_increment:.3f}m)")
+        r_test -= 0.1
 
-        best_candidate = None
-        fine_radius = fine_start
-        fine_iteration = 0
-        max_fine_iterations = int((fine_end - fine_start) / fine_increment) + 1
+    # Phase 3: Bisection search
+    print(f"\n=== PHASE 3: BISECTION OPTIMIZATION ===")
+    print(f"Bisection range: [{r_min:.3f}m, {r_max:.3f}m]")
 
-        while fine_radius <= fine_end and fine_iteration < max_fine_iterations:
-            fine_iteration += 1
+    best_result = None
+    iteration = 0
 
-            try:
-                analysis = analysis_class(tank_radius=fine_radius)
-                results = analysis.run_single_analysis()
+    while (r_max - r_min) > precision and evaluation_count < max_evaluations:
+        iteration += 1
+        evaluation_count += 1
+        r_mid = (r_min + r_max) / 2
 
-                if results:
-                    venting_threshold = analysis.get_venting_pressure()
-                    venting_occurred, max_pressure, venting_times = check_for_venting(analysis.results, venting_threshold)
-                    density_violation, final_density = check_minimum_density(
-                        analysis.results, analysis.tank_volume, minimum_density
-                    )
+        print(f"Bisection {iteration}: R={r_mid:.3f}m (range: {r_max-r_min:.3f}m)")
 
-                    if not venting_occurred and not density_violation:
-                        candidate = {
-                            'radius': fine_radius,
-                            'volume': analysis.tank_volume,
-                            'structural_mass': analysis.total_structural_mass,
-                            'venting_occurred': venting_occurred,
-                            'max_pressure': max_pressure,
-                            'max_pressure_bar': max_pressure / 1e5,
-                            'venting_times': venting_times,
-                            'density_violation': density_violation,
-                            'final_density': final_density,
-                            'analysis': analysis,
-                            'results': analysis.results,
-                            'density_margin': final_density - minimum_density
-                        }
+        result = safe_analysis_run(analysis_class, r_mid, minimum_density, venting_threshold)
+        search_results.append(result)
 
-                        # Select candidate closest to target density
-                        target_density = minimum_density + target_density_margin
-                        if best_candidate is None or abs(final_density - target_density) < abs(best_candidate['final_density'] - target_density):
-                            best_candidate = candidate
-                            print(f"  New best: R={fine_radius:.3f}m, ρ={final_density:.2f} kg/m³ (target: {target_density:.1f})")
+        if result['success'] and result['feasible']:
+            r_max = r_mid  # Feasible, try smaller radius
+            best_result = result
+            density_error = abs(result['final_density'] - minimum_density)
+            print(f"  ✓ Feasible: ρ={result['final_density']:.2f} kg/m³ (margin: +{result['density_margin']:.2f})")
 
-            except Exception as e:
-                pass  # Skip failed analyses in fine search
+            # Check if close enough to target
+            if density_error <= density_tolerance:
+                print(f"  ✓ Within tolerance: |ρ - ρ_min| = {density_error:.2f} ≤ {density_tolerance:.1f}")
+                break
+        else:
+            r_min = r_mid  # Infeasible, need larger radius
+            if result['success']:
+                print(f"  ✗ Infeasible: ρ={result['final_density']:.2f} kg/m³")
+            else:
+                print(f"  ✗ Failed: {result['reason']}")
 
-            fine_radius += fine_increment
+    # Results
+    optimal_radius = r_max if best_result else None
+    optimal_results = best_result
 
-        optimal_results = best_candidate if best_candidate else smallest_feasible
-        optimal_radius = optimal_results['radius']
-
-    elif len(feasible_solutions) == 1:
-        optimal_results = feasible_solutions[0]
-        optimal_radius = optimal_results['radius']
-        print(f"\nOnly one feasible solution found at radius {optimal_radius:.3f}m")
-
-    else:
-        print(f"\nNo feasible solutions found in search range")
+    # If no good result from bisection, use best from search_results
+    if optimal_results is None:
+        feasible_results = [r for r in search_results if r['success'] and r['feasible']]
+        if feasible_results:
+            optimal_results = min(feasible_results, key=lambda x: x['radius'])
+            optimal_radius = optimal_results['radius']
+            print(f"Using best attempt: R={optimal_radius:.3f}m")
 
     # Print search summary
     print("\n" + "="*80)
-    print(f"RADIUS SEARCH SUMMARY - {storage_name.upper()}")
+    print(f"BISECTION SEARCH SUMMARY - {storage_name.upper()}")
     print("="*80)
+    print(f"Total evaluations: {evaluation_count}")
+    print(f"Search results: {len([r for r in search_results if r['success']])} successful, {len([r for r in search_results if r['success'] and r['feasible']])} feasible")
 
     if optimal_radius is not None:
-        print(f"SUCCESS: Optimal radius found: {optimal_radius:.3f}m")
-        print(f"Volume: {optimal_results['volume']:.3f} m³")
-        print(f"Structural mass: {optimal_results['structural_mass']:.1f} kg")
-        venting_bar = temp_analysis.get_venting_pressure() / 1e5
-        print(f"Max pressure: {optimal_results['max_pressure_bar']:.1f} bar (< {venting_bar:.0f} bar)")
-        print(f"Final density: {optimal_results['final_density']:.2f} kg/m³ (≥ {minimum_density:.1f} kg/m³)")
+        print(f"✓ SUCCESS: Optimal radius found: {optimal_radius:.3f}m")
+        print(f"  Volume: {optimal_results['volume']:.3f} m³")
+        print(f"  Structural mass: {optimal_results['structural_mass']:.1f} kg")
+        print(f"  Max pressure: {optimal_results['max_pressure_bar']:.1f} bar (< {venting_threshold/1e5:.0f} bar)")
+        print(f"  Final density: {optimal_results['final_density']:.2f} kg/m³ (≥ {minimum_density:.1f} kg/m³)")
+        print(f"  Density margin: +{optimal_results['density_margin']:.2f} kg/m³")
 
         # Calculate efficiency
-        final_state = optimal_results['results'].states[-1]
-        fuel_mass = final_state.fuel_mass
-        gravimetric_eff = fuel_mass / (fuel_mass + optimal_results['structural_mass']) * 100
-        print(f"Gravimetric efficiency: {gravimetric_eff:.1f}%")
-
+        if 'analysis' in optimal_results:
+            final_state = optimal_results['results'].states[-1]
+            fuel_mass = final_state.fuel_mass
+            gravimetric_eff = fuel_mass / (fuel_mass + optimal_results['structural_mass']) * 100
+            print(f"  Gravimetric efficiency: {gravimetric_eff:.1f}%")
     else:
-        print(f"FAILED: No radius found up to {max_radius:.3f}m that meets both requirements")
+        print(f"✗ FAILED: No feasible radius found in range")
+        # Show best attempt
+        if search_results:
+            best_attempt = max(search_results, key=lambda x: x.get('final_density', 0) if x['success'] else 0)
+            if best_attempt['success']:
+                print(f"Best attempt: R={best_attempt['radius']:.3f}m, ρ={best_attempt['final_density']:.2f} kg/m³")
 
     return {
         'optimal_radius': optimal_radius,
         'optimal_results': optimal_results,
         'search_results': search_results,
         'search_successful': optimal_radius is not None,
-        'storage_type': storage_name
+        'storage_type': storage_name,
+        'evaluation_count': evaluation_count
     }

@@ -78,11 +78,11 @@ class BenchmarkSLH2Analysis(ParametricBenchmark):
     def get_optimization_parameters(self) -> Dict[str, Any]:
         """Get sLH2-specific optimization parameters."""
         return {
-            'initial_radius': 0.2,      # Start smaller due to high liquid density
-            'max_radius': 0.8,          # Likely won't need very large tanks
-            'radius_increment': 0.03,   # 30 mm steps for coarse search (finer due to smaller range)
-            'max_iterations': 30,       # Maximum iterations
-            'target_density_margin': 1.0  # Target 1.0 kg/m³ above minimum (larger margin for liquid)
+            'min_radius': 0.5,              # Minimum search radius [m]
+            'max_radius': 1.5,              # Maximum search radius [m]
+            'radius_precision': 0.005,      # Precision: ±5mm
+            'density_tolerance': 2.0,       # Within 2 kg/m³ of minimum is acceptable
+            'max_evaluations': 20           # Maximum function evaluations
         }
 
     def get_minimum_pressure(self) -> float:
@@ -122,26 +122,9 @@ def main():
     print("Starting Subcooled Liquid Hydrogen (sLH2) Benchmark Analysis")
     print("="*80)
 
-    # Quick test mode - run single analysis without optimization
-    test_radius = 0.63  # Change this to test different radii
-    analysis = BenchmarkSLH2Analysis(tank_radius=test_radius)
-
-    print(f"Running single analysis with radius {test_radius:.3f}m (no optimization)")
-    success = analysis.run_single_analysis()
-
-    if success:
-        analysis.print_results()
-
-        # Generate plots
-        try:
-            print("\nGenerating 4 separate plots...")
-            analysis.run_analysis(include_plots=True)
-        except Exception as e:
-            print(f"Plotting failed (this is non-critical): {e}")
-    else:
-        print("Analysis failed")
-
-    return  # Exit early to skip optimization
+    # Test optimization directly
+    print("Testing new bisection optimization...")
+    print("Expected: Much faster than old brute-force approach")
 
     # Run optimal radius search for sLH2 (commented out for quick testing)
     search_results = find_optimal_radius_for_storage_type(BenchmarkSLH2Analysis)
