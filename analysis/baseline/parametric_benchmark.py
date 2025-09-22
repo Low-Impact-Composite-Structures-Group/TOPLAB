@@ -807,15 +807,17 @@ class ParametricBenchmark(ABC):
         # Initialize the sb_plotter
         sb_plotter = SeabornPlotter()
 
-        # Extract temperature and density data
+        # Extract temperature, density, and pressure data
         temperatures = [state.temperature for state in self.results.states]
         masses = [state.fuel_mass for state in self.results.states]
+        pressures = [state.pressure/1e5 for state in self.results.states]  # Convert to bar
         densities = [mass / self.tank_volume for mass in masses]
 
         # Use sb_plotting baseline density-temperature function
         fig = sb_plotter.plot_baseline_density_temperature(
             temperatures=temperatures,
             densities=densities,
+            pressures=pressures,
             include_saturation_line=True,
             include_isobars=True,
             figsize=(8, 6)
@@ -1067,65 +1069,81 @@ class ParametricBenchmark(ABC):
         else:
             plt.show()
 
+    def plot_optimization_progress_from_data(self, optimization_progress, target_density, density_tolerance, save_path=None):
+        """
+        Visualize bisection search progress using pre-existing optimization data.
+
+        This method uses optimization progress data that was already captured during
+        a previous optimization run, avoiding the need to re-run the entire optimization.
+
+        Args:
+            optimization_progress: Dictionary with optimization iteration data
+            target_density: Minimum density target for the optimization
+            density_tolerance: Density tolerance used in optimization
+            save_path: Optional path to save plot file
+        """
+        print(f"\n{'='*80}")
+        print(f"OPTIMIZATION PROGRESS VISUALIZATION - {self.get_storage_type_name().upper()}")
+        print(f"{'='*80}")
+
+        # Create progress plot using SeabornPlotter
+        from plotting.sb_plotting import SeabornPlotter
+        sb_plotter = SeabornPlotter()
+
+        try:
+            fig = sb_plotter.plot_bisection_optimization_progress(
+                optimization_data=optimization_progress,
+                target_density=target_density,
+                density_tolerance=density_tolerance
+            )
+
+            print("Creating optimization progress plot...")
+            print(f"Total evaluations: {len(optimization_progress['iterations'])}")
+            if optimization_progress['radii']:
+                optimal_radius = optimization_progress['radii'][-1]  # Last radius should be optimal
+                print(f"Optimal radius found: {optimal_radius:.3f}m")
+
+            return fig
+
+        except Exception as e:
+            print(f"⚠️  Failed to create optimization progress plot: {e}")
+            return None
+
     def plot_optimization_progress(self, save_path=None):
         """
         Run optimization and visualize the bisection search progress.
-        
+
         This method runs the full bisection optimization to find the optimal radius
         and plots the convergence progress showing how the algorithm narrows down
         the search range to find the minimum feasible tank radius.
-        
+
+        Note: This method re-runs the optimization. For efficiency, use
+        plot_optimization_progress_from_data() with pre-existing optimization data.
+
         Args:
             save_path: Optional path to save plot file
         """
         print(f"\n{'='*80}")
         print(f"OPTIMIZATION PROGRESS VISUALIZATION - {self.get_storage_type_name().upper()}")
         print(f"{'='*80}")
-        
+
         # Run optimization to capture progress data
         optimization_results = find_optimal_radius_for_storage_type(self.__class__)
-        
+
         if not optimization_results['search_successful']:
             print("⚠️  Optimization failed - cannot generate progress plot")
             print(f"Failure reason: {optimization_results.get('failure_reason', 'Unknown')}")
             return None
-            
-        # Extract optimization progress data
-        optimization_progress = optimization_results['optimization_progress']
-        target_density = optimization_results['minimum_density_target']
-        density_tolerance = optimization_results['density_tolerance']
-        
-        # Create progress plot using SeabornPlotter
-        from plotting.sb_plotting import SeabornPlotter
-        sb_plotter = SeabornPlotter()
-        
-        print(f"Creating optimization progress plot...")
-        print(f"Total evaluations: {optimization_results['evaluation_count']}")
-        print(f"Optimal radius found: {optimization_results['optimal_radius']:.3f}m")
-        
-        try:
-            fig = sb_plotter.plot_bisection_optimization_progress(
-                optimization_data=optimization_progress,
-                target_density=target_density,
-                density_tolerance=density_tolerance,
-                figsize=(12, 8)
-            )
-            
-            # Update title to include storage type
-            fig.suptitle(f'{self.get_storage_type_name()} Bisection Optimization Progress',
-                        fontsize=16, fontweight='bold', y=0.95)
-            
-            if save_path:
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')
-                print(f"Optimization progress plot saved to: {save_path}")
-            else:
-                plt.show()
-                
-            return fig
-            
-        except Exception as e:
-            print(f"Plotting failed: {e}")
-            return None
+
+        # Extract optimization progress data and delegate to the efficient version
+        return self.plot_optimization_progress_from_data(
+            optimization_results['optimization_progress'],
+            optimization_results['minimum_density_target'],
+            optimization_results['density_tolerance'],
+            save_path
+        )
+
+
 
     def run_analysis(self, include_plots=True):
         """Run complete benchmark analysis."""
@@ -1342,7 +1360,7 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
     search_results = []
     evaluation_count = 0
-    
+
     # Initialize optimization progress tracking for plotting
     optimization_progress = {
         'iterations': [],
@@ -1367,7 +1385,7 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
         search_results.append(result)
-        
+
         # Record progress data for plotting
         optimization_progress['iterations'].append(evaluation_count)
         optimization_progress['radii'].append(r_test)
@@ -1419,7 +1437,7 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_test, minimum_density, venting_threshold)
         search_results.append(result)
-        
+
         # Record progress data for plotting
         optimization_progress['iterations'].append(evaluation_count)
         optimization_progress['radii'].append(r_test)
@@ -1460,7 +1478,7 @@ def find_optimal_radius_for_storage_type(analysis_class, **optimization_params):
 
         result = safe_analysis_run(analysis_class, r_mid, minimum_density, venting_threshold)
         search_results.append(result)
-        
+
         # Record bisection progress data for plotting
         optimization_progress['iterations'].append(evaluation_count)
         optimization_progress['radii'].append(r_mid)

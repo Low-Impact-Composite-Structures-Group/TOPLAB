@@ -145,8 +145,17 @@ def main():
 
         # Generate plots for optimal configuration
         try:
-            print("\nGenerating 4 separate plots for optimal CCH2 configuration...")
+            print("\nGenerating 5 plots for optimal CCH2 configuration...")
             analysis.run_analysis(include_plots=True)
+
+            # Generate optimization progress plot (creates figure but doesn't show yet)
+            analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
+                                                        search_results['minimum_density_target'],
+                                                        search_results['density_tolerance'])
+
+            # Show all plots at once
+            import matplotlib.pyplot as plt
+            plt.show()
 
         except Exception as e:
             print(f"Plotting failed (this is non-critical): {e}")
@@ -165,8 +174,17 @@ def main():
             analysis.print_results()
 
             try:
-                print("\nGenerating 4 separate plots for best CCH2 attempt...")
+                print("\nGenerating 5 plots for best CCH2 attempt...")
                 analysis.run_analysis(include_plots=True)
+
+                # Generate optimization progress plot (creates figure but doesn't show yet)
+                analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
+                                                            search_results['minimum_density_target'],
+                                                            search_results['density_tolerance'])
+
+                # Show all plots at once
+                import matplotlib.pyplot as plt
+                plt.show()
 
             except Exception as e:
                 print(f"Plotting failed (this is non-critical): {e}")

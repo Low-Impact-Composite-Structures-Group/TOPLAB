@@ -1383,7 +1383,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         plt.tight_layout()
         return fig
 
-    def plot_baseline_density_temperature(self, temperatures, densities,
+    def plot_baseline_density_temperature(self, temperatures, densities, pressures=None,
                                          include_saturation_line=True, include_isobars=True,
                                          figsize=(8, 6)) -> plt.Figure:
         """Create density-temperature plot for baseline analysis with isobars.
@@ -1391,6 +1391,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         Args:
             temperatures: Temperature array [K]
             densities: Density array [kg/m³]
+            pressures: Pressure array [bar] - if provided, min/max will be used for isobars
             include_saturation_line: Whether to include saturation line
             include_isobars: Whether to include isobar lines
             figsize: Figure size tuple
@@ -1448,17 +1449,33 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Add isobar lines if requested
         if include_isobars:
+            # Create smart temperature range: 5K below min, 10K above max discharge temp
+            temp_min = min(temperatures) - 5
+            temp_max = max(temperatures) + 10
+            temps = np.linspace(temp_min, temp_max, 200)  # More points for smoother curves
+
             # Define pressure levels in bar
             regular_pressure_levels = [100, 400]  # Regular pressure levels
-            special_pressures = {
-                15: {'color': PAARS, 'label': '15 bar (Min Pressure)', 'style': '-'},
-                500: {'color': TURKOOIS, 'label': '500 bar (Vent Pressure)', 'style': '-'}
-            }
 
-            # Create temperature range based on data
-            temp_min = min(temperatures) - 10
-            temp_max = max(temperatures) + 10
-            temps = np.linspace(temp_min, temp_max, 100)
+            # Use dynamic pressures if provided, otherwise fall back to defaults
+            if pressures is not None and len(pressures) > 0:
+                min_pressure = round(min(pressures))  # Round to nearest integer
+                max_pressure = round(max(pressures))  # Round to nearest integer
+                special_pressures = {
+                    min_pressure: {'color': PAARS, 'label': f'{min_pressure} bar (Min Pressure)', 'style': '-'},
+                    max_pressure: {'color': TURKOOIS, 'label': f'{max_pressure} bar (Max Pressure)', 'style': '-'}
+                }
+            else:
+                # Fallback to hardcoded values if no pressure data available
+                special_pressures = {
+                    15: {'color': PAARS, 'label': '15 bar (Min Pressure)', 'style': '-'},
+                    500: {'color': TURKOOIS, 'label': '500 bar (Max Pressure)', 'style': '-'}
+                }
+
+            # Filter out regular pressures that are too close to special pressures
+            special_pressure_values = set(special_pressures.keys())
+            regular_pressure_levels = [p for p in regular_pressure_levels
+                                     if not any(abs(p - sp) < 50 for sp in special_pressure_values)]
 
             # Track legend entries to avoid duplicates
             isobar_legend_added = False
@@ -1549,6 +1566,12 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                         arrowprops=dict(arrowstyle='->', color='black'),
                         bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', pad=2),
                         fontweight='bold')
+
+        # Set smart axis limits: 5K below min, 10K above max discharge temp
+        if len(temperatures) > 0:
+            temp_min = min(temperatures) - 5
+            temp_max = max(temperatures) + 10
+            ax.set_xlim(temp_min, temp_max)
 
         plt.tight_layout()
         return fig
@@ -1810,7 +1833,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Connect points with iteration order (show search path)
         if len(radii) > 1:
-            ax1.plot(radii, final_densities, 'k--', alpha=0.4, linewidth=1, 
+            ax1.plot(radii, final_densities, 'k--', alpha=0.4, linewidth=1,
                     label='Search Path', zorder=3)
 
         # Add iteration numbers as annotations for bisection points
@@ -1833,7 +1856,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                    linewidth=1, alpha=0.7, zorder=4)
 
         # Fill tolerance band
-        ax1.fill_between([min(radii) * 0.95, max(radii) * 1.05], 
+        ax1.fill_between([min(radii) * 0.95, max(radii) * 1.05],
                         target_density - density_tolerance, target_density + density_tolerance,
                         color=DONKERBLAUW, alpha=0.1, zorder=1)
 

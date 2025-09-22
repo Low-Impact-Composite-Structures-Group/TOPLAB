@@ -23,6 +23,7 @@ Based on parametric_benchmark.py framework
 import sys
 from pathlib import Path
 from typing import Dict, Any
+import matplotlib.pyplot as plt
 
 # Add parent directories for local imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -155,12 +156,15 @@ def main():
         print(f"  Final density: {optimal_data['final_density']:.1f} kg/m³")
 
         # Generate plots for optimal configuration
-        try:
-            print("\nGenerating 4 separate plots for optimal sLH2 configuration...")
-            analysis.run_analysis(include_plots=True)
+        print("\nGenerating 5 plots for optimal sLH2 configuration...")
+        analysis.run_analysis(include_plots=True)
 
-        except Exception as e:
-            print(f"Plotting failed (this is non-critical): {e}")
+        # Generate optimization progress plot (creates figure but doesn't show yet)
+        analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
+                                                    search_results['minimum_density_target'],
+                                                    search_results['density_tolerance'])
+
+        plt.show()
 
     else:
         print(f"\n" + "="*80)
@@ -176,8 +180,15 @@ def main():
             analysis.print_results()
 
             try:
-                print("\nGenerating 4 separate plots for best sLH2 attempt...")
+                print("\nGenerating 5 plots for best sLH2 attempt...")
                 analysis.run_analysis(include_plots=True)
+
+                # Generate optimization progress plot (creates figure but doesn't show yet)
+                analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
+                                                            search_results['minimum_density_target'],
+                                                            search_results['density_tolerance'])
+
+                plt.show()
 
             except Exception as e:
                 print(f"Plotting failed (this is non-critical): {e}")

@@ -149,7 +149,7 @@ def main():
 
         print(f"\nCH2 Performance Summary:")
         print(f"  Optimal radius: {optimal_radius:.3f} m")
-        print(f"  Tank volume: {analysis.inner_volume:.3f} m³")
+        print(f"  Tank volume: {analysis.tank_volume:.3f} m³")
         print(f"  Structural mass: {analysis.total_structural_mass:.1f} kg")
         print(f"  Final fuel mass: {fuel_mass:.1f} kg")
         print(f"  Gravimetric efficiency: {gravimetric_eff:.1f}%")
@@ -157,9 +157,18 @@ def main():
 
         # Generate plots for optimal configuration
         try:
-            print("\nGenerating 4 separate plots for optimal CH2 configuration...")
+            print("\nGenerating 5 plots for optimal CH2 configuration...")
             analysis.run_analysis(include_plots=True)
-            print("\nAll 4 plots displayed successfully!")
+
+            # Generate optimization progress plot (creates figure but doesn't show yet)
+            analysis.plot_optimization_progress_from_data(optimization_results['optimization_progress'],
+                                                        optimization_results['minimum_density_target'],
+                                                        optimization_results['density_tolerance'])
+
+            # Show all plots at once
+            import matplotlib.pyplot as plt
+            plt.show()
+            print("\nAll 5 plots displayed successfully!")
 
         except Exception as e:
             print(f"Plotting failed (this is non-critical): {e}")
