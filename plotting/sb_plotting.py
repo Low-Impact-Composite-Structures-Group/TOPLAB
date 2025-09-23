@@ -1883,3 +1883,70 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         plt.tight_layout()
         return fig
+
+    def plot_dormancy_mass_evolution(self, times, masses, pressures, time_to_vent_hours=None,
+                                    venting_pressure=None, storage_type="Unknown", figsize=(10, 6)):
+        """
+        Create standalone mass vs time plot for dormancy analysis with SeabornPlotter styling.
+
+        Args:
+            times: Time array [hours]
+            masses: Mass array [kg]
+            pressures: Pressure array [bar]
+            time_to_vent_hours: Time when venting starts [hours], if any
+            venting_pressure: Venting pressure threshold [bar]
+            storage_type: Storage type name for title
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create single plot figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Plot mass evolution using consistent Seaborn styling colors
+        ax.plot(times, masses, color=BORDEAUX, linewidth=2.5, label='Fuel Mass')
+
+        # Mark venting onset if it occurred
+        if time_to_vent_hours is not None:
+            ax.axvline(x=time_to_vent_hours, color=KONINGSBLAUW, linestyle='--',
+                      linewidth=2, alpha=0.8,
+                      label=f'Venting starts at {time_to_vent_hours:.1f}h')
+
+            # Add annotation for clarity
+            max_mass = max(masses)
+            min_mass = min(masses)
+            y_annotation = min_mass + 0.7 * (max_mass - min_mass)
+            ax.annotate(f'First venting\nat {time_to_vent_hours:.1f}h',
+                       xy=(time_to_vent_hours, y_annotation),
+                       xytext=(time_to_vent_hours + max(times)*0.1, y_annotation),
+                       arrowprops=dict(arrowstyle='->', color=KONINGSBLAUW, alpha=0.7),
+                       fontsize=10, color=KONINGSBLAUW, fontweight='bold')
+
+        # Formatting
+        ax.set_xlabel('Time [h]', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Fuel Mass [kg]', fontsize=12, fontweight='bold')
+        ax.set_title(f'{storage_type} Dormancy Analysis - Mass Evolution',
+                    fontsize=14, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+
+        # Add info box with key metrics
+        mass_lost = masses[0] - masses[-1]
+        duration = max(times)
+        info_text = f'Duration: {duration:.1f}h\nMass lost: {mass_lost:.2f}kg'
+        if time_to_vent_hours is not None:
+            info_text += f'\nTime to vent: {time_to_vent_hours:.1f}h'
+        else:
+            info_text += f'\nNo venting occurred'
+
+        # Place info box in upper right
+        ax.text(0.98, 0.98, info_text, transform=ax.transAxes,
+               verticalalignment='top', horizontalalignment='right',
+               bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8),
+               fontsize=10)
+
+        plt.tight_layout()
+        return fig

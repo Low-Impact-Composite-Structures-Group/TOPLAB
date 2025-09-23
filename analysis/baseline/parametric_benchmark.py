@@ -1341,6 +1341,24 @@ class ParametricBenchmark(ABC):
                 f"- **Radius Precision:** ±{opt_params.get('radius_precision', 'N/A')*1000:.1f} mm",
             ])
 
+        # Add dormancy results if available
+        if hasattr(self, 'dormancy_summary') and self.dormancy_summary:
+            dormancy = self.dormancy_summary
+            md_lines.extend([
+                f"",
+                f"## Dormancy Analysis",
+                f"",
+                f"- **Dormancy Duration:** {dormancy['duration_hours']:.1f} hours",
+                f"- **Initial Mass (Dormancy):** {dormancy['initial_mass']:.2f} kg",
+                f"- **Final Mass (Dormancy):** {dormancy['final_mass']:.2f} kg",
+                f"- **Mass Vented:** {dormancy['mass_vented']:.2f} kg",
+            ])
+
+            if dormancy['time_to_vent_hours'] is not None:
+                md_lines.append(f"- **Time to First Venting:** {dormancy['time_to_vent_hours']:.1f} hours")
+            else:
+                md_lines.append(f"- **Time to First Venting:** No venting occurred during {dormancy['duration_hours']:.1f}h period")
+
         # Add gravimetric efficiency
         fuel_mass = final_state.fuel_mass
         gravimetric_eff = fuel_mass / (fuel_mass + self.total_structural_mass) * 100
@@ -1374,6 +1392,161 @@ class ParametricBenchmark(ABC):
                 print(f"Failed to save analysis summary: {e}")
 
         return markdown_content
+
+    def run_dormancy_analysis(self, duration_hours: float = 60.0):
+        """
+        Run dormancy scenario for cryogenic storage types.
+
+        Simulates a dormancy period where the tank is at rest with no discharge
+        or refuel flows. Only ambient heat leak occurs, potentially causing
+        pressure buildup and venting (Configuration C).
+
+        Args:
+            duration_hours: Dormancy duration in hours (default: 60 hours)
+
+        Returns:
+            dict: Dormancy analysis results including time-to-vent
+        """
+        # Skip dormancy for CH2 (compressed hydrogen at ambient temperature)
+        storage_name = self.get_storage_type_name()
+        if "Compressed H2 (CH2)" in storage_name:
+            print(f"Dormancy analysis skipped for {storage_name} (operates at ambient temperature)")
+            return None
+
+        print(f"\n{'='*60}")
+        print(f"{storage_name.upper()} DORMANCY ANALYSIS")
+        print(f"{'='*60}")
+        print(f"Duration: {duration_hours:.1f} hours ({duration_hours*3600:.0f} seconds)")
+        print(f"Scenario: Tank at rest with ambient heat leak only")
+
+        # Use initial conditions from discharge analysis
+        if not self.results or len(self.results.states) == 0:
+            raise ValueError("Must run discharge analysis first to get initial conditions")
+
+        initial_discharge_state = self.results.states[0]
+
+        # Create dormancy mission parameters
+        from src.mission.isochoric_missions import IsochoricMissionParameters, IsochoricMission
+        from src.mission.mission_sections import MissionSection
+
+        dormancy_params = IsochoricMissionParameters(
+            tank_volume=self.tank_volume,
+            p_min=self.get_minimum_pressure(),
+            p_vent=self.get_venting_pressure(),
+            initial_mass=initial_discharge_state.fuel_mass,
+            initial_temperature=initial_discharge_state.temperature,
+            initial_solid_temperature=initial_discharge_state.temperature,  # Simplified
+            ambient_temperature=self.ambient_temperature,
+            time_step=self.time_step,
+            rtol=self.rtol,
+            atol=self.atol,
+            use_density_stopping_events=False
+        )
+
+        # Create dormancy section (no flows, just ambient heat leak)
+        dormancy_section = MissionSection(
+            duration=duration_hours * 3600,  # Convert to seconds
+            fuel_flows=[],  # No flows during dormancy
+            altitude=0.0,
+            mach_number=0.0,
+            fuel_flow_key="dormancy"
+        )
+
+        # Create dormancy mission
+        dormancy_mission = IsochoricMission([dormancy_section], dormancy_params, "DORMANCY")
+        dormancy_mission.integration_method = RK45Solver(
+            timestep=self.time_step,
+            rtol=self.rtol,
+            atol=self.atol,
+            max_step=self.max_step
+        )
+
+        # Create mission analysis
+        dormancy_analysis = IsochoricMissionAnalysis(
+            dormancy_mission,
+            self.thermal_model
+        )
+
+        print("Starting dormancy integration...")
+        self.dormancy_results = dormancy_analysis.run_analysis()
+
+        if not self.dormancy_results or len(self.dormancy_results.states) == 0:
+            raise ValueError("Dormancy analysis failed: No results returned")
+
+        # Find time to vent (first Configuration C activation)
+        time_to_vent = self._find_time_to_vent()
+
+        # Calculate final conditions
+        final_state = self.dormancy_results.states[-1]
+        initial_mass = initial_discharge_state.fuel_mass
+        final_mass = final_state.fuel_mass
+        mass_vented = initial_mass - final_mass
+
+        print(f"\nDormancy analysis completed!")
+        print(f"Initial mass: {initial_mass:.2f} kg")
+        print(f"Final mass: {final_mass:.2f} kg")
+        print(f"Mass vented: {mass_vented:.2f} kg")
+        if time_to_vent is not None:
+            print(f"Time to first venting: {time_to_vent/3600:.1f} hours")
+        else:
+            print("No venting occurred during dormancy period")
+
+        return {
+            'time_to_vent_hours': time_to_vent/3600 if time_to_vent else None,
+            'time_to_vent_seconds': time_to_vent,
+            'initial_mass': initial_mass,
+            'final_mass': final_mass,
+            'mass_vented': mass_vented,
+            'duration_hours': duration_hours
+        }
+
+    def _find_time_to_vent(self):
+        """Find the first time step where Configuration C (venting) occurs."""
+        venting_pressure = self.get_venting_pressure()
+
+        for i, state in enumerate(self.dormancy_results.states):
+            if state.pressure >= venting_pressure:
+                return i * self.time_step
+
+        return None  # No venting occurred
+
+    def plot_dormancy_results(self, dormancy_data, save_path=None):
+        """
+        Plot dormancy results showing mass vs time with venting onset using SeabornPlotter.
+
+        Args:
+            dormancy_data: Dictionary with dormancy analysis results
+            save_path: Optional path to save plot file
+        """
+        if not self.dormancy_results or len(self.dormancy_results.states) == 0:
+            print("No dormancy data available for plotting")
+            return
+
+        # Initialize the SeabornPlotter with consistent styling
+        from plotting.sb_plotting import SeabornPlotter
+        sb_plotter = SeabornPlotter()
+
+        # Extract data
+        times_hours = [i * self.time_step / 3600 for i in range(len(self.dormancy_results.states))]
+        masses = [state.fuel_mass for state in self.dormancy_results.states]
+        pressures = [state.pressure/1e5 for state in self.dormancy_results.states]  # Convert to bar
+
+        # Create standalone mass vs time plot using SeabornPlotter styling
+        fig = sb_plotter.plot_dormancy_mass_evolution(
+            times=times_hours,
+            masses=masses,
+            pressures=pressures,
+            time_to_vent_hours=dormancy_data.get('time_to_vent_hours'),
+            venting_pressure=self.get_venting_pressure()/1e5,  # Convert to bar
+            storage_type=self.get_storage_type_name(),
+            figsize=(10, 6)
+        )
+
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Dormancy plot saved to: {save_path}")
+
+        return fig
 
 
 # Common utility functions for all storage types

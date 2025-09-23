@@ -76,7 +76,7 @@ class BenchmarkCCH2Analysis(ParametricBenchmark):
 
     def get_venting_pressure(self) -> float:
         """Get venting pressure for CCH2."""
-        return 500e5
+        return 450e5
 
     def get_ambient_htc(self) -> float:
         """Get ambient heat transfer coefficient for CCH2."""
@@ -165,7 +165,35 @@ def main():
                                                         search_results['density_tolerance'],
                                                         save_path=results_dir / "05_optimization_progress.png")
 
-            # Generate and save analysis summary
+            # Run dormancy analysis for CCH2
+            print("\n" + "="*80)
+            print("DORMANCY ANALYSIS - CCH2")
+            print("="*80)
+
+            try:
+                dormancy_data = analysis.run_dormancy_analysis(duration_hours=60.0)
+
+                if dormancy_data:
+                    # Generate dormancy plot
+                    analysis.plot_dormancy_results(dormancy_data,
+                                                 save_path=results_dir / "06_dormancy_analysis.png")
+
+                    # Store dormancy data for summary generation
+                    analysis.dormancy_summary = dormancy_data
+
+                    print(f"CCH2 Dormancy Summary:")
+                    print(f"  Duration: {dormancy_data['duration_hours']:.1f} hours")
+                    print(f"  Mass vented: {dormancy_data['mass_vented']:.2f} kg")
+                    if dormancy_data['time_to_vent_hours']:
+                        print(f"  Time to first venting: {dormancy_data['time_to_vent_hours']:.1f} hours")
+                    else:
+                        print(f"  No venting occurred during {dormancy_data['duration_hours']:.1f}h period")
+
+            except Exception as e:
+                print(f"Dormancy analysis failed: {e}")
+                analysis.dormancy_summary = None
+
+            # Generate and save analysis summary (now includes dormancy data)
             analysis.generate_analysis_summary(save_path=results_dir / "analysis_summary.md",
                                              optimization_results=search_results)
 
@@ -211,7 +239,35 @@ def main():
                                                             search_results['density_tolerance'],
                                                             save_path=results_dir / "05_optimization_progress_best_attempt.png")
 
-                # Generate and save analysis summary
+                # Run dormancy analysis for CCH2 (best attempt)
+                print("\n" + "="*80)
+                print("DORMANCY ANALYSIS - CCH2 (BEST ATTEMPT)")
+                print("="*80)
+
+                try:
+                    dormancy_data = analysis.run_dormancy_analysis(duration_hours=60.0)
+
+                    if dormancy_data:
+                        # Generate dormancy plot
+                        analysis.plot_dormancy_results(dormancy_data,
+                                                     save_path=results_dir / "06_dormancy_analysis_best_attempt.png")
+
+                        # Store dormancy data for summary generation
+                        analysis.dormancy_summary = dormancy_data
+
+                        print(f"CCH2 Dormancy Summary (Best Attempt):")
+                        print(f"  Duration: {dormancy_data['duration_hours']:.1f} hours")
+                        print(f"  Mass vented: {dormancy_data['mass_vented']:.2f} kg")
+                        if dormancy_data['time_to_vent_hours']:
+                            print(f"  Time to first venting: {dormancy_data['time_to_vent_hours']:.1f} hours")
+                        else:
+                            print(f"  No venting occurred during {dormancy_data['duration_hours']:.1f}h period")
+
+                except Exception as e:
+                    print(f"Dormancy analysis failed: {e}")
+                    analysis.dormancy_summary = None
+
+                # Generate and save analysis summary (now includes dormancy data)
                 analysis.generate_analysis_summary(save_path=results_dir / "analysis_summary_best_attempt.md",
                                                  optimization_results=search_results)
 
