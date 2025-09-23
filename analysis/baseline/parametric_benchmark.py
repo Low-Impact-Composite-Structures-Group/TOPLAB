@@ -86,7 +86,7 @@ class ParametricBenchmark(ABC):
         # Material and thickness parameters
         self.liner_thickness = 0.005
         self.insulation_thickness = 0.050
-        self.design_pressure = 450e5
+        # Note: Design pressure now uses storage-specific venting pressure in calculate_composite_thickness()
         self.safety_factor = 1.25
 
         # Composite material properties
@@ -206,8 +206,9 @@ class ParametricBenchmark(ABC):
         tank_section = TankSectionInterface(self.tank_radius, g10_material)
         composite_model = CompositeCylinder()
 
-        # Apply safety factor to pressure
-        design_pressure = self.design_pressure / self.safety_factor
+        # Use storage-specific venting pressure as design pressure
+        storage_venting_pressure = self.get_venting_pressure()
+        design_pressure = storage_venting_pressure / self.safety_factor
 
         # Calculate thickness using netting analysis
         self.composite_thickness = composite_model.compute_thickness(
@@ -218,7 +219,8 @@ class ParametricBenchmark(ABC):
         print(f"  Material: G10-NIST at {self.composite_winding_angle}° winding")
         print(f"  Tensile strength: {g10_material.failure_stress/1e6:.1f} MPa")
         print(f"  Design stress: {g10_material.failure_stress/self.safety_factor/1e6:.1f} MPa (SF = {self.safety_factor})")
-        print(f"  Design pressure: {self.design_pressure/1e5:.0f} bar")
+        print(f"  Storage venting pressure: {storage_venting_pressure/1e5:.0f} bar")
+        print(f"  Design pressure (with SF): {design_pressure/1e5:.0f} bar")
         print(f"  Required thickness: {self.composite_thickness*1000:.2f} mm")
 
         return g10_material.density
