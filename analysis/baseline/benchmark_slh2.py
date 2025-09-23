@@ -155,15 +155,32 @@ def main():
         print(f"  Gravimetric efficiency: {gravimetric_eff:.1f}%")
         print(f"  Final density: {optimal_data['final_density']:.1f} kg/m³")
 
-        # Generate plots for optimal configuration
-        print("\nGenerating 5 plots for optimal sLH2 configuration...")
-        analysis.run_analysis(include_plots=True)
+        # Setup save paths
+        import os
+        from pathlib import Path
+        results_dir = Path("../../data/results/benchmark_slh2_results")
+        results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate optimization progress plot (creates figure but doesn't show yet)
+        # Generate plots for optimal configuration and save them
+        print("\nGenerating and saving 5 plots for optimal sLH2 configuration...")
+
+        # Generate and save individual plots
+        analysis.plot_results(save_path=results_dir / "01_tank_states.png")
+        analysis.plot_fuel_flow_profile(save_path=results_dir / "02_fuel_flow_profile.png")
+        analysis.plot_density_temperature(save_path=results_dir / "03_density_temperature.png")
+        analysis.plot_heat_exchanger_requirements(save_path=results_dir / "04_heat_exchanger_requirements.png")
+
+        # Generate optimization progress plot and save it
         analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
                                                     search_results['minimum_density_target'],
-                                                    search_results['density_tolerance'])
+                                                    search_results['density_tolerance'],
+                                                    save_path=results_dir / "05_optimization_progress.png")
 
+        # Generate and save analysis summary
+        analysis.generate_analysis_summary(save_path=results_dir / "analysis_summary.md",
+                                         optimization_results=search_results)
+
+        print(f"All plots and summary saved to: {results_dir}")
         plt.show()
 
     else:
@@ -180,14 +197,31 @@ def main():
             analysis.print_results()
 
             try:
-                print("\nGenerating 5 plots for best sLH2 attempt...")
-                analysis.run_analysis(include_plots=True)
+                # Setup save paths
+                import os
+                from pathlib import Path
+                results_dir = Path("../../data/results/benchmark_slh2_results")
+                results_dir.mkdir(parents=True, exist_ok=True)
 
-                # Generate optimization progress plot (creates figure but doesn't show yet)
+                print("\nGenerating and saving 5 plots for best sLH2 attempt...")
+
+                # Generate and save individual plots
+                analysis.plot_results(save_path=results_dir / "01_tank_states_best_attempt.png")
+                analysis.plot_fuel_flow_profile(save_path=results_dir / "02_fuel_flow_profile_best_attempt.png")
+                analysis.plot_density_temperature(save_path=results_dir / "03_density_temperature_best_attempt.png")
+                analysis.plot_heat_exchanger_requirements(save_path=results_dir / "04_heat_exchanger_requirements_best_attempt.png")
+
+                # Generate optimization progress plot and save it
                 analysis.plot_optimization_progress_from_data(search_results['optimization_progress'],
                                                             search_results['minimum_density_target'],
-                                                            search_results['density_tolerance'])
+                                                            search_results['density_tolerance'],
+                                                            save_path=results_dir / "05_optimization_progress_best_attempt.png")
 
+                # Generate and save analysis summary
+                analysis.generate_analysis_summary(save_path=results_dir / "analysis_summary_best_attempt.md",
+                                                 optimization_results=search_results)
+
+                print(f"All plots and summary saved to: {results_dir}")
                 plt.show()
 
             except Exception as e:

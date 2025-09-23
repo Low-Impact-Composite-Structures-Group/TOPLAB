@@ -153,25 +153,52 @@ def main():
         print(f"  Structural mass: {analysis.total_structural_mass:.1f} kg")
         print(f"  Final fuel mass: {fuel_mass:.1f} kg")
         print(f"  Gravimetric efficiency: {gravimetric_eff:.1f}%")
-        print(f"  Final density: {analysis.results.final_density:.1f} kg/m³")
+        final_state = analysis.results.states[-1]
+        print(f"  Final density: {final_state.density:.1f} kg/m³")
 
-        # Generate plots for optimal configuration
+        # Generate plots for optimal configuration and save them
         try:
-            print("\nGenerating 5 plots for optimal CH2 configuration...")
-            analysis.run_analysis(include_plots=True)
+            # Setup save paths with absolute path resolution
+            import os
+            from pathlib import Path
 
-            # Generate optimization progress plot (creates figure but doesn't show yet)
+            # Get the script's directory and build absolute path
+            script_dir = Path(__file__).parent.parent.parent  # Go up to hydrogen_fuel_tank/
+            results_dir = script_dir / "data" / "results" / "benchmark_ch2_results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+
+            print("\nGenerating and saving plots for optimal CH2 configuration...")
+
+            # Generate and save individual plots
+            analysis.plot_results(save_path=results_dir / "ch2_tank_states.png")
+            analysis.plot_fuel_flow_profile(save_path=results_dir / "ch2_fuel_flow_profile.png")
+            analysis.plot_density_temperature(save_path=results_dir / "ch2_density_temperature.png")
+
+            # Handle heat exchanger plot (returns None for CH2)
+            hx_fig = analysis.plot_heat_exchanger_requirements(save_path=results_dir / "ch2_heat_exchanger_requirements.png")
+            if hx_fig is None:
+                print("Heat exchanger analysis skipped for CH2 (no thermal management needed)")
+
+            # Generate optimization progress plot and save it
             analysis.plot_optimization_progress_from_data(optimization_results['optimization_progress'],
                                                         optimization_results['minimum_density_target'],
-                                                        optimization_results['density_tolerance'])
+                                                        optimization_results['density_tolerance'],
+                                                        save_path=results_dir / "ch2_optimization_progress.png")
+
+            # Generate and save analysis summary
+            analysis.generate_analysis_summary(save_path=results_dir / "ch2_analysis_summary.md",
+                                             optimization_results=optimization_results)
 
             # Show all plots at once
             import matplotlib.pyplot as plt
+            print(f"All plots and summary saved to: {results_dir}")
             plt.show()
-            print("\nAll 5 plots displayed successfully!")
+            print("\nCH2 benchmark completed - all plots and summary generated!")
 
         except Exception as e:
-            print(f"Plotting failed (this is non-critical): {e}")
+            print(f"Error during plotting/saving: {e}")
+            import traceback
+            traceback.print_exc()
 
     else:
         print(f"\n" + "="*80)

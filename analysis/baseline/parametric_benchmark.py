@@ -1054,6 +1054,9 @@ class ParametricBenchmark(ABC):
                 print(f"Energy Split: oHEX {ohex_pct:.1f}% (Pure CH2 has no iHEX)")
         print("=" * 60)
 
+        # Store energy results for use in summary generation
+        self.energy_requirements = energy_results
+
         fig = sb_plotter.plot_heat_exchanger_requirements(
             heat_flow_data=heat_flow_data,
             scenario_name=f"{storage_name} discharge",
@@ -1102,6 +1105,11 @@ class ParametricBenchmark(ABC):
             if optimization_progress['radii']:
                 optimal_radius = optimization_progress['radii'][-1]  # Last radius should be optimal
                 print(f"Optimal radius found: {optimal_radius:.3f}m")
+
+            # Save plot if path provided
+            if save_path:
+                fig.savefig(save_path, dpi=300, bbox_inches='tight')
+                print(f"Optimization progress plot saved to: {save_path}")
 
             return fig
 
@@ -1185,6 +1193,187 @@ class ParametricBenchmark(ABC):
                 plt.ioff()  # Make sure to turn off interactive mode even if plotting fails
 
         return self.results
+
+    def generate_analysis_summary(self, save_path=None, optimization_results=None):
+        """
+        Generate a comprehensive analysis summary document in Markdown format.
+
+        Args:
+            save_path: Path to save the summary document
+            optimization_results: Optional optimization results data
+
+        Returns:
+            str: The markdown content
+        """
+        if not self.results or len(self.results.states) == 0:
+            print("No analysis results available for summary generation")
+            return ""
+
+        # Get basic data
+        initial_state = self.results.states[0]
+        final_state = self.results.states[-1]
+        storage_type = self.get_storage_type_name()
+
+        # Create markdown content
+        md_lines = [
+            f"# {storage_type} Analysis Summary",
+            f"",
+            f"**Generated:** {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"",
+            f"## Storage Type Configuration",
+            f"",
+            f"- **Storage Type:** {storage_type}",
+            f"- **Initial Pressure:** {self.get_initial_pressure()/1e5:.1f} bar",
+            f"- **Initial Temperature:** {self.get_initial_temperature():.2f} K",
+            f"- **Minimum Density Requirement:** {self.get_minimum_density():.1f} kg/m³",
+            f"- **Venting Pressure:** {self.get_venting_pressure()/1e5:.1f} bar",
+            f"",
+            f"## Tank Geometry",
+            f"",
+            f"- **Inner Radius:** {self.tank_radius:.3f} m",
+            f"- **Cylindrical Length:** {2.4 * self.tank_radius:.3f} m (φ = 3.0)",
+            f"- **Inner Volume:** {self.tank_volume:.3f} m³",
+            f"- **Inner Surface Area:** {self.inner_surface_area:.2f} m²",
+            f"- **Outer Surface Area:** {self.outer_surface_area:.2f} m²",
+            f"- **Liner Thickness:** {self.liner_thickness*1000:.1f} mm",
+            f"- **Wall Thickness (Composite):** {self.composite_thickness*1000:.2f} mm",
+            f"",
+            f"## Structural Design",
+            f"",
+            f"- **Total Structural Mass:** {self.total_structural_mass:.1f} kg",
+            f"  - Liner Mass: {self.liner_mass:.1f} kg",
+            f"  - Composite Mass: {self.composite_mass:.1f} kg",
+            f"- **Ambient Heat Transfer Coefficient:** {self.get_ambient_htc():.6f} W/m²K",
+            f"",
+            f"## Initial Conditions",
+            f"",
+            f"- **Initial Mass:** {initial_state.fuel_mass:.2f} kg",
+            f"- **Initial Pressure:** {initial_state.pressure/1e5:.1f} bar",
+            f"- **Initial Temperature:** {initial_state.temperature:.2f} K",
+            f"- **Initial Density:** {initial_state.fuel_mass/self.tank_volume:.2f} kg/m³",
+            f"",
+            f"## Final Conditions",
+            f"",
+            f"- **Final Mass:** {final_state.fuel_mass:.2f} kg",
+            f"- **Final Pressure:** {final_state.pressure/1e5:.1f} bar",
+            f"- **Final Temperature:** {final_state.temperature:.2f} K",
+            f"- **Final Density:** {final_state.fuel_mass/self.tank_volume:.2f} kg/m³",
+            f"",
+            f"## Mission Performance",
+            f"",
+            f"- **Mission Duration:** {len(self.results.states) * self.time_step:.0f} s ({len(self.results.states) * self.time_step/3600:.2f} h)",
+            f"- **Fuel Consumed:** {initial_state.fuel_mass - final_state.fuel_mass:.2f} kg",
+            f"- **Average Discharge Rate:** {(initial_state.fuel_mass - final_state.fuel_mass)/(len(self.results.states) * self.time_step):.4f} kg/s",
+            f"- **Minimum Density Met:** {'✓' if final_state.fuel_mass/self.tank_volume >= self.get_minimum_density() else '✗'} ({final_state.fuel_mass/self.tank_volume:.2f} ≥ {self.get_minimum_density():.1f})",
+            f"",
+            f"## Heat Exchanger Requirements",
+            f"",
+        ]
+
+        # Add heat exchanger data if available
+        if hasattr(self.results, 'heat_flows') and self.results.heat_flows:
+            max_heat_flow = max([abs(hf) for hf in self.results.heat_flows if hf is not None])
+            avg_heat_flow = sum([abs(hf) for hf in self.results.heat_flows if hf is not None and hf != 0]) / len([hf for hf in self.results.heat_flows if hf is not None and hf != 0])
+
+            md_lines.extend([
+                f"- **Maximum Heat Flow:** {max_heat_flow/1000:.1f} kW",
+                f"- **Average Heat Flow:** {avg_heat_flow/1000:.1f} kW",
+            ])
+        else:
+            md_lines.append("- Heat exchanger data not available")
+
+        # Add energy requirements if available
+        if hasattr(self, 'energy_requirements') and self.energy_requirements:
+            energy = self.energy_requirements
+            storage_name = self.get_storage_type_name()
+
+            md_lines.extend([
+                f"",
+                f"### Energy Requirements",
+                f"",
+            ])
+
+            # Check if this is CH2 (no iHEX) or CCH2/sLH2 (has iHEX)
+            has_ihex = 'iHEX' in storage_name.upper() or 'CCH2' in storage_name.upper() or 'SLH2' in storage_name.upper()
+
+            if has_ihex and energy['ihex']['kwh'] > 0.001:
+                md_lines.append(f"- **iHEX Energy:** {energy['ihex']['kwh']:.2f} kWh ({energy['ihex']['mj']:.1f} MJ)")
+            elif has_ihex:
+                md_lines.append(f"- **iHEX Energy:** 0.00 kWh (0.0 MJ)")
+
+            if energy['ohex']['kwh'] > 0.001:
+                md_lines.append(f"- **oHEX Energy:** {energy['ohex']['kwh']:.2f} kWh ({energy['ohex']['mj']:.1f} MJ)")
+            else:
+                md_lines.append(f"- **oHEX Energy:** 0.00 kWh (0.0 MJ)")
+
+            md_lines.append(f"- **Total Energy:** {energy['total']['kwh']:.2f} kWh ({energy['total']['mj']:.1f} MJ)")
+
+            # Energy split percentage
+            if energy['total']['kwh'] > 0.001:
+                if has_ihex and energy['ihex']['kwh'] > 0.001:
+                    ihex_pct = (energy['ihex']['kwh'] / energy['total']['kwh']) * 100
+                    ohex_pct = (energy['ohex']['kwh'] / energy['total']['kwh']) * 100
+                    md_lines.append(f"- **Energy Split:** iHEX {ihex_pct:.1f}% | oHEX {ohex_pct:.1f}%")
+                else:
+                    ohex_pct = (energy['ohex']['kwh'] / energy['total']['kwh']) * 100
+                    if 'CH2' in storage_name.upper() and 'CCH2' not in storage_name.upper():
+                        md_lines.append(f"- **Energy Split:** oHEX {ohex_pct:.1f}% (Pure CH2 has no iHEX)")
+                    else:
+                        md_lines.append(f"- **Energy Split:** oHEX {ohex_pct:.1f}%")
+
+        # Add optimization results if provided
+        if optimization_results:
+            md_lines.extend([
+                f"",
+                f"## Optimization Results",
+                f"",
+                f"- **Optimization Successful:** {'✓' if optimization_results.get('search_successful') else '✗'}",
+                f"- **Total Evaluations:** {optimization_results.get('evaluation_count', 'N/A')}",
+            ])
+
+            # Add optimization parameters
+            opt_params = self.get_optimization_parameters()
+            md_lines.extend([
+                f"- **Starting Radius:** {opt_params.get('min_radius', 'N/A'):.3f} m",
+                f"- **Maximum Radius:** {opt_params.get('max_radius', 'N/A'):.3f} m",
+                f"- **Optimal Radius:** {optimization_results.get('optimal_radius', 'N/A'):.3f} m" if optimization_results.get('optimal_radius') else "- **Optimal Radius:** Not found",
+                f"- **Density Tolerance:** {optimization_results.get('density_tolerance', 'N/A'):.1f} kg/m³",
+                f"- **Radius Precision:** ±{opt_params.get('radius_precision', 'N/A')*1000:.1f} mm",
+            ])
+
+        # Add gravimetric efficiency
+        fuel_mass = final_state.fuel_mass
+        gravimetric_eff = fuel_mass / (fuel_mass + self.total_structural_mass) * 100
+        md_lines.extend([
+            f"",
+            f"## Performance Metrics",
+            f"",
+            f"- **Gravimetric Efficiency:** {gravimetric_eff:.1f}%",
+            f"- **Fuel-to-Structure Mass Ratio:** {fuel_mass/self.total_structural_mass:.2f}:1",
+            f"",
+            f"## Mission Profile",
+            f"",
+            f"- **Mission Type:** ATR72 Regional Aircraft",
+            f"- **Flow Profile:** Variable flow rates across 11 mission sections",
+            f"- **Mission Sections:** Taxi-out, Takeoff, Climb, Cruise, Initial Descent, Approach, Go-around, Climb-2, Cruise-2, Final Descent, Taxi-in",
+            f"",
+            f"---",
+            f"*Analysis generated using Parametric Benchmark Framework*"
+        ])
+
+        # Join all lines
+        markdown_content = "\n".join(md_lines)
+
+        # Save if path provided
+        if save_path:
+            try:
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    f.write(markdown_content)
+                print(f"Analysis summary saved to: {save_path}")
+            except Exception as e:
+                print(f"Failed to save analysis summary: {e}")
+
+        return markdown_content
 
 
 # Common utility functions for all storage types
