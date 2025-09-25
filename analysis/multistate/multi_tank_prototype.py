@@ -1,23 +1,17 @@
 """
-Multi-Tank CCH2 Prototype Analysis
+Multi-Tank System Analysis Framework
 
-This script implements a generalized multi-tank framework for cryocompressed hydrogen storage
-analysis. It demonstrates the architecture with a 2-tank test case:
-- Tank 1: Dormancy scenario (no flow in/out, possible venting)
-- Tank 2: Discharge scenario (constant outflow)
-
-The framework is designed as scaffolding for future inter-tank coupling capabilities
-while maintaining all the sophisticated physics from the single-tank verification script.
+A generalized framework for analyzing coupled tank systems with inter-tank mass transfer.
+Supports various coupling mechanisms and tank configurations with unified physics modeling.
 
 Key Features:
-- N-tank state vector: [m1, T1, Ts1, m2, T2, Ts2, ..., mN, TN, TsN]
-- Generalized flow nomenclature: in/out/vent instead of fuel/discharge/vent
-- Independent tank physics with configuration switching
-- Unified ODE system and results management
-- ANY-tank stopping criteria
+- Arbitrary number of tanks with coupled physics
+- Pressure-triggered valves with choked flow modeling
+- Configurable tank geometries and materials
+- Graph-based network topology definition
+- Unified ODE integration with stopping criteria
 
 Authors: Dante Raso (2025)
-Based on verification framework from verification_cch2.py
 """
 
 # Standard library imports
@@ -63,30 +57,134 @@ from graph_factory import GraphFactory, TankSystemGraph
 # Plotting imports
 from plotting.plot_style_sb import configure_plot_style
 
+class InterTankCoupling:
+    """Base class for inter-tank mass transfer mechanisms."""
+
+    def __init__(self, source_idx: int, target_idx: int, coupling_id: str = None):
+        self.source_idx = source_idx
+        self.target_idx = target_idx
+        self.coupling_id = coupling_id or f"Coupling_{source_idx}→{target_idx}"
+        self.is_active = False
+
+    def evaluate(self, t: float, tank_states: List) -> bool:
+        """Determine if coupling should be active at current conditions."""
+        raise NotImplementedError("Subclasses must implement evaluate()")
+
+    def calculate_flow_rate(self, t: float, tank_states: List) -> float:
+        """Calculate mass flow rate [kg/s] when coupling is active."""
+        raise NotImplementedError("Subclasses must implement calculate_flow_rate()")
+
+
+class PressureTriggeredValve(InterTankCoupling):
+    """Pressure-triggered valve with choked flow physics and hysteresis control."""
+
+    def __init__(self, source_idx: int, target_idx: int,
+                 p_open: float, p_close: float,
+                 max_flow_rate: float = 0.005,
+                 orifice_diameter: float = 0.002,
+                 coupling_id: str = None):
+        super().__init__(source_idx, target_idx, coupling_id)
+        self.p_open = p_open
+        self.p_close = p_close
+        self.max_flow_rate = max_flow_rate
+        self.effective_area = math.pi * (orifice_diameter / 2)**2
+
+        if p_close <= p_open:
+            raise ValueError(f"p_close ({p_close/1e5:.1f} bar) must be > p_open ({p_open/1e5:.1f} bar)")
+
+    def evaluate(self, t: float, tank_states: List) -> bool:
+        """Evaluate valve state with hysteresis logic."""
+        target_state = tank_states[self.target_idx]
+
+        if target_state.pressure is None:
+            target_state.compute_pressure()
+
+        target_pressure = target_state.pressure
+
+        if not self.is_active and target_pressure < self.p_open:
+            self.is_active = True
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} OPENED (P={target_pressure/1e5:.1f} bar < {self.p_open/1e5:.1f} bar)")
+
+        elif self.is_active and target_pressure > self.p_close:
+            self.is_active = False
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSED (P={target_pressure/1e5:.1f} bar > {self.p_close/1e5:.1f} bar)")
+
+        return self.is_active
+
+    def calculate_flow_rate(self, t: float, tank_states: List) -> float:
+        """Calculate choked flow rate using compressible gas physics."""
+        if not self.is_active:
+            return 0.0
+
+        source_state = tank_states[self.source_idx]
+        target_state = tank_states[self.target_idx]
+
+        if source_state.fuel_mass < 1.0:
+            return 0.0
+
+        if source_state.pressure is None:
+            source_state.compute_pressure()
+        if target_state.pressure is None:
+            target_state.compute_pressure()
+
+        P1, P2 = source_state.pressure, target_state.pressure
+
+        if P1 <= P2:
+            return 0.0
+
+        T1 = source_state.temperature
+        rho1 = source_state.fuel_mass / source_state.tank.volume
+
+        # Gas properties
+        gamma = 1.4  # Heat capacity ratio for hydrogen
+        R_specific = 4124  # J/(kg⋅K) specific gas constant for hydrogen
+        P_crit_ratio = (2/(gamma+1))**(gamma/(gamma-1))  # Critical pressure ratio ≈ 0.528
+        discharge_coeff = 0.6  # Discharge coefficient for sharp-edged orifice
+
+        if P2/P1 < P_crit_ratio:
+            # Choked flow - sonic velocity condition
+            sonic_velocity = math.sqrt(gamma * R_specific * T1)
+            flow_rate = discharge_coeff * self.effective_area * rho1 * sonic_velocity
+        else:
+            # Subsonic flow
+            velocity = math.sqrt(2 * (P1 - P2) / rho1)
+            flow_rate = discharge_coeff * self.effective_area * rho1 * velocity
+
+        # Apply valve capacity limit
+        flow_rate = min(flow_rate, self.max_flow_rate)
+
+        # Safety limit: prevent excessive mass transfer rate
+        max_safe_flow = 0.1 * source_state.fuel_mass
+        flow_rate = min(flow_rate, max_safe_flow)
+
+        return flow_rate
+
+
 # =================== MULTI-TANK CONFIGURATION ===================
 
-def calculate_mission_based_tank_geometry(
+def create_tank_from_mission(
     mission: DischargeMission,
     initial_pressure: float,
     initial_temperature: float,
-    operating_pressure: float,  # P_VENT - drives wall design
+    operating_pressure: float,
     safety_margin: float = 1.2,
-    liner_thickness: float = 0.005,  # 5mm aluminum liner
-    insulation_thickness: float = 0.05,  # 50mm insulation
+    liner_thickness: float = 0.005,
+    insulation_thickness: float = 0.05,
 ) -> tuple[SphericalTank, float]:
     """
-    Calculate tank geometry based on mission fuel requirements.
+    Create tank geometry based on mission fuel requirements.
 
     Args:
-        mission: DischargeMission defining fuel requirements
+        mission: Mission defining fuel requirements
         initial_pressure: Initial tank pressure [Pa]
         initial_temperature: Initial tank temperature [K]
-        safety_margin: Safety factor for fuel mass (default 1.2 = 20% margin)
-        liner_thickness: Aluminum liner thickness [m] (default 5mm)
-        insulation_thickness: Insulation thickness [m] (default 50mm)
+        operating_pressure: Maximum operating pressure for wall design [Pa]
+        safety_margin: Safety factor for fuel mass
+        liner_thickness: Liner thickness [m]
+        insulation_thickness: Insulation thickness [m]
 
     Returns:
-        tuple: (SphericalTank object, fuel_volume_required [m³])
+        tuple: (SphericalTank, required_fuel_volume [m³])
     """
     import CoolProp.CoolProp as CP
     import math
@@ -139,50 +237,50 @@ def calculate_mission_based_tank_geometry(
 
     # For SphericalTank, we use the external radius and the liner material
     # (the wall/insulation will be handled by the thermal model)
-    # CRITICAL: Use operating_pressure (P_VENT) for wall design, not initial_pressure
+
     tank = SphericalTank(
         radius=external_radius,
         material=liner_material,
         operating_pressure=operating_pressure
     )
 
-    print(f"Mission-based tank sizing:")
+    print(f"Tank sizing from mission requirements:")
     print(f"  Total fuel mass required: {total_fuel_mass:.3f} kg")
     print(f"  With {safety_margin}x safety margin: {required_fuel_mass:.3f} kg")
-    print(f"  H2 density at {initial_pressure/1e5:.1f} bar, {initial_temperature:.1f} K: {rho_h2:.2f} kg/m³")
+    print(f"  Density at {initial_pressure/1e5:.1f} bar, {initial_temperature:.1f} K: {rho_h2:.2f} kg/m³")
     print(f"  Fuel volume required: {fuel_volume_required:.4f} m³")
-    print(f"  Internal tank volume (with ullage): {internal_volume_required:.4f} m³")
+    print(f"  Internal volume (with ullage): {internal_volume_required:.4f} m³")
     print(f"  Internal radius: {internal_radius:.3f} m")
-    print(f"  External radius (with {liner_thickness*1000:.0f}mm liner): {external_radius:.3f} m")
-    print(f"  Tank total volume: {tank.volume:.4f} m³")
-    print(f"  Wall designed for operating pressure: {operating_pressure/1e5:.1f} bar (P_VENT)")
+    print(f"  External radius (with liner): {external_radius:.3f} m")
+    print(f"  Tank volume: {tank.volume:.4f} m³")
+    print(f"  Operating pressure: {operating_pressure/1e5:.1f} bar")
 
     return tank, fuel_volume_required
 
 
-def calculate_ch2_tank_geometry(
+def create_tank_from_fuel_mass(
     fuel_mass: float,
     initial_pressure: float,
     initial_temperature: float,
-    operating_pressure: float,  # P_VENT - drives wall design
+    operating_pressure: float,
     safety_margin: float = 1.1,
-    liner_thickness: float = 0.005,  # 5mm aluminum liner
-    insulation_thickness: float = 0.05,  # 50mm insulation
+    liner_thickness: float = 0.005,
+    insulation_thickness: float = 0.05,
 ) -> SphericalTank:
     """
-    Calculate CH2 tank geometry based on given fuel mass.
+    Create tank geometry based on required fuel mass.
 
     Args:
         fuel_mass: Required fuel mass [kg]
         initial_pressure: Initial tank pressure [Pa]
         initial_temperature: Initial tank temperature [K]
-        operating_pressure: Maximum operating pressure (P_VENT) for wall design [Pa]
-        safety_margin: Safety factor for tank volume (default 1.1 = 10% ullage)
-        liner_thickness: Aluminum liner thickness [m] (default 5mm)
-        insulation_thickness: Insulation thickness [m] (default 50mm)
+        operating_pressure: Maximum operating pressure for wall design [Pa]
+        safety_margin: Safety factor for tank volume (ullage space)
+        liner_thickness: Liner thickness [m]
+        insulation_thickness: Insulation thickness [m]
 
     Returns:
-        SphericalTank: Tank object designed for operating pressure
+        SphericalTank: Tank designed for operating pressure
     """
     import CoolProp.CoolProp as CP
 
@@ -220,71 +318,62 @@ def calculate_ch2_tank_geometry(
         operating_pressure=operating_pressure  # Use P_VENT for structural design
     )
 
-    print(f"CH2 tank sizing:")
+    print(f"Tank sizing from fuel mass:")
     print(f"  Required fuel mass: {fuel_mass:.3f} kg")
-    print(f"  H2 density at {initial_pressure/1e5:.1f} bar, {initial_temperature:.1f} K: {rho_h2:.2f} kg/m³")
+    print(f"  Density at {initial_pressure/1e5:.1f} bar, {initial_temperature:.1f} K: {rho_h2:.2f} kg/m³")
     print(f"  Fuel volume required: {fuel_volume_required:.4f} m³")
-    print(f"  Internal tank volume (with ullage): {internal_volume_required:.4f} m³")
+    print(f"  Internal volume (with ullage): {internal_volume_required:.4f} m³")
     print(f"  Internal radius: {internal_radius:.3f} m")
-    print(f"  External radius (with {liner_thickness*1000:.0f}mm liner): {external_radius:.3f} m")
-    print(f"  Tank total volume: {tank.volume:.4f} m³")
-    print(f"  Operating pressure (P_VENT): {operating_pressure/1e5:.1f} bar")
+    print(f"  External radius (with liner): {external_radius:.3f} m")
+    print(f"  Tank volume: {tank.volume:.4f} m³")
+    print(f"  Operating pressure: {operating_pressure/1e5:.1f} bar")
 
     return tank
 
 
 @dataclass
 class MultiTankConfig:
-    """
-    Configuration parameters for multi-tank analysis.
-
-    Supports individual tank configurations with different pressure thresholds,
-    initial conditions, and tank types (CH2 vs CCH2).
-    """
+    """Configuration parameters for multi-tank analysis."""
 
     # Global parameters
-    AMBIENT_TEMPERATURE = 298.15  # K - T_amb
+    AMBIENT_TEMPERATURE = 298.15  # K
 
-    # Individual tank configurations
-    class Tank1:  # CH2 tank (compressed hydrogen at ambient temperature)
-        INITIAL_PRESSURE = 700e5        # Pa (700 bar)
-        INITIAL_TEMPERATURE = 330.0     # K (ambient + some heating)
-        INITIAL_SOLID_TEMP = "thermal_equilibrium"  # K
-        INITIAL_MASS = 25.0             # kg (given mass)
-        STOPPING_DENSITY = 5.0          # kg/m³ (low density stop)
+    # Example tank configurations
+    class HighPressureTank:
+        INITIAL_PRESSURE = 700e5
+        INITIAL_TEMPERATURE = 330.0
+        INITIAL_SOLID_TEMP = "thermal_equilibrium"
+        INITIAL_MASS = 25.0
+        STOPPING_DENSITY = 5.0
 
-        # Individual pressure thresholds
-        P_MIN = 100e5                   # Pa (100 bar) - higher min for CH2
-        P_VENT = 800e5                  # Pa (800 bar) - higher vent for CH2
+        P_MIN = 100e5
+        P_VENT = 800e5
 
-        # Flow rates (dormancy = all zeros except venting)
-        INFLOW_RATE = 0.0              # kg/s - no inflow
-        OUTFLOW_RATE = 0.0             # kg/s - no outflow
-        MISSION_DURATION = 216000.0    # s (60 hours)
-        TIME_STEP = 10.0               # s
+        INFLOW_RATE = 0.0
+        OUTFLOW_RATE = 0.0
+        MISSION_DURATION = 216000.0
+        TIME_STEP = 10.0
 
-    class Tank2:  # CCH2 tank (cryocompressed hydrogen)
-        INITIAL_PRESSURE = 400e5        # Pa (400 bar)
-        INITIAL_TEMPERATURE = 53.25     # K (cryogenic)
-        INITIAL_SOLID_TEMP = "thermal_equilibrium"  # K
-        STOPPING_DENSITY = 5.8          # kg/m³
+    class CryogenicTank:
+        INITIAL_PRESSURE = 400e5
+        INITIAL_TEMPERATURE = 53.25
+        INITIAL_SOLID_TEMP = "thermal_equilibrium"
+        STOPPING_DENSITY = 5.8
 
-        # Individual pressure thresholds
-        P_MIN = 15e5                    # Pa (15 bar) - standard CCH2 min
-        P_VENT = 450e5                  # Pa (450 bar) - standard CCH2 vent
+        P_MIN = 15e5
+        P_VENT = 450e5
 
-        # Flow rates (discharge = constant outflow)
-        INFLOW_RATE = 0.0              # kg/s - no inflow
-        OUTFLOW_RATE = 0.001           # kg/s - constant discharge
-        MISSION_DURATION = 40000.0     # s
-        TIME_STEP = 1.0                # s
+        INFLOW_RATE = 0.0
+        OUTFLOW_RATE = 0.001
+        MISSION_DURATION = 40000.0
+        TIME_STEP = 1.0
 
-    # Solver configuration parameters
+    # Solver configuration
     class Solver:
-        PRIMARY_METHOD = 'RK45'         # Primary solver method
-        RTOL = 1e-5                     # Relative tolerance
-        ATOL = 1e-8                     # Absolute tolerance
-        MAX_STEP = 5.0                  # Maximum step size (seconds)
+        PRIMARY_METHOD = 'RK45'
+        RTOL = 1e-5
+        ATOL = 1e-8
+        MAX_STEP = 5.0
 
 
 # =================== MULTI-TANK STATE MANAGEMENT ===================
@@ -444,101 +533,112 @@ class MultiTankResults:
 
 # =================== MULTI-TANK SYSTEM CLASS ===================
 
-class MultiTankCCH2System:
+class MultiTankSystem:
     """
-    Multi-tank CCH2 system for generalized hydrogen storage analysis.
+    Multi-tank system for hydrogen storage analysis.
 
-    This class manages multiple tanks with independent physics but unified
-    integration. Designed as scaffolding for future inter-tank coupling.
+    Manages multiple tanks with independent physics but unified integration.
+    Provides scaffolding for inter-tank coupling capabilities.
 
     Key Features:
-    - Manages N tanks with individual configurations
-    - Unified ODE system for all tanks
+    - N-tank management with individual configurations
+    - Unified ODE system integration
     - Independent thermal models per tank
-    - Generalized flow interface (in/out/vent)
-    - ANY-tank stopping criteria
+    - Generalized flow interface (inflow/outflow/venting)
+    - Configurable stopping criteria
     """
 
-    def __init__(self, config: MultiTankConfig = None, mission_tank: SphericalTank = None, ch2_tank: SphericalTank = None):
+    def __init__(self, config: MultiTankConfig = None, tank_geometries: List[SphericalTank] = None):
         """
         Initialize multi-tank system.
 
         Args:
             config: Multi-tank configuration object
-            mission_tank: Mission-calculated SphericalTank for Tank 2 (CCH2)
-            ch2_tank: CH2 tank for Tank 1 (compressed hydrogen at ambient conditions)
+            tank_geometries: List of SphericalTank objects for system tanks
         """
-        print("Initializing MultiTankCCH2System...")
+        print("Initializing MultiTankSystem...")
         self.config = config or MultiTankConfig()
-        self.mission_tank = mission_tank  # Tank 2 (CCH2)
-        self.ch2_tank = ch2_tank         # Tank 1 (CH2)
+        self.tank_geometries = tank_geometries or []
 
         # System components
-        self.tanks = []  # Tank objects with real geometry
-        self.thermal_models = []  # Individual thermal models
-        self.dynamic_models = []  # Individual dynamic models
+        self.tanks = []
+        self.thermal_models = []
+        self.dynamic_models = []
+        self.coupling_rules = []
         self.solver = None
 
         # Results storage
         self.results = None
         self.analysis_metadata = {}
 
-        # Setup tanks
+        # Configuration
+        self.enable_coupling = True
+
+        # Setup system
         self._setup_tanks()
-        print(f"Multi-tank system initialized with {len(self.tanks)} tanks")
+        self._setup_coupling_rules()
+
+        print(f"Multi-tank system initialized with {len(self.tanks)} tanks and {len(self.coupling_rules)} coupling rules")
 
     def _setup_tanks(self):
         """Setup individual tanks with different geometries and pressure thresholds"""
 
-        print(f"\n� TANK SETUP WITH INDIVIDUAL PROPERTIES:")
-        print(f"   Tank 1 (CH2): P_VENT={self.config.Tank1.P_VENT/1e5:.0f} bar, P_MIN={self.config.Tank1.P_MIN/1e5:.0f} bar")
-        print(f"   Tank 2 (CCH2): P_VENT={self.config.Tank2.P_VENT/1e5:.0f} bar, P_MIN={self.config.Tank2.P_MIN/1e5:.0f} bar")
+        print(f"\n🏗️ TANK SETUP:")
+        print(f"   High-Pressure Tank: P_VENT={self.config.HighPressureTank.P_VENT/1e5:.0f} bar, P_MIN={self.config.HighPressureTank.P_MIN/1e5:.0f} bar")
+        print(f"   Cryogenic Tank: P_VENT={self.config.CryogenicTank.P_VENT/1e5:.0f} bar, P_MIN={self.config.CryogenicTank.P_MIN/1e5:.0f} bar")
 
-        # Tank 1: CH2 tank (compressed hydrogen at ambient conditions)
-        print("Setting up Tank 1 (CH2 dormancy scenario)...")
-        if self.ch2_tank is None:
-            print("   ⚠️  No CH2 tank provided, creating default")
-            # Create default CH2 tank if not provided
-            self.ch2_tank = self._create_minimal_tank(0.1)  # Small default volume
+        # Setup tanks from provided geometries
+        for i, (tank_geom, tank_config, scenario) in enumerate([
+            (self.tank_geometries[0] if len(self.tank_geometries) > 0 else None, self.config.HighPressureTank, "DORMANCY"),
+            (self.tank_geometries[1] if len(self.tank_geometries) > 1 else None, self.config.CryogenicTank, "DISCHARGE")
+        ]):
+            tank_name = ["High-Pressure", "Cryogenic"][i]
+            print(f"Setting up Tank {i+1} ({tank_name})...")
 
-        tank1_properties = self._get_tank_properties(self.ch2_tank, tank_id="Tank1")
-        tank1 = self.ch2_tank
-        thermal1 = self._create_thermal_model(tank1_properties)
-        dynamic1 = IsochoricModelSwitcher(
-            scenario="DORMANCY",
-            p_min=self.config.Tank1.P_MIN,
-            p_vent=self.config.Tank1.P_VENT,
-            tank_volume=tank1_properties['volume']
+            if tank_geom is None:
+                print(f"   ⚠️  No {tank_name} tank provided, creating default")
+                tank_geom = self._create_minimal_tank(0.1)
+
+            tank_properties = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}")
+            thermal_model = self._create_thermal_model(tank_properties)
+            dynamic_model = IsochoricModelSwitcher(
+                scenario=scenario,
+                p_min=tank_config.P_MIN,
+                p_vent=tank_config.P_VENT,
+                tank_volume=tank_properties['volume']
+            )
+
+            self.tanks.append(tank_geom)
+            self.thermal_models.append(thermal_model)
+            self.dynamic_models.append(dynamic_model)
+
+            print(f"   ✅ Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m²")
+
+    def _setup_coupling_rules(self):
+        """Setup inter-tank coupling rules"""
+        if not self.enable_coupling:
+            print("🔗 Coupling disabled - running in independent tank mode")
+            return
+
+        print(f"\n🔗 COUPLING SETUP:")
+
+        # Example pressure-triggered valve: High-pressure → Cryogenic tank
+        valve = PressureTriggeredValve(
+            source_idx=0,
+            target_idx=1,
+            p_open=30e5,
+            p_close=32e5,
+            max_flow_rate=0.005,
+            orifice_diameter=0.002,
+            coupling_id="HighPressure→Cryogenic"
         )
 
-        self.tanks.append(tank1)
-        self.thermal_models.append(thermal1)
-        self.dynamic_models.append(dynamic1)
+        self.coupling_rules.append(valve)
 
-        print(f"   ✅ Tank 1: V={tank1_properties['volume']:.4f} m³, A_in={tank1_properties['inner_surface_area']:.3f} m²")
-
-        # Tank 2: CCH2 tank (cryocompressed hydrogen)
-        print("Setting up Tank 2 (CCH2 discharge scenario)...")
-        if self.mission_tank is None:
-            print("   ⚠️  No mission tank provided, creating default")
-            # Create default mission tank if not provided
-            self.mission_tank = self._create_minimal_tank(0.5)  # Default volume
-
-        tank2_properties = self._get_tank_properties(self.mission_tank, tank_id="Tank2")
-        tank2 = self.mission_tank
-        thermal2 = self._create_thermal_model(tank2_properties)
-        dynamic2 = IsochoricModelSwitcher(
-            scenario="DISCHARGE",
-            p_min=self.config.Tank2.P_MIN,
-            p_vent=self.config.Tank2.P_VENT,
-            tank_volume=tank2_properties['volume']
-        )
-
-        self.tanks.append(tank2)
-        self.thermal_models.append(thermal2)
-        self.dynamic_models.append(dynamic2)
-
-        print(f"   ✅ Tank 2: V={tank2_properties['volume']:.4f} m³, A_in={tank2_properties['inner_surface_area']:.3f} m²")
+        print(f"   🔗 Valve: Opens at {valve.p_open/1e5:.0f} bar, closes at {valve.p_close/1e5:.0f} bar")
+        print(f"      Max flow rate: {valve.max_flow_rate*1000:.1f} g/s")
+        print(f"      Orifice diameter: {math.sqrt(4*valve.effective_area/math.pi)*1000:.1f} mm")
+        print(f"   ✅ {len(self.coupling_rules)} coupling rules configured")
 
     def _create_minimal_tank(self, volume: float):
         """Create minimal tank object for state management"""
@@ -623,7 +723,7 @@ class MultiTankCCH2System:
     def _create_solver(self, method: str):
         """Create solver instance"""
         # Use the most restrictive time step from all tanks
-        min_timestep = min(self.config.Tank1.TIME_STEP, self.config.Tank2.TIME_STEP)
+        min_timestep = min(self.config.HighPressureTank.TIME_STEP, self.config.CryogenicTank.TIME_STEP)
 
         solver_config = {
             'timestep': min_timestep,
@@ -650,77 +750,77 @@ class MultiTankCCH2System:
         """Create initial multi-tank state with individual tank properties"""
         print("Creating initial multi-tank state...")
 
-        # Tank 1 initial conditions (CH2 tank with specified mass)
-        tank1_mass = self.config.Tank1.INITIAL_MASS  # Use specified mass directly
+        # Tank 1 initial conditions
+        tank1_mass = self.config.HighPressureTank.INITIAL_MASS
         tank1_volume = self.tanks[0].volume
         tank1_density = tank1_mass / tank1_volume
 
-        print(f"Tank 1 (CH2): Using specified mass {tank1_mass:.2f} kg in {tank1_volume:.4f} m³ volume")
-        print(f"              Resulting density: {tank1_density:.2f} kg/m³")
+        print(f"Tank 1: Using specified mass {tank1_mass:.2f} kg in {tank1_volume:.4f} m³ volume")
+        print(f"        Resulting density: {tank1_density:.2f} kg/m³")
 
         # Calculate thermal equilibrium solid temperature for Tank 1
-        if self.config.Tank1.INITIAL_SOLID_TEMP == "thermal_equilibrium":
+        if self.config.HighPressureTank.INITIAL_SOLID_TEMP == "thermal_equilibrium":
             tank1_solid_temp = self.thermal_models[0].calculate_thermal_equilibrium_Ts(
-                self.config.Tank1.INITIAL_TEMPERATURE
+                self.config.HighPressureTank.INITIAL_TEMPERATURE
             )
         else:
-            tank1_solid_temp = self.config.Tank1.INITIAL_SOLID_TEMP
+            tank1_solid_temp = self.config.HighPressureTank.INITIAL_SOLID_TEMP
 
         tank1_state = IsochoricTankState(
             tank=self.tanks[0],
             fuel_mass=tank1_mass,
-            temperature=self.config.Tank1.INITIAL_TEMPERATURE,
+            temperature=self.config.HighPressureTank.INITIAL_TEMPERATURE,
             solid_temperature=tank1_solid_temp,
             scenario="DORMANCY"
         )
 
-        # Tank 2 initial conditions (CCH2 tank calculated from P, T, V)
+        # Tank 2 initial conditions (cryogenic tank calculated from P, T, V)
         tank2_volume = self.tanks[1].volume
-        tank2_density = PropsSI("Dmass", "P", self.config.Tank2.INITIAL_PRESSURE,
-                               "T", self.config.Tank2.INITIAL_TEMPERATURE, "hydrogen")
+        tank2_density = PropsSI("Dmass", "P", self.config.CryogenicTank.INITIAL_PRESSURE,
+                               "T", self.config.CryogenicTank.INITIAL_TEMPERATURE, "hydrogen")
         tank2_mass = tank2_density * tank2_volume
 
-        print(f"Tank 2 (CCH2): Calculated from P={self.config.Tank2.INITIAL_PRESSURE/1e5:.0f} bar, T={self.config.Tank2.INITIAL_TEMPERATURE:.1f} K")
-        print(f"               Density: {tank2_density:.2f} kg/m³, Volume: {tank2_volume:.4f} m³")
-        print(f"               Resulting mass: {tank2_mass:.2f} kg")
+        print(f"Tank 2: Calculated from P={self.config.CryogenicTank.INITIAL_PRESSURE/1e5:.0f} bar, T={self.config.CryogenicTank.INITIAL_TEMPERATURE:.1f} K")
+        print(f"        Density: {tank2_density:.2f} kg/m³, Volume: {tank2_volume:.4f} m³")
+        print(f"        Resulting mass: {tank2_mass:.2f} kg")
 
         # Calculate thermal equilibrium solid temperature for Tank 2
-        if self.config.Tank2.INITIAL_SOLID_TEMP == "thermal_equilibrium":
+        if self.config.CryogenicTank.INITIAL_SOLID_TEMP == "thermal_equilibrium":
             tank2_solid_temp = self.thermal_models[1].calculate_thermal_equilibrium_Ts(
-                self.config.Tank2.INITIAL_TEMPERATURE
+                self.config.CryogenicTank.INITIAL_TEMPERATURE
             )
         else:
-            tank2_solid_temp = self.config.Tank2.INITIAL_SOLID_TEMP
+            tank2_solid_temp = self.config.CryogenicTank.INITIAL_SOLID_TEMP
 
         tank2_state = IsochoricTankState(
             tank=self.tanks[1],
             fuel_mass=tank2_mass,
-            temperature=self.config.Tank2.INITIAL_TEMPERATURE,
+            temperature=self.config.CryogenicTank.INITIAL_TEMPERATURE,
             solid_temperature=tank2_solid_temp,
             scenario="DISCHARGE"
         )
 
         print(f"Initial conditions summary:")
-        print(f"  Tank 1 (CH2): m={tank1_mass:.2f}kg, T={self.config.Tank1.INITIAL_TEMPERATURE:.1f}K, Ts={tank1_solid_temp:.1f}K")
-        print(f"  Tank 2 (CCH2): m={tank2_mass:.2f}kg, T={self.config.Tank2.INITIAL_TEMPERATURE:.1f}K, Ts={tank2_solid_temp:.1f}K")
+        print(f"  Tank 1: m={tank1_mass:.2f}kg, T={self.config.HighPressureTank.INITIAL_TEMPERATURE:.1f}K, Ts={tank1_solid_temp:.1f}K")
+        print(f"  Tank 2: m={tank2_mass:.2f}kg, T={self.config.CryogenicTank.INITIAL_TEMPERATURE:.1f}K, Ts={tank2_solid_temp:.1f}K")
 
         return MultiTankState(tank_states=[tank1_state, tank2_state])
 
     def _get_flow_rates(self, time: float, tank_index: int) -> Tuple[float, float]:
         """Get inflow and outflow rates for specific tank at given time"""
-        if tank_index == 0:  # Tank 1 (Dormancy)
-            return self.config.Tank1.INFLOW_RATE, self.config.Tank1.OUTFLOW_RATE
-        elif tank_index == 1:  # Tank 2 (Discharge)
-            return self.config.Tank2.INFLOW_RATE, self.config.Tank2.OUTFLOW_RATE
+        if tank_index == 0:  # Tank 1 (High Pressure)
+            return self.config.HighPressureTank.INFLOW_RATE, self.config.HighPressureTank.OUTFLOW_RATE
+        elif tank_index == 1:  # Tank 2 (Cryogenic)
+            return self.config.CryogenicTank.INFLOW_RATE, self.config.CryogenicTank.OUTFLOW_RATE
         else:
             raise ValueError(f"Invalid tank index: {tank_index}")
 
     def _create_ode_system(self):
-        """Create the unified ODE system for all tanks"""
+        """Create the unified ODE system for all tanks with coupling"""
 
         def ode_system(t, y):
             """
-            Unified ODE system for multi-tank analysis.
+            Unified ODE system for multi-tank analysis with inter-tank coupling.
 
             Args:
                 t: Time [s]
@@ -732,16 +832,36 @@ class MultiTankCCH2System:
             # Create multi-tank state from state vector
             try:
                 multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
+                tank_states = [multi_state.get_tank_state(i) for i in range(len(self.tanks))]
             except Exception as e:
                 print(f"❌ Failed to create multi-tank state at t={t:.1f}s: {e}")
                 return np.zeros_like(y)
 
-            # Compute derivatives for each tank
+            # Step 1: Evaluate coupling rules and calculate inter-tank flows
+            coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
+
+            if self.enable_coupling and self.coupling_rules:
+                try:
+                    for rule in self.coupling_rules:
+                        # Evaluate if coupling should be active
+                        if rule.evaluate(t, tank_states):
+                            # Calculate flow rate
+                            flow_rate = rule.calculate_flow_rate(t, tank_states)
+
+                            # Apply flow: source loses mass, target gains mass
+                            coupling_flows[rule.source_idx] -= flow_rate
+                            coupling_flows[rule.target_idx] += flow_rate
+
+                except Exception as e:
+                    print(f"❌ Coupling evaluation failed at t={t:.1f}s: {e}")
+                    # Continue with zero coupling flows
+
+            # Step 2: Compute derivatives for each tank with coupling contributions
             derivatives = []
 
             for tank_idx in range(len(self.tanks)):
                 try:
-                    tank_state = multi_state.get_tank_state(tank_idx)
+                    tank_state = tank_states[tank_idx]
 
                     # Apply bounds checking
                     if tank_state.fuel_mass <= 0.1:
@@ -749,7 +869,7 @@ class MultiTankCCH2System:
                     tank_state.temperature = max(min(tank_state.temperature, 1000.0), 10.0)
                     tank_state.solid_temperature = max(min(tank_state.solid_temperature, 1000.0), 10.0)
 
-                    # Get flow rates for this tank
+                    # Get base flow rates for this tank (external flows)
                     inflow_rate, outflow_rate = self._get_flow_rates(t, tank_idx)
 
                     # Create flow functions
@@ -760,19 +880,26 @@ class MultiTankCCH2System:
                     Q_solid = self.thermal_models[tank_idx].compute_heat_flux(t, tank_state)
                     dTs_dt = self.thermal_models[tank_idx].compute_solid_temperature_derivative(t, tank_state)
 
-                    # Compute dynamic derivatives
+                    # Compute base tank dynamics (unchanged)
                     tank_derivatives = self.dynamic_models[tank_idx].compute_state_derivatives(
                         t, tank_state, inflow_func, outflow_func,
                         Q_solid=Q_solid, dTs_dt=dTs_dt
                     )
 
+                    # Add coupling contribution to mass derivative
+                    coupling_dm_dt = coupling_flows[tank_idx]
+                    dm_dt = tank_derivatives.fuel_mass_derivative + coupling_dm_dt
+
+                    # Temperature and solid temperature derivatives (unchanged for now)
+                    dT_dt = tank_derivatives.temperature_derivative
+                    dTs_dt = tank_derivatives.solid_temperature_derivative
+
                     # Apply derivative bounds
-                    dm_dt = tank_derivatives.fuel_mass_derivative
                     if tank_state.fuel_mass <= 0.1 and dm_dt < 0:
                         dm_dt = 0.0
 
-                    dT_dt = max(min(tank_derivatives.temperature_derivative, 100.0), -100.0)
-                    dTs_dt = max(min(tank_derivatives.solid_temperature_derivative, 10.0), -10.0)
+                    dT_dt = max(min(dT_dt, 100.0), -100.0)
+                    dTs_dt = max(min(dTs_dt, 10.0), -10.0)
 
                     derivatives.extend([dm_dt, dT_dt, dTs_dt])
 
@@ -785,7 +912,7 @@ class MultiTankCCH2System:
         return ode_system
 
     def _create_stopping_events(self):
-        """Create density-based stopping events for ANY tank using individual volumes"""
+        """Create stopping events: density-based AND time-based"""
 
         # Get individual tank volumes
         tank1_volume = self.tanks[0].volume
@@ -794,18 +921,33 @@ class MultiTankCCH2System:
         def tank1_density_event(t, y):
             """Tank 1 density stopping event"""
             mass = y[0]  # Tank 1 mass is first element
-            if mass <= 0:
-                return 0.0
+            if mass <= 0.1:  # Safety check for near-empty tank
+                return -1.0  # Force termination
             density = mass / tank1_volume
-            return density - self.config.Tank1.STOPPING_DENSITY
+            return density - self.config.HighPressureTank.STOPPING_DENSITY
 
         def tank2_density_event(t, y):
             """Tank 2 density stopping event"""
             mass = y[3]  # Tank 2 mass is fourth element (after m1, T1, Ts1)
-            if mass <= 0:
-                return 0.0
+            if mass <= 0.1:  # Safety check for near-empty tank
+                return -1.0  # Force termination
             density = mass / tank2_volume
-            return density - self.config.Tank2.STOPPING_DENSITY
+            return density - self.config.CryogenicTank.STOPPING_DENSITY
+
+        def time_limit_event(t, y):
+            """Time-based stopping event - stop after 6 hours for coupling tests"""
+            max_time = 5 * 3600.0  # 5 hours in seconds
+            return t - max_time
+
+        def mass_safety_event(t, y):
+            """Safety event: stop if any tank becomes too empty"""
+            min_safe_mass = 0.5  # kg - minimum safe mass
+            tank1_mass = y[0]
+            tank2_mass = y[3]
+
+            if tank1_mass < min_safe_mass or tank2_mass < min_safe_mass:
+                return -1.0  # Force termination
+            return 1.0  # Continue
 
         # Configure events
         tank1_density_event.terminal = True
@@ -814,7 +956,40 @@ class MultiTankCCH2System:
         tank2_density_event.terminal = True
         tank2_density_event.direction = -1  # Trigger when decreasing (discharge)
 
-        return [tank1_density_event, tank2_density_event]
+        time_limit_event.terminal = True
+        time_limit_event.direction = 1   # Trigger when time exceeds limit
+
+        mass_safety_event.terminal = True
+        mass_safety_event.direction = -1  # Trigger when masses get too low
+
+        return [tank1_density_event, tank2_density_event, time_limit_event, mass_safety_event]
+
+    def enable_tank_coupling(self, enable: bool = True):
+        """Enable or disable inter-tank coupling for debugging"""
+        self.enable_coupling = enable
+        status = "ENABLED" if enable else "DISABLED"
+        print(f"🔗 Inter-tank coupling {status}")
+
+    def get_coupling_status(self) -> Dict[str, Any]:
+        """Get status of all coupling rules"""
+        if not self.coupling_rules:
+            return {"coupling_enabled": self.enable_coupling, "rules": []}
+
+        rule_status = []
+        for rule in self.coupling_rules:
+            rule_status.append({
+                "rule_id": rule.rule_id,
+                "source_idx": rule.source_idx,
+                "target_idx": rule.target_idx,
+                "is_active": rule.is_active,
+                "type": type(rule).__name__
+            })
+
+        return {
+            "coupling_enabled": self.enable_coupling,
+            "n_rules": len(self.coupling_rules),
+            "rules": rule_status
+        }
 
     def run_analysis(self, solver_method: str = None) -> MultiTankResults:
         """
@@ -827,13 +1002,15 @@ class MultiTankCCH2System:
             MultiTankResults: Analysis results
         """
         print("\n" + "="*80)
-        print("STARTING MULTI-TANK CCH2 ANALYSIS")
+        print("STARTING MULTI-TANK CCH2 ANALYSIS WITH COUPLING")
         print("="*80)
         print(f"System Configuration:")
         print(f"   • Number of Tanks: {len(self.tanks)}")
         print(f"   • Tank 1: Dormancy scenario (no flow, possible venting)")
         print(f"   • Tank 2: Discharge scenario (constant outflow)")
         print(f"   • State Vector Dimension: {3 * len(self.tanks)}")
+        print(f"   • Inter-tank Coupling: {'ENABLED' if self.enable_coupling else 'DISABLED'}")
+        print(f"   • Coupling Rules: {len(self.coupling_rules)}")
         print(f"   • Stopping Criteria: ANY tank reaches density target")
         print("="*80)
 
@@ -851,12 +1028,12 @@ class MultiTankCCH2System:
         stopping_events = self._create_stopping_events()
 
         # Determine integration duration (use maximum of all tanks)
-        max_duration = max(self.config.Tank1.MISSION_DURATION,
-                          self.config.Tank2.MISSION_DURATION)
+        max_duration = max(self.config.HighPressureTank.MISSION_DURATION,
+                          self.config.CryogenicTank.MISSION_DURATION)
 
         # Setup integration parameters
         t_span = (0.0, max_duration)
-        min_timestep = min(self.config.Tank1.TIME_STEP, self.config.Tank2.TIME_STEP)
+        min_timestep = min(self.config.HighPressureTank.TIME_STEP, self.config.CryogenicTank.TIME_STEP)
         t_eval = np.arange(0.0, max_duration, min_timestep)
         if t_eval[-1] < max_duration:
             t_eval = np.append(t_eval, max_duration)
@@ -887,10 +1064,11 @@ class MultiTankCCH2System:
 
                 # Check if stopped due to event
                 if hasattr(solution, 't_events') and solution.t_events:
+                    event_names = ["Tank 1 density", "Tank 2 density", "Time limit (1h)", "Mass safety"]
                     for i, event_times in enumerate(solution.t_events):
                         if len(event_times) > 0:
-                            tank_name = "Tank 1" if i == 0 else "Tank 2"
-                            print(f"   Stopped by {tank_name} density event at t={event_times[0]:.1f}s")
+                            event_name = event_names[i] if i < len(event_names) else f"Event {i}"
+                            print(f"   Stopped by {event_name} event at t={event_times[0]:.1f}s ({event_times[0]/3600:.2f}h)")
 
             else:
                 print(f"❌ Integration failed: {solution.message}")
@@ -920,17 +1098,17 @@ class MultiTankCCH2System:
                 'scenario': 'DORMANCY',
                 'initial_mass': initial_multi_state.tank_states[0].fuel_mass,
                 'initial_temp': initial_multi_state.tank_states[0].temperature,
-                'stopping_density': self.config.Tank1.STOPPING_DENSITY,
-                'inflow_rate': self.config.Tank1.INFLOW_RATE,
-                'outflow_rate': self.config.Tank1.OUTFLOW_RATE
+                'stopping_density': self.config.HighPressureTank.STOPPING_DENSITY,
+                'inflow_rate': self.config.HighPressureTank.INFLOW_RATE,
+                'outflow_rate': self.config.HighPressureTank.OUTFLOW_RATE
             },
             {
                 'scenario': 'DISCHARGE',
                 'initial_mass': initial_multi_state.tank_states[1].fuel_mass,
                 'initial_temp': initial_multi_state.tank_states[1].temperature,
-                'stopping_density': self.config.Tank2.STOPPING_DENSITY,
-                'inflow_rate': self.config.Tank2.INFLOW_RATE,
-                'outflow_rate': self.config.Tank2.OUTFLOW_RATE
+                'stopping_density': self.config.CryogenicTank.STOPPING_DENSITY,
+                'inflow_rate': self.config.CryogenicTank.INFLOW_RATE,
+                'outflow_rate': self.config.CryogenicTank.OUTFLOW_RATE
             }
         ]
 
@@ -996,12 +1174,12 @@ class MultiTankCCH2System:
                     phase = "unknown"
 
                 # Determine configuration using tank-specific thresholds
-                if tank_idx == 0:  # Tank 1 (CH2)
-                    p_vent = self.config.Tank1.P_VENT/1e5
-                    p_min = self.config.Tank1.P_MIN/1e5
-                else:  # Tank 2 (CCH2)
-                    p_vent = self.config.Tank2.P_VENT/1e5
-                    p_min = self.config.Tank2.P_MIN/1e5
+                if tank_idx == 0:  # Tank 1 (High Pressure)
+                    p_vent = self.config.HighPressureTank.P_VENT/1e5
+                    p_min = self.config.HighPressureTank.P_MIN/1e5
+                else:  # Tank 2 (Cryogenic)
+                    p_vent = self.config.CryogenicTank.P_VENT/1e5
+                    p_min = self.config.CryogenicTank.P_MIN/1e5
 
                 if p >= p_vent:
                     config = "Config C"
@@ -1158,10 +1336,10 @@ class MultiTankCCH2System:
 
 class GraphConfiguredMultiTankSystem:
     """
-    A system that wraps MultiTankCCH2System with graph-based configuration.
+    A system that wraps MultiTankSystem with graph-based configuration.
 
-    This class demonstrates how to configure the existing proven physics simulation
-    using a graph-based tank network definition instead of hard-coded parameters.
+    This class demonstrates how to configure the physics simulation
+    using a graph-based tank network definition.
     """
 
     def __init__(self, graph: TankSystemGraph, mission_tank: SphericalTank = None, ch2_tank: SphericalTank = None):
@@ -1180,8 +1358,9 @@ class GraphConfiguredMultiTankSystem:
         # Create configuration that matches the graph
         self.config = self._create_config_from_graph()
 
-        # Initialize the proven MultiTankCCH2System with graph-derived config
-        self.physics_system = MultiTankCCH2System(self.config, mission_tank, ch2_tank)
+        # Initialize the MultiTankSystem with graph-derived config
+        tank_geometries = [ch2_tank, mission_tank] if ch2_tank and mission_tank else []
+        self.physics_system = MultiTankSystem(self.config, tank_geometries)
 
     def _create_config_from_graph(self) -> MultiTankConfig:
         """Create MultiTankConfig from graph definition"""
@@ -1197,8 +1376,8 @@ class GraphConfiguredMultiTankSystem:
         # Config structure updated for individual tank approach
 
         # Set stopping densities from graph
-        config.Tank1.STOPPING_DENSITY = tank1.scenario_params.get("stopping_density", 70.0)
-        config.Tank2.STOPPING_DENSITY = tank2.scenario_params.get("stopping_density", 5.8)
+        config.HighPressureTank.STOPPING_DENSITY = tank1.scenario_params.get("stopping_density", 70.0)
+        config.CryogenicTank.STOPPING_DENSITY = tank2.scenario_params.get("stopping_density", 5.8)
 
         # Configure scenarios based on graph connections
         tank1_discharge_rate = self._get_discharge_rate_from_graph("Tank_1")
@@ -1217,8 +1396,8 @@ class GraphConfiguredMultiTankSystem:
             scenario2 = "discharge"
 
         print(f"Graph configuration extracted:")
-        print(f"  Tank 1: {scenario1} scenario, stopping at {config.Tank1.STOPPING_DENSITY} kg/m³")
-        print(f"  Tank 2: {scenario2} scenario, stopping at {config.Tank2.STOPPING_DENSITY} kg/m³")
+        print(f"  Tank 1: {scenario1} scenario, stopping at {config.HighPressureTank.STOPPING_DENSITY} kg/m³")
+        print(f"  Tank 2: {scenario2} scenario, stopping at {config.CryogenicTank.STOPPING_DENSITY} kg/m³")
         print(f"  Discharge rates: T1={tank1_discharge_rate:.4f} kg/s, T2={tank2_discharge_rate:.4f} kg/s")
 
         return config
@@ -1294,14 +1473,14 @@ def create_dual_tank_network_config():
     ch2_initial_temperature = 330.0  # K
     ch2_operating_pressure = 800e5  # Pa (800 bar P_VENT)
 
-    ch2_tank = calculate_ch2_tank_geometry(
+    ch2_tank = create_tank_from_fuel_mass(
         fuel_mass=ch2_fuel_mass,
         initial_pressure=ch2_initial_pressure,
         initial_temperature=ch2_initial_temperature,
-        operating_pressure=ch2_operating_pressure,  # Use P_VENT for wall design
-        safety_margin=1.1,  # 10% ullage
-        liner_thickness=0.005,  # 5mm aluminum liner
-        insulation_thickness=0.05,  # 50mm insulation
+        operating_pressure=ch2_operating_pressure,
+        safety_margin=1.1,
+        liner_thickness=0.005,
+        insulation_thickness=0.05,
     )
 
     # ===== Tank 2: CCH2 Tank (Cryocompressed Hydrogen) =====
@@ -1323,14 +1502,14 @@ def create_dual_tank_network_config():
     print(f"  Discharge rate: {discharge_rate} kg/s")
     print(f"  Mission duration: {mission_duration / 3600:.1f} hours")
 
-    cch2_tank, fuel_volume_required = calculate_mission_based_tank_geometry(
+    cch2_tank, fuel_volume_required = create_tank_from_mission(
         mission=discharge_mission,
         initial_pressure=cch2_initial_pressure,
         initial_temperature=cch2_initial_temperature,
-        operating_pressure=cch2_operating_pressure,  # Use P_VENT for wall design
-        safety_margin=1.2,  # 20% safety margin
-        liner_thickness=0.005,  # 5mm aluminum liner
-        insulation_thickness=0.05,  # 50mm insulation
+        operating_pressure=cch2_operating_pressure,
+        safety_margin=1.2,
+        liner_thickness=0.005,
+        insulation_thickness=0.05,
     )
 
     print(f"\n✅ Dual-tank geometry calculated:")
