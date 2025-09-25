@@ -328,16 +328,16 @@ class TankNetworkVisualizer:
             # Different shapes for different external types
             if 'SOURCE' in node:
                 shape = 'square'
-                symbol = '⊡'
+                symbol = 'S'
             elif 'SINK' in node:
                 shape = 'triangle'
-                symbol = '△'
+                symbol = 'K'
             elif 'ENVIRONMENT' in node:
                 shape = 'diamond'
-                symbol = '◇'
+                symbol = 'E'
             else:
                 shape = 'hexagon'
-                symbol = '⬡'
+                symbol = 'X'
 
             # Draw external node (larger for better visibility)
             if shape == 'square':
