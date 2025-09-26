@@ -141,6 +141,13 @@ class TankState:
     fuel_mass: float
     multi_flow: bool = False
 
+    # Flow rates (positive = inflow, negative = outflow)
+    inflow_rate: float = 0.0  # kg/s
+    outflow_rate: float = 0.0  # kg/s
+    vent_rate: float = 0.0  # kg/s
+    coupling_inflow_rate: float = 0.0  # kg/s (from other tanks)
+    coupling_outflow_rate: float = 0.0  # kg/s (to other tanks)
+
     @property
     def volume(self):
         return self.tank.volume
@@ -679,6 +686,13 @@ class IsochoricTankState:
     # Additional properties for isochoric analysis
     hydrogen: 'IsochoricHydrogen' = None
     derivatives: 'IsochoricStateDerivatives' = None
+
+    # Flow rates (positive = inflow, negative = outflow)
+    inflow_rate: float = 0.0  # kg/s
+    outflow_rate: float = 0.0  # kg/s
+    vent_rate: float = 0.0  # kg/s
+    coupling_inflow_rate: float = 0.0  # kg/s (from other tanks)
+    coupling_outflow_rate: float = 0.0  # kg/s (to other tanks)
 
     @property
     def volume(self):

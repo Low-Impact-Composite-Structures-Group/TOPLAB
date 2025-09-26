@@ -61,6 +61,10 @@ class PressureTriggeredValve(InterTankCoupling):
             self.is_active = False
             print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSED (P={target_pressure/1e5:.1f} bar > {self.p_close/1e5:.1f} bar)")
 
+        # Debug: Show valve state every few seconds when active
+        if self.is_active and int(t*10) % 50 == 0:  # Every 5 seconds
+            print(f"  Valve ACTIVE at t={t/3600:.3f}h: P_target={target_pressure/1e5:.1f}bar")
+
         return self.is_active
 
     def calculate_flow_rate(self, t: float, tank_states: List) -> float:

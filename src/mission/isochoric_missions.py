@@ -245,37 +245,69 @@ class DischargeMission(IsochoricMission):
 
     This mission handles discharge scenarios where hydrogen is consumed
     from the tank at specified rates with coupled thermal effects.
+    Supports both single-section and multi-section missions (like ATR72).
     """
 
     def __init__(self,
-                 discharge_rate: float,
-                 duration: float,
+                 discharge_rate: float = None,
+                 duration: float = None,
                  parameters: IsochoricMissionParameters = None,
                  altitude: float = 0.0,
-                 mach_number: float = 0.0):
+                 mach_number: float = 0.0,
+                 sections: list = None):
         """
         Initialize discharge mission.
 
         Args:
-            discharge_rate: Discharge mass flow rate [kg/s] (positive)
-            duration: Mission duration [s]
+            discharge_rate: Discharge mass flow rate [kg/s] (positive) - for single section
+            duration: Mission duration [s] - for single section
             parameters: Mission parameters
-            altitude: Mission altitude [m]
-            mach_number: Mission Mach number
+            altitude: Mission altitude [m] - for single section
+            mach_number: Mission Mach number - for single section
+            sections: List of MissionSection objects - for multi-section missions
         """
         if parameters is None:
             parameters = IsochoricMissionParameters()
 
-        # Create discharge section
-        discharge_section = MissionSection(
-            duration=duration,
-            fuel_flows=[OutFlow(-discharge_rate, "gas")],  # Negative for outflow
-            altitude=altitude,
-            mach_number=mach_number
-        )
+        if sections is not None:
+            # Multi-section mission (e.g., ATR72)
+            super().__init__(sections, parameters, "DISCHARGE")
+            # Calculate total discharge rate for compatibility
+            self.discharge_rate = self._calculate_average_discharge_rate()
+        else:
+            # Single-section mission (legacy behavior)
+            if discharge_rate is None or duration is None:
+                raise ValueError("For single-section missions, discharge_rate and duration are required")
 
-        super().__init__([discharge_section], parameters, "DISCHARGE")
-        self.discharge_rate = discharge_rate
+            discharge_section = MissionSection(
+                duration=duration,
+                fuel_flows=[OutFlow(-discharge_rate, "gas")],  # Negative for outflow
+                altitude=altitude,
+                mach_number=mach_number
+            )
+
+            super().__init__([discharge_section], parameters, "DISCHARGE")
+            self.discharge_rate = discharge_rate
+
+    def _calculate_average_discharge_rate(self) -> float:
+        """Calculate average discharge rate across all sections."""
+        total_fuel = 0.0
+        total_duration = 0.0
+
+        for section in self.sections:
+            for flow in section.fuel_flows:
+                if isinstance(flow, OutFlow):
+                    if isinstance(flow.mass_flow, list):
+                        # Time-varying flow: integrate using trapezoidal rule
+                        avg_rate = sum(abs(rate) for rate in flow.mass_flow) / len(flow.mass_flow)
+                    else:
+                        # Constant flow
+                        avg_rate = abs(flow.mass_flow)
+
+                    total_fuel += avg_rate * section.duration
+            total_duration += section.duration
+
+        return total_fuel / total_duration if total_duration > 0 else 0.0
 
     @classmethod
     def constant_discharge(cls,
@@ -336,6 +368,65 @@ class DischargeMission(IsochoricMission):
         mission = cls.__new__(cls)  # Create without calling __init__
         IsochoricMission.__init__(mission, [discharge_section], parameters, "DISCHARGE")
         return mission
+
+    @classmethod
+    def atr72_mission(cls,
+                     initial_mass: float = 25.0,
+                     initial_temperature: float = 53.25) -> DischargeMission:
+        """
+        Create ATR72 discharge mission with multiple sections.
+
+        Args:
+            initial_mass: Initial hydrogen mass [kg]
+            initial_temperature: Initial temperature [K]
+
+        Returns:
+            DischargeMission: Configured ATR72 mission with 11 sections
+        """
+        from src.mission.mission import Mission
+        from src.mission.mission_sections import MissionSection, OutFlow
+
+        parameters = IsochoricMissionParameters(
+            initial_mass=initial_mass,
+            initial_temperature=initial_temperature
+        )
+
+        # Get ATR72 mission definition
+        atr72_mission = Mission.atr72()
+        discharge_sections = []
+
+        print(f"Creating ATR72 discharge mission with {len(atr72_mission.sections)} sections:")
+        print("Section | Duration (s) | Flow Rate (kg/s) | Flow Type")
+        print("-" * 60)
+
+        for i, section in enumerate(atr72_mission.sections):
+            original_flow = section.fuel_flows[0]
+
+            # Convert to positive discharge rate for consistency
+            if isinstance(original_flow.mass_flow, list):
+                discharge_rates = [abs(rate) for rate in original_flow.mass_flow]
+                discharge_flow = OutFlow(discharge_rates, "gas")  # Positive rates for OutFlow
+                flow_str = f'{discharge_rates[0]:.6f} -> {discharge_rates[-1]:.6f}'
+                flow_type = 'Variable'
+            else:
+                discharge_rate = abs(original_flow.mass_flow)
+                discharge_flow = OutFlow(discharge_rate, "gas")  # Positive rate for OutFlow
+                flow_str = f'{discharge_rate:.6f}'
+                flow_type = 'Constant'
+
+            print(f'{i+1:7} | {section.duration:12.1f} | {flow_str:16} | {flow_type}')
+
+            discharge_section = MissionSection(
+                duration=section.duration,
+                fuel_flows=[discharge_flow],
+                altitude=section.altitude,
+                mach_number=section.mach_number,
+                fuel_flow_key=getattr(section, 'fuel_flow_key', f'section_{i+1}')
+            )
+
+            discharge_sections.append(discharge_section)
+
+        return cls(sections=discharge_sections, parameters=parameters)
 
 
 class RefuelMission(IsochoricMission):

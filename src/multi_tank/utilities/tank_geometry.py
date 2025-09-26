@@ -42,15 +42,23 @@ def create_tank_from_mission(
     # Calculate total fuel mass required from mission
     total_fuel_mass = 0.0
     for section in mission.sections:
-        # Get outflows (negative mass flows represent fuel consumption)
+        # Get outflows (fuel consumption)
         outflows = section.get_outflows()
         section_fuel_consumption = 0.0
 
         for flow in outflows:
             if hasattr(flow, 'mass_flow'):
-                # Mass flow is negative for outflows, make positive for consumption
-                consumption_rate = abs(flow.mass_flow)  # kg/s
-                section_fuel_consumption += consumption_rate * section.duration  # kg
+                if isinstance(flow.mass_flow, list):
+                    # Time-varying flow: integrate using trapezoidal rule
+                    # For linear interpolation between start and end values
+                    start_rate = abs(flow.mass_flow[0])
+                    end_rate = abs(flow.mass_flow[-1])
+                    avg_rate = (start_rate + end_rate) / 2.0  # Trapezoidal integration
+                    section_fuel_consumption += avg_rate * section.duration
+                else:
+                    # Constant flow
+                    consumption_rate = abs(flow.mass_flow)  # kg/s
+                    section_fuel_consumption += consumption_rate * section.duration  # kg
 
         total_fuel_mass += section_fuel_consumption
 

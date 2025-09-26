@@ -44,7 +44,8 @@ class MultiTankState:
     def from_state_vector(cls,
                          state_vector: np.ndarray,
                          tank_objects: List[Any],
-                         time: float = 0.0) -> 'MultiTankState':
+                         time: float = 0.0,
+                         flow_data: List[Dict] = None) -> 'MultiTankState':
         """Create MultiTankState from combined state vector"""
         n_tanks = len(tank_objects)
         if len(state_vector) != 3 * n_tanks:
@@ -59,6 +60,16 @@ class MultiTankState:
                 temperature=state_vector[idx + 1],
                 solid_temperature=state_vector[idx + 2]
             )
+
+            # Add flow rate data if provided
+            if flow_data and i < len(flow_data):
+                flow_info = flow_data[i]
+                tank_state.inflow_rate = flow_info.get('inflow_rate', 0.0)
+                tank_state.outflow_rate = flow_info.get('outflow_rate', 0.0)
+                tank_state.vent_rate = flow_info.get('vent_rate', 0.0)
+                tank_state.coupling_inflow_rate = flow_info.get('coupling_inflow_rate', 0.0)
+                tank_state.coupling_outflow_rate = flow_info.get('coupling_outflow_rate', 0.0)
+
             tank_states.append(tank_state)
 
         return cls(tank_states=tank_states, time=time)
@@ -121,16 +132,23 @@ class MultiTankResults:
             'temperatures': [],
             'solid_temperatures': [],
             'pressures': [],
-            'densities': []
+            'densities': [],
+            'inflow_rates': [],
+            'outflow_rates': [],
+            'vent_rates': [],
+            'coupling_inflow_rates': [],
+            'coupling_outflow_rates': []
         }
 
         for tank_idx in range(self.n_tanks):
             tank_data = self._extract_tank_arrays(tank_idx)
-            for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities']:
+            for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities',
+                       'inflow_rates', 'outflow_rates', 'vent_rates', 'coupling_inflow_rates', 'coupling_outflow_rates']:
                 data[key].append(tank_data[key])
 
         # Convert lists to numpy arrays
-        for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities']:
+        for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities',
+                   'inflow_rates', 'outflow_rates', 'vent_rates', 'coupling_inflow_rates', 'coupling_outflow_rates']:
             data[key] = np.array(data[key])
 
         return data
@@ -142,6 +160,11 @@ class MultiTankResults:
         solid_temperatures = []
         pressures = []
         densities = []
+        inflow_rates = []
+        outflow_rates = []
+        vent_rates = []
+        coupling_inflow_rates = []
+        coupling_outflow_rates = []
 
         for multi_state in self.multi_tank_states:
             tank_state = multi_state.get_tank_state(tank_index)
@@ -156,10 +179,22 @@ class MultiTankResults:
 
             densities.append(tank_state.density)
 
+            # Extract flow rates (convert to g/s for plotting)
+            inflow_rates.append(getattr(tank_state, 'inflow_rate', 0.0) * 1000)
+            outflow_rates.append(getattr(tank_state, 'outflow_rate', 0.0) * 1000)
+            vent_rates.append(getattr(tank_state, 'vent_rate', 0.0) * 1000)
+            coupling_inflow_rates.append(getattr(tank_state, 'coupling_inflow_rate', 0.0) * 1000)
+            coupling_outflow_rates.append(getattr(tank_state, 'coupling_outflow_rate', 0.0) * 1000)
+
         return {
             'masses': np.array(masses),
             'temperatures': np.array(temperatures),
             'solid_temperatures': np.array(solid_temperatures),
             'pressures': np.array(pressures),
-            'densities': np.array(densities)
+            'densities': np.array(densities),
+            'inflow_rates': np.array(inflow_rates),
+            'outflow_rates': np.array(outflow_rates),
+            'vent_rates': np.array(vent_rates),
+            'coupling_inflow_rates': np.array(coupling_inflow_rates),
+            'coupling_outflow_rates': np.array(coupling_outflow_rates)
         }

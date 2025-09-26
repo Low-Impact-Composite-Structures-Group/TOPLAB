@@ -160,14 +160,16 @@ class MultiTankSystem:
 
         print(f"\n🔗 COUPLING SETUP:")
 
-        # Example pressure-triggered valve: High-pressure → Cryogenic tank
+        # Pressure-triggered valve: High-pressure → Cryogenic tank
+        # Opens at 50 bar, closes at 52 bar to trigger BEFORE Configuration B (15 bar)
+        # High capacity valve to compete with ATR72 discharge rates (~0.1 kg/s)
         valve = PressureTriggeredValve(
             source_idx=0,
             target_idx=1,
-            p_open=30e5,
-            p_close=32e5,
-            max_flow_rate=0.005,
-            orifice_diameter=0.002,
+            p_open=17e5,
+            p_close=18e5,
+            max_flow_rate=0.15,  # 150 g/s - much higher capacity
+            orifice_diameter=0.01,  # 10mm diameter for higher flow
             coupling_id="HighPressure→Cryogenic"
         )
 
@@ -356,6 +358,9 @@ class MultiTankSystem:
     def _create_ode_system(self):
         """Create the unified ODE system for all tanks with coupling"""
 
+        # Storage for flow rates during integration
+        self._flow_history = []
+
         def ode_system(t, y):
             """
             Unified ODE system for multi-tank analysis with inter-tank coupling.
@@ -386,6 +391,13 @@ class MultiTankSystem:
                             # Calculate flow rate
                             flow_rate = rule.calculate_flow_rate(t, tank_states)
 
+                            # Debug output for significant flows
+                            if flow_rate > 1e-6:  # Only log flows > 1 mg/s
+                                if int(t) % 300 == 0:  # Every 5 minutes
+                                    p1 = tank_states[rule.source_idx].pressure / 1e5
+                                    p2 = tank_states[rule.target_idx].pressure / 1e5
+                                    print(f"t={t/3600:.2f}h: Coupling flow {rule.source_idx}→{rule.target_idx}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)")
+
                             # Apply flow: source loses mass, target gains mass
                             coupling_flows[rule.source_idx] -= flow_rate
                             coupling_flows[rule.target_idx] += flow_rate
@@ -410,6 +422,31 @@ class MultiTankSystem:
                     # Get base flow rates for this tank (external flows)
                     inflow_rate, outflow_rate = self._get_flow_rates(t, tank_idx)
 
+                    # Get coupling contribution
+                    coupling_dm_dt = coupling_flows[tank_idx]
+
+                    # Store flow rates in tank state for later plotting
+                    tank_state.inflow_rate = inflow_rate
+                    tank_state.outflow_rate = outflow_rate
+                    tank_state.vent_rate = 0.0  # TODO: Add venting logic
+                    tank_state.coupling_inflow_rate = max(0.0, coupling_dm_dt)
+                    tank_state.coupling_outflow_rate = max(0.0, -coupling_dm_dt)
+
+                    # Store flow data for this tank and time step
+                    if not hasattr(self, '_current_flow_data'):
+                        self._current_flow_data = []
+
+                    if len(self._current_flow_data) <= tank_idx:
+                        self._current_flow_data.extend([{} for _ in range(tank_idx + 1 - len(self._current_flow_data))])
+
+                    self._current_flow_data[tank_idx] = {
+                        'inflow_rate': inflow_rate,
+                        'outflow_rate': outflow_rate,
+                        'vent_rate': 0.0,
+                        'coupling_inflow_rate': max(0.0, coupling_dm_dt),
+                        'coupling_outflow_rate': max(0.0, -coupling_dm_dt)
+                    }
+
                     # Create flow functions
                     def inflow_func(time_arg): return inflow_rate
                     def outflow_func(time_arg): return outflow_rate
@@ -418,17 +455,27 @@ class MultiTankSystem:
                     Q_solid = self.thermal_models[tank_idx].compute_heat_flux(t, tank_state)
                     dTs_dt = self.thermal_models[tank_idx].compute_solid_temperature_derivative(t, tank_state)
 
-                    # Compute base tank dynamics (unchanged)
+                    # Create modified flow functions that include coupling effects
+                    def coupled_inflow_func(time_arg):
+                        base_inflow = inflow_rate
+                        coupling_inflow = max(0.0, coupling_dm_dt)  # Only positive coupling flow is inflow
+                        return base_inflow + coupling_inflow
+
+                    def coupled_outflow_func(time_arg):
+                        base_outflow = outflow_rate
+                        coupling_outflow = max(0.0, -coupling_dm_dt)  # Only negative coupling flow is outflow
+                        return base_outflow + coupling_outflow
+
+                    # Compute tank dynamics with coupling flows included in temperature calculation
                     tank_derivatives = self.dynamic_models[tank_idx].compute_state_derivatives(
-                        t, tank_state, inflow_func, outflow_func,
+                        t, tank_state, coupled_inflow_func, coupled_outflow_func,
                         Q_solid=Q_solid, dTs_dt=dTs_dt
                     )
 
-                    # Add coupling contribution to mass derivative
-                    coupling_dm_dt = coupling_flows[tank_idx]
-                    dm_dt = tank_derivatives.fuel_mass_derivative + coupling_dm_dt
+                    # Total mass derivative already includes coupling from the flow functions
+                    dm_dt = tank_derivatives.fuel_mass_derivative
 
-                    # Temperature and solid temperature derivatives (unchanged for now)
+                    # Temperature derivatives now properly account for coupling flows
                     dT_dt = tank_derivatives.temperature_derivative
                     dTs_dt = tank_derivatives.solid_temperature_derivative
 
@@ -444,6 +491,14 @@ class MultiTankSystem:
                 except Exception as e:
                     print(f"❌ Tank {tank_idx} derivative computation failed at t={t:.1f}s: {e}")
                     derivatives.extend([0.0, 0.0, 0.0])
+
+            # Store flow data for this time step
+            if hasattr(self, '_current_flow_data'):
+                self._flow_history.append({
+                    'time': t,
+                    'flow_data': self._current_flow_data.copy()
+                })
+                self._current_flow_data = []  # Reset for next evaluation
 
             return np.array(derivatives)
 
@@ -622,8 +677,23 @@ class MultiTankSystem:
 
         for i, t in enumerate(solution.t):
             try:
+                # Find matching flow data for this time
+                flow_data = None
+                if hasattr(self, '_flow_history'):
+                    # Find the closest flow data entry
+                    closest_flow_entry = None
+                    min_time_diff = float('inf')
+                    for flow_entry in self._flow_history:
+                        time_diff = abs(flow_entry['time'] - t)
+                        if time_diff < min_time_diff:
+                            min_time_diff = time_diff
+                            closest_flow_entry = flow_entry
+
+                    if closest_flow_entry and min_time_diff < 1.0:  # Within 1 second tolerance
+                        flow_data = closest_flow_entry['flow_data']
+
                 multi_state = MultiTankState.from_state_vector(
-                    solution.y[:, i], self.tanks, t
+                    solution.y[:, i], self.tanks, t, flow_data
                 )
                 multi_tank_states.append(multi_state)
             except Exception as e:
