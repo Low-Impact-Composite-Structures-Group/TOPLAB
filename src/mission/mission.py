@@ -36,9 +36,11 @@ class Mission:
         for section in self.sections:
             for flow in section.fuel_flows:
                 if isinstance(flow.mass_flow, list):
-                    height = abs(flow.mass_flow[-1] - flow.mass_flow[0])
+                    # Correct trapezoidal integration for linearly varying flow
+                    start_rate = abs(flow.mass_flow[0])
+                    end_rate = abs(flow.mass_flow[-1])
                     base = section.duration
-                    total_fuel += 0.5 * height * base
+                    total_fuel += 0.5 * (start_rate + end_rate) * base
                 else:
                     total_fuel += abs(flow.mass_flow) * section.duration
         return total_fuel

@@ -1,0 +1,103 @@
+# Custom Multi-Section Discharge Example
+analysis_name: "Custom Flight Profile"
+description: "Custom multi-section discharge mission for specialized aircraft operations"
+version: "1.0"
+
+# Network topology definition
+network:
+  number_of_tanks: 1
+  external_source: false
+  external_sink: true
+  tanks:
+    - tank_id: 1
+      tank_type: "CcH2"
+
+# Tank geometry and initial conditions
+geometry:
+  1:
+    phi: 3.0                             # Length/radius ratio (L/R)
+    initial_pressure: 400e5              # Pa (400 bar - cryocompressed storage)
+    initial_density: 80.0                # kg/m³ (initial density - temperature computed)
+    venting_pressure: 450e5              # Pa (450 bar - venting pressure)
+    minimum_pressure: 15e5               # Pa (15 bar - minimum allowable pressure)
+
+# Material specifications with NIST temperature-dependent properties
+materials:
+  liner:
+    nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
+    thickness: 0.005                     # m (5mm aluminum liner)
+  composite:
+    nist_path: "g10_nist"                # Path to NIST materials library
+    winding_angle: 54.7                  # degrees (optimal winding angle)
+    thickness: "calculated"              # Calculated from pressure requirements
+  insulation:
+    thickness: 0.050                     # m (50mm insulation layer)
+    heat_transfer_coefficient: 0.025     # W/m²K (vacuum insulation)
+  safety_margin: 1.25                    # Structural design safety factor
+
+# Mission profile configuration - CUSTOM MULTI-SECTION EXAMPLE
+mission:
+  type: "discharge"                      # Mission type: discharge
+  profile: "custom"                      # Profile: custom multi-section
+  ambient_temperature: 288.15            # K (ambient conditions)
+  # Required parameters for custom profile:
+  sections:
+    - duration: 300                      # s (5 min ground operations)
+      flow_rate: 0.01                    # kg/s (low ground consumption)
+      phase: "gas"
+    - duration: 600                      # s (10 min climb)
+      flow_rate: 0.08                    # kg/s (high climb consumption)
+      phase: "gas"
+    - duration: 2400                     # s (40 min cruise)
+      flow_rate: 0.06                    # kg/s (moderate cruise consumption)
+      phase: "gas"
+    - duration: 900                      # s (15 min approach/descent)
+      flow_rate: 0.04                    # kg/s (reduced descent consumption)
+      phase: "gas"
+    - duration: 300                      # s (5 min ground operations)
+      flow_rate: 0.01                    # kg/s (low ground consumption)
+      phase: "gas"
+
+# Stopping criteria
+stopping_criteria:
+  minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
+  use_density_stopping_events: false    # Use pressure-based stopping instead
+  use_duration_stopping: true           # Stop when section durations are complete (even if density target not met)
+
+# Coupling rules (empty for single tank)
+coupling_rules: []
+
+# Solver configuration
+solver:
+  method: "LSODA"                        # Primary integration method
+  rtol: 1e-6                            # Relative tolerance
+  atol: 1e-9                            # Absolute tolerance
+  time_step: 1.0                        # Base time step [s]
+  max_step: 10.0                        # Maximum step size [s]
+  custom_config: false                   # true if custom solver precision needed
+
+# Output settings
+output:
+  identifier: "custom_multi_section"     # Identifier string appended to file names
+  save_plots: true
+  plot_formats: ["png", "pdf"]
+  save_data: true
+  data_format: "csv"
+  results_directory: "output/results"
+  plots_directory: "output/plots"
+
+  # Plotting configuration
+  plotting:
+    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
+    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
+
+  # Plot configurations
+  plots:
+    tank_states:
+      enabled: true
+      figsize: [12, 10]
+      filename: "tank_states"
+    fuel_flow_profile:
+      enabled: true
+      figsize: [14, 10]
+      filename: "fuel_flow_profile"

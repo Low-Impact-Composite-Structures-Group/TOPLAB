@@ -16,7 +16,7 @@ from CoolProp.CoolProp import PropsSI
 
 from src.tank_design.tank_shapes import SphericalTank
 from src.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
-from src.multistep_methods.linear_multistep_methods import (
+from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
 )
 from src.thermodynamics.tank_states import IsochoricTankState
@@ -181,11 +181,18 @@ class MultiTankSystem:
         print(f"   ✅ {len(self.coupling_rules)} coupling rules configured")
 
     def _create_minimal_tank(self, volume: float):
-        """Create minimal tank object for state management"""
-        class MinimalTank:
-            def __init__(self, volume):
-                self.volume = volume
-        return MinimalTank(volume)
+        """Create minimal SphericalTank object for state management"""
+        from src.tank_design.tank_shapes import SphericalTank
+        from src.materials.materials_for_multi_tank.nist_material import NISTMaterial
+
+        # Calculate radius from volume: V = (4/3)πr³
+        radius = (3 * volume / (4 * 3.14159)) ** (1/3)
+
+        # Use default aluminum material
+        material = NISTMaterial.aluminum_6061T6_nist()
+        operating_pressure = 300e5  # 300 bar default
+
+        return SphericalTank(radius=radius, material=material, operating_pressure=operating_pressure)
 
     def _get_tank_properties(self, tank: SphericalTank, tank_id: str = "Unknown"):
         """Calculate tank properties from SphericalTank geometry"""
