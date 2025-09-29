@@ -198,7 +198,8 @@ class MissionSectionAnalysis:
         Returns:
             The calculated enthalpy value (J/kg)
         """
-        # Get enthalpy directly from our cryopump model
+        # Get enthalpy from cryopump model with configurable parameters
+        # TODO: Extract cryopump parameters from mission configuration if available
         enthalpy = CryoPumpModel.compute_pump_outlet_hydrogen(tank_pressure, tank_temperature)
         return enthalpy
 

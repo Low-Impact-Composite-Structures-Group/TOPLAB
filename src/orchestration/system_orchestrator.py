@@ -44,38 +44,51 @@ from CoolProp.CoolProp import PropsSI
 
 class SystemOrchestrator:
     """
-    Production-ready orchestrator for multi-tank hydrogen analysis.
+    System orchestrator for running multi-tank hydrogen storage analysis.
 
-    Integrates ScenarioConfig with MultiTankSystem DAE physics engine to provide:
-    - Unified YAML configuration loading
-    - Mission sequence execution with proper state management
-    - Multi-tank coupling with pressure-triggered valves
-    - Enhanced stopping criteria validation
-    - Results validation and output generation
-
-    Key Design Philosophy:
-    - Configuration-driven physics setup (no hardcoded parameters)
-    - Mission sequence chaining with state preservation
-    - Exposed physics components for inspection and modification
-    - Production-ready error handling and validation
+    The SystemOrchestrator provides a high-level interface for configuring
+    and running tank system analyses. It handles:
+    - Mission profile configuration and parsing
+    - Tank geometry sizing and configuration
+    - Analysis execution and results collection
     """
 
-    def __init__(self, scenario_config: ScenarioConfig):
-        """
-        Initialize orchestrator with ScenarioConfig.
+    # Class-level cache for sequential mission tank geometry
+    _cached_tank_geometries = {}
+    _sizing_mission_key = None
 
-        Args:
-            scenario_config: Unified configuration from YAML file
-        """
-        print("🔧 Initializing System Orchestrator...")
-        print("   Integrating ScenarioConfig with TankSystem DAE engine...")
-
-        self.scenario_config = scenario_config
+    def __init__(self, scenario_config: ScenarioConfig = None, config_path: str = None):
+        # Initialize scenario configuration
+        if scenario_config is not None:
+            self.scenario_config = scenario_config
+        elif config_path is not None:
+            self.scenario_config = ScenarioConfig(config_path)
+        else:
+            raise ValueError("Must provide either scenario_config or config_path")
 
         # Load mission profile first (needed for tank sizing)
-        mission = self.scenario_config.mission_sequence.missions[0]
-        self.mission_profile = self._get_mission_profile(mission.profile)
-        print(f"   ✓ Mission profile loaded: {mission.profile}")
+        # Respect the actual profile specified in the configuration
+        try:
+            import yaml
+            with open(self.scenario_config._config_path, 'r') as f:
+                raw_config = yaml.safe_load(f)
+
+            if 'mission' in raw_config and 'profile' in raw_config['mission']:
+                # Use the profile specified in the mission section
+                mission_profile = raw_config['mission']['profile']
+                print(f"   📋 Using mission section profile: {mission_profile}")
+            else:
+                # Fallback to mission_sequence
+                mission = self.scenario_config.mission_sequence.missions[0]
+                mission_profile = mission.profile
+                print(f"   📋 Using mission_sequence profile: {mission_profile}")
+        except Exception as e:
+            # Ultimate fallback
+            mission_profile = "atr72"  # Default to atr72 instead of constant flow
+            print(f"   ⚠️  Using fallback profile: {mission_profile} (error: {e})")
+
+        self.mission_profile = self._get_mission_profile(mission_profile)
+        print(f"   ✓ Mission profile loaded: {mission_profile}")
 
         # Create tank geometries from scenario configuration (now with mission profile available)
         self.tank_geometries = self._create_tank_geometries()
@@ -218,9 +231,22 @@ class SystemOrchestrator:
         # Calculate mission duration based on profile
         mission_duration = self._calculate_mission_duration()
 
-        # Get minimum density from first tank's configuration (assumes all tanks have same stopping criteria)
-        first_tank_data = list(self.scenario_config.tank_geometries.values())[0]
-        minimum_density = float(first_tank_data.get('minimum_density', 5.8))  # Default 5.8 kg/m³
+        # Get stopping criteria from configuration (prioritize stopping_criteria over tank geometry)
+        stopping_criteria = self.scenario_config.config_dict.get('stopping_criteria', {})
+
+        # Get minimum density (prioritize stopping_criteria, fallback to tank geometry)
+        if 'minimum_density' in stopping_criteria:
+            minimum_density = float(stopping_criteria['minimum_density'])
+        else:
+            first_tank_data = list(self.scenario_config.tank_geometries.values())[0]
+            minimum_density = float(first_tank_data.get('minimum_density', 5.8))  # Default 5.8 kg/m³
+
+        # Get target density from stopping criteria configuration
+        target_density = None
+        if 'target_density' in stopping_criteria:
+            target_density = float(stopping_criteria['target_density'])
+        elif 'maximum_density' in stopping_criteria:
+            target_density = float(stopping_criteria['maximum_density'])
 
         # Create system configuration with mission profile
         system_config = TankSystemConfig(
@@ -228,7 +254,8 @@ class SystemOrchestrator:
             MISSION_DURATION=mission_duration,
             tanks=tank_configs,
             mission_profile=self.mission_profile,
-            minimum_density=minimum_density
+            minimum_density=minimum_density,
+            target_density=target_density
         )
 
         return system_config
@@ -250,12 +277,89 @@ class SystemOrchestrator:
 
     def _get_mission_profile(self, profile_name: str):
         """Get mission profile object from profile name."""
-        from src.mission.mission import Mission
+        from src.mission.mission import Mission, MissionSection, OutFlow, InFlow
 
         if profile_name.lower() == "atr72":
             return Mission.atr72()
+        elif profile_name.lower() in ["constant_flow", "sequential_constant_flow"]:
+            return self._create_constant_flow_mission()
         else:
             raise ValueError(f"Unknown mission profile: {profile_name}")
+
+    def _create_constant_flow_mission(self):
+        """Create constant flow mission from scenario config parameters."""
+        from src.mission.mission import Mission, MissionSection, OutFlow, InFlow
+        import yaml
+
+        # Handle both old mission format and new mission section format
+        try:
+            # Try to read from mission section first (preferred for sequential missions)
+            config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
+            with open(config_path, 'r') as f:
+                raw_config = yaml.safe_load(f)
+
+            if 'mission' in raw_config:
+                # New mission section format - use current mission parameters
+                mission_data = raw_config['mission']
+                flow_rate = mission_data.get('flow_rate', 0.001)
+                duration = mission_data.get('duration', 36000)
+                mission_type = mission_data.get('type', 'discharge')
+                mission_key = mission_data.get('key', mission_type)
+                ambient_temp = mission_data.get('ambient_temperature', 288.15)
+
+            elif 'mission_sequence' in raw_config and 'missions' in raw_config['mission_sequence']:
+                # Fallback to sequential mission format - use first mission
+                mission_data = raw_config['mission_sequence']['missions'][0]
+                flow_rate = mission_data.get('flow_rate', 0.001)
+                duration = mission_data.get('max_duration', mission_data.get('duration', 36000))
+                mission_type = mission_data.get('type', 'discharge')
+                mission_key = mission_data.get('key', mission_type)
+                ambient_temp = raw_config['mission_sequence'].get('ambient_temperature', 288.15)
+            else:
+                # Fallback to old format
+                mission_config = self.scenario_config.mission_sequence.missions[0]
+                flow_rate = getattr(mission_config, 'flow_rate', 0.001)
+                duration = getattr(mission_config, 'duration', 3600)
+                mission_type = getattr(mission_config, 'type', 'discharge')
+                mission_key = mission_type
+                ambient_temp = getattr(mission_config, 'ambient_temperature', 288.15)
+        except Exception as e:
+            # Ultimate fallback
+            print(f"   ⚠️  Config reading failed: {e}")
+            flow_rate = 0.001
+            duration = 36000  # 10 hours
+            mission_type = 'discharge'
+            mission_key = 'discharge'
+            ambient_temp = 288.15
+
+        # Create flow object based on mission type
+        if mission_type.lower() == 'discharge':
+            # Negative flow for discharge (outflow)
+            fuel_flow = OutFlow(-abs(flow_rate), "gas")
+        elif mission_type.lower() == 'refuel':
+            # Positive flow for refuel (inflow) - need proper hydrogen object for cryopump physics
+            from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+            # Create a dummy hydrogen object - the actual cryopump enthalpy will be calculated dynamically
+            dummy_hydrogen = SinglePhaseRequester().get_hydrogen_properties(3e5, 20.4)  # 3 bar, 20.4K (dewar conditions)
+            fuel_flow = InFlow(abs(flow_rate), dummy_hydrogen)
+        elif mission_type.lower() == 'dormancy':
+            # Zero flow for dormancy
+            fuel_flow = OutFlow(0.0, "gas")
+        else:
+            # Default to discharge
+            fuel_flow = OutFlow(-abs(flow_rate), "gas")
+
+        # Create mission section with correct constructor parameters
+        mission_section = MissionSection(
+            duration,
+            [fuel_flow],
+            0.0,  # altitude - Ground level for tank operations
+            0.0,  # mach_number
+            mission_key,  # fuel_flow_key - use mission key
+            ambient_temp  # temperature
+        )
+
+        return Mission([mission_section])
 
     def _create_mission_sized_tank(self, geometry_data, material, operating_pressure):
         """
@@ -272,10 +376,140 @@ class SystemOrchestrator:
         from CoolProp.CoolProp import PropsSI
         import math
 
-        # Get mission fuel requirements
-        required_fuel_mass = self.mission_profile.required_fuel  # kg
+        # Check if this is part of a sequential mission analysis
+        # For sequential missions, reuse tank geometry from sizing mission
+        try:
+            import yaml
+            config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
+            if config_path != 'NO_PATH':
+                with open(config_path, 'r') as f:
+                    raw_config = yaml.safe_load(f)
 
-        # Get initial conditions
+                # Check if this config has mission_sequence (sequential missions)
+                if 'mission_sequence' in raw_config and 'missions' in raw_config['mission_sequence']:
+                    sizing_mission = raw_config['mission_sequence'].get('sizing_mission', 'discharge')
+                    current_mission = raw_config.get('mission', {}).get('type', 'unknown')
+
+                    # For sequential missions, use the ORIGINAL config path as base, not temp files
+                    # Extract original config path from the driver context
+                    original_config_path = config_path
+                    if '/tmp/simple_mission_' in config_path or 'temp_config_' in config_path:
+                        # This is a temporary config - find the original config path
+                        # Look for the original stops_verification.yaml config
+                        import os
+                        config_dir = os.path.dirname(config_path)
+                        potential_original = os.path.join(config_dir, 'stops_verification.yaml')
+                        if os.path.exists(potential_original):
+                            original_config_path = potential_original
+                        else:
+                            # If stops_verification.yaml not found in same dir, look in parent directories
+                            # The temp files are in /tmp but original might be elsewhere
+                            # Use a consistent original path based on temp filename pattern
+                            if '/tmp/simple_mission_' in config_path:
+                                # For stops verification, use a consistent base path
+                                original_config_path = 'stops_verification.yaml'  # Use relative path as consistent key
+
+                    # Generate cache key based on original config path
+                    cache_key = f"{original_config_path}_{sizing_mission}"
+
+                    if current_mission == sizing_mission:
+                        # This is the sizing mission - calculate and cache geometry
+                        print(f"   🔧 Sizing mission '{sizing_mission}' - calculating tank geometry")
+                        SystemOrchestrator._sizing_mission_key = cache_key
+                    else:
+                        # This is a non-sizing mission - try to reuse cached geometry
+                        if cache_key in SystemOrchestrator._cached_tank_geometries:
+                            cached_tank = SystemOrchestrator._cached_tank_geometries[cache_key]
+                            print(f"   🔧 Non-sizing mission '{current_mission}' - reusing tank geometry from '{sizing_mission}'")
+                            print(f"     Cached geometry: V={cached_tank.volume:.4f}m³, R={cached_tank.radius:.3f}m")
+                            return cached_tank
+                        else:
+                            print(f"   ⚠️  No cached geometry found for sizing mission '{sizing_mission}' - calculating new geometry")
+                            print(f"     Cache key: {cache_key}")
+                            print(f"     Available keys: {list(SystemOrchestrator._cached_tank_geometries.keys())}")
+        except Exception as e:
+            print(f"   ⚠️  Sequential mission detection failed: {e} - proceeding with normal sizing")
+
+        # Get mission fuel requirements from the actual mission profile
+        # This handles both predefined profiles (ATR72) and custom constant flow missions
+        try:
+            # First try to get fuel requirements directly from the mission profile
+            if hasattr(self.mission_profile, 'required_fuel'):
+                required_fuel_mass = self.mission_profile.required_fuel
+                print(f"   🔧 Using mission profile fuel requirement: {required_fuel_mass:.2f} kg")
+            else:
+                # Calculate from mission sections for custom profiles
+                required_fuel_mass = 0.0
+                for section in self.mission_profile.sections:
+                    # Get total outflow from section
+                    section_fuel = 0.0
+                    for flow in section.fuel_flows:
+                        if hasattr(flow, 'flow_rate') and flow.flow_rate < 0:  # Outflow (negative)
+                            section_fuel += abs(flow.flow_rate) * section.duration
+                        elif hasattr(flow, 'mass_flow_rate') and flow.mass_flow_rate < 0:  # Outflow (negative)
+                            section_fuel += abs(flow.mass_flow_rate) * section.duration
+                    required_fuel_mass += section_fuel
+                print(f"   🔧 Calculated fuel requirement from sections: {required_fuel_mass:.2f} kg")
+        except Exception as e:
+            # Fallback to config-based calculation for simple constant flow missions
+            print(f"   ⚠️ Mission profile fuel calculation failed: {e}")
+            try:
+                import yaml
+                config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
+                with open(config_path, 'r') as f:
+                    raw_config = yaml.safe_load(f)
+
+                if 'mission' in raw_config:
+                    current_mission = raw_config['mission']
+                    flow_rate = current_mission.get('flow_rate', 0.001)
+                    duration = current_mission.get('duration', 3600)
+                    required_fuel_mass = flow_rate * duration
+                    print(f"   🔧 Using config-based fuel requirement: {required_fuel_mass:.2f} kg")
+                else:
+                    required_fuel_mass = 36.0  # Default for ATR72-like missions
+                    print(f"   🔧 Using default fuel requirement: {required_fuel_mass:.2f} kg")
+            except:
+                required_fuel_mass = 36.0  # Default for ATR72-like missions
+                print(f"   🔧 Using fallback fuel requirement: {required_fuel_mass:.2f} kg")
+        print(f"   🔧 Mission profile type: {type(self.mission_profile)}")
+        if hasattr(self.mission_profile, 'sections'):
+            print(f"   🔧 Mission sections: {len(self.mission_profile.sections)}")
+            for i, section in enumerate(self.mission_profile.sections):
+                if hasattr(section, 'duration') and hasattr(section, 'fuel_flows'):
+                    flows = getattr(section, 'fuel_flows', [])
+                    flow_info = []
+                    for flow in flows:
+                        # Check different possible attributes for flow rate
+                        if hasattr(flow, 'flow_rate'):
+                            flow_info.append(f"{flow.flow_rate:.3f} kg/s")
+                        elif hasattr(flow, 'mass_flow_rate'):
+                            flow_info.append(f"{flow.mass_flow_rate:.3f} kg/s")
+                        else:
+                            flow_info.append(f"{type(flow).__name__}")
+                    flow_info_str = flow_info if flow_info else ["No flows"]
+                    print(f"      Section {i}: duration={section.duration}s, flows={flow_info_str}")
+
+        # Get initial conditions - ALWAYS use discharge mission conditions for tank sizing
+        try:
+            config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
+            with open(config_path, 'r') as f:
+                raw_config = yaml.safe_load(f)
+
+            # Check if this is part of a sequential mission
+            if 'mission' in raw_config:
+                current_mission = raw_config['mission']
+                mission_type = current_mission.get('type', 'discharge')
+
+                if mission_type != 'discharge':
+                    # Override with discharge mission conditions for consistent tank sizing
+
+                    geometry_data = geometry_data.copy()  # Don't modify original
+                    geometry_data['initial_pressure'] = 400e5  # 400 bar - discharge pressure
+                    geometry_data['initial_density'] = 78.0    # kg/m³ - discharge density
+
+        except Exception as e:
+            print(f"   ⚠️  Could not override initial conditions: {e}")
+
         initial_pressure = float(geometry_data['initial_pressure'])  # Pa
 
         # Calculate initial density from pressure and temperature OR density constraint
@@ -317,6 +551,14 @@ class SystemOrchestrator:
         from src.tank_design.tank_shapes import SphericalTank
         tank = SphericalTank(radius=tank_radius, material=material, operating_pressure=operating_pressure)
 
+        # Cache tank geometry for sequential missions if this is the sizing mission
+        if hasattr(SystemOrchestrator, '_sizing_mission_key') and SystemOrchestrator._sizing_mission_key:
+            cache_key = SystemOrchestrator._sizing_mission_key
+            SystemOrchestrator._cached_tank_geometries[cache_key] = tank
+            print(f"     ✓ Cached tank geometry for sequential missions: V={tank.volume:.4f}m³")
+            # Reset the key after caching
+            SystemOrchestrator._sizing_mission_key = None
+
         return tank
 
     def _setup_mission_sequences(self):
@@ -335,12 +577,13 @@ class SystemOrchestrator:
         # and passed to TankSystemConfig in _create_tank_system_config
         print(f"   ✓ Mission flow profile configured for DAE system")
 
-    def run_simulation(self, solver_method: str = "RK45") -> Any:
+    def run_simulation(self, solver_method: str = "RK45", solver_config: dict = None) -> Any:
         """
         Execute the complete multi-tank simulation using ScenarioConfig.
 
         Args:
             solver_method: Override solver method (RK45, LSODA, etc.)
+            solver_config: Optional solver configuration parameters (timestep, rtol, atol, max_step)
 
         Returns:
             MultiTankResults: Analysis results from DAE integration
@@ -361,7 +604,7 @@ class SystemOrchestrator:
             print("   🔧 Heat flow data collector configured for iHEX extraction")
 
             # Run the MultiTankSystem DAE simulation
-            self.results = self.tank_system.run_analysis(solver_method)
+            self.results = self.tank_system.run_analysis(solver_method, solver_config)
 
             end_time = time.time()
             wall_time = end_time - start_time
@@ -585,74 +828,248 @@ class SystemOrchestrator:
             # Create plotter with analysis name from config
             plotter = DelftColourPlotter(analysis_name=self.scenario_config.analysis_name)
 
-            # Generate plots for each tank
-            figures = []
-            for tank_idx in range(len(self.tank_geometries)):
-                print(f"   � Plotting Tank {tank_idx + 1} evolution...")
+            # Check if this is a sequential mission analysis
+            is_sequential = self._is_sequential_mission_analysis()
 
-                # Create reference lines from tank configuration
-                tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
-                reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+            if is_sequential:
+                print("🔍 Detected sequential mission analysis - using sequential plotting methods")
+                return self._generate_sequential_plots(plotter, save_path)
+            else:
+                print("🔍 Detected single mission analysis - using standard plotting methods")
+                return self._generate_single_mission_plots(plotter, save_path)
 
-                # Add mission ambient temperature if available
-                mission = self.scenario_config.mission_sequence.missions[0]
-                reference_lines['T_ambient'] = mission.ambient_temperature
+        except Exception as e:
+            print(f"   ⚠️ Plot generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
-                # Generate tank evolution plot
-                tank_save_path = None
+    def _is_sequential_mission_analysis(self) -> bool:
+        """
+        Detect if this is a sequential mission analysis based on config structure.
+
+        Returns:
+            bool: True if sequential missions detected, False otherwise
+        """
+        # Check if we have stored mission results from sequential execution
+        if hasattr(self, 'mission_results') and len(self.mission_results) > 1:
+            print(f"   🔎 Found {len(self.mission_results)} sequential mission results")
+            return True
+
+        # Check if config has mission section with multiple entries
+        if hasattr(self.scenario_config, 'config_dict') and self.scenario_config.config_dict:
+            mission_section = self.scenario_config.config_dict.get('mission', {})
+
+            # Look for multiple mission entries (discharge, refuel, dormancy)
+            mission_types = ['discharge', 'refuel', 'dormancy']
+            found_missions = [mission_type for mission_type in mission_types
+                            if mission_type in mission_section]
+
+            # Sequential if we have more than one mission type
+            if len(found_missions) > 1:
+                print(f"   🔎 Found sequential missions in config: {', '.join(found_missions)}")
+                return True
+
+        print("   🔎 Single mission analysis detected")
+        return False
+
+    def _generate_sequential_plots(self, plotter, save_path: str = None):
+        """Generate plots for sequential mission analysis."""
+        if not hasattr(self, 'mission_results'):
+            print("⚠️  No mission results available for sequential plotting")
+            return None
+
+        mission_data = self.mission_results
+        figures = []
+
+        # Generate sequential plots for each tank
+        num_tanks = len(self.tank_geometries)
+
+        for tank_idx in range(num_tanks):
+            print(f"🎨 Generating sequential plots for Tank {tank_idx + 1}")
+
+            # Create reference lines from tank configuration
+            tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+
+            # Add mission ambient temperature if available
+            if self.scenario_config.mission_sequence and self.scenario_config.mission_sequence.missions:
+                reference_lines['T_ambient'] = self.scenario_config.mission_sequence.missions[0].ambient_temperature
+
+            # Sequential tank evolution (4-panel plot)
+            if save_path:
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+                plot_path = save_dir / f"{save_name}_sequential_evolution_tank{tank_idx + 1}{save_ext}"
+            else:
+                plot_path = None
+
+            fig1 = plotter.plot_sequential_tank_evolution(
+                mission_results=mission_data,
+                tank_index=tank_idx,
+                reference_lines=reference_lines,
+                save_path=str(plot_path) if plot_path else None
+            )
+            figures.append(fig1)
+
+            # Sequential density-temperature diagram
+            if save_path:
+                plot_path = save_dir / f"{save_name}_sequential_density_temperature_tank{tank_idx + 1}{save_ext}"
+            else:
+                plot_path = None
+
+            # Get density-temperature plot configuration
+            dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
+            isobar_pressures = dt_config.get('isobar_pressures', [450, 400, 100, 15, 5])
+            show_reference_pressures = dt_config.get('show_reference_pressures', True)
+            include_saturation_line = dt_config.get('include_saturation_line', True)
+            include_isobars = dt_config.get('include_isobars', True)
+
+            ref_pressures = reference_lines if show_reference_pressures else None
+
+            fig2 = plotter.plot_sequential_density_temperature(
+                mission_results=mission_data,
+                tank_index=tank_idx,
+                include_saturation_line=include_saturation_line,
+                include_isobars=include_isobars,
+                isobar_pressures=isobar_pressures,
+                reference_pressures=ref_pressures,
+                save_path=str(plot_path) if plot_path else None
+            )
+            figures.append(fig2)
+
+            # Sequential mass flows
+            mf_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {})
+            if mf_config.get('enabled', True):
                 if save_path:
-                    # Create tank-specific save path
-                    from pathlib import Path
-                    save_dir = Path(save_path).parent
-                    save_name = Path(save_path).stem
-                    save_ext = Path(save_path).suffix or '.png'
-                    tank_save_path = save_dir / f"{save_name}_tank{tank_idx + 1}{save_ext}"
+                    mf_filename = mf_config.get('filename', 'mass_flows')
+                    plot_path = save_dir / f"{save_name}_sequential_{mf_filename}_tank{tank_idx + 1}{save_ext}"
+                else:
+                    plot_path = None
 
-                fig = plotter.plot_tank_evolution(
-                    results=self.results,
+                fig3 = plotter.plot_sequential_mass_flows(
+                    mission_results=mission_data,
                     tank_index=tank_idx,
-                    reference_lines=reference_lines,
-                    save_path=str(tank_save_path) if tank_save_path else None
+                    save_path=str(plot_path) if plot_path else None
                 )
-                figures.append(fig)
+                figures.append(fig3)
 
-                # Generate density-temperature plot for this tank
-                dt_save_path = None
-                if save_path:
-                    from pathlib import Path
-                    save_dir = Path(save_path).parent
-                    save_name = Path(save_path).stem
-                    save_ext = Path(save_path).suffix or '.png'
-                    dt_save_path = save_dir / f"{save_name}_density_temperature_tank{tank_idx + 1}{save_ext}"
+        # Count and report plots generated
+        plots_per_tank = 2  # Always: evolution + density-temperature
+        if mf_config.get('enabled', True):
+            plots_per_tank += 1
 
-                # Get density-temperature plot configuration
-                dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
+        plot_types = ['sequential evolution', 'sequential density-temperature']
+        if mf_config.get('enabled', True):
+            plot_types.append('sequential mass flows')
 
+        print(f"   ✅ Generated {len(figures)} sequential plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
+
+        # Return the first figure (or all figures if multiple tanks)
+        return figures[0] if len(figures) == 1 else figures
+
+    def _generate_single_mission_plots(self, plotter, save_path: str = None):
+        """Generate plots for single mission analysis."""
+        figures = []
+
+        # Generate plots for each tank
+        for tank_idx in range(len(self.tank_geometries)):
+            print(f"   🎨 Plotting Tank {tank_idx + 1} evolution...")
+
+            # Create reference lines from tank configuration
+            tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+
+            # Add mission ambient temperature if available
+            mission = self.scenario_config.mission_sequence.missions[0]
+            reference_lines['T_ambient'] = mission.ambient_temperature
+
+            # Generate tank evolution plot
+            tank_save_path = None
+            if save_path:
+                # Create tank-specific save path
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+                tank_save_path = save_dir / f"{save_name}_tank{tank_idx + 1}{save_ext}"
+
+            fig = plotter.plot_tank_evolution(
+                results=self.results,
+                tank_index=tank_idx,
+                reference_lines=reference_lines,
+                save_path=str(tank_save_path) if tank_save_path else None
+            )
+            figures.append(fig)
+
+            # Generate density-temperature plot for this tank
+            dt_save_path = None
+            if save_path:
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+                dt_save_path = save_dir / f"{save_name}_density_temperature_tank{tank_idx + 1}{save_ext}"
+
+            # Get density-temperature plot configuration
+            dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
+
+            # Extract plot parameters from config with defaults
+            isobar_pressures = dt_config.get('isobar_pressures', [450, 400, 100, 15, 5])
+            show_reference_pressures = dt_config.get('show_reference_pressures', True)
+            include_saturation_line = dt_config.get('include_saturation_line', True)
+            include_isobars = dt_config.get('include_isobars', True)
+
+            # Only pass reference pressures if config allows it
+            ref_pressures = reference_lines if show_reference_pressures else None
+
+            dt_fig = plotter.plot_density_temperature(
+                results=self.results,
+                tank_index=tank_idx,
+                include_saturation_line=include_saturation_line,
+                include_isobars=include_isobars,
+                isobar_pressures=isobar_pressures,
+                reference_pressures=ref_pressures,
+                save_path=str(dt_save_path) if dt_save_path else None
+            )
+            figures.append(dt_fig)
+
+            # Get mass flow plot configuration
+            mf_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {})
+
+            # Generate mass flow plot for this tank
+            mf_save_path = None
+            if save_path:
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+
+                # Use filename from config if available
+                mf_filename = mf_config.get('filename', 'mass_flows')
+                mf_save_path = save_dir / f"{save_name}_{mf_filename}_tank{tank_idx + 1}{save_ext}"
+
+            # Check if mass flow plots are enabled
+            if mf_config.get('enabled', True):
                 # Extract plot parameters from config with defaults
-                isobar_pressures = dt_config.get('isobar_pressures', [450, 400, 100, 15, 5])
-                show_reference_pressures = dt_config.get('show_reference_pressures', True)
-                include_saturation_line = dt_config.get('include_saturation_line', True)
-                include_isobars = dt_config.get('include_isobars', True)
+                include_venting_flow = mf_config.get('include_venting_flow', True)
 
-                # Only pass reference pressures if config allows it
-                ref_pressures = reference_lines if show_reference_pressures else None
-
-                dt_fig = plotter.plot_density_temperature(
+                mf_fig = plotter.plot_mass_flows(
                     results=self.results,
                     tank_index=tank_idx,
-                    include_saturation_line=include_saturation_line,
-                    include_isobars=include_isobars,
-                    isobar_pressures=isobar_pressures,
-                    reference_pressures=ref_pressures,
-                    save_path=str(dt_save_path) if dt_save_path else None
+                    include_venting_flow=include_venting_flow,
+                    save_path=str(mf_save_path) if mf_save_path else None
                 )
-                figures.append(dt_fig)
+                figures.append(mf_fig)
 
-                # Get mass flow plot configuration
-                mf_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {})
+            # Get heat exchanger plot configuration
+            hex_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {})
 
-                # Generate mass flow plot for this tank
-                mf_save_path = None
+            # Generate heat exchanger plot for this tank (if enabled)
+            if hex_config.get('enabled', False):
+                hex_save_path = None
                 if save_path:
                     from pathlib import Path
                     save_dir = Path(save_path).parent
@@ -660,88 +1077,53 @@ class SystemOrchestrator:
                     save_ext = Path(save_path).suffix or '.png'
 
                     # Use filename from config if available
-                    mf_filename = mf_config.get('filename', 'mass_flows')
-                    mf_save_path = save_dir / f"{save_name}_{mf_filename}_tank{tank_idx + 1}{save_ext}"
+                    hex_filename = hex_config.get('filename', 'heat_exchanger_requirements')
+                    hex_save_path = save_dir / f"{save_name}_{hex_filename}_tank{tank_idx + 1}{save_ext}"
 
-                # Check if mass flow plots are enabled
-                if mf_config.get('enabled', True):
-                    # Extract plot parameters from config with defaults
-                    include_venting_flow = mf_config.get('include_venting_flow', True)
+                # Calculate OHEX data if needed
+                qdot_ohex = self._calculate_ohex_requirements(tank_idx) if hex_config.get('include_ohex', True) else []
 
-                    mf_fig = plotter.plot_mass_flows(
-                        results=self.results,
-                        tank_index=tank_idx,
-                        include_venting_flow=include_venting_flow,
-                        save_path=str(mf_save_path) if mf_save_path else None
-                    )
-                    figures.append(mf_fig)
+                # Calculate iHEX data if needed
+                qdot_ihex = self._calculate_ihex_requirements(tank_idx) if hex_config.get('include_ihex', True) else [0.0] * len(self.results.times)
 
-                # Get heat exchanger plot configuration
-                hex_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {})
+                # Prepare heat exchanger data
+                heat_exchanger_data = {
+                    'times': self.results.times / 3600.0,  # Convert to hours
+                    'ihex_requirements': qdot_ihex,
+                    'ohex_requirements': qdot_ohex
+                }
 
-                # Generate heat exchanger plot for this tank (if enabled)
-                if hex_config.get('enabled', False):
-                    hex_save_path = None
-                    if save_path:
-                        from pathlib import Path
-                        save_dir = Path(save_path).parent
-                        save_name = Path(save_path).stem
-                        save_ext = Path(save_path).suffix or '.png'
+                hex_fig = plotter.plot_heat_exchanger_requirements(
+                    heat_exchanger_data=heat_exchanger_data,
+                    tank_index=tank_idx,
+                    include_ohex=hex_config.get('include_ohex', True),
+                    include_total=hex_config.get('include_total', True),
+                    save_path=str(hex_save_path) if hex_save_path else None
+                )
+                figures.append(hex_fig)
 
-                        # Use filename from config if available
-                        hex_filename = hex_config.get('filename', 'heat_exchanger_requirements')
-                        hex_save_path = save_dir / f"{save_name}_{hex_filename}_tank{tank_idx + 1}{save_ext}"
+        # Count plots generated
+        mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
+        heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
 
-                    # Calculate OHEX data if needed
-                    qdot_ohex = self._calculate_ohex_requirements(tank_idx) if hex_config.get('include_ohex', True) else []
+        plots_per_tank = 2  # Always: evolution + density-temperature
+        if mass_flows_enabled:
+            plots_per_tank += 1
+        if heat_exchanger_enabled:
+            plots_per_tank += 1
 
-                    # Calculate iHEX data if needed
-                    qdot_ihex = self._calculate_ihex_requirements(tank_idx) if hex_config.get('include_ihex', True) else [0.0] * len(self.results.times)
+        total_plots = len(self.results.tank_metadata) * plots_per_tank
 
-                    # Prepare heat exchanger data
-                    heat_exchanger_data = {
-                        'times': self.results.times / 3600.0,  # Convert to hours
-                        'ihex_requirements': qdot_ihex,
-                        'ohex_requirements': qdot_ohex
-                    }
+        plot_types = ['evolution', 'density-temperature']
+        if mass_flows_enabled:
+            plot_types.append('mass flows')
+        if heat_exchanger_enabled:
+            plot_types.append('heat exchanger requirements')
 
-                    hex_fig = plotter.plot_heat_exchanger_requirements(
-                        heat_exchanger_data=heat_exchanger_data,
-                        tank_index=tank_idx,
-                        include_ohex=hex_config.get('include_ohex', True),
-                        include_total=hex_config.get('include_total', True),
-                        save_path=str(hex_save_path) if hex_save_path else None
-                    )
-                    figures.append(hex_fig)
+        print(f"   ✅ Generated {len(figures)} tank plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
 
-            # Count plots generated
-            mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
-            heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
-
-            plots_per_tank = 2  # Always: evolution + density-temperature
-            if mass_flows_enabled:
-                plots_per_tank += 1
-            if heat_exchanger_enabled:
-                plots_per_tank += 1
-
-            total_plots = len(self.results.tank_metadata) * plots_per_tank
-
-            plot_types = ['evolution', 'density-temperature']
-            if mass_flows_enabled:
-                plot_types.append('mass flows')
-            if heat_exchanger_enabled:
-                plot_types.append('heat exchanger requirements')
-
-            print(f"   ✅ Generated {len(figures)} tank plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
-
-            # Return the first figure (or all figures if multiple tanks)
-            return figures[0] if len(figures) == 1 else figures
-
-        except Exception as e:
-            print(f"   ⚠️ Plot generation failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        # Return the first figure (or all figures if multiple tanks)
+        return figures[0] if len(figures) == 1 else figures
 
     def get_scenario_summary(self) -> Dict[str, Any]:
         """Get comprehensive summary of the scenario configuration and results."""

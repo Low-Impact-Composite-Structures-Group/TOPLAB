@@ -271,7 +271,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         if config == "C":
             # Configuration C: venting occurs
             # Simplified venting model - could be made more sophisticated
-            return max(0.0, (p - self.p_vent) * 1e-7)  # Simple proportional venting
+            return max(0.0, (p - self.p_vent) * 1e-8)  # Simple proportional venting
         else:
             return 0.0  # No venting in configurations A and B
 

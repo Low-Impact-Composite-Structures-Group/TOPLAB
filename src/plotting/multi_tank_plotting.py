@@ -646,6 +646,360 @@ class DelftColourPlotter:
 
         return reference_lines
 
+    def plot_sequential_tank_evolution(self,
+                                     mission_results: List[Dict[str, Any]],
+                                     tank_index: int = 0,
+                                     reference_lines: Optional[Dict[str, float]] = None,
+                                     save_path: Optional[str] = None) -> plt.Figure:
+        """
+        Plot sequential tank evolution across multiple missions with 4 subplots.
+
+        Creates the same 4-panel layout as plot_tank_evolution but combines data from
+        all missions with clear mission boundaries marked.
+
+        Args:
+            mission_results: List of dicts with keys 'name', 'type', 'result', 'orchestrator'
+            tank_index: Index of tank to plot (0 for first tank)
+            reference_lines: Optional dict with reference values
+            save_path: Optional path to save the plot
+
+        Returns:
+            matplotlib Figure object
+        """
+        print(f"🔵 Plotting sequential tank evolution for Tank {tank_index + 1}...")
+
+        # Aggregate data from all missions
+        combined_times = []
+        combined_pressures = []
+        combined_temperatures = []
+        combined_masses = []
+        combined_densities = []
+        mission_boundaries = []
+        mission_labels = []
+
+        time_offset = 0.0
+
+        for i, mission_result in enumerate(mission_results):
+            result = mission_result['result']
+            name = mission_result.get('name', mission_result.get('mission', f'Mission_{i+1}'))
+
+            # Extract tank data arrays
+            tank_data = result._extract_tank_arrays(tank_index)
+            times_hours = result.times / 3600.0  # Convert to hours
+
+            # Add time offset to continue from previous mission
+            adjusted_times = times_hours + time_offset
+
+            combined_times.extend(adjusted_times)
+            combined_pressures.extend(tank_data['pressures'])
+            combined_temperatures.extend(tank_data['temperatures'])
+            combined_masses.extend(tank_data['masses'])
+            combined_densities.extend(tank_data['densities'])
+
+            # Mark mission boundary (except for first mission)
+            if i > 0:
+                mission_boundaries.append(adjusted_times[0])
+
+            mission_labels.append({
+                'name': name.title(),
+                'start_time': adjusted_times[0],
+                'end_time': adjusted_times[-1]
+            })
+
+            # Update offset for next mission
+            time_offset = adjusted_times[-1]
+
+        # Create 2x2 subplot grid
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f"{self.analysis_name} - Sequential Tank {tank_index + 1} Evolution",
+                     fontsize=14, fontweight='bold')
+
+        # Colors from Delft palette
+        primary_color = DELFT_PALETTE[0]  # DONKERBLAUW
+        reference_color = DELFT_PALETTE[2]  # KONINGSBLAUW
+        boundary_color = DELFT_PALETTE[4]  # ORANJE
+
+        # Plot 1: Pressure vs Time
+        ax1 = axes[0, 0]
+        ax1.plot(combined_times, combined_pressures, color=primary_color, linewidth=2, label='Pressure')
+        ax1.set_xlabel('Time [hours]')
+        ax1.set_ylabel('Pressure [bar]')
+        ax1.set_title('Pressure vs Time')
+        ax1.grid(True, alpha=0.3)
+
+        # Add mission boundaries
+        for boundary in mission_boundaries:
+            ax1.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
+
+        # Add reference lines for pressure
+        if reference_lines:
+            if 'P_min' in reference_lines:
+                ax1.axhline(y=reference_lines['P_min'], color=reference_color,
+                           linestyle='--', alpha=0.7, label=f"P_min = {reference_lines['P_min']:.0f} bar")
+            if 'P_vent' in reference_lines:
+                ax1.axhline(y=reference_lines['P_vent'], color=DELFT_PALETTE[6],
+                           linestyle='--', alpha=0.7, label=f"P_vent = {reference_lines['P_vent']:.0f} bar")
+
+        if reference_lines and ('P_min' in reference_lines or 'P_vent' in reference_lines):
+            ax1.legend(fontsize=9)
+
+        # Plot 2: Temperature vs Time
+        ax2 = axes[0, 1]
+        ax2.plot(combined_times, combined_temperatures, color=primary_color, linewidth=2, label='Temperature')
+        ax2.set_xlabel('Time [hours]')
+        ax2.set_ylabel('Temperature [K]')
+        ax2.set_title('Temperature vs Time')
+        ax2.grid(True, alpha=0.3)
+
+        # Add mission boundaries
+        for boundary in mission_boundaries:
+            ax2.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
+
+        # Add reference line for ambient temperature
+        if reference_lines and 'T_ambient' in reference_lines:
+            ax2.axhline(y=reference_lines['T_ambient'], color=reference_color,
+                       linestyle='--', alpha=0.7, label=f"T_ambient = {reference_lines['T_ambient']:.0f} K")
+            ax2.legend(fontsize=9)
+
+        # Plot 3: Mass vs Time
+        ax3 = axes[1, 0]
+        ax3.plot(combined_times, combined_masses, color=primary_color, linewidth=2, label='Mass')
+        ax3.set_xlabel('Time [hours]')
+        ax3.set_ylabel('Mass [kg]')
+        ax3.set_title('Mass vs Time')
+        ax3.grid(True, alpha=0.3)
+
+        # Add mission boundaries
+        for boundary in mission_boundaries:
+            ax3.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
+
+        # Plot 4: Density vs Time
+        ax4 = axes[1, 1]
+        ax4.plot(combined_times, combined_densities, color=primary_color, linewidth=2, label='Density')
+        ax4.set_xlabel('Time [hours]')
+        ax4.set_ylabel('Density [kg/m³]')
+        ax4.set_title('Density vs Time')
+        ax4.grid(True, alpha=0.3)
+
+        # Add mission boundaries
+        for boundary in mission_boundaries:
+            ax4.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
+
+        # Add reference line for stopping density
+        if reference_lines and 'rho_stop' in reference_lines:
+            ax4.axhline(y=reference_lines['rho_stop'], color=reference_color,
+                       linestyle='--', alpha=0.7, label=f"ρ_stop = {reference_lines['rho_stop']:.1f} kg/m³")
+            ax4.legend(fontsize=9)
+
+        # Add mission labels at the top of the plot
+        for i, mission in enumerate(mission_labels):
+            mid_time = (mission['start_time'] + mission['end_time']) / 2
+            ax1.text(mid_time, ax1.get_ylim()[1] * 0.95, mission['name'],
+                    ha='center', va='top', fontsize=10, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+
+        # Improve layout
+        plt.tight_layout()
+
+        # Save if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {save_path}")
+
+        print(f"   ✅ Sequential tank evolution plot completed")
+        return fig
+
+    def plot_sequential_density_temperature(self,
+                                          mission_results: List[Dict[str, Any]],
+                                          tank_index: int = 0,
+                                          include_saturation_line: bool = True,
+                                          include_isobars: bool = True,
+                                          isobar_pressures: List[float] = None,
+                                          reference_pressures: Optional[Dict[str, float]] = None,
+                                          temperature_range: Tuple[float, float] = (15, 80),
+                                          density_range: Tuple[float, float] = (0, 80),
+                                          save_path: Optional[str] = None) -> plt.Figure:
+        """
+        Plot sequential density-temperature diagram showing thermodynamic path across all missions.
+
+        Shows the combined trajectory of hydrogen in density-temperature space for all missions
+        with different colors/markers for each mission phase.
+
+        Args:
+            mission_results: List of dicts with keys 'name', 'type', 'result', 'orchestrator'
+            tank_index: Index of tank to plot (0 for first tank)
+            include_saturation_line: Whether to include hydrogen saturation line
+            include_isobars: Whether to include isobar lines
+            isobar_pressures: List of pressures [bar] for isobars
+            reference_pressures: Dict with 'P_vent' and 'P_min' [bar] for highlighting
+            temperature_range: Min/max temperature range for the plot [K]
+            density_range: Min/max density range for the plot [kg/m³]
+            save_path: Optional path to save the plot
+
+        Returns:
+            matplotlib Figure object
+        """
+        print(f"🔵 Plotting sequential density-temperature for Tank {tank_index + 1}...")
+
+        # Default isobar pressures if not provided
+        if isobar_pressures is None:
+            isobar_pressures = [450, 400, 200, 100, 50, 15, 5]  # bar
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 8))
+        fig.suptitle(f"{self.analysis_name} - Sequential Density-Temperature (Tank {tank_index + 1})",
+                     fontsize=14, fontweight='bold')
+
+        # Different colors for each mission
+        mission_colors = [DELFT_PALETTE[0], DELFT_PALETTE[3], DELFT_PALETTE[5]]  # DONKERBLAUW, BORDEAUX, GRIJS
+
+        # Plot each mission's trajectory
+        for i, mission_result in enumerate(mission_results):
+            result = mission_result['result']
+            name = mission_result.get('name', mission_result.get('mission', f'Mission_{i+1}'))
+
+            # Extract tank data
+            tank_data = result._extract_tank_arrays(tank_index)
+
+            color = mission_colors[i % len(mission_colors)]
+
+            # Plot trajectory
+            ax.plot(tank_data['temperatures'], tank_data['densities'],
+                   color=color, linewidth=2.5, label=f"{name.title()}", alpha=0.8)
+
+            # Mark start and end points
+            ax.scatter(tank_data['temperatures'][0], tank_data['densities'][0],
+                      color=color, s=80, marker='o', edgecolor='white', linewidth=1, zorder=5)
+            ax.scatter(tank_data['temperatures'][-1], tank_data['densities'][-1],
+                      color=color, s=80, marker='s', edgecolor='white', linewidth=1, zorder=5)
+
+        # Add isobars if requested (simplified for sequential plots)
+        if include_isobars and isobar_pressures:
+            print(f"   📈 Isobar lines requested for pressures: {isobar_pressures} bar (skipped in sequential plot)")
+
+        # Add saturation line if requested (simplified for sequential plots)
+        if include_saturation_line:
+            print(f"   📈 Saturation line requested (skipped in sequential plot)")
+
+        # Set axis properties
+        ax.set_xlabel('Temperature [K]')
+        ax.set_ylabel('Density [kg/m³]')
+        ax.set_title('Thermodynamic Path')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Set axis limits
+        ax.set_xlim(temperature_range)
+        ax.set_ylim(density_range)
+
+        plt.tight_layout()
+
+        # Save if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {save_path}")
+
+        print(f"   ✅ Sequential density-temperature plot completed")
+        return fig
+
+    def plot_sequential_mass_flows(self,
+                                 mission_results: List[Dict[str, Any]],
+                                 tank_index: int = 0,
+                                 save_path: Optional[str] = None) -> plt.Figure:
+        """
+        Plot sequential mass flows showing flow rates across all missions.
+
+        Args:
+            mission_results: List of dicts with keys 'name', 'type', 'result', 'orchestrator'
+            tank_index: Index of tank to plot (0 for first tank)
+            save_path: Optional path to save the plot
+
+        Returns:
+            matplotlib Figure object
+        """
+        print(f"🔵 Plotting sequential mass flows for Tank {tank_index + 1}...")
+
+        # Aggregate flow data
+        combined_times = []
+        combined_flows = []
+        mission_boundaries = []
+        mission_labels = []
+
+        time_offset = 0.0
+
+        for i, mission_result in enumerate(mission_results):
+            result = mission_result['result']
+            name = mission_result.get('name', mission_result.get('mission', f'Mission_{i+1}'))
+            mission_type = mission_result.get('type', name.lower() if name else 'unknown')
+
+            times_hours = result.times / 3600.0
+            adjusted_times = times_hours + time_offset
+
+            # Get flow rates from mission type and duration
+            if mission_type.lower() == 'discharge':
+                flow_rates = [-0.001] * len(times_hours)  # kg/s (negative for outflow)
+            elif mission_type.lower() == 'refuel':
+                flow_rates = [0.07] * len(times_hours)   # kg/s (positive for inflow)
+            elif mission_type.lower() == 'dormancy':
+                flow_rates = [0.0] * len(times_hours)    # kg/s (zero flow)
+            else:
+                flow_rates = [0.0] * len(times_hours)
+
+            combined_times.extend(adjusted_times)
+            combined_flows.extend(flow_rates)
+
+            if i > 0:
+                mission_boundaries.append(adjusted_times[0])
+
+            mission_labels.append({
+                'name': name.title(),
+                'start_time': adjusted_times[0],
+                'end_time': adjusted_times[-1]
+            })
+
+            time_offset = adjusted_times[-1]
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 6))
+        fig.suptitle(f"{self.analysis_name} - Sequential Mass Flows (Tank {tank_index + 1})",
+                     fontsize=14, fontweight='bold')
+
+        # Plot flow rates
+        primary_color = DELFT_PALETTE[0]
+        ax.plot(combined_times, combined_flows, color=primary_color, linewidth=2.5, label='Mass Flow Rate')
+
+        # Add mission boundaries
+        boundary_color = DELFT_PALETTE[4]  # ORANJE
+        for boundary in mission_boundaries:
+            ax.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
+
+        # Add zero reference line
+        ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=1)
+
+        # Add mission labels
+        for mission in mission_labels:
+            mid_time = (mission['start_time'] + mission['end_time']) / 2
+            y_pos = ax.get_ylim()[1] * 0.9 if mission['name'] != 'Dormancy' else ax.get_ylim()[1] * 0.1
+            ax.text(mid_time, y_pos, mission['name'],
+                   ha='center', va='center', fontsize=10, fontweight='bold',
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Mass Flow Rate [kg/s]')
+        ax.set_title('Mass Flow Rate vs Time')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        plt.tight_layout()
+
+        # Save if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {save_path}")
+
+        print(f"   ✅ Sequential mass flows plot completed")
+        return fig
+
 
 def main():
     """Test the DelftColourPlotter with sample data."""

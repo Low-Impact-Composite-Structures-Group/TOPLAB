@@ -46,6 +46,7 @@ class TankSystemConfig:
     tanks: List[TankConfig] = None       # Tank configurations
     mission_profile: Any = None          # Mission profile for flow calculations
     minimum_density: float = 5.8         # Stopping density [kg/m³]
+    target_density: float = None         # Target density for refuel missions [kg/m³]
 
     def __post_init__(self):
         if self.tanks is None:
@@ -304,14 +305,24 @@ class TankSystem:
             for i in range(n_tanks):
                 tank_state = multi_state.tank_states[i]
 
-                # Check stopping criteria: minimum density
+                # Check stopping criteria: density-based stopping
                 tank_volume = self._cached_tank_properties[i]['volume']
                 current_density = tank_state.fuel_mass / tank_volume
 
+                # Check for minimum density (discharge/dormancy missions)
                 if current_density <= self.config.minimum_density:
-                    if not hasattr(self, '_density_stop_printed'):
+                    if not hasattr(self, '_min_density_stop_printed'):
                         print(f"   ⏹️  Tank {i+1} reached minimum density: {current_density:.2f} ≤ {self.config.minimum_density:.2f} kg/m³")
-                        self._density_stop_printed = True
+                        self._min_density_stop_printed = True
+                    # Set very small derivatives instead of zero to allow graceful termination
+                    dydt = np.ones(len(y)) * 1e-12
+                    return dydt
+
+                # Check for target density (refuel missions)
+                if self.config.target_density is not None and current_density >= self.config.target_density:
+                    if not hasattr(self, '_target_density_stop_printed'):
+                        print(f"   ⏹️  Tank {i+1} reached target density: {current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³")
+                        self._target_density_stop_printed = True
                     # Set very small derivatives instead of zero to allow graceful termination
                     dydt = np.ones(len(y)) * 1e-12
                     return dydt
@@ -324,8 +335,8 @@ class TankSystem:
                     tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
 
                 # Create mission-based flow functions
-                def fuel_flow_func(time): return 0.0  # No fuel inflow for discharge scenario
-                def discharge_flow_func(time): return self._get_discharge_flow_rate(time, i)  # Mission-based discharge
+                def fuel_flow_func(time): return self._get_inflow_rate(time, i)  # Mission-based inflow (refuel)
+                def discharge_flow_func(time): return self._get_outflow_rate(time, i)  # Mission-based outflow (discharge)
 
                 # Add coupling contributions
                 net_coupling_flow = sum(coupling_flows.get(f"to_{i}", [])) - sum(coupling_flows.get(f"from_{i}", []))
@@ -380,25 +391,55 @@ class TankSystem:
 
         return flows
 
-    def _get_discharge_flow_rate(self, time: float, tank_index: int) -> float:
+    def _get_outflow_rate(self, time: float, tank_index: int) -> float:
         """
-        Get discharge flow rate for specific tank at given time based on mission profile.
+        Get outflow (discharge) rate for specific tank at given time based on mission profile.
 
         Args:
             time: Current time [s]
             tank_index: Tank index (0-based)
 
         Returns:
-            Discharge flow rate [kg/s] (positive = outflow)
+            Outflow rate [kg/s] (positive = outflow)
+        """
+        return self._get_flow_rate(time, tank_index, 'OutFlow')
+
+    def _get_inflow_rate(self, time: float, tank_index: int) -> float:
+        """
+        Get inflow (refuel) rate for specific tank at given time based on mission profile.
+
+        Args:
+            time: Current time [s]
+            tank_index: Tank index (0-based)
+
+        Returns:
+            Inflow rate [kg/s] (positive = inflow)
+        """
+        return self._get_flow_rate(time, tank_index, 'InFlow')
+
+    def _get_flow_rate(self, time: float, tank_index: int, flow_type: str) -> float:
+        """
+        Get flow rate for specific tank at given time and flow type.
+
+        Args:
+            time: Current time [s]
+            tank_index: Tank index (0-based)
+            flow_type: 'InFlow' or 'OutFlow'
+
+        Returns:
+            Flow rate [kg/s] (positive)
         """
         if self.config.mission_profile is None:
             return 0.0
 
-        # For single tank scenarios, tank 0 gets the mission discharge flow
+        # For single tank scenarios, tank 0 gets the mission flow
         if tank_index != 0:
             return 0.0
 
         try:
+            # Import flow types
+            from src.mission.mission_sections import InFlow, OutFlow
+
             # Find which mission section we're in
             current_time = 0.0
 
@@ -409,20 +450,29 @@ class TankSystem:
                     # We're in this section - calculate flow rate
                     section_time = time - current_time
 
-                    # Extract outflows from this section
+                    # Extract flows of the specified type from this section
                     for flow in section.fuel_flows:
-                        if hasattr(flow, 'mass_flow'):
-                            if isinstance(flow.mass_flow, list):
+                        # Check if this is the right flow type
+                        if flow_type == 'InFlow' and isinstance(flow, InFlow):
+                            target_flow = flow
+                        elif flow_type == 'OutFlow' and isinstance(flow, OutFlow):
+                            target_flow = flow
+                        else:
+                            continue
+
+                        # Extract flow rate
+                        if hasattr(target_flow, 'mass_flow'):
+                            if isinstance(target_flow.mass_flow, list):
                                 # Time-varying flow: linear interpolation
-                                start_rate = abs(flow.mass_flow[0])
-                                end_rate = abs(flow.mass_flow[-1])
+                                start_rate = abs(target_flow.mass_flow[0])
+                                end_rate = abs(target_flow.mass_flow[-1])
                                 progress = section_time / section.duration if section.duration > 0 else 0
                                 return start_rate + (end_rate - start_rate) * progress
                             else:
                                 # Constant flow rate
-                                return abs(flow.mass_flow)
+                                return abs(target_flow.mass_flow)
 
-                    # No flows in this section
+                    # No flows of this type in this section
                     return 0.0
 
                 current_time = section_end_time
@@ -434,12 +484,13 @@ class TankSystem:
             print(f"⚠️  Error calculating discharge flow at t={time:.1f}s: {e}")
             return 0.0
 
-    def run_analysis(self, solver_method: str = "RK45") -> MultiTankResults:
+    def run_analysis(self, solver_method: str = "RK45", solver_config: dict = None) -> MultiTankResults:
         """
         Run complete tank system analysis.
 
         Args:
             solver_method: ODE solver to use ("RK45", "LSODA", "Radau", etc.)
+            solver_config: Optional solver configuration parameters
 
         Returns:
             MultiTankResults with time series data
@@ -449,23 +500,42 @@ class TankSystem:
         print(f"   Tanks: {len(self.tanks)}")
         print(f"   Solver: {solver_method}")
 
-        # Setup solver with default timestep
-        default_timestep = 1.0  # seconds
+        # Setup solver with configuration parameters
+        solver_config = solver_config or {}
+
+        # Extract solver parameters with defaults and ensure proper types
+        timestep = float(solver_config.get('time_step', 1.0))  # Default timestep
+        rtol = float(solver_config.get('rtol', 1e-6))
+        atol = float(solver_config.get('atol', 1e-9))
+        max_step = solver_config.get('max_step', None)
+        if max_step is not None:
+            max_step = float(max_step)
+
+        # Create solver configuration
+        solver_params = {
+            'timestep': timestep,
+            'rtol': rtol,
+            'atol': atol,
+        }
+        if max_step is not None:
+            solver_params['max_step'] = max_step
+
+        print(f"   🔧 Solver parameters: timestep={timestep}s, rtol={rtol:.0e}, atol={atol:.0e}, max_step={max_step}")
 
         if solver_method == "LSODA":
-            self.solver = LSODASolver(timestep=default_timestep)
+            self.solver = LSODASolver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         elif solver_method == "RK45":
-            self.solver = RK45Solver(timestep=default_timestep)
+            self.solver = RK45Solver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         elif solver_method == "Radau":
-            self.solver = RadauSolver(timestep=default_timestep)
+            self.solver = RadauSolver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         elif solver_method == "DOP853":
-            self.solver = DOP853Solver(timestep=default_timestep)
+            self.solver = DOP853Solver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         elif solver_method == "BDF":
-            self.solver = BDFSolver(timestep=default_timestep)
+            self.solver = BDFSolver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         else:
             raise ValueError(f"Unknown solver method: {solver_method}")
@@ -533,7 +603,7 @@ class TankSystem:
                 tank_state.get_hydrogen_properties()
 
                 # Calculate flow rates for this time step
-                discharge_flow = self._get_discharge_flow_rate(current_time, tank_idx)
+                discharge_flow = self._get_outflow_rate(current_time, tank_idx)
                 inflow_rate = 0.0  # No inflow for discharge scenario
                 outflow_rate = discharge_flow  # Discharge is outflow
                 vent_rate = 0.0  # TODO: Implement venting logic if needed

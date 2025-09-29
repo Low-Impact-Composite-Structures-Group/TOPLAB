@@ -91,6 +91,7 @@ class ScenarioConfig:
             config_dict = yaml.safe_load(f)
 
         scenario = cls(config_dict)
+        scenario._config_path = str(yaml_path)  # Store config path for SystemOrchestrator
         scenario.validate()
         return scenario
 

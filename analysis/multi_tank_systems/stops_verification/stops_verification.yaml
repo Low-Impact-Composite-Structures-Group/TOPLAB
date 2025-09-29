@@ -1,0 +1,178 @@
+# Stops Verification Configuration - Orchestrated Framework
+analysis_name: "Stops Verification Sequential Missions"
+description: "Sequential discharge → refuel → dormancy missions using orchestrated framework"
+version: "1.0"
+
+# Network topology definition (same format as single_tank_cch2)
+network:
+  number_of_tanks: 1
+  external_source: false
+  external_sink: true
+  tanks:
+    - tank_id: 1
+      tank_type: "CcH2"
+
+# Tank geometry and initial conditions (same format as single_tank_cch2)
+geometry:
+  1:
+    phi: 3.0                             # Length/radius ratio (L/R)
+    initial_pressure: 400e5              # Pa (400 bar - cryocompressed storage)
+    initial_density: 78.0               # kg/m³ (high density for sequential analysis)
+    venting_pressure: 450e5              # Pa (450 bar - venting pressure)
+    minimum_pressure: 15e5               # Pa (15 bar - minimum allowable pressure)
+
+# Material specifications (same format as single_tank_cch2)
+materials:
+  liner:
+    nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
+    thickness: 0.005                     # m (5mm aluminum liner)
+  composite:
+    nist_path: "g10_nist"                # Path to NIST materials library
+    winding_angle: 54.7                  # degrees (optimal winding angle)
+    thickness: "calculated"              # Calculated from pressure requirements
+  insulation:
+    thickness: 0.050                     # m (50mm insulation layer)
+    heat_transfer_coefficient: 0.025     # W/m²K (vacuum insulation)
+  safety_margin: 1.25                    # Structural design safety factor
+
+# Temporary compatibility section (for ScenarioConfig)
+mission:
+  type: "discharge"
+  profile: "sequential_constant_flow"
+  ambient_temperature: 288.15
+
+# Mission sequence configuration (sequential missions framework)
+mission_sequence:
+  profile: "sequential_constant_flow"   # Profile type for sequential missions
+  ambient_temperature: 288.15          # K (ambient conditions for all missions)
+
+  # Tank sizing configuration
+  sizing_mission: "discharge"           # Which mission to use for tank geometry sizing
+
+  # Global parameters for all missions
+  global_parameters:
+    # Cryopump parameters (for refuel missions)
+    cryopump:
+      dewar_pressure: 3e5               # Pa (3 bar dewar pressure)
+      dewar_temperature: 20.4           # K (saturated liquid at 3 bar)
+      pump_efficiency: 0.78             # Isentropic efficiency
+
+  # Sequential mission definitions
+  missions:
+    - name: "discharge"
+      type: "discharge"
+      key: "discharge"                  # Mission identifier
+      flow_rate: 0.001                  # kg/s (1 g/s discharge rate)
+      target_density: 5.8               # kg/m³ (stopping criteria)
+      max_duration: 36000               # s (10 hours max)
+      initial_conditions: "from_geometry" # Use geometry section initial conditions
+
+      # Mission-specific solver configuration
+      solver:
+        method: "LSODA"                 # Adaptive method good for discharge dynamics
+        time_step: 1.0                  # s (moderate timestep for discharge)
+        max_step:  10.0                   # s (smaller max step for accuracy during transients)
+        rtol: 1e-6                      # Relative tolerance
+        atol: 1e-9                      # Absolute tolerance
+
+    - name: "refuel"
+      type: "refuel"
+      key: "refuel"                     # Mission identifier
+      flow_rate: 0.07                   # kg/s (70 g/s refuel rate)
+      target_density: 78.0              # kg/m³ (restore full density)
+      max_duration: 600                 # s (10 minutes max)
+      initial_conditions: "from_config"  # Use refuel-specific initial conditions
+
+      # Refuel mission initial conditions (low pressure/density state)
+      initial_pressure: 15e5            # Pa (15 bar - post-discharge state)
+      initial_density: 7.8              # kg/m³ (low density after discharge)
+
+      # Mission-specific solver configuration
+      solver:
+        method: "LSODA"                 # Adaptive method for rapid dynamics
+        time_step: 0.1                  # s (small timestep for fast refuel dynamics)
+        max_step: 1.0                   # s (very small max step for rapid pressure changes)
+        rtol: 1e-7                      # Tighter relative tolerance
+        atol: 1e-10                     # Tighter absolute tolerance
+
+    - name: "dormancy"
+      type: "dormancy"
+      key: "dormancy"                   # Mission identifier
+      flow_rate: 0.0                    # kg/s (no flow)
+      duration: 216000                  # s (60 hours fixed)
+      initial_conditions: "from_config"  # Use dormancy-specific initial conditions
+
+      # Dormancy mission initial conditions (post-refuel state)
+      initial_pressure: 400e5           # Pa (400 bar - restored after refuel)
+      initial_density: 78.0             # kg/m³ (full density after refuel)
+
+      # Mission-specific solver configuration
+      solver:
+        method: "LSODA"                 # Adaptive method for slow thermal dynamics
+        time_step: 1.0                  # s (smaller timestep for venting accuracy)
+        max_step: 10.0                  # s (smaller max step to capture venting dynamics)
+        rtol: 1e-6                      # Tighter relative tolerance for numerical stability
+        atol: 1e-9                      # Tighter absolute tolerance for mass conservation# Stopping criteria (same format as single_tank_cch2)
+stopping_criteria:
+  minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
+  use_density_stopping_events: false     # Enable density-based stopping for sequential analysis
+
+# Coupling rules (empty for single tank, same as single_tank_cch2)
+coupling_rules: []
+
+# Solver configuration (same as single_tank_cch2)
+solver:
+  method: "LSODA"                        # Primary integration method
+  rtol: 1e-6                            # Relative tolerance
+  atol: 1e-9                            # Absolute tolerance
+  time_step: 1.0                        # Base time step [s]
+  max_step: 10.0                        # Maximum step size [s]
+  custom_config: false                   # Compatible with SystemOrchestrator
+
+# Output settings (same format as single_tank_cch2)
+output:
+  identifier: "stops_verification"       # Identifier string appended to file names
+  save_plots: true
+  plot_formats: ["png", "pdf"]
+  save_data: true
+  data_format: "csv"
+  results_directory: "output/results"
+  plots_directory: "output/plots"
+
+  # Plotting configuration (same as single_tank_cch2)
+  plotting:
+    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
+    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
+
+  # Plot configurations (same as single_tank_cch2 with sequential extensions)
+  plots:
+    tank_states:
+      enabled: true
+      figsize: [12, 10]
+      filename: "tank_states"
+    fuel_flow_profile:
+      enabled: true
+      figsize: [14, 10]
+      filename: "fuel_flow_profile"
+    density_temperature:
+      enabled: true
+      figsize: [12, 8]
+      filename: "density_temperature"
+      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]  # Custom isobars [bar]
+      show_reference_pressures: true     # Show venting and minimum pressure isobars
+      include_saturation_line: true      # Show liquid/vapor saturation lines
+      include_isobars: true              # Show isobar lines
+    mass_flows:
+      enabled: true
+      figsize: [12, 6]
+      filename: "mass_flows"
+      include_venting_flow: true         # Show venting flow curve
+    heat_exchanger_requirements:
+      enabled: true
+      figsize: [12, 6]
+      filename: "heat_exchanger_requirements"
+      include_ihex: true                 # Calculate and show iHEX requirements
+      include_ohex: true                 # Calculate and show oHEX requirements
+      include_total: true                # Show total (iHEX + oHEX) curve
+      ohex_target_temperature: 200.0     # K - Target temperature for oHEX
+      ohex_target_pressure: 20e5         # Pa - Target pressure for oHEX (20 bar)

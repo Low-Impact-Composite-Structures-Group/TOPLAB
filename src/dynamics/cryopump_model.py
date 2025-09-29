@@ -19,14 +19,21 @@ class CryoPumpModel:
     """
 
     @classmethod
-    def compute_pump_outlet_hydrogen(cls, tank_pressure: float, tank_temperature: float):
+    def compute_pump_outlet_hydrogen(cls, tank_pressure: float, tank_temperature: float,
+                                   dewar_pressure: float = 3e5, pump_efficiency: float = 0.78):
         """
         Calculate the hydrogen properties and pressure at pump outlet.
+
+        Args:
+            tank_pressure: Target tank pressure [Pa]
+            tank_temperature: Current tank temperature [K]
+            dewar_pressure: Source dewar pressure [Pa] (default 3e5 Pa = 3 bar)
+            pump_efficiency: Pump isentropic efficiency (default 0.78 = 78%)
         """
         fluid = "Hydrogen"
-        P1 = 3e5       # Pa (2 bar) - dewar pressure
-        P2 = tank_pressure  # Target pressure (Pa)
-        eta_p = 0.78   # Pump isentropic efficiency (78%)
+        P1 = dewar_pressure    # Pa - configurable dewar pressure
+        P2 = tank_pressure     # Target pressure (Pa)
+        eta_p = pump_efficiency # Configurable pump isentropic efficiency
 
         # 1. Inlet state: saturated liquid at P1
         h1 = PropsSI("H", "P", P1, "Q", 0, fluid)  # Enthalpy (J/kg)
