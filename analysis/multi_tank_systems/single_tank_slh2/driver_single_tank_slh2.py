@@ -82,6 +82,9 @@ def main():
         # Display component summary
         orchestrator.print_scenario_summary()
 
+        # Display comprehensive analysis summary
+        orchestrator.print_comprehensive_analysis_summary()
+
     except Exception as e:
         print(f"❌ Orchestrator creation failed: {e}")
         import traceback

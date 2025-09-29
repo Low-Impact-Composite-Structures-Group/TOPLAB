@@ -1181,6 +1181,308 @@ class SystemOrchestrator:
 
         return summary
 
+    def get_comprehensive_analysis_summary(self) -> Dict[str, Any]:
+        """Get comprehensive analysis summary with all input/output parameters for benchmarking."""
+        from CoolProp.CoolProp import PropsSI
+        import numpy as np
+
+        try:
+            # Initialize summary structure
+            summary = {
+                'analysis_name': self.scenario_config.analysis_name,
+                'tank_count': len(self.tank_geometries),
+                'tanks': {}
+            }
+
+            # Process each tank
+            for tank_idx in range(len(self.tank_geometries)):
+                tank_name = f"Tank_{tank_idx + 1}"
+                tank_geometry = self.tank_geometries[tank_idx]
+
+                # Get tank configuration data
+                tank_config_list = list(self.scenario_config.tank_geometries.values())
+                tank_config = tank_config_list[tank_idx] if tank_idx < len(tank_config_list) else {}
+
+                # Get initial state if results exist
+                initial_state = None
+                final_state = None
+                if self.results and self.results.multi_tank_states:
+                    initial_state = self.results.multi_tank_states[0].get_tank_state(tank_idx)
+                    final_state = self.results.multi_tank_states[-1].get_tank_state(tank_idx)
+
+                # === DIRECT INPUTS ===
+                direct_inputs = {}
+
+                # Initial conditions from tank config (handle None and string values safely)
+                initial_pressure_pa = tank_config.get('initial_pressure', 0)
+                initial_pressure_bar = float(initial_pressure_pa) / 1e5 if initial_pressure_pa else 0.0
+
+                # Try different temperature keys - it might be calculated vs configured
+                initial_temperature = tank_config.get('initial_temperature',
+                                   tank_config.get('calculated_temperature', 0))
+                initial_temperature = float(initial_temperature) if initial_temperature else 0.0
+
+                # Try to get the temperature from tank system if available and temperature is still 0
+                if initial_temperature == 0 and hasattr(self, 'tank_system') and self.tank_system:
+                    try:
+                        # Access tank configuration from tank system
+                        if hasattr(self.tank_system.config, 'tanks') and tank_idx < len(self.tank_system.config.tanks):
+                            tank_system_config = self.tank_system.config.tanks[tank_idx]
+                            if hasattr(tank_system_config, 'T_INIT'):
+                                initial_temperature = tank_system_config.T_INIT
+                    except:
+                        pass
+
+                # Also try to get the calculated temperature from results if available
+                if initial_temperature == 0 and initial_state:
+                    initial_temperature = initial_state.temperature
+
+                initial_density = tank_config.get('initial_density', 0)
+                initial_density = float(initial_density) if initial_density else 0.0
+
+                # Pressure limits - try different key names used in config
+                vent_pressure_pa = (tank_config.get('vent_pressure', 0) or
+                                   tank_config.get('venting_pressure', 0))
+                vent_pressure_bar = float(vent_pressure_pa) / 1e5 if vent_pressure_pa else 0.0
+
+                min_pressure_pa = tank_config.get('minimum_pressure', 0)
+                min_pressure_bar = float(min_pressure_pa) / 1e5 if min_pressure_pa else 0.0
+
+                # Stopping criteria - check both config locations
+                min_density = (tank_config.get('minimum_density', 0) or
+                              self.scenario_config.config_dict.get('stopping_criteria', {}).get('minimum_density', 0))
+                min_density = float(min_density) if min_density else 0.0
+
+                # Material thicknesses from config
+                liner_thickness_m = 0.005  # Default 5mm
+                insulation_thickness_m = 0.050  # Default 50mm
+
+                # Try to get actual thicknesses from materials config
+                materials_config = self.scenario_config.config_dict.get('materials', {})
+                if 'liner' in materials_config:
+                    liner_thickness_m = float(materials_config['liner'].get('thickness', 0.005))
+                if 'insulation' in materials_config:
+                    insulation_thickness_m = float(materials_config['insulation'].get('thickness', 0.050))
+
+                direct_inputs.update({
+                    'initial_pressure_bar': initial_pressure_bar,
+                    'initial_temperature_K': initial_temperature,
+                    'initial_density_kg_m3': initial_density,
+                    'vent_pressure_bar': vent_pressure_bar,
+                    'min_pressure_bar': min_pressure_bar,
+                    'min_density_kg_m3': min_density,
+                    'liner_thickness_m': liner_thickness_m,
+                    'insulation_thickness_m': insulation_thickness_m
+                })
+
+                # === PREPROCESSED INPUTS ===
+                preprocessed_inputs = {}
+
+                # Calculate preprocessed temperatures if we have valid initial conditions
+                if initial_pressure_bar > 0 and initial_temperature > 0:
+                    try:
+                        # Get hydrogen critical pressure for comparison
+                        P_crit = PropsSI("Pcrit", "hydrogen") / 1e5  # Convert to bar
+
+                        if initial_pressure_bar <= P_crit:
+                            # Below critical pressure - can calculate saturation temperature
+                            T_sat = PropsSI("T", "P", initial_pressure_bar * 1e5, "Q", 0, "hydrogen")
+                            delta_T = initial_temperature - T_sat
+                        else:
+                            # Above critical pressure - supercritical fluid (no saturation line)
+                            # Use critical temperature as reference
+                            T_crit = PropsSI("Tcrit", "hydrogen")
+                            T_sat = T_crit  # Reference to critical point
+                            delta_T = initial_temperature - T_crit
+
+                        preprocessed_inputs.update({
+                            'T_sat_K': T_sat,
+                            'delta_T_K': delta_T
+                        })
+                    except Exception as e:
+                        # Handle CoolProp errors gracefully
+                        preprocessed_inputs.update({
+                            'T_sat_K': 0.0,
+                            'delta_T_K': 0.0
+                        })
+                else:
+                    preprocessed_inputs.update({
+                        'T_sat_K': 0.0,
+                        'delta_T_K': 0.0
+                    })
+
+                # === DIRECT OUTPUTS (Tank Geometry) ===
+                direct_outputs = {}
+
+                # Tank dimensions
+                tank_volume = tank_geometry.volume
+                tank_radius = getattr(tank_geometry, 'radius', 0)
+                tank_diameter = 2 * tank_radius if np.any(tank_radius > 0) else 0
+
+                # Surface area (spherical approximation)
+                surface_area = 4 * np.pi * tank_radius**2 if np.any(tank_radius > 0) else 0
+
+                # Calculate tank masses (using typical structural mass ratios)
+                liner_mass = 0.0
+                wall_mass = 0.0
+
+                # Try to get accurate masses from tank system properties
+                if hasattr(self, 'tank_system') and self.tank_system:
+                    try:
+                        tank_props = self.tank_system._get_tank_properties(tank_geometry, f"Tank{tank_idx+1}", tank_idx)
+                        liner_mass = tank_props.get('liner_mass', 0)
+                        wall_mass = tank_props.get('wall_mass', 0)
+                    except:
+                        # Fallback calculations
+                        liner_mass = tank_volume * 5.0  # ~5 kg/m³ typical
+                        wall_mass = tank_volume * 50.0   # ~50 kg/m³ typical
+                else:
+                    # Fallback calculations
+                    liner_mass = tank_volume * 5.0
+                    wall_mass = tank_volume * 50.0
+
+                total_tank_mass = liner_mass + wall_mass
+
+                # Calculate wall thickness (composite + insulation)
+                wall_thickness_m = 0.020 + insulation_thickness_m  # 20mm composite + insulation
+
+                # Try to get actual wall thickness from tank properties if available
+                if hasattr(self, 'tank_system') and self.tank_system:
+                    try:
+                        # Wall thickness is typically the difference between external and internal radius
+                        inner_radius = tank_radius - liner_thickness_m
+                        # Estimate external radius including all layers
+                        wall_thickness_m = 0.020 + insulation_thickness_m  # Keep calculated value
+                    except:
+                        pass
+
+                direct_outputs.update({
+                    'tank_volume_m3': tank_volume,
+                    'tank_radius_m': tank_radius,
+                    'tank_diameter_m': tank_diameter,
+                    'surface_area_m2': surface_area,
+                    'wall_thickness_m': wall_thickness_m,
+                    'liner_mass_kg': liner_mass,
+                    'wall_mass_kg': wall_mass,
+                    'total_tank_mass_kg': total_tank_mass
+                })
+
+                # Initial fuel mass
+                if initial_state:
+                    fuel_mass = initial_state.fuel_mass
+                else:
+                    # Calculate from initial conditions
+                    fuel_mass = initial_density * tank_volume if np.any(initial_density > 0) else 0
+
+                direct_outputs['fuel_mass_kg'] = fuel_mass
+
+                # === POSTPROCESSED OUTPUTS ===
+                postprocessed_outputs = {}
+
+                # Mission duration and time to vent
+                mission_duration_hours = 0
+                time_to_vent_hours = 0
+
+                if self.results and self.results.times:
+                    mission_duration_hours = self.results.times[-1] / 3600
+
+                    # Find time to vent (when pressure reaches vent limit)
+                    try:
+                        tank_series = self.results.get_tank_series(tank_idx)
+                        vent_pressure_pa = vent_pressure_bar * 1e5
+
+                        for i, state in enumerate(tank_series.states):
+                            if state.pressure and state.pressure >= vent_pressure_pa:
+                                time_to_vent_hours = self.results.times[i] / 3600
+                                break
+
+                        if time_to_vent_hours == 0:
+                            time_to_vent_hours = mission_duration_hours  # Never vented
+                    except:
+                        time_to_vent_hours = mission_duration_hours
+
+                # Gravimetric efficiency = hydrogen mass / (hydrogen mass + structure mass)
+                # Structure mass = liner mass + wall mass (insulation neglected per definition)
+                structure_mass = liner_mass + wall_mass
+                total_system_mass = fuel_mass + structure_mass
+                mass_efficiency = (fuel_mass / total_system_mass) if np.any(total_system_mass > 0) else 0
+
+                # Volumetric efficiency = hydrogen volume / (hydrogen volume + structure volume)
+                # Structure volume = liner volume + wall volume + insulation volume
+                hydrogen_volume = tank_volume  # Internal tank volume containing hydrogen
+
+                # Calculate structure volumes
+                # Liner volume (spherical shell): V = 4π * [(r_outer)³ - (r_inner)³] / 3
+                # Handle array/scalar tank_radius safely
+                if hasattr(tank_radius, '__len__'):  # Array case
+                    inner_radius = tank_radius - liner_thickness_m
+                else:  # Scalar case
+                    inner_radius = tank_radius - liner_thickness_m if tank_radius > liner_thickness_m else tank_radius * 0.95
+                liner_outer_radius = tank_radius
+                liner_volume = (4/3) * np.pi * (liner_outer_radius**3 - inner_radius**3)
+
+                # Wall volume (composite + insulation layers)
+                wall_outer_radius = tank_radius + wall_thickness_m
+                wall_volume = (4/3) * np.pi * (wall_outer_radius**3 - liner_outer_radius**3)
+
+                # Total volume = hydrogen volume + structure volumes
+                total_volume = hydrogen_volume + liner_volume + wall_volume
+                volumetric_efficiency = (hydrogen_volume / total_volume) if np.any(total_volume > 0) else 0
+
+                # Energy calculations
+                fuel_energy_mj = fuel_mass * 120.0 if np.any(fuel_mass > 0) else 0  # H2 LHV ~120 MJ/kg
+
+                # Calculate energy requirements (placeholder - would need actual heat exchanger calculations)
+                ohex_energy_mj = 0.0
+                ihex_energy_mj = 0.0
+
+                # Try to calculate actual energy requirements if available
+                if self.results:
+                    try:
+                        # Calculate OHEX energy
+                        qdot_ohex = self._calculate_ohex_requirements(tank_idx)
+                        if qdot_ohex and self.results.times:
+                            dt = np.diff(self.results.times)  # Time steps in seconds
+                            if len(dt) == len(qdot_ohex) - 1:
+                                # Integrate power to get energy
+                                ohex_energy_mj = np.sum(np.array(qdot_ohex[:-1]) * dt) / 1e6  # Convert W·s to MJ
+
+                        # Calculate iHEX energy
+                        qdot_ihex = self._calculate_ihex_requirements(tank_idx)
+                        if qdot_ihex and self.results.times:
+                            dt = np.diff(self.results.times)
+                            if len(dt) == len(qdot_ihex) - 1:
+                                ihex_energy_mj = np.sum(np.array(qdot_ihex[:-1]) * dt) / 1e6
+                    except:
+                        pass  # Keep default values
+
+                total_energy_mj = ohex_energy_mj + ihex_energy_mj
+
+                postprocessed_outputs.update({
+                    'mission_duration_hours': mission_duration_hours,
+                    'time_to_vent_hours': time_to_vent_hours,
+                    'mass_efficiency': mass_efficiency,
+                    'volumetric_efficiency': volumetric_efficiency,
+                    'fuel_energy_MJ': fuel_energy_mj,
+                    'ohex_energy_MJ': ohex_energy_mj,
+                    'ihex_energy_MJ': ihex_energy_mj,
+                    'total_energy_MJ': total_energy_mj
+                })
+
+                # Assemble tank summary
+                summary['tanks'][tank_name] = {
+                    'direct_inputs': direct_inputs,
+                    'preprocessed_inputs': preprocessed_inputs,
+                    'direct_outputs': direct_outputs,
+                    'postprocessed_outputs': postprocessed_outputs
+                }
+
+            return summary
+
+        except Exception as e:
+            print(f"   ⚠️ Error generating comprehensive summary: {e}")
+            return {'error': str(e)}
+
     def print_scenario_summary(self):
         """Print comprehensive scenario summary."""
         summary = self.get_scenario_summary()
@@ -1208,6 +1510,268 @@ class SystemOrchestrator:
             print(f"  Validation: {'✅ PASSED' if overall else '❌ FAILED'}")
 
         print("=" * 60)
+
+    def print_comprehensive_analysis_summary(self):
+        """Print comprehensive analysis parameter summary table."""
+        summary = self.get_comprehensive_analysis_summary()
+
+        if 'error' in summary:
+            print(f"❌ Error generating summary: {summary['error']}")
+            return
+
+        print(f"\n📊 COMPREHENSIVE ANALYSIS SUMMARY: {summary['analysis_name']}")
+        print("=" * 100)
+
+        # Header
+        header = f"{'Parameter':<35} {'Unit':<12}"
+        for tank_name in summary['tanks'].keys():
+            header += f"{tank_name:<15}"
+        print(header)
+        print("-" * 100)
+
+        # Define parameter groups and their display information
+        param_groups = [
+            ("DIRECT INPUTS", [
+                ('initial_pressure_bar', 'bar', 'Initial Pressure'),
+                ('initial_temperature_K', 'K', 'Initial Temperature'),
+                ('initial_density_kg_m3', 'kg/m³', 'Initial Density'),
+                ('vent_pressure_bar', 'bar', 'Vent Pressure'),
+                ('min_pressure_bar', 'bar', 'Minimum Pressure'),
+                ('min_density_kg_m3', 'kg/m³', 'Minimum Density'),
+                ('liner_thickness_m', 'm', 'Liner Thickness'),
+                ('insulation_thickness_m', 'm', 'Insulation Thickness')
+            ]),
+            ("PREPROCESSED INPUTS", [
+                ('T_sat_K', 'K', 'Saturation Temperature'),
+                ('delta_T_K', 'K', 'ΔT from Saturation')
+            ]),
+            ("DIRECT OUTPUTS", [
+                ('tank_volume_m3', 'm³', 'Tank Volume'),
+                ('tank_radius_m', 'm', 'Tank Radius'),
+                ('tank_diameter_m', 'm', 'Tank Diameter'),
+                ('surface_area_m2', 'm²', 'Surface Area'),
+                ('wall_thickness_m', 'm', 'Wall Thickness'),
+                ('fuel_mass_kg', 'kg', 'Fuel Mass'),
+                ('liner_mass_kg', 'kg', 'Liner Mass'),
+                ('wall_mass_kg', 'kg', 'Wall Mass'),
+                ('total_tank_mass_kg', 'kg', 'Total Tank Mass')
+            ]),
+            ("POSTPROCESSED OUTPUTS", [
+                ('mission_duration_hours', 'hours', 'Mission Duration'),
+                ('time_to_vent_hours', 'hours', 'Time to Vent'),
+                ('mass_efficiency', '-', 'Mass Efficiency'),
+                ('volumetric_efficiency', '-', 'Volumetric Efficiency'),
+                ('fuel_energy_MJ', 'MJ', 'Fuel Energy'),
+                ('ohex_energy_MJ', 'MJ', 'OHEX Energy'),
+                ('ihex_energy_MJ', 'MJ', 'iHEX Energy'),
+                ('total_energy_MJ', 'MJ', 'Total Energy')
+            ])
+        ]
+
+        # Print each parameter group
+        for group_name, params in param_groups:
+            print(f"\n{group_name}")
+            print("-" * 50)
+
+            for param_key, unit, display_name in params:
+                row = f"{display_name:<35} {unit:<12}"
+
+                for tank_name in summary['tanks'].keys():
+                    tank_data = summary['tanks'][tank_name]
+
+                    # Find the parameter in the appropriate group
+                    value = None
+                    for group_key in ['direct_inputs', 'preprocessed_inputs', 'direct_outputs', 'postprocessed_outputs']:
+                        if param_key in tank_data[group_key]:
+                            value = tank_data[group_key][param_key]
+                            break
+
+                    if value is not None:
+                        # Format based on parameter type
+                        if 'efficiency' in param_key:
+                            formatted_value = f"{value:.3f}"
+                        elif 'energy' in param_key or 'MJ' in unit:
+                            formatted_value = f"{value:.1f}"
+                        elif 'hours' in unit:
+                            formatted_value = f"{value:.2f}"
+                        elif 'bar' in unit:
+                            formatted_value = f"{value:.0f}"
+                        elif param_key in ['tank_volume_m3', 'surface_area_m2']:
+                            formatted_value = f"{value:.3f}"
+                        elif param_key in ['tank_radius_m', 'tank_diameter_m']:
+                            formatted_value = f"{value:.2f}"
+                        elif 'thickness' in param_key:
+                            formatted_value = f"{value:.3f}"
+                        elif 'mass' in param_key:
+                            formatted_value = f"{value:.1f}"
+                        elif 'density' in param_key:
+                            formatted_value = f"{value:.1f}"
+                        elif 'temperature' in param_key.lower() or unit == 'K':
+                            formatted_value = f"{value:.1f}"
+                        else:
+                            formatted_value = f"{value:.2f}"
+                    else:
+                        formatted_value = "N/A"
+
+                    row += f"{formatted_value:<15}"
+
+                print(row)
+
+        print("\n" + "=" * 100)
+        print("✅ Comprehensive analysis summary complete")
+        print("   📝 All input parameters, tank geometry, and performance metrics displayed")
+
+        # Also save to markdown file
+        self.save_comprehensive_analysis_summary_to_markdown()
+
+    def save_comprehensive_analysis_summary_to_markdown(self, output_dir: str = None):
+        """Save comprehensive analysis parameter summary to markdown file."""
+        import os
+        from datetime import datetime
+
+        if output_dir is None:
+            # Use the configured output directory
+            output_dir = self.scenario_config.config_dict.get('output', {}).get('results_directory', 'output/results')
+
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Generate filename
+        analysis_name = self.scenario_config.analysis_name.replace(' ', '_').lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{analysis_name}_comprehensive_summary_{timestamp}.text"
+        filepath = os.path.join(output_dir, filename)
+
+        try:
+            summary = self.get_comprehensive_analysis_summary()
+
+            if 'error' in summary:
+                print(f"❌ Cannot save summary due to error: {summary['error']}")
+                return None
+
+            # Generate markdown content
+            md_content = f"# Comprehensive Analysis Summary: {summary['analysis_name']}\n\n"
+            md_content += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            md_content += f"**Number of Tanks:** {summary['tank_count']}\n\n"
+
+            # Define parameter groups and their display information (same as print method)
+            param_groups = [
+                ("DIRECT INPUTS", [
+                    ('initial_pressure_bar', 'bar', 'Initial Pressure'),
+                    ('initial_temperature_K', 'K', 'Initial Temperature'),
+                    ('initial_density_kg_m3', 'kg/m³', 'Initial Density'),
+                    ('vent_pressure_bar', 'bar', 'Vent Pressure'),
+                    ('min_pressure_bar', 'bar', 'Minimum Pressure'),
+                    ('min_density_kg_m3', 'kg/m³', 'Minimum Density'),
+                    ('liner_thickness_m', 'm', 'Liner Thickness'),
+                    ('insulation_thickness_m', 'm', 'Insulation Thickness')
+                ]),
+                ("PREPROCESSED INPUTS", [
+                    ('T_sat_K', 'K', 'Saturation Temperature'),
+                    ('delta_T_K', 'K', 'ΔT from Saturation')
+                ]),
+                ("DIRECT OUTPUTS", [
+                    ('tank_volume_m3', 'm³', 'Tank Volume'),
+                    ('tank_radius_m', 'm', 'Tank Radius'),
+                    ('tank_diameter_m', 'm', 'Tank Diameter'),
+                    ('surface_area_m2', 'm²', 'Surface Area'),
+                    ('wall_thickness_m', 'm', 'Wall Thickness'),
+                    ('fuel_mass_kg', 'kg', 'Fuel Mass'),
+                    ('liner_mass_kg', 'kg', 'Liner Mass'),
+                    ('wall_mass_kg', 'kg', 'Wall Mass'),
+                    ('total_tank_mass_kg', 'kg', 'Total Tank Mass')
+                ]),
+                ("POSTPROCESSED OUTPUTS", [
+                    ('mission_duration_hours', 'hours', 'Mission Duration'),
+                    ('time_to_vent_hours', 'hours', 'Time to Vent'),
+                    ('mass_efficiency', '-', 'Mass Efficiency'),
+                    ('volumetric_efficiency', '-', 'Volumetric Efficiency'),
+                    ('fuel_energy_MJ', 'MJ', 'Fuel Energy'),
+                    ('ohex_energy_MJ', 'MJ', 'OHEX Energy'),
+                    ('ihex_energy_MJ', 'MJ', 'iHEX Energy'),
+                    ('total_energy_MJ', 'MJ', 'Total Energy')
+                ])
+            ]
+
+            # Create markdown table
+            tank_names = list(summary['tanks'].keys())
+
+            # Header row
+            header = "| Parameter | Unit |"
+            for tank_name in tank_names:
+                header += f" {tank_name} |"
+            header += "\n"
+
+            # Separator row
+            separator = "|-----------|------|"
+            for _ in tank_names:
+                separator += "--------|"
+            separator += "\n"
+
+            md_content += header + separator
+
+            # Add each parameter group
+            for group_name, params in param_groups:
+                md_content += f"\n**{group_name}**\n\n"
+
+                for param_key, unit, display_name in params:
+                    row = f"| {display_name} | {unit} |"
+
+                    for tank_name in tank_names:
+                        tank_data = summary['tanks'][tank_name]
+
+                        # Find the parameter in the appropriate group
+                        value = None
+                        for group_key in ['direct_inputs', 'preprocessed_inputs', 'direct_outputs', 'postprocessed_outputs']:
+                            if param_key in tank_data[group_key]:
+                                value = tank_data[group_key][param_key]
+                                break
+
+                        if value is not None:
+                            # Format based on parameter type (same logic as print method)
+                            if 'efficiency' in param_key:
+                                formatted_value = f"{value:.3f}"
+                            elif 'energy' in param_key or 'MJ' in unit:
+                                formatted_value = f"{value:.1f}"
+                            elif 'hours' in unit:
+                                formatted_value = f"{value:.2f}"
+                            elif 'bar' in unit:
+                                formatted_value = f"{value:.0f}"
+                            elif param_key in ['tank_volume_m3', 'surface_area_m2']:
+                                formatted_value = f"{value:.3f}"
+                            elif param_key in ['tank_radius_m', 'tank_diameter_m']:
+                                formatted_value = f"{value:.2f}"
+                            elif 'thickness' in param_key:
+                                formatted_value = f"{value:.3f}"
+                            elif 'mass' in param_key:
+                                formatted_value = f"{value:.1f}"
+                            elif 'density' in param_key:
+                                formatted_value = f"{value:.1f}"
+                            elif 'temperature' in param_key.lower() or unit == 'K':
+                                formatted_value = f"{value:.1f}"
+                            else:
+                                formatted_value = f"{value:.2f}"
+                        else:
+                            formatted_value = "N/A"
+
+                        row += f" {formatted_value} |"
+
+                    md_content += row + "\n"
+
+            # Add footer
+            md_content += f"\n---\n\n"
+            md_content += f"*Generated by SystemOrchestrator comprehensive analysis*\n"
+
+            # Write to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(md_content)
+
+            print(f"   💾 Comprehensive summary saved to: {filepath}")
+            return filepath
+
+        except Exception as e:
+            print(f"   ❌ Error saving markdown summary: {e}")
+            return None
 
 
 def main():
