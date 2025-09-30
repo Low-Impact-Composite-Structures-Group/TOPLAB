@@ -36,16 +36,24 @@ class PressureTriggeredValve(InterTankCoupling):
                  orifice_diameter: float = 0.002,
                  coupling_id: str = None):
         super().__init__(source_idx, target_idx, coupling_id)
-        self.p_open = p_open
-        self.p_close = p_close
+        # Correct pressure logic: p_open is activation threshold, p_close is deactivation threshold
+        self.p_open = p_open     # Valve opens when target pressure <= p_open
+        self.p_close = p_close   # Valve closes when target pressure >= p_close
         self.max_flow_rate = max_flow_rate
+        # Hysteresis thresholds for clear logic
+        self.activation_threshold = p_open    # Open valve when P_target ≤ this
+        self.deactivation_threshold = p_close # Close valve when P_target ≥ this
         self.effective_area = math.pi * (orifice_diameter / 2)**2
 
         if p_close <= p_open:
-            raise ValueError(f"p_close ({p_close/1e5:.1f} bar) must be > p_open ({p_open/1e5:.1f} bar)")
+            raise ValueError(f"deactivation_threshold ({p_close/1e5:.1f} bar) must be > activation_threshold ({p_open/1e5:.1f} bar)")
 
     def evaluate(self, t: float, tank_states: List) -> bool:
-        """Evaluate valve state with hysteresis logic."""
+        """Evaluate valve state with hysteresis logic.
+
+        Valve opens when target pressure ≤ activation_threshold
+        Valve closes when target pressure ≥ deactivation_threshold
+        """
         target_state = tank_states[self.target_idx]
 
         if target_state.pressure is None:
@@ -53,15 +61,17 @@ class PressureTriggeredValve(InterTankCoupling):
 
         target_pressure = target_state.pressure
 
-        if not self.is_active and target_pressure < self.p_open:
+        # Valve opens when target pressure drops to or below activation threshold
+        if not self.is_active and target_pressure <= self.activation_threshold:
             self.is_active = True
-            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} OPENED (P={target_pressure/1e5:.1f} bar < {self.p_open/1e5:.1f} bar)")
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} OPENED (P={target_pressure/1e5:.1f} bar ≤ {self.activation_threshold/1e5:.1f} bar)")
 
-        elif self.is_active and target_pressure > self.p_close:
+        # Valve closes when target pressure rises to or above deactivation threshold
+        elif self.is_active and target_pressure >= self.deactivation_threshold:
             self.is_active = False
-            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSED (P={target_pressure/1e5:.1f} bar > {self.p_close/1e5:.1f} bar)")
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSED (P={target_pressure/1e5:.1f} bar ≥ {self.deactivation_threshold/1e5:.1f} bar)")
 
-        # Debug: Show valve state every few seconds when active
+        # Debug: Show valve state periodically when active
         if self.is_active and int(t*10) % 50 == 0:  # Every 5 seconds
             print(f"  Valve ACTIVE at t={t/3600:.3f}h: P_target={target_pressure/1e5:.1f}bar")
 
@@ -114,3 +124,43 @@ class PressureTriggeredValve(InterTankCoupling):
         flow_rate = min(flow_rate, max_safe_flow)
 
         return flow_rate
+
+    def update_valve_state(self, target_pressure, t):
+        """Update valve open/close state based on hysteresis logic
+
+        Opens when target_pressure ≤ activation_threshold
+        Closes when target_pressure ≥ deactivation_threshold
+        """
+        if not self.is_active:
+            # Valve opens when target pressure drops to or below activation threshold
+            if target_pressure <= self.activation_threshold:
+                self.is_active = True
+                print(f"  Valve {self.source_idx}→{self.target_idx} OPENED: P={target_pressure/1e5:.1f} ≤ {self.activation_threshold/1e5:.1f} bar")
+        else:
+            # Valve closes when target pressure rises to or above deactivation threshold
+            if target_pressure >= self.deactivation_threshold:
+                self.is_active = False
+                print(f"  Valve {self.source_idx}→{self.target_idx} CLOSED: P={target_pressure/1e5:.1f} ≥ {self.deactivation_threshold/1e5:.1f} bar")
+
+    def calculate_flow(self, source_state, target_state, t):
+        """Interface method expected by TankSystem._calculate_coupling_flows"""
+        # Update valve state based on current pressures
+        if hasattr(source_state, 'compute_pressure'):
+            source_state.compute_pressure()
+        if hasattr(target_state, 'compute_pressure'):
+            target_state.compute_pressure()
+
+        # Check if valve should open/close
+        self.update_valve_state(target_state.pressure, t)
+
+        # Calculate flow rate if valve is active
+        if not self.is_active:
+            return 0.0
+
+        # Create mock tank_states list for compatibility with calculate_flow_rate
+        tank_states = [None] * max(self.source_idx + 1, self.target_idx + 1)
+        tank_states[self.source_idx] = source_state
+        tank_states[self.target_idx] = target_state
+
+        # Call existing calculate_flow_rate method
+        return self.calculate_flow_rate(t, tank_states)

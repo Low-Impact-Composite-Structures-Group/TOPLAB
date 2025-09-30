@@ -175,6 +175,12 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         # Scenario-specific fuel enthalpy
         h_fuel = self._compute_fuel_enthalpy(p, T)
 
+        # Check for coupling enthalpy override
+        coupling_enthalpy = kwargs.get('coupling_enthalpy', None)
+        if coupling_enthalpy is not None and coupling_enthalpy != 0.0:
+            # Use coupling enthalpy for inflow when coupling flows are present
+            h_fuel = coupling_enthalpy
+
         # Discharge and vent enthalpies
         h_discharge = h
         h_vent = h

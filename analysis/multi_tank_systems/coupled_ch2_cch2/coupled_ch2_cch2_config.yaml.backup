@@ -1,0 +1,151 @@
+# Coupled CH2-CCH2 Multi-Tank System Configuration
+analysis_name: "Coupled CH2-CCH2 Multi# Solver configuration - optimized for coupling dynamics
+solver:
+  method: "BDF"                         # BDF solver better for stiff coupling dynamics
+  rtol: 1e-4                            # Relaxed relative tolerance for faster performance
+  atol: 1e-7                            # Relaxed absolute tolerance
+  time_step: 10.0                       # Larger base time step [s] 
+  max_step: 60.0                        # Larger maximum step size [s]
+  custom_config: true                   # Use custom solver precision for performancestem"
+description: "Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K) with pressure compensation coupling and ATR72 mission profile"
+version: "1.0"
+
+# Network topology definition
+network:
+  number_of_tanks: 2
+  external_source: false
+  external_sink: true
+  tanks:
+    - tank_id: 1
+      tank_type: "CH2"     # Compressed hydrogen tank (high pressure, room temperature)
+    - tank_id: 2
+      tank_type: "CcH2"    # Cryocompressed hydrogen tank (medium pressure, cryogenic)
+
+# Tank geometry and initial conditions
+geometry:
+  # Tank 1: CH2 - High pressure compressed hydrogen (user-defined sizing)
+  1:
+    phi: 3.0                             # Length/radius ratio (L/R)
+    radius: 1.0                          # m (user-specified radius for 150kg fuel capacity)
+    initial_pressure: 70000000           # Pa (700 bar - high pressure gaseous storage)
+    initial_temperature: 330.0           # K (room temperature)
+    initial_density: 42.0                # kg/m³ (calculated for 700 bar at 330K)
+    venting_pressure: 80000000           # Pa (800 bar - venting pressure)
+    minimum_pressure: 1500000            # Pa (15 bar - minimum allowable pressure)
+
+  # Tank 2: CCH2 - Cryocompressed hydrogen (mission-based sizing)
+  2:
+    phi: 3.0                             # Length/radius ratio (L/R)
+    initial_pressure: 40000000           # Pa (400 bar - cryocompressed storage)
+    initial_temperature: 53.25           # K (cryogenic temperature)
+    initial_density: 80.0                # kg/m³ (cryocompressed density)
+    venting_pressure: 45000000           # Pa (450 bar - venting pressure)
+    minimum_pressure: 1500000            # Pa (15 bar - minimum allowable pressure)
+    mission_based_sizing: true           # Size based on ATR72 mission requirements
+
+# Material specifications with NIST temperature-dependent properties
+materials:
+  liner:
+    nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
+    thickness: 0.005                     # m (5mm aluminum liner)
+  composite:
+    nist_path: "g10_nist"                # Path to NIST materials library
+    winding_angle: 54.7                  # degrees (optimal winding angle)
+    thickness: "calculated"              # Calculated from pressure requirements
+  insulation:
+    thickness: 0.050                     # m (50mm insulation layer)
+    heat_transfer_coefficient: 0.025     # W/m²K (vacuum insulation)
+  safety_margin: 1.25                    # Structural design safety factor
+
+# Mission profile configuration
+mission:
+  type: "discharge"                      # Mission type: discharge | refuel | dormancy
+  profile: "atr72"                       # Profile: atr72 | constant_flow | custom
+  assigned_to: 2                         # Tank ID that executes the mission (Tank 2 = CCH2)
+  ambient_temperature: 288.15            # K (ambient conditions)
+  # Note: Tank 1 (CH2) will operate in dormancy mode during Tank 2's ATR72 mission
+
+# Stopping criteria
+stopping_criteria:
+  minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement for mission tank)
+  use_density_stopping_events: false    # Use pressure-based stopping
+
+# Coupling rules for inter-tank interactions
+coupling_rules:
+  - coupling_id: "ch2_cch2_pressure_compensation"
+    coupling_type: "pressure_compensation"
+    description: "Bidirectional pressure-driven flow between CH2 and CCH2 tanks"
+
+    participants:
+      source: 1                          # Tank 1 (CH2) - high pressure source
+      target: 2                          # Tank 2 (CCH2) - lower pressure target
+
+    activation_conditions:
+      pressure_differential_bar: 5.0     # Activate when ΔP > 5 bar
+      minimum_source_pressure_bar: 50.0 # Don't drain source below 50 bar
+      maximum_target_pressure_bar: 420.0 # Don't overpressure target above 420 bar
+
+    flow_parameters:
+      flow_resistance: 0.1               # Flow resistance coefficient
+      bidirectional: true                # Allow reverse flow if conditions change
+      max_flow_rate_kg_s: 0.05          # Maximum coupling flow rate (kg/s)
+
+    hysteresis:
+      activation_threshold_bar: 320.0    # Close valve when Tank 2 pressure >= 320 bar (p_close)
+      deactivation_threshold_bar: 300.0  # Open valve when Tank 2 pressure <= 300 bar (p_open)
+
+# Solver configuration
+solver:
+  method: "RK45"                         # Primary integration method
+  rtol: 1e-6                            # Relative tolerance
+  atol: 1e-9                            # Absolute tolerance
+  time_step: 1.0                        # Base time step [s]
+  max_step: 10.0                        # Maximum step size [s]
+  custom_config: false                   # true if custom solver precision needed
+
+# Output settings
+output:
+  identifier: "coupled_ch2_cch2"         # Identifier string appended to file names
+  save_plots: true
+  plot_formats: ["png", "pdf"]
+  save_data: true
+  data_format: "csv"
+  results_directory: "output/results"
+  plots_directory: "output/plots"
+
+  # Plotting configuration
+  plotting:
+    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
+    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
+
+  # Plot configurations
+  plots:
+    tank_states:
+      enabled: true
+      figsize: [12, 10]
+      filename: "coupled_tank_states"
+    fuel_flow_profile:
+      enabled: true
+      figsize: [14, 10]
+      filename: "coupled_fuel_flow_profile"
+    density_temperature:
+      enabled: true
+      figsize: [12, 8]
+      filename: "coupled_density_temperature"
+      isobar_pressures: [800, 700, 450, 400, 200, 100, 50, 15]  # Show pressures for both tanks
+      show_reference_pressures: true
+      include_saturation_line: true
+      include_isobars: true
+    mass_flows:
+      enabled: true
+      figsize: [12, 6]
+      filename: "coupled_mass_flows"
+      include_venting_flow: true
+      include_coupling_flows: true       # Show inter-tank coupling flows
+    coupling_analysis:
+      enabled: true
+      figsize: [12, 8]
+      filename: "coupling_analysis"
+      show_pressure_differential: true   # Show pressure difference between tanks
+      show_coupling_flow_rates: true    # Show coupling flow rates over time
+      show_activation_zones: true       # Highlight coupling activation periods

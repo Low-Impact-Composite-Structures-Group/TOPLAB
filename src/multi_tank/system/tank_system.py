@@ -9,6 +9,7 @@ import math
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
@@ -142,14 +143,22 @@ class TankSystem:
             return
 
         for rule in self.coupling_rules:
+            source_idx = rule.get('source_tank', 0)
+            target_idx = rule.get('target_tank', 1)
+
             valve = PressureTriggeredValve(
-                source_tank=rule.get('source_tank', 0),
-                target_tank=rule.get('target_tank', 1),
-                opening_pressure=rule.get('opening_pressure', 17e5),  # 17 bar default
-                closing_pressure=rule.get('closing_pressure', 18e5),  # 18 bar default
+                source_idx=source_idx,
+                target_idx=target_idx,
+                p_open=rule.get('opening_pressure', 17e5),  # 17 bar default
+                p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
                 max_flow_rate=rule.get('max_flow_rate', 0.15),        # 150 g/s default
                 orifice_diameter=rule.get('orifice_diameter', 0.01)   # 10 mm default
             )
+
+            # Add tank name attributes expected by _calculate_coupling_flows
+            valve.source_tank = source_idx
+            valve.target_tank = target_idx
+
             self.coupling_valves.append(valve)
 
             print(f"   🔗 Valve: Tank{rule.get('source_tank', 0)} → Tank{rule.get('target_tank', 1)}")
@@ -334,12 +343,32 @@ class TankSystem:
                         self._empty_warn_printed = True
                     tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
 
-                # Create mission-based flow functions
-                def fuel_flow_func(time): return self._get_inflow_rate(time, i)  # Mission-based inflow (refuel)
-                def discharge_flow_func(time): return self._get_outflow_rate(time, i)  # Mission-based outflow (discharge)
+                # Get coupling contribution for this tank (simplified pattern)
+                net_coupling_flow = coupling_flows[i]
 
-                # Add coupling contributions
-                net_coupling_flow = sum(coupling_flows.get(f"to_{i}", [])) - sum(coupling_flows.get(f"from_{i}", []))
+                # Calculate coupling enthalpy (hydrogen coming from other tanks)
+                coupling_enthalpy = 0.0
+                if net_coupling_flow > 0:  # Receiving hydrogen from other tanks
+                    # Find source tank with highest pressure (likely Tank 1 supplying Tank 2)
+                    source_tank_idx = 0 if i == 1 else 1  # Simple 2-tank case
+                    if source_tank_idx < len(multi_state.tank_states):
+                        source_state = multi_state.tank_states[source_tank_idx]
+                        try:
+                            coupling_enthalpy = PropsSI("Hmass", "T", source_state.temperature,
+                                                       "Dmass", source_state.density, "hydrogen")
+                        except:
+                            coupling_enthalpy = 0.0  # Fallback
+
+                # Create flow functions that include both mission and coupling flows
+                def fuel_flow_func(time):
+                    mission_inflow = self._get_inflow_rate(time, i)  # Mission-based inflow (refuel)
+                    coupling_inflow = max(0.0, net_coupling_flow)  # Positive coupling = inflow
+                    return mission_inflow + coupling_inflow
+
+                def discharge_flow_func(time):
+                    mission_outflow = self._get_outflow_rate(time, i)  # Mission-based outflow (discharge)
+                    coupling_outflow = max(0.0, -net_coupling_flow)  # Negative coupling = outflow
+                    return mission_outflow + coupling_outflow
 
                 # Get thermal derivatives from thermal model using correct interface
                 Q_solid = self.thermal_models[i].compute_heat_flux(t, tank_state)
@@ -353,14 +382,25 @@ class TankSystem:
                     discharge_flow_func=discharge_flow_func,
                     Q_solid=Q_solid,
                     dTs_dt=dTs_dt,
-                    Q_discharge=0.0
+                    Q_discharge=0.0,
+                    coupling_enthalpy=coupling_enthalpy  # Pass coupling enthalpy for proper energy balance
                 )
 
                 # Pack derivatives: [dm/dt, dT/dt, dTs/dt]
+                # Note: coupling flows are now included in the flow functions, so temperature derivatives
+                # automatically account for coupling enthalpy effects
                 idx = i * 3
-                dydt[idx] = state_derivatives.fuel_mass_derivative + net_coupling_flow  # Mass derivative with coupling
-                dydt[idx + 1] = state_derivatives.temperature_derivative  # Temperature derivative
+                dydt[idx] = state_derivatives.fuel_mass_derivative  # Mass derivative already includes coupling
+                dydt[idx + 1] = state_derivatives.temperature_derivative  # Temperature derivative includes coupling enthalpy
                 dydt[idx + 2] = state_derivatives.solid_temperature_derivative  # Solid temperature derivative
+
+            # print some debug info (throttled to avoid performance issues)
+            if hasattr(self, '_last_debug_time'):
+                if t - self._last_debug_time > 100:  # Print every 100 seconds
+                    print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
+                    self._last_debug_time = t
+            else:
+                self._last_debug_time = t
 
             return dydt
 
@@ -369,27 +409,30 @@ class TankSystem:
             # Return zero derivatives to prevent integration failure
             return np.zeros(len(y))
 
-    def _calculate_coupling_flows(self, multi_state: MultiTankState, t: float) -> Dict[str, List[float]]:
-        """Calculate mass flows between tanks due to coupling valves."""
-        flows = {}
+    def _calculate_coupling_flows(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
+        """Calculate net mass flow rate for each tank due to coupling (simplified like MultiTankSystem)."""
+        # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
+        coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
 
         for valve in self.coupling_valves:
             source_state = multi_state.tank_states[valve.source_tank]
             target_state = multi_state.tank_states[valve.target_tank]
 
-            # Calculate valve flow
+            # Calculate valve flow rate
             flow_rate = valve.calculate_flow(source_state, target_state, t)
 
-            # Record flows
-            if f"from_{valve.source_tank}" not in flows:
-                flows[f"from_{valve.source_tank}"] = []
-            if f"to_{valve.target_tank}" not in flows:
-                flows[f"to_{valve.target_tank}"] = []
+            if flow_rate > 0:
+                # Source tank loses mass (negative), target tank gains mass (positive)
+                coupling_flows[valve.source_tank] -= flow_rate
+                coupling_flows[valve.target_tank] += flow_rate
 
-            flows[f"from_{valve.source_tank}"].append(flow_rate)
-            flows[f"to_{valve.target_tank}"].append(flow_rate)
+                # Debug output for active coupling (throttled to avoid spam)
+                if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
+                    p1 = source_state.pressure / 1e5 if source_state.pressure else 0
+                    p2 = target_state.pressure / 1e5 if target_state.pressure else 0
+                    print(f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)")
 
-        return flows
+        return coupling_flows
 
     def _get_outflow_rate(self, time: float, tank_index: int) -> float:
         """
@@ -565,13 +608,21 @@ class TankSystem:
         if hasattr(self, '_empty_warn_printed'):
             delattr(self, '_empty_warn_printed')
 
-        solution = self.solver.integrate_full(
-            t_span=t_span,
-            y0=y0,
-            rtol=1e-6,
-            atol=1e-9,
-            max_step=10.0
-        )
+        # Use solver config parameters instead of hardcoded values
+        integration_params = {
+            't_span': t_span,
+            'y0': y0,
+            'rtol': rtol,
+            'atol': atol
+        }
+
+        # Add max_step only if provided
+        if max_step is not None:
+            integration_params['max_step'] = max_step
+
+        print(f"   🔧 Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
+
+        solution = self.solver.integrate_full(**integration_params)
 
         elapsed_time = time.time() - start_time
         print(f"✅ Integration completed in {elapsed_time:.1f}s")

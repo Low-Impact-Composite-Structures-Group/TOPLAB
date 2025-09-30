@@ -18,6 +18,7 @@ class MissionConfig:
     ambient_temperature: float
     parameters: Dict[str, Any]
     name: Optional[str] = None
+    assigned_to: Optional[int] = None  # Tank ID that executes this mission
 
     @classmethod
     def from_dict(cls, config_dict: dict):
@@ -26,12 +27,14 @@ class MissionConfig:
         profile = mission_data.get('profile')
         ambient_temp = mission_data.get('ambient_temperature', 288.15)
         parameters = mission_data.get('parameters', {})
+        assigned_to = mission_data.get('assigned_to')  # Tank ID for mission assignment
 
         return cls(
             type=mission_type,
             profile=profile,
             ambient_temperature=ambient_temp,
-            parameters=parameters
+            parameters=parameters,
+            assigned_to=assigned_to
         )
 
 
@@ -51,7 +54,8 @@ class MissionSequenceConfig:
                         'type': seq_mission.get('type'),
                         'profile': seq_mission.get('profile'),
                         'ambient_temperature': seq_mission.get('ambient_temperature', 288.15),
-                        'parameters': seq_mission.get('parameters', {})
+                        'parameters': seq_mission.get('parameters', {}),
+                        'assigned_to': seq_mission.get('assigned_to')
                     }
                 }
                 missions.append(MissionConfig.from_dict(mission_config))

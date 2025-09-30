@@ -35,6 +35,9 @@ from src.multi_tank.utilities.tank_geometry import create_tank_from_fuel_mass
 # Mission framework
 from src.mission.isochoric_missions import DischargeMission
 
+# Coupling rules system
+from src.orchestration.coupling_rules import parse_coupling_rules, CouplingRule
+
 # Heat flow data collection for iHEX calculation
 from src.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
 
@@ -62,9 +65,17 @@ class SystemOrchestrator:
         if scenario_config is not None:
             self.scenario_config = scenario_config
         elif config_path is not None:
-            self.scenario_config = ScenarioConfig(config_path)
+            try:
+                self.scenario_config = ScenarioConfig.from_yaml(config_path)
+            except Exception as e:
+                print(f"   ❌ Failed to load ScenarioConfig: {e}")
+                raise e
         else:
             raise ValueError("Must provide either scenario_config or config_path")
+
+        # Validate that scenario_config is properly loaded
+        if not hasattr(self.scenario_config, '_config_path'):
+            raise ValueError(f"ScenarioConfig not properly loaded: {type(self.scenario_config)}")
 
         # Load mission profile first (needed for tank sizing)
         # Respect the actual profile specified in the configuration
@@ -98,11 +109,42 @@ class SystemOrchestrator:
         self.tank_system_config = self._create_tank_system_config()
         print(f"   ✓ Tank system configuration created")
 
+        # Parse coupling rules from configuration
+        coupling_rules_config = self.scenario_config.config_dict.get('coupling_rules', [])
+        self.coupling_rules = parse_coupling_rules(coupling_rules_config)
+        if coupling_rules_config:
+            print(f"   ✓ Parsed {len(self.coupling_rules)} coupling rules")
+            for rule in self.coupling_rules:
+                print(f"     - {rule.coupling_id}: {rule.coupling_type}")
+
+        # Convert coupling rules to TankSystem expected format
+        tank_system_coupling_rules = []
+        for rule_config in coupling_rules_config:
+            participants = rule_config.get('participants', {})
+            activation = rule_config.get('activation_conditions', {})
+            flow_params = rule_config.get('flow_parameters', {})
+            hysteresis = rule_config.get('hysteresis', {})
+
+            # Map our config format to TankSystem expected format
+            # PressureTriggeredValve: p_open is activation threshold (valve opens), p_close is deactivation threshold (valve closes)
+            activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when Tank 2 ≤ this pressure
+            deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when Tank 2 ≥ this pressure
+
+            tank_system_rule = {
+                'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
+                'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
+                'opening_pressure': activation_threshold * 1e5,    # p_open: valve opens when target ≤ this
+                'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
+                'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.05),
+                'orifice_diameter': flow_params.get('orifice_diameter_m', 0.01)  # Default 10mm orifice
+            }
+            tank_system_coupling_rules.append(tank_system_rule)
+
         # Initialize TankSystem with all components
         self.tank_system = TankSystem(
             tank_geometries=self.tank_geometries,
             config=self.tank_system_config,
-            coupling_rules=self.scenario_config.config_dict.get('coupling_rules', [])
+            coupling_rules=tank_system_coupling_rules  # Pass converted config
         )
         print(f"   ✓ TankSystem DAE engine initialized")
 
@@ -134,6 +176,10 @@ class SystemOrchestrator:
     def _create_tank_geometries(self) -> List[Any]:
         """Create tank geometries from scenario configuration."""
         tank_geometries = []
+
+        # Validate scenario_config has required attributes
+        if not hasattr(self.scenario_config, 'tank_geometries'):
+            raise ValueError(f"ScenarioConfig missing tank_geometries: {type(self.scenario_config)}")
 
         for tank_id, geometry_data in self.scenario_config.tank_geometries.items():
             print(f"   Creating Tank {tank_id} geometry...")
@@ -167,7 +213,8 @@ class SystemOrchestrator:
 
                 radius = float(geometry_data['radius'])
                 material = NISTMaterial.aluminum_6061T6_nist()
-                tank_geom = SphericalTank(radius=radius, material=material)
+                operating_pressure = geometry_data.get('venting_pressure', geometry_data['initial_pressure'])
+                tank_geom = SphericalTank(radius=radius, material=material, operating_pressure=operating_pressure)
                 print(f"     From radius: {radius}m → V={tank_geom.volume:.4f}m³")
 
             else:
@@ -202,8 +249,11 @@ class SystemOrchestrator:
             # Use calculated temperature from mission sizing if available
             if 'calculated_initial_temperature' in geometry_data:
                 initial_temp = geometry_data['calculated_initial_temperature']
+            elif 'initial_temperature' in geometry_data:
+                # Use explicit initial temperature from config (prioritize over density calculation)
+                initial_temp = geometry_data['initial_temperature']
             elif 'initial_density' in geometry_data:
-                # Calculate temperature from pressure and density
+                # Calculate temperature from pressure and density as fallback
                 try:
                     from CoolProp.CoolProp import PropsSI
                     density = float(geometry_data['initial_density'])
@@ -211,7 +261,7 @@ class SystemOrchestrator:
                 except:
                     initial_temp = 53.25  # Default cryogenic temperature
             else:
-                initial_temp = geometry_data.get('initial_temperature', 53.25)
+                initial_temp = 53.25  # Default
 
             # Create tank configuration
             tank_config = TankConfig(
@@ -573,9 +623,81 @@ class SystemOrchestrator:
             mission = self.scenario_config.mission_sequence.missions[0]
             print(f"     Single mission: {mission.type} - {mission.profile}")
 
+        # Apply mission assignment logic if assigned_to is specified
+        self._apply_mission_assignment()
+
         # Mission profile is already stored in self.mission_profile during initialization
         # and passed to TankSystemConfig in _create_tank_system_config
         print(f"   ✓ Mission flow profile configured for DAE system")
+
+    def _apply_mission_assignment(self):
+        """Apply mission flows only to the assigned tank."""
+        mission = self.scenario_config.mission_sequence.missions[0]
+
+        if mission.assigned_to is not None:
+            assigned_tank_id = mission.assigned_to
+            # Convert tank ID to tank index (tank IDs are 1-based, indices are 0-based)
+            assigned_tank_index = assigned_tank_id - 1
+
+            print(f"     Mission assigned to Tank {assigned_tank_id} (index {assigned_tank_index})")
+
+            # Override the TankSystem's flow rate methods to apply mission only to assigned tank
+            # IMPORTANT: Don't interfere with coupling flows - only override base mission flows
+            original_get_outflow_rate = self.tank_system._get_outflow_rate
+
+            def mission_assigned_outflow_rate(time: float, tank_index: int):
+                """Get outflow rates with mission assignment logic."""
+                if tank_index == assigned_tank_index:
+                    # This tank executes the mission - apply mission profile flows
+                    if hasattr(self, 'mission_profile') and self.mission_profile is not None:
+                        return self._get_mission_flow_rate(time)
+                    else:
+                        # Fallback to original method for assigned tank
+                        return original_get_outflow_rate(time, tank_index)
+                else:
+                    # Other tanks have no mission outflow (but coupling can still happen)
+                    return 0.0
+
+            # Replace only the outflow method - let coupling handle inflows
+            self.tank_system._get_outflow_rate = mission_assigned_outflow_rate
+
+            print(f"     ✓ Mission flows applied to Tank {assigned_tank_id}")
+            print(f"     ✓ Coupling flows preserved for pressure compensation")
+        else:
+            print(f"     ⚠️ No mission assignment specified - applying mission to all tanks")
+
+    def _get_mission_flow_rate(self, time: float) -> float:
+        """Get mission flow rate at given time from mission profile."""
+        if not hasattr(self, 'mission_profile') or self.mission_profile is None:
+            return 0.0
+
+        current_time = 0.0
+        for section in self.mission_profile.sections:
+            section_end_time = current_time + section.duration
+
+            if time <= section_end_time:
+                # We're in this section
+                section_time = time - current_time
+
+                # Get flow from this section
+                for flow in section.fuel_flows:
+                    if hasattr(flow, 'mass_flow'):
+                        if isinstance(flow.mass_flow, list):
+                            # Time-varying flow: linear interpolation
+                            start_rate = abs(flow.mass_flow[0])
+                            end_rate = abs(flow.mass_flow[-1])
+                            progress = section_time / section.duration if section.duration > 0 else 0
+                            return start_rate + (end_rate - start_rate) * progress
+                        else:
+                            # Constant flow
+                            return abs(flow.mass_flow)
+
+                return 0.0  # No flow found in this section
+
+            current_time = section_end_time
+
+        # Beyond mission duration
+        return 0.0
 
     def run_simulation(self, solver_method: str = "RK45", solver_config: dict = None) -> Any:
         """
