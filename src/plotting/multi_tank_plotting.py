@@ -452,8 +452,17 @@ class DelftColourPlotter:
         legend.get_frame().set_facecolor('white')
         legend.get_frame().set_linewidth(1.2)
 
-        # Improve layout
-        plt.tight_layout()
+        # Improve layout (suppress tight_layout warnings for density-temperature plots)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                plt.tight_layout()
+            except:
+                pass
+
+        # Always apply aggressive margins to maximize plot area width
+        plt.subplots_adjust(top=0.92, bottom=0.14, left=0.10, right=0.97)
 
         # Save if requested
         if save_path:
@@ -467,17 +476,16 @@ class DelftColourPlotter:
                        results: MultiTankResults,
                        tank_index: int = 0,
                        include_venting_flow: bool = True,
+                       include_coupling_flows: bool = True,
                        save_path: Optional[str] = None) -> plt.Figure:
         """
-        Plot mass flow rates for a single tank.
-
-        Shows inflow (positive), outflow (negative), and optionally venting flow (negative)
-        over time. For mission sequences, creates subplots for each mission phase.
+        Plot mass flow rates for a single tank using the proven working pattern from multi_tank_analysis.
 
         Args:
             results: MultiTankResults containing simulation data
             tank_index: Index of tank to plot (0 for first tank)
             include_venting_flow: Whether to show venting flow curve
+            include_coupling_flows: Whether to show coupling flows (for multi-tank systems)
             save_path: Optional path to save the plot
 
         Returns:
@@ -489,89 +497,59 @@ class DelftColourPlotter:
         if tank_index >= results.n_tanks:
             raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
 
-        # Extract tank flow data
+        # Create figure using simple, proven layout
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Convert time to hours for plotting
+        times_hours = results.times / 3600.0
+
+        # Get flow data for the specific tank using the exact same pattern as working multi_tank_analysis
         tank_data = results._extract_tank_arrays(tank_index)
-        times_hours = results.times / 3600.0  # Convert to hours
 
-        # Check if we have mission sequence data (for future multi-mission support)
-        # For now, assume single mission - can be extended later
-        n_missions = 1  # TODO: Extract from results when multi-mission support is added
+        # Use the exact same approach as the working multi_tank_analysis:
+        # Combine flows and make outflows negative for display (data is already in g/s)
+        inflow_total = tank_data['inflow_rates'] + tank_data['coupling_inflow_rates']
+        outflow_total = -(tank_data['outflow_rates'] + tank_data['coupling_outflow_rates'])  # Make negative
+        vent = -tank_data['vent_rates']  # Make negative
 
-        # Create figure - single plot for single mission, subplots for multiple missions
-        if n_missions == 1:
-            fig, ax = plt.subplots(figsize=(12, 6))
-            axes = [ax]  # Make it iterable for consistent handling
-            fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Mass Flow Rates",
-                         fontsize=14, fontweight='bold')
-        else:
-            # Multi-mission subplot layout (for future implementation)
-            fig, axes = plt.subplots(n_missions, 1, figsize=(12, 4*n_missions), sharex=True)
-            if n_missions == 1:
-                axes = [axes]  # Ensure it's always a list
-            fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Mass Flow Rates (Mission Sequence)",
-                         fontsize=14, fontweight='bold')
+        # Use consistent color palette approach to match other plots
+        inflow_color = self.color_palette[0 % len(self.color_palette)]
+        outflow_color = self.color_palette[1 % len(self.color_palette)]
+        vent_color = self.color_palette[2 % len(self.color_palette)]
 
-        # Color scheme (greyscale or color)
-        if self.use_greyscale:
-            inflow_color = self.color_palette[0]    # Black for inflows
-            outflow_color = self.color_palette[2]   # Dark grey for outflows
-            vent_color = self.color_palette[1]      # Dark grey for venting
-        else:
-            inflow_color = DELFT_PALETTE[1]   # LICHTBLAUW (light blue) for inflows
-            outflow_color = DELFT_PALETTE[6]  # ORANJE (orange) for outflows
-            vent_color = DELFT_PALETTE[5]     # ROOD (red) for venting
+        # Plot with consistent styling and markers for greyscale mode
+        inflow_style = {'color': inflow_color, 'linewidth': 2, 'linestyle': '-'}
+        outflow_style = {'color': outflow_color, 'linewidth': 2, 'linestyle': '-'}
+        vent_style = {'color': vent_color, 'linewidth': 2, 'linestyle': '--'}
 
-        # Plot data for each mission (currently just one)
-        for mission_idx in range(n_missions):
-            ax = axes[mission_idx]
+        # Add markers for greyscale mode to improve readability
+        inflow_style.update(self._get_marker_config(0, len(times_hours)))
+        outflow_style.update(self._get_marker_config(1, len(times_hours)))
+        vent_style.update(self._get_marker_config(2, len(times_hours)))
 
-            # Extract flow rates (convert from g/s to kg/s)
-            inflow_rates = tank_data['inflow_rates'] / 1000.0    # Convert to kg/s, positive values
-            outflow_rates = -tank_data['outflow_rates'] / 1000.0 # Convert to kg/s, make negative for plotting
-            vent_rates = -tank_data['vent_rates'] / 1000.0       # Convert to kg/s, make negative for plotting
+        # Plot all flows with consistent styling
+        ax.plot(times_hours, inflow_total, label='Inflow', **inflow_style)
+        ax.plot(times_hours, outflow_total, label='Outflow', **outflow_style)
+        ax.plot(times_hours, vent, label='Vent', **vent_style)
 
-            # Plot inflow (positive) with greyscale markers if needed
-            inflow_style = {'color': inflow_color, 'linewidth': 2, 'linestyle': '-'}
-            if self.use_greyscale:
-                inflow_style.update(self._get_marker_config(0, len(times_hours)))
-            ax.plot(times_hours, inflow_rates, label='Inflow', **inflow_style)
+        # Add zero line for reference
+        ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.8)
 
-            # Plot outflow (negative) with greyscale markers if needed
-            outflow_style = {'color': outflow_color, 'linewidth': 2, 'linestyle': '-'}
-            if self.use_greyscale:
-                outflow_style.update(self._get_marker_config(1, len(times_hours)))
-            ax.plot(times_hours, outflow_rates, label='Outflow', **outflow_style)
+        # Set up plot formatting to match other plots
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Flow Rate [g/s]')
+        ax.set_title(f'Tank {tank_index + 1} Flow Rates')
+        ax.grid(True, alpha=0.3)
 
-            # Optionally plot venting flow (negative) with greyscale markers if needed
-            if include_venting_flow:
-                vent_style = {'color': vent_color, 'linewidth': 2, 'linestyle': '--'}
-                if self.use_greyscale:
-                    vent_style.update(self._get_marker_config(2, len(times_hours)))
-                ax.plot(times_hours, vent_rates, label='Venting Flow', **vent_style)
+        # Add legend with 3D shadow effect (same styling as other plots)
+        legend = ax.legend(fontsize=9, loc='best', frameon=True, fancybox=True,
+                          shadow=True, framealpha=0.9, edgecolor='black')
+        # Additional styling for 3D effect to match tank evolution plots
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
 
-            # Add zero line for reference
-            ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.8)
-
-            # Formatting
-            ax.set_xlabel('Time [hours]')
-            ax.set_ylabel('Mass Flow Rate [kg/s]')
-            if n_missions == 1:
-                ax.set_title('Mass Flow Rates vs Time')
-            else:
-                ax.set_title(f'Mission {mission_idx + 1}')
-            ax.grid(True, alpha=0.3)
-
-            # Add legend with 3D shadow effect (same as tank evolution)
-            legend = ax.legend(fontsize=9, loc='best', frameon=True, fancybox=True,
-                              shadow=True, framealpha=0.9, edgecolor='black')
-            # Additional styling for 3D effect
-            legend.get_frame().set_facecolor('white')
-            legend.get_frame().set_linewidth(1.2)
-
-        # Improve layout
         plt.tight_layout()
 
-        # Save if requested
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")

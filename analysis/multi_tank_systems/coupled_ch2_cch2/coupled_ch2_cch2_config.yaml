@@ -86,8 +86,8 @@ solver:
   method: "LSODA"                         # BDF solver better for stiff coupling dynamics
   rtol: 1e-4                            # Relaxed relative tolerance for faster performance
   atol: 1e-7                            # Relaxed absolute tolerance
-  time_step: 10.0                       # Larger base time step [s]
-  max_step: 60.0                        # Larger maximum step size [s]
+  time_step: 5.0                        # Smaller time step to capture valve dynamics [s]
+  max_step: 10.0                        # Smaller maximum step size [s]
   custom_config: true                   # Use custom solver precision for performance
 
 # Output settings
@@ -106,7 +106,7 @@ output:
   plots:
     # Plotting style options
     style:
-      use_greyscale: false              # Set to true for greyscale plots with markers
+      use_greyscale: true              # Set to true for greyscale plots with markers
       enable_multi_tank_overlay: true   # Overlay multiple tanks on same evolution plot
 
     # Individual plot configurations
@@ -127,6 +127,7 @@ output:
       enabled: true
       filename: "mass_flows"
       include_venting_flow: true
+      include_coupling_flows: true
     heat_exchanger_requirements:
       enabled: false  # Optional - enable for heat exchanger analysis
       filename: "heat_exchanger_requirements"

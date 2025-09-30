@@ -1189,11 +1189,16 @@ class SystemOrchestrator:
             # Only pass reference pressures if config allows it
             ref_pressures = reference_lines if show_reference_pressures else None
 
+            # For multi-tank systems, disable isobars and saturation lines by default to avoid clutter
+            is_multi_tank = len(self.tank_geometries) > 1
+            show_saturation = include_saturation_line if not is_multi_tank else False
+            show_isobars = include_isobars if not is_multi_tank else False
+
             dt_fig = plotter.plot_density_temperature(
                 results=self.results,
                 tank_index=tank_idx,
-                include_saturation_line=include_saturation_line,
-                include_isobars=include_isobars,
+                include_saturation_line=show_saturation,
+                include_isobars=show_isobars,
                 isobar_pressures=isobar_pressures,
                 reference_pressures=ref_pressures,
                 save_path=str(dt_save_path) if dt_save_path else None
@@ -1219,11 +1224,13 @@ class SystemOrchestrator:
             if mf_config.get('enabled', True):
                 # Extract plot parameters from config with defaults
                 include_venting_flow = mf_config.get('include_venting_flow', True)
+                include_coupling_flows = mf_config.get('include_coupling_flows', True)
 
                 mf_fig = plotter.plot_mass_flows(
                     results=self.results,
                     tank_index=tank_idx,
                     include_venting_flow=include_venting_flow,
+                    include_coupling_flows=include_coupling_flows,
                     save_path=str(mf_save_path) if mf_save_path else None
                 )
                 figures.append(mf_fig)
