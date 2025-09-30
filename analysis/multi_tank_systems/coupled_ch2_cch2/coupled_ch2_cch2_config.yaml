@@ -134,3 +134,5 @@ output:
       include_ohex: true
       include_ihex: true
       include_total: true
+      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
+      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations

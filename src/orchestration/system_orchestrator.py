@@ -130,6 +130,12 @@ class SystemOrchestrator:
             activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when Tank 2 ≤ this pressure
             deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when Tank 2 ≥ this pressure
 
+            # Log fallback usage for transparency
+            if 'activation_threshold_bar' not in hysteresis:
+                print(f"⚠️  Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
+            if 'deactivation_threshold_bar' not in hysteresis:
+                print(f"⚠️  Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
+
             tank_system_rule = {
                 'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
                 'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
@@ -138,6 +144,13 @@ class SystemOrchestrator:
                 'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.05),
                 'orifice_diameter': flow_params.get('orifice_diameter_m', 0.01)  # Default 10mm orifice
             }
+
+            # Log fallback usage for critical coupling parameters
+            if 'max_flow_rate_kg_s' not in flow_params:
+                print(f"⚠️  Using fallback: max_flow_rate_kg_s = {tank_system_rule['max_flow_rate']} kg/s (consider adding to YAML config)")
+            if 'orifice_diameter_m' not in flow_params:
+                print(f"⚠️  Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
+
             tank_system_coupling_rules.append(tank_system_rule)
 
         # Initialize TankSystem with all components
@@ -224,6 +237,8 @@ class SystemOrchestrator:
 
                 material = NISTMaterial.aluminum_6061T6_nist()
                 operating_pressure = geometry_data.get('venting_pressure', 450e5)  # Default 450 bar
+                if 'venting_pressure' not in geometry_data:
+                    print(f"⚠️  Using fallback: venting_pressure = {operating_pressure/1e5:.0f} bar for Tank {tank_id} (consider adding to YAML config)")
 
                 # Calculate tank geometry from mission requirements
                 tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure)
@@ -245,6 +260,8 @@ class SystemOrchestrator:
             initial_pressure = float(geometry_data['initial_pressure'])
             venting_pressure = float(geometry_data.get('venting_pressure', initial_pressure * 1.125))
             minimum_pressure = float(geometry_data.get('minimum_pressure', min(15e5, initial_pressure * 0.1)))
+            if 'minimum_pressure' not in geometry_data:
+                print(f"⚠️  Using fallback: minimum_pressure = {minimum_pressure/1e5:.1f} bar for Tank {tank_id} (calculated from initial_pressure)")
 
             # Use calculated temperature from mission sizing if available
             if 'calculated_initial_temperature' in geometry_data:
@@ -290,6 +307,8 @@ class SystemOrchestrator:
         else:
             first_tank_data = list(self.scenario_config.tank_geometries.values())[0]
             minimum_density = float(first_tank_data.get('minimum_density', 5.8))  # Default 5.8 kg/m³
+            if 'minimum_density' not in first_tank_data:
+                print(f"⚠️  Using fallback: minimum_density = {minimum_density} kg/m³ for stopping criteria (consider adding to YAML config)")
 
         # Get target density from stopping criteria configuration
         target_density = None
@@ -353,9 +372,17 @@ class SystemOrchestrator:
                 mission_data = raw_config['mission']
                 flow_rate = mission_data.get('flow_rate', 0.001)
                 duration = mission_data.get('duration', 36000)
+
+                # Log fallback usage for mission parameters
+                if 'flow_rate' not in mission_data:
+                    print(f"⚠️  Using fallback: flow_rate = {flow_rate} kg/s (consider adding to YAML config)")
+                if 'duration' not in mission_data:
+                    print(f"⚠️  Using fallback: duration = {duration} s ({duration/3600:.1f} hours) (consider adding to YAML config)")
                 mission_type = mission_data.get('type', 'discharge')
                 mission_key = mission_data.get('key', mission_type)
                 ambient_temp = mission_data.get('ambient_temperature', 288.15)
+                if 'ambient_temperature' not in mission_data:
+                    print(f"⚠️  Using fallback: ambient_temperature = {ambient_temp} K (consider adding to YAML config)")
 
             elif 'mission_sequence' in raw_config and 'missions' in raw_config['mission_sequence']:
                 # Fallback to sequential mission format - use first mission
@@ -792,6 +819,12 @@ class SystemOrchestrator:
         hex_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {})
         target_temp = float(hex_config.get('ohex_target_temperature', 200.0))  # K
         target_press = float(hex_config.get('ohex_target_pressure', 20e5))    # Pa
+
+        # Log fallback usage for heat exchanger parameters
+        if 'ohex_target_temperature' not in hex_config:
+            print(f"⚠️  Using fallback: ohex_target_temperature = {target_temp} K (now available in YAML config)")
+        if 'ohex_target_pressure' not in hex_config:
+            print(f"⚠️  Using fallback: ohex_target_pressure = {target_press/1e5:.0f} bar (now available in YAML config)")
 
         try:
             # Calculate target enthalpy (constant for all time points)

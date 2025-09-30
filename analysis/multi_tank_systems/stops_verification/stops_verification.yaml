@@ -1,6 +1,13 @@
 # Stops Verification Configuration - Orchestrated Framework
 analysis_name: "Stops Verification Sequential Missions"
-description: "Sequential discharge → refuel → dormancy missions using orchestrated framework"
+description: "Sequential discharge → refuel → dormancy mi    heat_exchanger_requirements:
+      enabled: true
+      figsize: [12, 6]
+      filename: "heat_exchanger_requirements"
+      include_ihex: true             # Calculate and show iHEX requirements (true/false)
+      include_ohex: true             # Calculate and show oHEX requirements (true/false)
+      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
+      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations using orchestrated framework"
 version: "1.0"
 
 # Network topology definition (same format as single_tank_cch2)

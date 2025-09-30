@@ -106,6 +106,8 @@ output:
       filename: "heat_exchanger_requirements"
       include_ihex: true             # Calculate and show iHEX requirements (true/false)
       include_ohex: true             # Calculate and show oHEX requirements (true/false)
+      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
+      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations
       include_total: true            # Show total (iHEX + oHEX) curve (true/false)
       ohex_target_temperature: 200.0 # K - Target temperature for oHEX calculation
       ohex_target_pressure: 20e5     # Pa - Target pressure for oHEX calculation (20 bar)
