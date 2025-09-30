@@ -397,7 +397,10 @@ class TankSystem:
             # print some debug info (throttled to avoid performance issues)
             if hasattr(self, '_last_debug_time'):
                 if t - self._last_debug_time > 100:  # Print every 100 seconds
-                    print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
+                    if len(self.tanks) >= 2:
+                        print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
+                    else:
+                        print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg")
                     self._last_debug_time = t
             else:
                 self._last_debug_time = t
@@ -475,9 +478,15 @@ class TankSystem:
         if self.config.mission_profile is None:
             return 0.0
 
-        # For single tank scenarios, tank 0 gets the mission flow
-        if tank_index != 0:
-            return 0.0
+        # For single tank scenarios, the only tank gets the mission flow
+        # For multi-tank scenarios, check mission assignment
+        if len(self.tanks) == 1:
+            # Single tank case: the only tank gets all mission flows
+            pass  # Continue to flow calculation
+        else:
+            # Multi-tank case: use mission assignment logic
+            if tank_index != 0:  # Only tank 0 gets mission flows by default
+                return 0.0
 
         try:
             # Import flow types
@@ -506,11 +515,35 @@ class TankSystem:
                         # Extract flow rate
                         if hasattr(target_flow, 'mass_flow'):
                             if isinstance(target_flow.mass_flow, list):
-                                # Time-varying flow: linear interpolation
-                                start_rate = abs(target_flow.mass_flow[0])
-                                end_rate = abs(target_flow.mass_flow[-1])
-                                progress = section_time / section.duration if section.duration > 0 else 0
-                                return start_rate + (end_rate - start_rate) * progress
+                                # Time-varying flow: proper handling of multi-point profiles
+                                if len(target_flow.mass_flow) == 1:
+                                    return abs(target_flow.mass_flow[0])
+                                elif len(target_flow.mass_flow) == 2:
+                                    # Two-point linear interpolation (original behavior)
+                                    start_rate = abs(target_flow.mass_flow[0])
+                                    end_rate = abs(target_flow.mass_flow[-1])
+                                    progress = section_time / section.duration if section.duration > 0 else 0
+                                    return start_rate + (end_rate - start_rate) * progress
+                                else:
+                                    # Multi-point profile: interpolate across the full array
+                                    flow_values = [abs(rate) for rate in target_flow.mass_flow]
+                                    if section.duration <= 0:
+                                        return flow_values[0]
+
+                                    # Calculate which segment we're in
+                                    progress = section_time / section.duration
+                                    progress = max(0.0, min(1.0, progress))  # Clamp to [0,1]
+
+                                    # Map progress to array index
+                                    array_pos = progress * (len(flow_values) - 1)
+                                    idx = int(array_pos)
+
+                                    if idx >= len(flow_values) - 1:
+                                        return flow_values[-1]
+
+                                    # Linear interpolation between adjacent points
+                                    frac = array_pos - idx
+                                    return flow_values[idx] + (flow_values[idx + 1] - flow_values[idx]) * frac
                             else:
                                 # Constant flow rate
                                 return abs(target_flow.mass_flow)
