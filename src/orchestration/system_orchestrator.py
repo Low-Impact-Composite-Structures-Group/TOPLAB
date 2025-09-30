@@ -947,8 +947,16 @@ class SystemOrchestrator:
             # Import the new plotting module
             from src.plotting.multi_tank_plotting import DelftColourPlotter
 
-            # Create plotter with analysis name from config
-            plotter = DelftColourPlotter(analysis_name=self.scenario_config.analysis_name)
+            # Get plotting configuration from config
+            plot_config = self.scenario_config.config_dict.get('output', {}).get('plots', {})
+            style_config = plot_config.get('style', {})
+
+            # Create plotter with analysis name and styling options from config
+            plotter = DelftColourPlotter(
+                analysis_name=self.scenario_config.analysis_name,
+                use_greyscale=style_config.get('use_greyscale', False),
+                enable_multi_tank_overlay=style_config.get('enable_multi_tank_overlay', False)
+            )
 
             # Check if this is a sequential mission analysis
             is_sequential = self._is_sequential_mission_analysis()
@@ -1096,10 +1104,41 @@ class SystemOrchestrator:
         """Generate plots for single mission analysis."""
         figures = []
 
-        # Generate plots for each tank
-        for tank_idx in range(len(self.tank_geometries)):
-            print(f"   🎨 Plotting Tank {tank_idx + 1} evolution...")
+        # Check if multi-tank overlay is enabled and we have multiple tanks
+        num_tanks = len(self.tank_geometries)
+        use_overlay = plotter.enable_multi_tank_overlay and num_tanks > 1
 
+        if use_overlay:
+            print(f"   🎨 Plotting multi-tank evolution (overlay mode, {num_tanks} tanks)...")
+
+            # Create reference lines from first tank configuration (for overlay mode)
+            tank_config_data = list(self.scenario_config.tank_geometries.values())[0]
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+
+            # Add mission ambient temperature if available
+            mission = self.scenario_config.mission_sequence.missions[0]
+            reference_lines['T_ambient'] = mission.ambient_temperature
+
+            # Generate single overlay plot for all tanks
+            overlay_save_path = None
+            if save_path:
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+                overlay_save_path = save_dir / f"{save_name}_evolution_all_tanks{save_ext}"
+
+            fig = plotter.plot_tank_evolution(
+                results=self.results,
+                tank_index=0,  # Not used in overlay mode
+                reference_lines=reference_lines,
+                save_path=str(overlay_save_path) if overlay_save_path else None,
+                overlay_all_tanks=True
+            )
+            figures.append(fig)
+
+        # Generate per-tank plots (individual evolution plots if not overlaying, plus other plot types)
+        for tank_idx in range(num_tanks):
             # Create reference lines from tank configuration
             tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
             reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
@@ -1108,23 +1147,26 @@ class SystemOrchestrator:
             mission = self.scenario_config.mission_sequence.missions[0]
             reference_lines['T_ambient'] = mission.ambient_temperature
 
-            # Generate tank evolution plot
-            tank_save_path = None
-            if save_path:
-                # Create tank-specific save path
-                from pathlib import Path
-                save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
-                save_ext = Path(save_path).suffix or '.png'
-                tank_save_path = save_dir / f"{save_name}_tank{tank_idx + 1}{save_ext}"
+            # Generate individual tank evolution plot (only if not using overlay mode)
+            if not use_overlay:
+                print(f"   🎨 Plotting Tank {tank_idx + 1} evolution...")
 
-            fig = plotter.plot_tank_evolution(
-                results=self.results,
-                tank_index=tank_idx,
-                reference_lines=reference_lines,
-                save_path=str(tank_save_path) if tank_save_path else None
-            )
-            figures.append(fig)
+                tank_save_path = None
+                if save_path:
+                    # Create tank-specific save path
+                    from pathlib import Path
+                    save_dir = Path(save_path).parent
+                    save_name = Path(save_path).stem
+                    save_ext = Path(save_path).suffix or '.png'
+                    tank_save_path = save_dir / f"{save_name}_evolution_tank{tank_idx + 1}{save_ext}"
+
+                fig = plotter.plot_tank_evolution(
+                    results=self.results,
+                    tank_index=tank_idx,
+                    reference_lines=reference_lines,
+                    save_path=str(tank_save_path) if tank_save_path else None
+                )
+                figures.append(fig)
 
             # Generate density-temperature plot for this tank
             dt_save_path = None

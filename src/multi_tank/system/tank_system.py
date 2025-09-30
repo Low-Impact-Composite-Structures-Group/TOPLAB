@@ -327,14 +327,13 @@ class TankSystem:
                     dydt = np.ones(len(y)) * 1e-12
                     return dydt
 
-                # Check for target density (refuel missions)
+                # Check for target density (refuel missions) - just log, don't terminate here
                 if self.config.target_density is not None and current_density >= self.config.target_density:
                     if not hasattr(self, '_target_density_stop_printed'):
                         print(f"   ⏹️  Tank {i+1} reached target density: {current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³")
                         self._target_density_stop_printed = True
-                    # Set very small derivatives instead of zero to allow graceful termination
-                    dydt = np.ones(len(y)) * 1e-12
-                    return dydt
+                        # Set a flag to indicate stopping should occur
+                        self._stop_requested = True
 
                 # Prevent numerical instability near empty tank
                 if tank_state.fuel_mass <= 1.0:  # 1 kg minimum
@@ -560,6 +559,37 @@ class TankSystem:
             print(f"⚠️  Error calculating discharge flow at t={time:.1f}s: {e}")
             return 0.0
 
+    def _create_density_event(self):
+        """Create density stopping event for refuel missions."""
+        def density_event(t, y):
+            """Event function to detect when target density is reached."""
+            # Check all tanks - stop if ANY tank reaches target density
+            states_per_tank = 3  # [mass, temp, temp_solid]
+
+            for i in range(len(self.tanks)):
+                mass_idx = i * states_per_tank
+                mass = y[mass_idx]
+
+                if mass <= 0:
+                    continue  # Skip empty tanks
+
+                # Calculate density for this tank
+                tank_volume = self._cached_tank_properties[i]['volume']
+                current_density = mass / tank_volume
+
+                # Check if this tank has reached target density
+                if current_density >= self.config.target_density:
+                    return current_density - self.config.target_density
+
+            # No tank has reached target yet - return negative value
+            return -1.0
+
+        # Configure event properties
+        density_event.terminal = True    # Stop integration when event occurs
+        density_event.direction = 1      # Trigger when density increases (refuel)
+
+        return density_event
+
     def run_analysis(self, solver_method: str = "RK45", solver_config: dict = None) -> MultiTankResults:
         """
         Run complete tank system analysis.
@@ -653,6 +683,11 @@ class TankSystem:
         if max_step is not None:
             integration_params['max_step'] = max_step
 
+        # Add density stopping events if target density is specified
+        if self.config.target_density is not None:
+            integration_params['events'] = self._create_density_event()
+            print(f"   🔧 Added target density event: {self.config.target_density:.1f} kg/m³")
+
         print(f"   🔧 Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
         solution = self.solver.integrate_full(**integration_params)
@@ -661,6 +696,11 @@ class TankSystem:
         print(f"✅ Integration completed in {elapsed_time:.1f}s")
         print(f"   Final time: {solution.t[-1]/3600:.2f} hours")
         print(f"   Data points: {len(solution.t)}")
+
+        # Check if stopped due to event
+        if hasattr(solution, 't_events') and solution.t_events and len(solution.t_events[0]) > 0:
+            event_time = solution.t_events[0][0]
+            print(f"   🎯 Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []

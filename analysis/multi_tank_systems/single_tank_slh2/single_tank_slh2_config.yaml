@@ -71,14 +71,14 @@ output:
   results_directory: "output/results"
   plots_directory: "output/plots"
 
-  # Plotting configuration
-  plotting:
-    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
-    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
-    # Note: sb_plotting may be deprecated - consider next script
+  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
 
   # Plot configurations
   plots:
+    # Plotting style configuration
+    style:
+      use_greyscale: true           # Enable greyscale plotting mode
+
     tank_states:
       enabled: true
       figsize: [12, 10]

@@ -40,37 +40,60 @@ class DelftColourPlotter:
     each plotting function modular and focused on a specific visualization.
     """
 
-    def __init__(self, analysis_name: str = "Multi-Tank Analysis"):
+    def __init__(self, analysis_name: str = "Multi-Tank Analysis",
+                 use_greyscale: bool = False,
+                 enable_multi_tank_overlay: bool = False):
         """
         Initialize plotter with seaborn styling.
 
         Args:
             analysis_name: Name of the analysis (used in plot titles)
+            use_greyscale: Whether to use greyscale styling instead of colors
+            enable_multi_tank_overlay: Whether to overlay multiple tanks on same plots
         """
         self.analysis_name = analysis_name
+        self.use_greyscale = use_greyscale
+        self.enable_multi_tank_overlay = enable_multi_tank_overlay
 
-        # Configure seaborn style with Delft colors
-        configure_plot_style(
-            font="Cambria",
-            palette="delft",
-            style="whitegrid",
-            context="paper",
-            figure_size=(12, 8),
-            dpi=100
-        )
-
-        print(f"🎨 DelftColourPlotter initialized for: {analysis_name}")
+                # Configure seaborn style
+        if use_greyscale:
+            # Use standard delft styling but override colors
+            configure_plot_style(
+                font="Cambria",
+                palette="delft",  # Use delft for now, override colors below
+                style="whitegrid",
+                context="paper",
+                figure_size=(12, 8),
+                dpi=100
+            )
+            # Define greyscale color scheme
+            self.color_palette = ['#000000', '#404040', '#808080', '#A0A0A0', '#C0C0C0', '#E0E0E0']
+            self.marker_styles = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
+            print(f"🎨 DelftColourPlotter initialized for: {analysis_name} (Greyscale Mode)")
+        else:
+            configure_plot_style(
+                font="Cambria",
+                palette="delft",
+                style="whitegrid",
+                context="paper",
+                figure_size=(12, 8),
+                dpi=100
+            )
+            self.color_palette = DELFT_PALETTE
+            self.marker_styles = None  # No markers for color mode
+            print(f"🎨 DelftColourPlotter initialized for: {analysis_name}")
 
     def plot_tank_evolution(self,
                           results: MultiTankResults,
                           tank_index: int = 0,
                           reference_lines: Optional[Dict[str, float]] = None,
-                          save_path: Optional[str] = None) -> plt.Figure:
+                          save_path: Optional[str] = None,
+                          overlay_all_tanks: bool = None) -> plt.Figure:
         """
         Plot tank evolution with 4 subplots: pressure, temperature, mass, and density vs time.
 
         This is the core tank evolution visualization showing the complete state evolution
-        of a single tank over time. For multi-tank systems, call this function for each tank.
+        of a single tank over time. For multi-tank systems, can overlay all tanks or show individually.
 
         Args:
             results: MultiTankResults containing simulation data
@@ -81,84 +104,126 @@ class DelftColourPlotter:
                 - 'rho_stop': Stopping density [kg/m³]
                 - 'T_ambient': Ambient temperature [K]
             save_path: Optional path to save the plot
+            overlay_all_tanks: Whether to overlay all tanks (overrides class setting)
 
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting tank evolution for Tank {tank_index + 1}...")
+        # Determine if we should overlay all tanks
+        should_overlay = overlay_all_tanks if overlay_all_tanks is not None else self.enable_multi_tank_overlay
+
+        if should_overlay and results.n_tanks > 1:
+            print(f"🔵 Plotting tank evolution for all {results.n_tanks} tanks (overlay mode)...")
+        else:
+            print(f"🔵 Plotting tank evolution for Tank {tank_index + 1}...")
 
         # Validate inputs
         if tank_index >= results.n_tanks:
             raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
 
-        # Extract tank data arrays
-        tank_data = results._extract_tank_arrays(tank_index)
+        # Create 2x2 subplot grid
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10) if should_overlay else (12, 8))
+
+        if should_overlay and results.n_tanks > 1:
+            fig.suptitle(f"{self.analysis_name} - Multi-Tank Evolution Comparison",
+                         fontsize=14, fontweight='bold')
+        else:
+            fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Evolution",
+                         fontsize=14, fontweight='bold')
+
+        # Get time array
         times_hours = results.times / 3600.0  # Convert to hours
 
-        # Create 2x2 subplot grid
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-        fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Evolution",
-                     fontsize=14, fontweight='bold')
+        # Colors from palette (greyscale or Delft)
+        primary_color = self.color_palette[0]
+        reference_color = self.color_palette[2] if len(self.color_palette) > 2 else self.color_palette[1]
 
-        # Colors from Delft palette
-        primary_color = DELFT_PALETTE[0]  # DONKERBLAUW
-        reference_color = DELFT_PALETTE[2]  # KONINGSBLAUW
+        # Setup axes
+        ax1, ax2, ax3, ax4 = axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]
 
-        # Plot 1: Pressure vs Time
-        ax1 = axes[0, 0]
-        ax1.plot(times_hours, tank_data['pressures'], color=primary_color, linewidth=2, label='Pressure')
+        # Configure axes
         ax1.set_xlabel('Time [hours]')
         ax1.set_ylabel('Pressure [bar]')
         ax1.set_title('Pressure vs Time')
         ax1.grid(True, alpha=0.3)
 
-        # Add reference lines for pressure
-        if reference_lines:
-            if 'P_min' in reference_lines:
-                ax1.axhline(y=reference_lines['P_min'], color=reference_color,
-                           linestyle='--', alpha=0.7, label=f"P_min = {reference_lines['P_min']:.0f} bar")
-            if 'P_vent' in reference_lines:
-                ax1.axhline(y=reference_lines['P_vent'], color=DELFT_PALETTE[6],
-                           linestyle='--', alpha=0.7, label=f"P_vent = {reference_lines['P_vent']:.0f} bar")
-
-        if reference_lines and ('P_min' in reference_lines or 'P_vent' in reference_lines):
-            ax1.legend(fontsize=9)
-
-        # Plot 2: Temperature vs Time
-        ax2 = axes[0, 1]
-        ax2.plot(times_hours, tank_data['temperatures'], color=primary_color, linewidth=2, label='Temperature')
         ax2.set_xlabel('Time [hours]')
         ax2.set_ylabel('Temperature [K]')
         ax2.set_title('Temperature vs Time')
         ax2.grid(True, alpha=0.3)
 
-        # Add reference line for ambient temperature
-        if reference_lines and 'T_ambient' in reference_lines:
-            ax2.axhline(y=reference_lines['T_ambient'], color=reference_color,
-                       linestyle='--', alpha=0.7, label=f"T_ambient = {reference_lines['T_ambient']:.0f} K")
-            ax2.legend(fontsize=9)
-
-        # Plot 3: Mass vs Time
-        ax3 = axes[1, 0]
-        ax3.plot(times_hours, tank_data['masses'], color=primary_color, linewidth=2, label='Mass')
         ax3.set_xlabel('Time [hours]')
         ax3.set_ylabel('Mass [kg]')
         ax3.set_title('Mass vs Time')
         ax3.grid(True, alpha=0.3)
 
-        # Plot 4: Density vs Time
-        ax4 = axes[1, 1]
-        ax4.plot(times_hours, tank_data['densities'], color=primary_color, linewidth=2, label='Density')
         ax4.set_xlabel('Time [hours]')
         ax4.set_ylabel('Density [kg/m³]')
         ax4.set_title('Density vs Time')
         ax4.grid(True, alpha=0.3)
 
-        # Add reference line for stopping density
-        if reference_lines and 'rho_stop' in reference_lines:
-            ax4.axhline(y=reference_lines['rho_stop'], color=reference_color,
-                       linestyle='--', alpha=0.7, label=f"ρ_stop = {reference_lines['rho_stop']:.1f} kg/m³")
-            ax4.legend(fontsize=9)
+        # Plot tank data (single tank or multi-tank overlay)
+        tanks_to_plot = range(results.n_tanks) if should_overlay else [tank_index]
+
+        for i, tank_idx in enumerate(tanks_to_plot):
+            # Extract tank data arrays
+            tank_data = results._extract_tank_arrays(tank_idx)
+
+            # Get color and marker configuration
+            color = self.color_palette[i % len(self.color_palette)]
+            marker_config = self._get_marker_config(i, len(times_hours))
+
+            # Tank label
+            tank_label = f"Tank {tank_idx + 1}" if should_overlay else "Data"
+
+            # Plot 1: Pressure vs Time
+            ax1.plot(times_hours, tank_data['pressures'], color=color, linewidth=2,
+                    label=f'{tank_label} Pressure' if should_overlay else 'Pressure', **marker_config)
+
+            # Plot 2: Temperature vs Time
+            ax2.plot(times_hours, tank_data['temperatures'], color=color, linewidth=2,
+                    label=f'{tank_label} Temperature' if should_overlay else 'Temperature', **marker_config)
+
+            # Plot 3: Mass vs Time
+            ax3.plot(times_hours, tank_data['masses'], color=color, linewidth=2,
+                    label=f'{tank_label} Mass' if should_overlay else 'Mass', **marker_config)
+
+            # Plot 4: Density vs Time
+            ax4.plot(times_hours, tank_data['densities'], color=color, linewidth=2,
+                    label=f'{tank_label} Density' if should_overlay else 'Density', **marker_config)
+
+        # Add reference lines with greyscale-appropriate styling
+        if reference_lines:
+            # Define reference line styles for greyscale vs color
+            if self.use_greyscale:
+                pmin_style = {'color': '#000000', 'linestyle': '--', 'alpha': 0.8, 'linewidth': 2.0}
+                pvent_style = {'color': '#404040', 'linestyle': '-.', 'alpha': 0.8, 'linewidth': 2.0}
+                tambient_style = {'color': '#404040', 'linestyle': '--', 'alpha': 0.8, 'linewidth': 1.5}
+                rhostop_style = {'color': '#404040', 'linestyle': '--', 'alpha': 0.8, 'linewidth': 1.5}
+            else:
+                pmin_style = {'color': reference_color, 'linestyle': '--', 'alpha': 0.7, 'linewidth': 1.5}
+                pvent_style = {'color': reference_color, 'linestyle': ':', 'alpha': 0.7, 'linewidth': 1.5}
+                tambient_style = {'color': reference_color, 'linestyle': '--', 'alpha': 0.7, 'linewidth': 1.5}
+                rhostop_style = {'color': reference_color, 'linestyle': '--', 'alpha': 0.7, 'linewidth': 1.5}
+
+            if 'P_min' in reference_lines:
+                ax1.axhline(y=reference_lines['P_min'], label=f"P_min = {reference_lines['P_min']:.0f} bar", **pmin_style)
+            if 'P_vent' in reference_lines:
+                ax1.axhline(y=reference_lines['P_vent'], label=f"P_vent = {reference_lines['P_vent']:.0f} bar", **pvent_style)
+            if 'T_ambient' in reference_lines:
+                ax2.axhline(y=reference_lines['T_ambient'], label=f"T_ambient = {reference_lines['T_ambient']:.0f} K", **tambient_style)
+            if 'rho_stop' in reference_lines:
+                ax4.axhline(y=reference_lines['rho_stop'], label=f"ρ_stop = {reference_lines['rho_stop']:.1f} kg/m³", **rhostop_style)
+
+        # Add legends to axes that have multiple series or reference lines
+        for ax in [ax1, ax2, ax3, ax4]:
+            if len(ax.get_lines()) > 1 or (len(ax.get_lines()) == 1 and ax.get_lines()[0].get_label() != '_nolegend_'):
+                ax.legend(fontsize=9)
+
+        # Apply consistent legend formatting to all subplots
+        for ax in [ax1, ax2, ax3, ax4]:
+            if ax.get_legend():
+                self._apply_3d_legend_formatting(ax)
 
         # Improve layout
         plt.tight_layout()
@@ -223,13 +288,16 @@ class DelftColourPlotter:
         fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Density-Temperature Diagram",
                      fontsize=14, fontweight='bold')
 
-        # Primary color for tank path
-        primary_color = DELFT_PALETTE[0]  # DONKERBLAUW
+        # Primary color for tank path (greyscale or color)
+        primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color
+        line_style = {'color': primary_color, 'linewidth': 2}
+        if self.use_greyscale:
+            marker_config = self._get_marker_config(0, len(tank_data['temperatures']))
+            line_style.update(marker_config)
 
         # Plot tank path
         tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
-                            '-', color=primary_color, linewidth=2,
-                            label=f"Tank {tank_index + 1} Path")
+                            '-', label=f"Tank {tank_index + 1} Path", **line_style)
 
         # Add direction arrow (about 1/3 along the path)
         if len(tank_data['temperatures']) > 10:
@@ -270,13 +338,18 @@ class DelftColourPlotter:
                         rho_sat_vapor.append(np.nan)
 
                 # Plot saturation lines
-                ax.plot(T_sat_range, rho_sat_liquid, '--', color=DELFT_PALETTE[3],
+                # Use appropriate colors based on mode
+                sat_liquid_color = self.color_palette[3] if len(self.color_palette) > 3 else self.color_palette[1]
+                sat_vapor_color = self.color_palette[4] if len(self.color_palette) > 4 else self.color_palette[2]
+                crit_color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]
+
+                ax.plot(T_sat_range, rho_sat_liquid, '--', color=sat_liquid_color,
                        linewidth=1.5, alpha=0.7, label='Liquid Saturation')
-                ax.plot(T_sat_range, rho_sat_vapor, '--', color=DELFT_PALETTE[4],
+                ax.plot(T_sat_range, rho_sat_vapor, '--', color=sat_vapor_color,
                        linewidth=1.5, alpha=0.7, label='Vapor Saturation')
 
                 # Mark critical point
-                ax.plot(T_crit, rho_crit, 'o', color=DELFT_PALETTE[6], markersize=8,
+                ax.plot(T_crit, rho_crit, 'o', color=crit_color, markersize=8,
                        label=f'Critical Point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
 
             except Exception as e:
@@ -319,17 +392,17 @@ class DelftColourPlotter:
                     if len(T_valid) > 5:  # Only plot if we have enough points
                         # Determine color and style based on pressure type
                         if p_vent_bar and abs(P_bar - p_vent_bar) < 0.1:  # Venting pressure
-                            color = DELFT_PALETTE[6]  # ORANJE for venting
+                            color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]  # Grey/Orange for venting
                             linewidth = 2
                             alpha = 0.8
                             label = f'{P_bar:.0f} bar (Vent)'
                         elif p_min_bar and abs(P_bar - p_min_bar) < 0.1:  # Minimum pressure
-                            color = DELFT_PALETTE[5]  # ROOD for minimum
+                            color = self.color_palette[2] if self.use_greyscale else DELFT_PALETTE[5]  # Dark grey/Red for minimum
                             linewidth = 2
                             alpha = 0.8
                             label = f'{P_bar:.0f} bar (Min)'
                         else:  # Regular isobar
-                            color = DELFT_PALETTE[2]  # KONINGSBLAUW for regular
+                            color = self.color_palette[3] if self.use_greyscale else DELFT_PALETTE[2]  # Light grey/Blue for regular
                             linewidth = 1
                             alpha = 0.5
                             label = None
@@ -438,10 +511,15 @@ class DelftColourPlotter:
             fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Mass Flow Rates (Mission Sequence)",
                          fontsize=14, fontweight='bold')
 
-        # Color scheme
-        inflow_color = DELFT_PALETTE[1]   # LICHTBLAUW (light blue) for inflows
-        outflow_color = DELFT_PALETTE[6]  # ORANJE (orange) for outflows
-        vent_color = DELFT_PALETTE[5]     # ROOD (red) for venting
+        # Color scheme (greyscale or color)
+        if self.use_greyscale:
+            inflow_color = self.color_palette[0]    # Black for inflows
+            outflow_color = self.color_palette[2]   # Dark grey for outflows
+            vent_color = self.color_palette[1]      # Dark grey for venting
+        else:
+            inflow_color = DELFT_PALETTE[1]   # LICHTBLAUW (light blue) for inflows
+            outflow_color = DELFT_PALETTE[6]  # ORANJE (orange) for outflows
+            vent_color = DELFT_PALETTE[5]     # ROOD (red) for venting
 
         # Plot data for each mission (currently just one)
         for mission_idx in range(n_missions):
@@ -452,18 +530,24 @@ class DelftColourPlotter:
             outflow_rates = -tank_data['outflow_rates'] / 1000.0 # Convert to kg/s, make negative for plotting
             vent_rates = -tank_data['vent_rates'] / 1000.0       # Convert to kg/s, make negative for plotting
 
-            # Plot inflow (positive)
-            ax.plot(times_hours, inflow_rates, color=inflow_color, linewidth=2,
-                   label='Inflow', linestyle='-')
+            # Plot inflow (positive) with greyscale markers if needed
+            inflow_style = {'color': inflow_color, 'linewidth': 2, 'linestyle': '-'}
+            if self.use_greyscale:
+                inflow_style.update(self._get_marker_config(0, len(times_hours)))
+            ax.plot(times_hours, inflow_rates, label='Inflow', **inflow_style)
 
-            # Plot outflow (negative)
-            ax.plot(times_hours, outflow_rates, color=outflow_color, linewidth=2,
-                   label='Outflow', linestyle='-')
+            # Plot outflow (negative) with greyscale markers if needed
+            outflow_style = {'color': outflow_color, 'linewidth': 2, 'linestyle': '-'}
+            if self.use_greyscale:
+                outflow_style.update(self._get_marker_config(1, len(times_hours)))
+            ax.plot(times_hours, outflow_rates, label='Outflow', **outflow_style)
 
-            # Optionally plot venting flow (negative)
+            # Optionally plot venting flow (negative) with greyscale markers if needed
             if include_venting_flow:
-                ax.plot(times_hours, vent_rates, color=vent_color, linewidth=2,
-                       label='Venting Flow', linestyle='--')
+                vent_style = {'color': vent_color, 'linewidth': 2, 'linestyle': '--'}
+                if self.use_greyscale:
+                    vent_style.update(self._get_marker_config(2, len(times_hours)))
+                ax.plot(times_hours, vent_rates, label='Venting Flow', **vent_style)
 
             # Add zero line for reference
             ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.8)
@@ -544,17 +628,24 @@ class DelftColourPlotter:
         fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements",
                      fontsize=14, fontweight='bold')
 
-        # Color scheme
-        ihex_color = DELFT_PALETTE[0]    # DONKERBLAUW (dark blue) for iHEX
-        ohex_color = DELFT_PALETTE[6]    # ORANJE (orange) for oHEX
-        total_color = DELFT_PALETTE[2]   # KONINGSBLAUW (royal blue) for total
+        # Color scheme (greyscale or color)
+        if self.use_greyscale:
+            ihex_color = self.color_palette[0]    # Black for iHEX
+            ohex_color = self.color_palette[2]    # Dark grey for oHEX
+            total_color = self.color_palette[1]   # Dark grey for total
+        else:
+            ihex_color = DELFT_PALETTE[0]    # DONKERBLAUW (dark blue) for iHEX
+            ohex_color = DELFT_PALETTE[6]    # ORANJE (orange) for oHEX
+            total_color = DELFT_PALETTE[2]   # KONINGSBLAUW (royal blue) for total
 
         # Convert W to kW for better readability
         ihex_requirements_kw = [req / 1000.0 for req in ihex_requirements]
 
-        # Plot iHEX requirements (always present)
-        ax.plot(times_hours, ihex_requirements_kw, color=ihex_color, linewidth=2,
-               label='iHEX (Internal Heat Exchanger)', linestyle='-')
+        # Plot iHEX requirements (always present) with greyscale markers if needed
+        ihex_style = {'color': ihex_color, 'linewidth': 2, 'linestyle': '-'}
+        if self.use_greyscale:
+            ihex_style.update(self._get_marker_config(0, len(times_hours)))
+        ax.plot(times_hours, ihex_requirements_kw, label='iHEX (Internal Heat Exchanger)', **ihex_style)
 
         # Plot oHEX requirements if available and requested
         ohex_plotted = False
@@ -563,8 +654,10 @@ class DelftColourPlotter:
             max_ohex = max(ohex_requirements) if len(ohex_requirements) > 0 else 0
             if max_ohex > 1.0:  # Only plot if we have significant values (> 1W)
                 ohex_requirements_kw = [req / 1000.0 for req in ohex_requirements]
-                ax.plot(times_hours, ohex_requirements_kw, color=ohex_color, linewidth=2,
-                       label='oHEX (Outboard Heat Exchanger)', linestyle='-')
+                ohex_style = {'color': ohex_color, 'linewidth': 2, 'linestyle': '-'}
+                if self.use_greyscale:
+                    ohex_style.update(self._get_marker_config(1, len(times_hours)))
+                ax.plot(times_hours, ohex_requirements_kw, label='oHEX (Outboard Heat Exchanger)', **ohex_style)
                 ohex_plotted = True
 
         # Plot total requirements if both are available and requested
@@ -572,8 +665,10 @@ class DelftColourPlotter:
             try:
                 total_requirements = [ihex + ohex for ihex, ohex in zip(ihex_requirements, ohex_requirements)]
                 total_requirements_kw = [req / 1000.0 for req in total_requirements]
-                ax.plot(times_hours, total_requirements_kw, color=total_color, linewidth=2,
-                       label='Total Heat Exchanger Requirement', linestyle='--', alpha=0.8)
+                total_style = {'color': total_color, 'linewidth': 2, 'linestyle': '--', 'alpha': 0.8}
+                if self.use_greyscale:
+                    total_style.update(self._get_marker_config(2, len(times_hours)))
+                ax.plot(times_hours, total_requirements_kw, label='Total Heat Exchanger Requirement', **total_style)
             except Exception as e:
                 print(f"   ⚠️  Could not calculate total requirements: {e}")
 
@@ -603,6 +698,90 @@ class DelftColourPlotter:
 
         print(f"   ✅ Heat exchanger requirements plot completed")
         return fig
+
+    def _apply_3d_legend_formatting(self, ax):
+        """
+        Apply consistent 3D shadow effect legend formatting to an axis.
+
+        Args:
+            ax: Matplotlib axis object
+        """
+        legend = ax.get_legend()
+        if legend:
+            legend.set_frameon(True)
+            legend.set_fancybox(True)
+            legend.set_shadow(True)
+            legend.set_framealpha(0.9)
+            legend.set_edgecolor('black')
+            legend.get_frame().set_facecolor('white')
+            legend.get_frame().set_linewidth(1.2)
+
+    def _get_marker_config(self, line_index: int = 0) -> Dict[str, Any]:
+        """
+        Get marker configuration for greyscale plotting.
+
+        Args:
+            line_index: Index of the line/series for different marker styles
+
+        Returns:
+            Dictionary with marker configuration
+        """
+        if not self.use_greyscale or not self.marker_styles:
+            return {}
+
+        marker_style = self.marker_styles[line_index % len(self.marker_styles)]
+        return {
+            'marker': marker_style,
+            'markevery': max(1, len(range(100)) // 20),  # Show ~20 markers per line
+            'markersize': 6,
+            'markerfacecolor': 'white',
+            'markeredgewidth': 1.5
+        }
+
+    def _apply_3d_legend_formatting(self, ax):
+        """
+        Apply consistent 3D shadow effect legend formatting to an axis.
+
+        Args:
+            ax: Matplotlib axis object
+        """
+        legend = ax.get_legend()
+        if legend:
+            legend.set_frame_on(True)
+            frame = legend.get_frame()
+            frame.set_facecolor('white')
+            frame.set_edgecolor('black')
+            frame.set_linewidth(1.2)
+            frame.set_alpha(0.9)
+            # Note: Shadow effect should be set during legend creation with shadow=True parameter
+
+    def _get_marker_config(self, line_index: int = 0, data_length: int = 100) -> Dict[str, Any]:
+        """
+        Get marker configuration for greyscale plotting.
+
+        Args:
+            line_index: Index of the line/series for different marker styles
+            data_length: Length of data array to calculate marker density
+
+        Returns:
+            Dictionary with marker configuration
+        """
+        if not self.use_greyscale or not self.marker_styles:
+            return {}
+
+        marker_style = self.marker_styles[line_index % len(self.marker_styles)]
+        # Calculate marker density - show ~15-25 evenly spaced markers per line
+        target_markers = 20
+        markevery = max(1, data_length // target_markers) if data_length > target_markers else 1
+
+        return {
+            'marker': marker_style,
+            'markevery': markevery,
+            'markersize': 5,
+            'markerfacecolor': 'white',
+            'markeredgewidth': 1.2,
+            'markeredgecolor': self.color_palette[line_index % len(self.color_palette)]
+        }
 
     def create_reference_lines_from_config(self, tank_config: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -714,10 +893,15 @@ class DelftColourPlotter:
         fig.suptitle(f"{self.analysis_name} - Sequential Tank {tank_index + 1} Evolution",
                      fontsize=14, fontweight='bold')
 
-        # Colors from Delft palette
-        primary_color = DELFT_PALETTE[0]  # DONKERBLAUW
-        reference_color = DELFT_PALETTE[2]  # KONINGSBLAUW
-        boundary_color = DELFT_PALETTE[4]  # ORANJE
+        # Colors (greyscale or Delft palette)
+        if self.use_greyscale:
+            primary_color = self.color_palette[0]    # Black
+            reference_color = self.color_palette[2]  # Dark grey
+            boundary_color = self.color_palette[1]   # Dark grey
+        else:
+            primary_color = DELFT_PALETTE[0]  # DONKERBLAUW
+            reference_color = DELFT_PALETTE[2]  # KONINGSBLAUW
+            boundary_color = DELFT_PALETTE[4]  # ORANJE
 
         # Plot 1: Pressure vs Time
         ax1 = axes[0, 0]
@@ -737,7 +921,8 @@ class DelftColourPlotter:
                 ax1.axhline(y=reference_lines['P_min'], color=reference_color,
                            linestyle='--', alpha=0.7, label=f"P_min = {reference_lines['P_min']:.0f} bar")
             if 'P_vent' in reference_lines:
-                ax1.axhline(y=reference_lines['P_vent'], color=DELFT_PALETTE[6],
+                vent_ref_color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]
+                ax1.axhline(y=reference_lines['P_vent'], color=vent_ref_color,
                            linestyle='--', alpha=0.7, label=f"P_vent = {reference_lines['P_vent']:.0f} bar")
 
         if reference_lines and ('P_min' in reference_lines or 'P_vent' in reference_lines):
@@ -850,8 +1035,11 @@ class DelftColourPlotter:
         fig.suptitle(f"{self.analysis_name} - Sequential Density-Temperature (Tank {tank_index + 1})",
                      fontsize=14, fontweight='bold')
 
-        # Different colors for each mission
-        mission_colors = [DELFT_PALETTE[0], DELFT_PALETTE[3], DELFT_PALETTE[5]]  # DONKERBLAUW, BORDEAUX, GRIJS
+        # Different colors for each mission (greyscale or color)
+        if self.use_greyscale:
+            mission_colors = [self.color_palette[0], self.color_palette[1], self.color_palette[2]]  # Black, dark grey, grey
+        else:
+            mission_colors = [DELFT_PALETTE[0], DELFT_PALETTE[3], DELFT_PALETTE[5]]  # DONKERBLAUW, BORDEAUX, GRIJS
 
         # Plot each mission's trajectory
         for i, mission_result in enumerate(mission_results):
@@ -964,12 +1152,15 @@ class DelftColourPlotter:
         fig.suptitle(f"{self.analysis_name} - Sequential Mass Flows (Tank {tank_index + 1})",
                      fontsize=14, fontweight='bold')
 
-        # Plot flow rates
-        primary_color = DELFT_PALETTE[0]
-        ax.plot(combined_times, combined_flows, color=primary_color, linewidth=2.5, label='Mass Flow Rate')
+        # Plot flow rates (greyscale or color)
+        primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color
+        flow_style = {'color': primary_color, 'linewidth': 2.5}
+        if self.use_greyscale:
+            flow_style.update(self._get_marker_config(0, len(combined_times)))
+        ax.plot(combined_times, combined_flows, label='Mass Flow Rate', **flow_style)
 
         # Add mission boundaries
-        boundary_color = DELFT_PALETTE[4]  # ORANJE
+        boundary_color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[4]  # Dark grey/Orange
         for boundary in mission_boundaries:
             ax.axvline(x=boundary, color=boundary_color, linestyle=':', alpha=0.7, linewidth=1)
 

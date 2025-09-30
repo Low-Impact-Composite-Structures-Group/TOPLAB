@@ -57,12 +57,10 @@ class SimpleSequentialAnalysis:
             duration = mission.get('max_duration', mission.get('duration', 3600))
             print(f"   Duration: {duration}s")
 
-
-
-
-
+            print(f"   🔧 Creating mission config...")
             # Create mission config
             mission_config = self._create_simple_config(config, mission, sizing_mission_name)
+            print(f"   🔧 Mission config created successfully")
 
             # Get solver config from mission
             solver_method = "RK45"  # default
@@ -79,8 +77,11 @@ class SimpleSequentialAnalysis:
 
             # Run mission
             print(f"   Solver: {solver_method}")
+            print(f"   🔧 Creating SystemOrchestrator...")
             orchestrator = SystemOrchestrator(mission_config)
+            print(f"   🔧 SystemOrchestrator created, starting simulation...")
             result = orchestrator.run_simulation(solver_method, solver_config)
+            print(f"   🔧 Simulation completed, processing results...")
 
             # Simple result summary
             actual_duration = result.times[-1] if hasattr(result, 'times') else 0
@@ -149,23 +150,30 @@ class SimpleSequentialAnalysis:
                     config['geometry'][tank_key]['initial_density'] = mission['initial_density']
 
         # Apply mission-specific stopping criteria
-        if 'target_density' in mission:
-            config['stopping_criteria'] = config.get('stopping_criteria', {})
+        config['stopping_criteria'] = config.get('stopping_criteria', {})
 
+        if mission['type'].lower() == 'dormancy':
+            # Dormancy: ALWAYS use time only, no density stopping
+            config['stopping_criteria']['use_density_stopping_events'] = False
+            config['stopping_criteria']['minimum_density'] = 0.1  # Very low, won't trigger
+            # Ensure mission duration is used
+            if 'duration' in mission:
+                config['mission']['duration'] = mission['duration']
+            print(f"   🔧 Dormancy mission: duration={config['mission']['duration']}s, density_stopping=False")
+        elif 'target_density' in mission:
             if mission['type'].lower() == 'discharge':
                 # Discharge: stop when density drops TO target (minimum)
                 config['stopping_criteria']['minimum_density'] = mission['target_density']
                 config['stopping_criteria']['use_density_stopping_events'] = True
+                print(f"   🔧 Discharge mission: minimum_density={mission['target_density']}, density_stopping=True")
             elif mission['type'].lower() == 'refuel':
                 # Refuel: stop when density reaches target (maximum)
                 config['stopping_criteria']['target_density'] = mission['target_density']
                 config['stopping_criteria']['use_density_stopping_events'] = True
-                # Set minimum_density very low so it doesn't interfere with target stopping
-                config['stopping_criteria']['minimum_density'] = 1.0  # Very low, won't trigger
-            else:
-                # Dormancy: use time only, no density stopping
-                config['stopping_criteria']['use_density_stopping_events'] = False
-                config['stopping_criteria']['minimum_density'] = 1.0  # Very low, won't trigger
+                # REMOVE minimum_density completely for refuel - only use target_density
+                if 'minimum_density' in config['stopping_criteria']:
+                    del config['stopping_criteria']['minimum_density']
+                print(f"   🔧 Refuel mission: target_density={mission['target_density']}, density_stopping=True")
 
         # Ensure fill_fraction is set for tank sizing calculations
         tank_key = 1 if 1 in config['geometry'] else '1'

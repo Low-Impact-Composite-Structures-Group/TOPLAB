@@ -80,7 +80,7 @@ mission_sequence:
       key: "refuel"                     # Mission identifier
       flow_rate: 0.07                   # kg/s (70 g/s refuel rate)
       target_density: 78.0              # kg/m³ (restore full density)
-      max_duration: 600                 # s (10 minutes max)
+      max_duration: 120                 # s (2 minutes max - REDUCED FOR DEBUG)
       initial_conditions: "from_config"  # Use refuel-specific initial conditions
 
       # Refuel mission initial conditions (low pressure/density state)
@@ -112,7 +112,9 @@ mission_sequence:
         time_step: 1.0                  # s (smaller timestep for venting accuracy)
         max_step: 10.0                  # s (smaller max step to capture venting dynamics)
         rtol: 1e-6                      # Tighter relative tolerance for numerical stability
-        atol: 1e-9                      # Tighter absolute tolerance for mass conservation# Stopping criteria (same format as single_tank_cch2)
+        atol: 1e-9                      # Tighter absolute tolerance for mass conservation
+
+# Stopping criteria (same format as single_tank_cch2)
 stopping_criteria:
   minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
   use_density_stopping_events: false     # Enable density-based stopping for sequential analysis
@@ -139,13 +141,15 @@ output:
   results_directory: "output/results"
   plots_directory: "output/plots"
 
-  # Plotting configuration (same as single_tank_cch2)
-  plotting:
-    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
-    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
+  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
 
   # Plot configurations (same as single_tank_cch2 with sequential extensions)
   plots:
+    # Plotting style options
+    style:
+      use_greyscale: true               # Set to true for greyscale plots with markers
+      enable_multi_tank_overlay: false  # Single tank system - no overlay needed
+
     tank_states:
       enabled: true
       figsize: [12, 10]

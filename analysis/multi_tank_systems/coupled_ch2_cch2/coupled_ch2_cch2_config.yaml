@@ -100,13 +100,16 @@ output:
   results_directory: "output/results"
   plots_directory: "output/plots"
 
-  # Plotting configuration
-  plotting:
-    style_module: "plot_style_sb"        # Import plotting style from plot_style_sb
-    functions_module: "sb_plotting"      # All plotting functions from sb_plotting
+  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
 
   # Plot configurations
   plots:
+    # Plotting style options
+    style:
+      use_greyscale: false              # Set to true for greyscale plots with markers
+      enable_multi_tank_overlay: true   # Overlay multiple tanks on same evolution plot
+
+    # Individual plot configurations
     tank_states:
       enabled: true
       figsize: [12, 10]
@@ -115,3 +118,18 @@ output:
       enabled: true
       figsize: [14, 10]
       filename: "fuel_flow_profile"
+    density_temperature:
+      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]
+      show_reference_pressures: true
+      include_saturation_line: true
+      include_isobars: true
+    mass_flows:
+      enabled: true
+      filename: "mass_flows"
+      include_venting_flow: true
+    heat_exchanger_requirements:
+      enabled: false  # Optional - enable for heat exchanger analysis
+      filename: "heat_exchanger_requirements"
+      include_ohex: true
+      include_ihex: true
+      include_total: true
