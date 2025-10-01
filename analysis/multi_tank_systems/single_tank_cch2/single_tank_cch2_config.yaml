@@ -27,7 +27,7 @@ materials:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
     thickness: 0.005                     # m (5mm aluminum liner)
   composite:
-    nist_path: "g10_nist"                # Path to NIST materials library
+    nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
     thickness: "calculated"              # Calculated from pressure requirements
   insulation:
@@ -77,7 +77,7 @@ output:
   plots:
     # Plotting style configuration
     style:
-      use_greyscale: false           # Enable greyscale plotting mode
+      use_greyscale: true           # Enable greyscale plotting mode
 
     tank_states:
       enabled: true

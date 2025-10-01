@@ -19,6 +19,7 @@ from typing import Callable
 # Import NIST property functions
 from .nist_properties.aluminum_6061T6_nist import specific_heat as aluminum_6061T6_specific_heat
 from .nist_properties.g10_nist import specific_heat as g10_specific_heat
+from .nist_properties.carbon_epoxy_nist import specific_heat as carbon_epoxy_specific_heat
 
 
 @dataclass
@@ -126,6 +127,30 @@ class NISTMaterial:
             winding_angle=54.7 * 3.14159/180            # Default optimal angle (54.7°) in radians
         )
 
+    @classmethod
+    def carbon_epoxy_nist(cls):
+        """
+        Create carbon-epoxy composite material with CSV-based specific heat data.
+
+        Properties:
+        - Density: 1800 kg/m³ (placeholder, same as G10)
+        - Failure stress: 310 MPa (placeholder, same as G10)
+        - Temperature range: 10-88K (CSV data) + linear extrapolation
+        - Specific heat: CSV interpolation with linear extrapolation beyond 90K
+
+        Returns:
+            NISTMaterial: Configured carbon-epoxy composite material
+        """
+        return cls(
+            density=1500.0,                              # kg/m³
+            failure_stress=5000e6,                        # Pa
+            nist_path="carbon_epoxy_nist",
+            specific_heat_func=carbon_epoxy_specific_heat,
+            name="Carbon-Epoxy Composite (CSV)",
+            type="composite",
+            winding_angle=0.0 * 3.14159/180             # Default 0° (unidirectional fibers)
+        )
+
     def __str__(self):
         """String representation of the material."""
         return (f"{self.name}: ρ={self.density:.0f} kg/m³, "
@@ -156,6 +181,7 @@ def get_material_by_nist_path(nist_path: str) -> NISTMaterial:
     material_registry = {
         "aluminum_6061T6_nist": NISTMaterial.aluminum_6061T6_nist,
         "g10_nist": NISTMaterial.g10_nist,
+        "carbon_epoxy_nist": NISTMaterial.carbon_epoxy_nist,
     }
 
     if nist_path not in material_registry:
@@ -173,9 +199,11 @@ if __name__ == "__main__":
     # Create materials
     aluminum = NISTMaterial.aluminum_6061T6_nist()
     g10 = NISTMaterial.g10_nist()
+    carbon_epoxy = NISTMaterial.carbon_epoxy_nist()
 
     print(f"Aluminum: {aluminum}")
     print(f"G10: {g10}")
+    print(f"Carbon-Epoxy: {carbon_epoxy}")
 
     # Test temperature-dependent properties
     test_temps = [20, 77, 150, 300]  # K
@@ -184,7 +212,7 @@ if __name__ == "__main__":
     print(f"{'Material':<20} {'Temp (K)':<10} {'Cp (J/kg·K)':<12}")
     print("-" * 50)
 
-    for material in [aluminum, g10]:
+    for material in [aluminum, g10, carbon_epoxy]:
         for T in test_temps:
             cp = material.get_specific_heat(T)
             print(f"{material.name:<20} {T:<10.0f} {cp:<12.1f}")
@@ -193,8 +221,10 @@ if __name__ == "__main__":
     print(f"\nMaterial Registry Test:")
     al_from_path = get_material_by_nist_path("aluminum_6061T6_nist")
     g10_from_path = get_material_by_nist_path("g10_nist")
+    carbon_from_path = get_material_by_nist_path("carbon_epoxy_nist")
 
     print(f"From path: {al_from_path.name}")
     print(f"From path: {g10_from_path.name}")
+    print(f"From path: {carbon_from_path.name}")
 
     print(f"\n✅ NIST Materials Framework Ready!")

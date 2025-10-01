@@ -42,7 +42,7 @@ materials:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
     thickness: 0.005                     # m (5mm aluminum liner)
   composite:
-    nist_path: "g10_nist"                # Path to NIST materials library
+    nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
   insulation:
     thickness: 0.050                     # m (50mm insulation layer)
