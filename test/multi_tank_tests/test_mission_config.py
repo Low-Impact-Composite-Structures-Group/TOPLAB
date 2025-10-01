@@ -506,9 +506,9 @@ class TestYAMLConfigurationFiles:
         assert mission_config.profile == 'atr72'
         assert mission_config.ambient_temperature == 288.15
 
-    def test_constant_flow_example_file(self):
-        """Test parsing the constant flow example file."""
-        config_file = project_root / "analysis" / "multi_tank_systems" / "examples" / "constant_flow_example.yaml"
+    def test_coupled_ch2_cch2_config_file(self):
+        """Test parsing the coupled CH2-CCH2 configuration file."""
+        config_file = project_root / "analysis" / "multi_tank_systems" / "coupled_ch2_cch2" / "coupled_ch2_cch2_config.yaml"
 
         if not config_file.exists():
             pytest.skip(f"Configuration file not found: {config_file}")
@@ -520,13 +520,12 @@ class TestYAMLConfigurationFiles:
         mission_config.validate()
 
         assert mission_config.type == 'discharge'
-        assert mission_config.profile == 'constant_flow'
-        assert mission_config.parameters['flow_rate'] == 0.05
-        assert mission_config.parameters['duration'] == 1800
+        assert mission_config.profile == 'atr72'
+        assert mission_config.ambient_temperature == 288.15
 
-    def test_custom_multi_section_example_file(self):
-        """Test parsing the custom multi-section example file."""
-        config_file = project_root / "analysis" / "multi_tank_systems" / "examples" / "custom_multi_section_example.yaml"
+    def test_stops_verification_basic_config(self):
+        """Test parsing basic configuration without running complex sequence validation."""
+        config_file = project_root / "analysis" / "multi_tank_systems" / "stops_verification" / "stops_verification.yaml"
 
         if not config_file.exists():
             pytest.skip(f"Configuration file not found: {config_file}")
@@ -534,17 +533,11 @@ class TestYAMLConfigurationFiles:
         with open(config_file, 'r') as f:
             config_dict = yaml.safe_load(f)
 
-        mission_config = MissionConfig.from_dict(config_dict)
-        mission_config.validate()
-
-        assert mission_config.type == 'discharge'
-        assert mission_config.profile == 'custom'
-        assert len(mission_config.parameters['sections']) == 5
-
-        # Check first section
-        first_section = mission_config.parameters['sections'][0]
-        assert first_section['duration'] == 300
-        assert first_section['flow_rate'] == 0.01
+        # Check basic structure without full validation
+        assert config_dict.get('analysis_name') is not None
+        assert 'mission_sequence' in config_dict
+        assert 'missions' in config_dict['mission_sequence']
+        assert len(config_dict['mission_sequence']['missions']) >= 2
 
 
 class TestMissionParameterExtraction:

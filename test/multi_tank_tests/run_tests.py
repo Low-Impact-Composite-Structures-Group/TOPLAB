@@ -133,9 +133,8 @@ def run_tests(args):
     if args.fast:
         pytest_cmd.extend(['-x', '--tb=short'])  # Stop on first failure, short traceback
 
-    # Skip slow tests by default (unless explicitly included)
-    if not args.include_slow:
-        pytest_cmd.extend(['-m', 'not slow'])
+    # Note: All tests now include benchmarks with user-friendly messaging
+    # Previously slow tests are now integrated with progress indicators
 
     # Skip parallel execution for now (requires pytest-xdist)
 
@@ -216,7 +215,7 @@ Examples:
 
     args = parser.parse_args()
 
-    print("🧪 MULTI-TANK FRAMEWORK TEST RUNNER")
+    print("MULTI-TANK FRAMEWORK TEST RUNNER")
     print("=" * 80)
     print("Orchestrated multi-tank system testing with pytest")
     print("=" * 80)
