@@ -215,15 +215,14 @@ class DelftColourPlotter:
             if 'rho_stop' in reference_lines:
                 ax4.axhline(y=reference_lines['rho_stop'], label=f"ρ_stop = {reference_lines['rho_stop']:.1f} kg/m³", **rhostop_style)
 
-        # Add legends to axes that have multiple series or reference lines
+        # Add legends to axes that have multiple series or reference lines with 3D shadow effect
         for ax in [ax1, ax2, ax3, ax4]:
             if len(ax.get_lines()) > 1 or (len(ax.get_lines()) == 1 and ax.get_lines()[0].get_label() != '_nolegend_'):
-                ax.legend(fontsize=9)
-
-        # Apply consistent legend formatting to all subplots
-        for ax in [ax1, ax2, ax3, ax4]:
-            if ax.get_legend():
-                self._apply_3d_legend_formatting(ax)
+                legend = ax.legend(fontsize=9, frameon=True, fancybox=True,
+                                 shadow=True, framealpha=0.9, edgecolor='black')
+                # Additional styling for 3D effect
+                legend.get_frame().set_facecolor('white')
+                legend.get_frame().set_linewidth(1.2)
 
         # Improve layout
         plt.tight_layout()
@@ -677,23 +676,6 @@ class DelftColourPlotter:
         print(f"   ✅ Heat exchanger requirements plot completed")
         return fig
 
-    def _apply_3d_legend_formatting(self, ax):
-        """
-        Apply consistent 3D shadow effect legend formatting to an axis.
-
-        Args:
-            ax: Matplotlib axis object
-        """
-        legend = ax.get_legend()
-        if legend:
-            legend.set_frameon(True)
-            legend.set_fancybox(True)
-            legend.set_shadow(True)
-            legend.set_framealpha(0.9)
-            legend.set_edgecolor('black')
-            legend.get_frame().set_facecolor('white')
-            legend.get_frame().set_linewidth(1.2)
-
     def _get_marker_config(self, line_index: int = 0) -> Dict[str, Any]:
         """
         Get marker configuration for greyscale plotting.
@@ -715,23 +697,6 @@ class DelftColourPlotter:
             'markerfacecolor': 'white',
             'markeredgewidth': 1.5
         }
-
-    def _apply_3d_legend_formatting(self, ax):
-        """
-        Apply consistent 3D shadow effect legend formatting to an axis.
-
-        Args:
-            ax: Matplotlib axis object
-        """
-        legend = ax.get_legend()
-        if legend:
-            legend.set_frame_on(True)
-            frame = legend.get_frame()
-            frame.set_facecolor('white')
-            frame.set_edgecolor('black')
-            frame.set_linewidth(1.2)
-            frame.set_alpha(0.9)
-            # Note: Shadow effect should be set during legend creation with shadow=True parameter
 
     def _get_marker_config(self, line_index: int = 0, data_length: int = 100) -> Dict[str, Any]:
         """
@@ -1052,7 +1017,13 @@ class DelftColourPlotter:
         ax.set_ylabel('Density [kg/m³]')
         ax.set_title('Thermodynamic Path')
         ax.grid(True, alpha=0.3)
-        ax.legend()
+
+        # Add legend with 3D shadow effect
+        legend = ax.legend(fontsize=9, frameon=True, fancybox=True,
+                          shadow=True, framealpha=0.9, edgecolor='black')
+        # Additional styling for 3D effect
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
 
         # Set axis limits
         ax.set_xlim(temperature_range)
@@ -1157,7 +1128,13 @@ class DelftColourPlotter:
         ax.set_ylabel('Mass Flow Rate [kg/s]')
         ax.set_title('Mass Flow Rate vs Time')
         ax.grid(True, alpha=0.3)
-        ax.legend()
+
+        # Add legend with 3D shadow effect
+        legend = ax.legend(fontsize=9, frameon=True, fancybox=True,
+                          shadow=True, framealpha=0.9, edgecolor='black')
+        # Additional styling for 3D effect
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
 
         plt.tight_layout()
 
