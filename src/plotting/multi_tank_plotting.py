@@ -342,10 +342,11 @@ class DelftColourPlotter:
                 sat_vapor_color = self.color_palette[4] if len(self.color_palette) > 4 else self.color_palette[2]
                 crit_color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]
 
+                # Plot saturation lines with unified legend
                 ax.plot(T_sat_range, rho_sat_liquid, '--', color=sat_liquid_color,
-                       linewidth=1.5, alpha=0.7, label='Liquid Saturation')
+                       linewidth=1.5, alpha=0.7, label='Saturation line')
                 ax.plot(T_sat_range, rho_sat_vapor, '--', color=sat_vapor_color,
-                       linewidth=1.5, alpha=0.7, label='Vapor Saturation')
+                       linewidth=1.5, alpha=0.7)  # No label for vapor branch
 
                 # Mark critical point
                 ax.plot(T_crit, rho_crit, 'o', color=crit_color, markersize=8,
