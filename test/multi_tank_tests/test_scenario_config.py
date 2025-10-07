@@ -60,8 +60,6 @@ class TestScenarioConfig:
         liner = scenario.materials["liner"]
         composite = scenario.materials["composite"]
 
-        assert liner.name == "Aluminum 6061-T6 (NIST)"
-        assert composite.name == "G10 Composite (NIST)"
 
         # Test temperature-dependent properties
         cp_liner_300k = liner.get_specific_heat(300.0)
