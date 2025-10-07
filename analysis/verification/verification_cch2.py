@@ -109,6 +109,32 @@ def calculate_ohex_heat_requirements():
     print(f"oHEX calculation complete: {total_points} points, max = {max_ohex/1000:.1f} kW")
 
 
+def load_ihex_reference_data():
+    """
+    Load IHEX reference data from CSV file.
+    
+    Returns:
+        tuple: (time_hours, heat_flow_kw) or (None, None) if loading fails
+    """
+    import numpy as np
+    from pathlib import Path
+    
+    # Get the CSV file path relative to this script
+    csv_path = Path(__file__).parent / "ihex_requirements.csv"
+    
+    try:
+        data = np.loadtxt(csv_path, delimiter='\t')
+        time_hours = data[:, 0]
+        heat_flow_kw = data[:, 1]  # Assuming data is already in kW
+        print(f"✓ Loaded IHEX reference data: {len(time_hours)} points")
+        print(f"  Time range: {time_hours[0]:.2f} to {time_hours[-1]:.2f} hours")
+        print(f"  Heat flow range: {min(heat_flow_kw):.4f} to {max(heat_flow_kw):.4f} kW")
+        return time_hours, heat_flow_kw
+    except Exception as e:
+        print(f"⚠️ Could not load IHEX reference data: {e}")
+        return None, None
+
+
 class CCH2VerificationConfig:
     """
     Configuration parameters for CCH2 verification analysis.
@@ -630,8 +656,8 @@ class CCH2DischargeAnalysis:
         )
 
         # Update the title for discharge scenario
-        if fig:
-            fig.suptitle(f"CCH2 Discharge Analysis - {self.solver.method_name}", fontsize=16, fontweight='bold')
+        # if fig:
+        #     fig.suptitle(f"CCH2 Discharge Analysis - {self.solver.method_name}", fontsize=16, fontweight='bold')
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -1631,6 +1657,10 @@ def main():
 
     create_consolidated_plots(discharge_analysis, refuel_analysis, dormancy_analysis)
 
+    # 5. Create greyscale plots for publication
+    print("\n Creating greyscale plots for publication...")
+    create_greyscale_plots(discharge_analysis, refuel_analysis, dormancy_analysis)
+
     #show all returned plots
     plt.show()
 
@@ -1729,8 +1759,8 @@ def create_consolidated_plots(discharge_analysis, refuel_analysis, dormancy_anal
         initial_conditions=discharge_initial_conditions,
         figsize=(14, 10)
     )
-    if fig1:
-        fig1.suptitle("CCH2 Discharge Analysis - Complete Scenario", fontsize=16, fontweight='bold')
+    # if fig1:
+        # fig1.suptitle("CCH2 Discharge Analysis - Complete Scenario", fontsize=16, fontweight='bold')
 
     # 2. Refuel Analysis Plot
     print(" Creating refuel analysis subplot...")
@@ -1767,8 +1797,8 @@ def create_consolidated_plots(discharge_analysis, refuel_analysis, dormancy_anal
         initial_conditions=dormancy_initial_conditions,
         figsize=(14, 10)
     )
-    if fig3:
-        fig3.suptitle("CCH2 Dormancy Analysis - Long Duration Scenario", fontsize=16, fontweight='bold')
+    # if fig3:
+        # fig3.suptitle("CCH2 Dormancy Analysis - Long Duration Scenario", fontsize=16, fontweight='bold')
 
     # =================== FIGURE 2: Temperature-Density Plot ===================
     print(" Figure 2: Combined temperature-density comparison...")
@@ -1801,7 +1831,11 @@ def create_consolidated_plots(discharge_analysis, refuel_analysis, dormancy_anal
     )
 
     # =================== FIGURE 3: Heat Exchanger Requirements ===================
-    print(" Figure 3: Heat exchanger requirements (discharge only)...")
+    print(" Figure 3: Heat exchanger requirements with reference data (discharge only)...")
+
+    # Load reference data
+    ref_time_hours, ref_heat_flow_kw = load_ihex_reference_data()
+    reference_data = (ref_time_hours, ref_heat_flow_kw) if ref_time_hours is not None else None
 
     # Use the discharge heat flow data
     if len(heat_flow_data['t']) > 0:
@@ -1813,14 +1847,164 @@ def create_consolidated_plots(discharge_analysis, refuel_analysis, dormancy_anal
     else:
         print("⚠️ No heat flow data captured - plotting will show zeros")
 
-    fig3 = plotter.plot_heat_exchanger_requirements(
+    fig3 = plotter.plot_heat_exchanger_requirements_with_reference(
         heat_flow_data,
+        reference_data=reference_data,
+        suppress_ohex_total=True,  # Only show IHEX + reference curves
         scenario_name="discharge",
         figsize=(10, 6)
     )
 
     print(" All consolidated plots created successfully!")
     return fig1, fig2, fig3
+
+
+def create_greyscale_plots(discharge_analysis, refuel_analysis, dormancy_analysis):
+    """
+    Create greyscale (black and white) versions of all plots for publication.
+
+    This function generates 5 total plots:
+    1. Discharge scenario tank evolution (B&W)
+    2. Refuel scenario tank evolution (B&W)
+    3. Dormancy scenario tank evolution (B&W)
+    4. Combined density-temperature plot (B&W)
+    5. Heat exchanger requirements (B&W)
+    """
+    print(" Creating greyscale plots...")
+
+    # Create greyscale SeabornPlotter instance
+    plotter_bw = SeabornPlotter(font="Cambria", palette="delft", use_greyscale=True)
+
+    # Extract data from all three analyses
+    discharge_times = np.array([i * discharge_analysis.config.Discharge.TIME_STEP for i in range(len(discharge_analysis.results.states))])
+    discharge_masses = np.array([state.fuel_mass for state in discharge_analysis.results.states])
+    discharge_temperatures = np.array([state.temperature for state in discharge_analysis.results.states])
+    discharge_pressures = []
+    for i, state in enumerate(discharge_analysis.results.states):
+        try:
+            P = PropsSI("P", "T", state.temperature, "D", state.fuel_mass / discharge_analysis.config.TANK_VOLUME, "hydrogen")
+            discharge_pressures.append(P / 1e5)  # Convert to bar
+        except:
+            discharge_pressures.append(np.nan)
+    discharge_pressures = np.array(discharge_pressures)
+    discharge_densities = discharge_masses / discharge_analysis.config.TANK_VOLUME
+
+    refuel_times = np.array([i * refuel_analysis.config.Refuel.TIME_STEP for i in range(len(refuel_analysis.results.states))])
+    refuel_masses = np.array([state.fuel_mass for state in refuel_analysis.results.states])
+    refuel_temperatures = np.array([state.temperature for state in refuel_analysis.results.states])
+    refuel_pressures = []
+    for i, state in enumerate(refuel_analysis.results.states):
+        try:
+            P = PropsSI("P", "T", state.temperature, "D", state.fuel_mass / refuel_analysis.config.TANK_VOLUME, "hydrogen")
+            refuel_pressures.append(P / 1e5)  # Convert to bar
+        except:
+            refuel_pressures.append(np.nan)
+    refuel_pressures = np.array(refuel_pressures)
+    refuel_densities = refuel_masses / refuel_analysis.config.TANK_VOLUME
+
+    dormancy_times = np.array([i * dormancy_analysis.config.Dormancy.TIME_STEP for i in range(len(dormancy_analysis.results.states))])
+    dormancy_masses = np.array([state.fuel_mass for state in dormancy_analysis.results.states])
+    dormancy_temperatures = np.array([state.temperature for state in dormancy_analysis.results.states])
+    dormancy_pressures = []
+    for i, state in enumerate(dormancy_analysis.results.states):
+        try:
+            P = PropsSI("P", "T", state.temperature, "D", state.fuel_mass / dormancy_analysis.config.TANK_VOLUME, "hydrogen")
+            dormancy_pressures.append(P / 1e5)  # Convert to bar
+        except:
+            dormancy_pressures.append(np.nan)
+    dormancy_pressures = np.array(dormancy_pressures)
+    dormancy_densities = dormancy_masses / dormancy_analysis.config.TANK_VOLUME
+
+    # =================== FIGURE 1: Discharge Tank Evolution (B&W) ===================
+    print("  Creating discharge scenario plot (B&W)...")
+
+    initial_conditions_discharge = {
+        'pressure': discharge_pressures[0],
+        'temperature': discharge_temperatures[0],
+        'density': discharge_densities[0]
+    }
+
+    fig1_bw = plotter_bw.plot_refuel_analysis_bw(
+        discharge_times, discharge_masses, discharge_temperatures,
+        discharge_densities, discharge_pressures, initial_conditions_discharge
+    )
+    # fig1_bw.suptitle("CCH2 Discharge Scenario Analysis", fontsize=16, fontweight='bold')
+
+    # =================== FIGURE 2: Refuel Tank Evolution (B&W) ===================
+    print("  Creating refuel scenario plot (B&W)...")
+
+    initial_conditions_refuel = {
+        'pressure': refuel_pressures[0],
+        'temperature': refuel_temperatures[0],
+        'density': refuel_densities[0]
+    }
+
+    fig2_bw = plotter_bw.plot_refuel_analysis_bw(
+        refuel_times, refuel_masses, refuel_temperatures,
+        refuel_densities, refuel_pressures, initial_conditions_refuel
+    )
+
+    # =================== FIGURE 3: Dormancy Tank Evolution (B&W) ===================
+    print("  Creating dormancy scenario plot (B&W)...")
+
+    initial_conditions_dormancy = {
+        'pressure': dormancy_pressures[0],
+        'temperature': dormancy_temperatures[0],
+        'density': dormancy_densities[0]
+    }
+
+    fig3_bw = plotter_bw.plot_refuel_analysis_bw(
+        dormancy_times, dormancy_masses, dormancy_temperatures,
+        dormancy_densities, dormancy_pressures, initial_conditions_dormancy
+    )
+    # fig3_bw.suptitle("CCH2 Dormancy Scenario Analysis", fontsize=16, fontweight='bold')
+
+    # =================== FIGURE 4: Combined Density-Temperature Plot (B&W) ===================
+    print("  Creating combined density-temperature plot (B&W)...")
+
+    scenario_data = {
+        'discharge': {
+            'temperatures': discharge_temperatures,
+            'densities': discharge_densities
+        },
+        'refuel': {
+            'temperatures': refuel_temperatures,
+            'densities': refuel_densities
+        },
+        'dormancy': {
+            'temperatures': dormancy_temperatures,
+            'densities': dormancy_densities
+        }
+    }
+
+    fig4_bw = plotter_bw.plot_density_temperature_combined_bw(
+        scenario_data,
+        include_saturation_line=True,
+        include_isobars=True,
+        include_ref_data=True,
+        figsize=(10, 8),
+        temperature_range=(20, 70),
+        density_range=(0, 80)
+    )
+
+    # =================== FIGURE 5: Heat Exchanger Requirements (B&W) ===================
+    print("  Creating heat exchanger requirements plot with reference data (B&W)...")
+
+    # Load reference data for greyscale plot
+    ref_time_hours, ref_heat_flow_kw = load_ihex_reference_data()
+    reference_data = (ref_time_hours, ref_heat_flow_kw) if ref_time_hours is not None else None
+
+    fig5_bw = plotter_bw.plot_heat_exchanger_requirements_with_reference_bw(
+        heat_flow_data,
+        reference_data=reference_data,
+        suppress_ohex_total=True,  # Only show IHEX + reference curves
+        scenario_name="discharge",
+        figsize=(12, 6)
+    )
+
+    print("  ✅ All greyscale plots completed successfully!")
+
+    return [fig1_bw, fig2_bw, fig3_bw, fig4_bw, fig5_bw]
 
 
 if __name__ == "__main__":
