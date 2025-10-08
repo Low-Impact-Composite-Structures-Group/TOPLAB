@@ -120,38 +120,116 @@ class SystemOrchestrator:
         # Convert coupling rules to TankSystem expected format
         tank_system_coupling_rules = []
         for rule_config in coupling_rules_config:
-            participants = rule_config.get('participants', {})
-            activation = rule_config.get('activation_conditions', {})
-            flow_params = rule_config.get('flow_parameters', {})
-            hysteresis = rule_config.get('hysteresis', {})
+            coupling_type = rule_config.get('coupling_type')
 
-            # Map our config format to TankSystem expected format
-            # PressureTriggeredValve: p_open is activation threshold (valve opens), p_close is deactivation threshold (valve closes)
-            activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when Tank 2 ≤ this pressure
-            deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when Tank 2 ≥ this pressure
+            if coupling_type == 'flow_controlled_pressurization':
+                # Convert flow-controlled pressurization to PressureTriggeredValve
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                hysteresis = rule_config.get('hysteresis', {})
 
-            # Log fallback usage for transparency
-            if 'activation_threshold_bar' not in hysteresis:
-                print(f"⚠️  Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
-            if 'deactivation_threshold_bar' not in hysteresis:
-                print(f"⚠️  Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
+                # Map our config format to TankSystem expected format
+                activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when Tank 2 ≤ this pressure
+                deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when Tank 2 ≥ this pressure
 
-            tank_system_rule = {
-                'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
-                'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
-                'opening_pressure': activation_threshold * 1e5,    # p_open: valve opens when target ≤ this
-                'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
-                'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.05),
-                'orifice_diameter': flow_params.get('orifice_diameter_m', 0.01)  # Default 10mm orifice
-            }
+                # Log fallback usage for transparency
+                if 'activation_threshold_bar' not in hysteresis:
+                    print(f"⚠️  Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
+                if 'deactivation_threshold_bar' not in hysteresis:
+                    print(f"⚠️  Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
 
-            # Log fallback usage for critical coupling parameters
-            if 'max_flow_rate_kg_s' not in flow_params:
-                print(f"⚠️  Using fallback: max_flow_rate_kg_s = {tank_system_rule['max_flow_rate']} kg/s (consider adding to YAML config)")
-            if 'orifice_diameter_m' not in flow_params:
-                print(f"⚠️  Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
+                tank_system_rule = {
+                    'type': 'pressure_triggered_valve',
+                    'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
+                    'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
+                    'opening_pressure': activation_threshold * 1e5,    # p_open: valve opens when target ≤ this
+                    'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.05),
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.01)  # Default 10mm orifice
+                }
 
-            tank_system_coupling_rules.append(tank_system_rule)
+                # Log fallback usage for critical coupling parameters
+                if 'max_flow_rate_kg_s' not in flow_params:
+                    print(f"⚠️  Using fallback: max_flow_rate_kg_s = {tank_system_rule['max_flow_rate']} kg/s (consider adding to YAML config)")
+                if 'orifice_diameter_m' not in flow_params:
+                    print(f"⚠️  Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'mission_adaptive_pressurization':
+                # Convert mission-adaptive pressurization to MissionAdaptivePressureValve
+                # This preserves the full dynamic threshold capability
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                control_params = rule_config.get('control_parameters', {})
+                mission_params = rule_config.get('mission_parameters', {})
+                discharge_piping = rule_config.get('discharge_piping', {})
+
+                tank_system_rule = {
+                    'type': 'mission_adaptive_pressure_valve',
+                    'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
+                    'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
+                    'mission_profile': mission_params.get('mission_profile', {}),
+                    'discharge_piping': discharge_piping,
+                    'control_params': control_params,
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.005),
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.001),
+                    'coupling_id': rule_config.get('coupling_id', 'mission_adaptive_pressurization')
+                }
+
+                print(f"   ✓ Mission-adaptive pressurization → MissionAdaptivePressureValve")
+                print(f"     Dynamic thresholds based on mission flow requirements")
+                print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
+                print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'pressure_compensation':
+                # Convert pressure compensation to PressureTriggeredValve
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                hysteresis = rule_config.get('hysteresis', {})
+
+                # Map our config format to TankSystem expected format
+                activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when target ≤ this pressure
+                deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when target ≥ this pressure
+
+                tank_system_rule = {
+                    'type': 'pressure_triggered_valve',
+                    'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
+                    'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
+                    'opening_pressure': activation_threshold * 1e5,    # p_open: valve opens when target ≤ this
+                    'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.10),  # kg/s
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.002),  # m
+                    'coupling_id': rule_config.get('coupling_id', 'pressure_compensation')
+                }
+
+                print(f"   ✓ Pressure compensation → PressureTriggeredValve")
+                print(f"     Activation: {activation_threshold} bar, Deactivation: {deactivation_threshold} bar")
+                print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'ohex_extraction':
+                # Convert OHEX extraction to OHEXExtractionCoupling
+                participants = rule_config.get('participants', {})
+                mission_params = rule_config.get('mission_parameters', {})
+                extraction_params = rule_config.get('extraction_parameters', {})
+
+                tank_system_rule = {
+                    'type': 'ohex_extraction',
+                    'source_tank': participants.get('source', 2) - 1,  # Convert 1-based to 0-based index (default LH2 tank)
+                    'mission_profile': mission_params.get('mission_profile', {}),
+                    'min_extraction_pressure': extraction_params.get('min_extraction_pressure_bar', 3.0) * 1e5,
+                    'coupling_id': rule_config.get('coupling_id', 'ohex_extraction')
+                }
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            else:
+                print(f"⚠️  Unsupported coupling type '{coupling_type}' - skipping")
+                continue
 
         # Initialize TankSystem with all components
         self.tank_system = TankSystem(
@@ -1222,10 +1300,10 @@ class SystemOrchestrator:
             # Only pass reference pressures if config allows it
             ref_pressures = reference_lines if show_reference_pressures else None
 
-            # For multi-tank systems, disable isobars and saturation lines by default to avoid clutter
-            is_multi_tank = len(self.tank_geometries) > 1
-            show_saturation = include_saturation_line if not is_multi_tank else False
-            show_isobars = include_isobars if not is_multi_tank else False
+            # Respect the configuration settings for saturation line and isobars
+            # (The old logic was unnecessarily disabling these for multi-tank systems)
+            show_saturation = include_saturation_line
+            show_isobars = include_isobars
 
             dt_fig = plotter.plot_density_temperature(
                 results=self.results,

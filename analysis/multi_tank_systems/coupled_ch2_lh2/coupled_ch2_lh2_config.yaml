@@ -1,6 +1,6 @@
-# Coupled CH2-CCH2 Multi-Tank System Configuration
-analysis_name: "Coupled CH2-CCH2 Multi-Tank System"
-description: "Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K) with pressure compensation coupling and ATR72 mission profile"
+# Coupled CH2-LH2 Multi-Tank System Configuration
+analysis_name: "Coupled CH2-LH2 Multi-Tank System"
+description: "Two-tank coupled system: CH2 (700 bar, 330K) pressurizes LH2 (3-15 bar, 20K) for mission discharge with flow-controlled coupling"
 version: "1.0"
 
 # Network topology definition
@@ -12,7 +12,7 @@ network:
     - tank_id: 1
       tank_type: "CH2"     # Compressed hydrogen tank (high pressure, room temperature)
     - tank_id: 2
-      tank_type: "CcH2"    # Cryocompressed hydrogen tank (medium pressure, cryogenic)
+      tank_type: "LH2"     # Low-pressure liquid hydrogen tank (mission fuel)
 
 # Tank geometry and initial conditions
 geometry:
@@ -24,16 +24,16 @@ geometry:
     initial_temperature: 330.0           # K (room temperature - ensure proper initialization)
     initial_density: 42.0                # kg/m³ (calculated for 700 bar at 330K)
     venting_pressure: 80000000           # Pa (800 bar - venting pressure)
-    minimum_pressure: 1500000            # Pa (15 bar - minimum allowable pressure)
+    minimum_pressure: 100000             # Pa (1 bar - minimum allowable pressure)
 
-  # Tank 2: CCH2 - Cryocompressed hydrogen (mission-based sizing)
+  # Tank 2: LH2 - Low-pressure liquid hydrogen (mission fuel tank)
   2:
     phi: 3.0                             # Length/radius ratio (L/R)
-    initial_pressure: 40000000           # Pa (400 bar - cryocompressed storage)
-    initial_temperature: 53.25           # K (cryogenic temperature)
-    initial_density: 80.0                # kg/m³ (cryocompressed density)
-    venting_pressure: 45000000           # Pa (450 bar - venting pressure)
-    minimum_pressure: 1500000            # Pa (15 bar - minimum allowable pressure)
+    initial_pressure: 300000             # Pa (3 bar - low pressure liquid storage)
+    initial_temperature: 20.4            # K (saturated liquid at 3 bar)
+    initial_density: 70.8                # kg/m³ (liquid hydrogen density)
+    venting_pressure: 1500000            # Pa (15 bar - venting pressure)
+    minimum_pressure: 100000             # Pa (1 bar - minimum allowable pressure)
     mission_based_sizing: true           # Size based on ATR72 mission requirements
 
 # Material specifications with NIST temperature-dependent properties
@@ -54,32 +54,57 @@ mission:
   type: "discharge"                      # Mission type: discharge
   profile: "atr72"                       # Profile: ATR72 turboprop aircraft
   ambient_temperature: 288.15            # K (ambient conditions)
-  assigned_to: 2                         # Mission assigned to Tank 2 (CCH2)
+  assigned_to: 2                        # Mission assigned to Tank 2 (LH2) for fuel extraction
 
 # Stopping criteria
 stopping_criteria:
-  minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
+  minimum_density: 5.0                  # kg/m³ (LH2 minimum density - lower than sLH2)
   use_density_stopping_events: true     # Use density-based stopping events
   use_duration_stopping: true           # Stop when mission duration is reached
 
-# Coupling rules for inter-tank pressure compensation
+# Coupling rules for CH2 → LH2 mission-adaptive pressurization
 coupling_rules:
-  - coupling_id: "ch2_cch2_pressure_compensation"
-    coupling_type: "pressure_compensation"
+  # Rule 1: Mission-adaptive CH2 pressurization
+  - coupling_id: "mission_adaptive_pressurization"
+    coupling_type: "mission_adaptive_pressurization"
+    description: "CH2 provides mission-adaptive pressurization to LH2 tank based on real-time flow requirements"
     participants:
-      source: 1                          # CH2 tank (high pressure source)
-      target: 2                          # CCH2 tank (receives compensation)
-    activation_conditions:
-      pressure_differential_bar: 5.0     # Minimum pressure difference for activation
-      minimum_source_pressure_bar: 50.0  # Minimum source pressure
-      maximum_target_pressure_bar: 450.0 # Maximum target pressure
+      source: 1                          # CH2 tank (pressurization gas source)
+      target: 2                          # LH2 tank (mission fuel tank)
+
+    # Mission flow profile (ATR72 mission requirements)
+    mission_parameters:
+      mission_profile:
+        # ATR72 mission profile with actual flow rate requirements (197.68 kg total fuel over 1.02h)
+        time_s: [0.0, 30.0, 64.1, 970.3, 2576.7, 2608.7, 2974.8, 2984.0, 3112.1, 3272.3, 3301.7, 3688.8]
+        flow_rate_kg_s: [0.049031, 0.098062, 0.079295, 0.060529, 0.043348, 0.019163, 0.024846, 0.045859, 0.044670, 0.021410, 0.003833, 0.000000]
+
+    # Discharge piping characteristics for pressure calculations
+    discharge_piping:
+      diameter_m: 0.005                   # 10mm discharge pipe diameter
+      length_m: 2.0                      # 2m pipe length from tank to external system
+      roughness_m: 1.5e-6                # Pipe surface roughness (stainless steel)
+      loss_coefficient: 2.5              # Total minor loss coefficient (bends, valves, etc.)
+      choked_flow_enabled: true          # Enable choked flow calculations
+
+    # Control parameters for adaptive system
+    control_parameters:
+      pressure_margin_bar: 1.0           # Safety margin above minimum required pressure
+      deactivation_margin_bar: 0.5       # Additional margin for valve deactivation
+      control_gain: 0.5                  # Proportional control gain
+      max_pressurization_rate_kg_s: 0.05 # Maximum CH2 flow rate for pressurization
+      min_source_pressure_bar: 50.0      # Minimum CH2 pressure to operate
+
+    # Flow calculation parameters for CH2 pressurization
     flow_parameters:
-      flow_resistance: 100.0             # Flow resistance parameter
-      bidirectional: false               # Only source → target flow
-      max_flow_rate_kg_s: 0.10          # kg/s
-    hysteresis:
-      activation_threshold_bar: 16.0    # Open valve when Tank 2 pressure ≤ 20 bar (activation condition)
-      deactivation_threshold_bar: 20.0  # Close valve when Tank 2 pressure ≥ 23 bar (deactivation condition)
+      flow_coefficient: 0.01             # Flow rate scaling factor
+      response_time_s: 5.0               # Control system response time
+      max_flow_rate_kg_s: 0.120          # Maximum flow rate for adequate pressurization (120 g/s)
+      orifice_diameter_m: 0.001          # Orifice diameter for flow calculations (1mm - realistic for pressurization)
+
+    # Activation conditions
+    activation_conditions:
+      min_pressure_difference_bar: 10.0  # Minimum pressure difference to activate
 
 # Solver configuration - optimized for coupling dynamics
 solver:
@@ -92,7 +117,7 @@ solver:
 
 # Output settings
 output:
-  identifier: "coupled_ch2_cch2_multi_tank"  # Identifier string appended to file names
+  identifier: "coupled_ch2_lh2_pressurization"  # Identifier string appended to file names
   save_plots: true
   plot_formats: ["png", "pdf"]
   save_data: true
@@ -119,8 +144,8 @@ output:
       figsize: [14, 10]
       filename: "fuel_flow_profile"
     density_temperature:
-      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]
-      show_reference_pressures: true
+      isobar_pressures: [1, 5, 15, 100, 400]  # LH2 pressure range
+      show_reference_pressures: false
       include_saturation_line: true
       include_isobars: true
     mass_flows:

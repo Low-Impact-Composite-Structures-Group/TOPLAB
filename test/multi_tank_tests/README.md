@@ -74,6 +74,30 @@ test/multi_tank_tests/
 - **Solver Coverage:** All 5 solvers (RK45, Radau, DOP853, BDF, LSODA)
 - **Validation:** Conservation laws, accuracy, performance metrics
 
+### ✅ Coupling Flow Framework (`test_coupling_flows.py`)
+- **6 tests** covering coupling flow physics and data handling
+- **Test Classes:**
+  - `TestCouplingFlows` - Pressure-triggered valve logic, flow calculations, data storage
+- **Coverage:**
+  - Valve activation/deactivation hysteresis logic
+  - Coupling flow rate calculation with realistic physics
+  - Data storage and extraction for plotting
+  - Configuration parsing for different coupling rule formats
+  - Performance validation of valve calculations
+  - Integration testing with simulation results
+
+### ✅ Multi-Tank Plotting Enhancements (`test_multi_tank_plotting_enhancements.py`)
+- **6 tests** covering enhanced plotting features for multi-tank systems
+- **Test Classes:**
+  - `TestMultiTankPlottingEnhancements` - Auto temperature ranges, legend improvements, coupling flow visualization
+- **Coverage:**
+  - Auto-computed temperature range calculation for density-temperature plots
+  - Legend formatting improvements (title, isobars entry, larger arrows)
+  - Coupling flow visualization data extraction
+  - Density-temperature plot enhancements for multi-tank systems
+  - Plot file generation capability validation
+  - Integration of all plotting enhancements
+
 ## 🎯 Test Categories
 
 Tests are organized using pytest markers:
@@ -85,8 +109,17 @@ pytest test/multi_tank_tests/ -m unit
 # Run only integration tests
 pytest test/multi_tank_tests/ -m integration
 
+# Run coupling-related tests
+pytest test/multi_tank_tests/ -m coupling
+
+# Run plotting framework tests
+pytest test/multi_tank_tests/ -m plotting
+
 # Run NIST-related tests
 pytest test/multi_tank_tests/ -m nist
+
+# Run performance tests
+pytest test/multi_tank_tests/ -m performance
 
 # Skip slow tests
 pytest test/multi_tank_tests/ -m "not slow"
@@ -180,7 +213,7 @@ Planned test modules:
 
 ## 🎉 Success Metrics
 
-Current status: **✅ 54/54 tests passing (100%)**
+Current status: **✅ 111/111 tests passing (100%)**
 
 Target metrics:
 - **Test coverage**: >90% for all core components

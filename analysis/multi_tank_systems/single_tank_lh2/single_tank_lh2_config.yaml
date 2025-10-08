@@ -1,6 +1,6 @@
-# Single Tank CCH2 Benchmark Configuration
-analysis_name: "Single Tank CCH2 Benchmark"
-description: "Cryocompressed hydrogen single tank validation case using orchestrated framework"
+# Single Tank LH2 Configuration
+analysis_name: "Single Tank LH2"
+description: "Low-pressure liquid hydrogen single tank configuration for two-phase operation"
 version: "1.0"
 
 # Network topology definition
@@ -10,16 +10,17 @@ network:
   external_sink: true
   tanks:
     - tank_id: 1
-      tank_type: "CcH2"
+      tank_type: "LH2"
 
 # Tank geometry and initial conditions
 geometry:
   1:
     phi: 3.0                             # Length/radius ratio (L/R)
-    initial_pressure: 400e5              # Pa (400 bar - cryocompressed storage)
-    initial_density: 80.0               # kg/m³ (increased for sufficient fuel capacity)
-    venting_pressure: 450e5              # Pa (450 bar - venting pressure)
-    minimum_pressure: 15e5               # Pa (15 bar - minimum allowable pressure)
+    initial_pressure: 3e5                # Pa (3 bar - low pressure liquid storage)
+    initial_temperature: 20.4            # K (saturated liquid at 3 bar)
+    initial_density: 70.8                # kg/m³ (liquid hydrogen density at 3 bar)
+    venting_pressure: 15e5               # Pa (15 bar - venting pressure)
+    minimum_pressure: 1e5                # Pa (1 bar - minimum allowable pressure)
 
 # Material specifications with NIST temperature-dependent properties
 materials:
@@ -27,7 +28,7 @@ materials:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
     thickness: 0.005                     # m (5mm aluminum liner)
   composite:
-    nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
+    nist_path: "carbon_epoxy_nist"       # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
     thickness: "calculated"              # Calculated from pressure requirements
   insulation:
@@ -40,16 +41,13 @@ mission:
   type: "discharge"                      # Mission type: discharge | refuel | dormancy
   profile: "atr72"                       # Profile: atr72 | constant_flow | custom
   ambient_temperature: 288.15            # K (ambient conditions)
-  # No additional parameters needed for atr72 profile
-  # For constant_flow: add flow_rate (kg/s), duration (s)
-  # For custom: add sections (list of {duration, flow_rate})
 
 # Stopping criteria
 stopping_criteria:
-  minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
+  minimum_density: 5.0                  # kg/m³ (LH2 minimum density requirement - lower than sLH2)
   use_density_stopping_events: false    # Use pressure-based stopping instead
 
-# Coupling rules (empty for single tank, but structure ready for multi-tank)
+# Coupling rules (empty for single tank)
 coupling_rules: []
 
 # Solver configuration
@@ -59,11 +57,11 @@ solver:
   atol: 1e-9                            # Absolute tolerance
   time_step: 1.0                        # Base time step [s]
   max_step: 10.0                        # Maximum step size [s]
-  custom_config: false                   # true if custom solver precision needed (handled in driver)
+  custom_config: false                   # true if custom solver precision needed
 
 # Output settings
 output:
-  identifier: "single_tank_cch2"         # Identifier string appended to file names
+  identifier: "single_tank_lh2"          # Identifier string appended to file names
   save_plots: true
   plot_formats: ["png", "pdf"]
   save_data: true
@@ -71,11 +69,8 @@ output:
   results_directory: "output/results"
   plots_directory: "output/plots"
 
-  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
-
   # Plot configurations
   plots:
-    # Plotting style configuration
     style:
       use_greyscale: true           # Enable greyscale plotting mode
 
@@ -91,12 +86,21 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]  # Custom isobars to show [bar]
-      show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
+      isobar_pressures: [15, 10, 8, 5, 3, 2, 1]      # Custom isobars for LH2 [bar]
+      show_reference_pressures: true  # Show venting and minimum pressure isobars
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
     mass_flows:
       enabled: true
       figsize: [12, 6]
       filename: "mass_flows"
-      include_venting_flow: true      # Show venting flow curve (true/false)
+      include_venting_flow: true      # Show venting flow curve
+    heat_exchanger_requirements:
+      enabled: true
+      figsize: [12, 6]
+      filename: "heat_exchanger_requirements"
+      include_ihex: true             # Calculate and show iHEX requirements
+      include_ohex: true             # Calculate and show oHEX requirements
+      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
+      ohex_target_pressure: 20e5     # Pa (20 bar) - target pressure for oHEX calculations
+      include_total: true            # Show total (iHEX + oHEX) curve

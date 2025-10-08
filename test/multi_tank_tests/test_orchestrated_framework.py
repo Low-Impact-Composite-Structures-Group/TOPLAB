@@ -36,6 +36,7 @@ class TestSystemOrchestrator:
             'single_tank_ch2': self.repo_root / 'analysis' / 'multi_tank_systems' / 'single_tank_ch2' / 'single_tank_ch2_config.yaml',
             'single_tank_cch2': self.repo_root / 'analysis' / 'multi_tank_systems' / 'single_tank_cch2' / 'single_tank_cch2_config.yaml',
             'single_tank_slh2': self.repo_root / 'analysis' / 'multi_tank_systems' / 'single_tank_slh2' / 'single_tank_slh2_config.yaml',
+            'single_tank_lh2': self.repo_root / 'analysis' / 'multi_tank_systems' / 'single_tank_lh2' / 'single_tank_lh2_config.yaml',
             'coupled_ch2_cch2': self.repo_root / 'analysis' / 'multi_tank_systems' / 'coupled_ch2_cch2' / 'coupled_ch2_cch2_config.yaml',
             'stops_verification': self.repo_root / 'analysis' / 'multi_tank_systems' / 'stops_verification' / 'stops_verification.yaml'
         }

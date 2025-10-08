@@ -143,28 +143,94 @@ class TankSystem:
             return
 
         for rule in self.coupling_rules:
-            source_idx = rule.get('source_tank', 0)
-            target_idx = rule.get('target_tank', 1)
+            rule_type = rule.get('type', 'pressure_triggered_valve')
 
-            valve = PressureTriggeredValve(
-                source_idx=source_idx,
-                target_idx=target_idx,
-                p_open=rule.get('opening_pressure', 17e5),  # 17 bar default
-                p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
-                max_flow_rate=rule.get('max_flow_rate', 0.15),        # 150 g/s default
-                orifice_diameter=rule.get('orifice_diameter', 0.01)   # 10 mm default
-            )
+            if rule_type == 'pressure_triggered_valve':
+                # Create pressure-triggered valve
+                source_idx = rule.get('source_tank', 0)
+                target_idx = rule.get('target_tank', 1)
 
-            # Add tank name attributes expected by _calculate_coupling_flows
-            valve.source_tank = source_idx
-            valve.target_tank = target_idx
+                valve = PressureTriggeredValve(
+                    source_idx=source_idx,
+                    target_idx=target_idx,
+                    p_open=rule.get('opening_pressure', 17e5),  # 17 bar default
+                    p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
+                    max_flow_rate=rule.get('max_flow_rate', 0.005),       # 5 g/s default (realistic for pressurization)
+                    orifice_diameter=rule.get('orifice_diameter', 0.001)  # 1 mm default (realistic for pressurization)
+                )
 
-            self.coupling_valves.append(valve)
+                # Add tank name attributes expected by _calculate_coupling_flows
+                valve.source_tank = source_idx
+                valve.target_tank = target_idx
 
-            print(f"   🔗 Valve: Tank{rule.get('source_tank', 0)} → Tank{rule.get('target_tank', 1)}")
-            print(f"      Opens at {rule.get('opening_pressure', 17e5)/1e5:.0f} bar, closes at {rule.get('closing_pressure', 18e5)/1e5:.0f} bar")
-            print(f"      Max flow rate: {rule.get('max_flow_rate', 0.15)*1000:.1f} g/s")
-            print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.01)*1000:.1f} mm")
+                self.coupling_valves.append(valve)
+
+                print(f"   🔗 Valve: Tank{source_idx+1} → Tank{target_idx+1}")
+                print(f"      Opens at {rule.get('opening_pressure', 17e5)/1e5:.0f} bar, closes at {rule.get('closing_pressure', 18e5)/1e5:.0f} bar")
+                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.005)*1000:.1f} g/s")
+                print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.001)*1000:.1f} mm")
+
+            elif rule_type == 'mission_adaptive_pressure_valve':
+                # Create mission-adaptive pressure valve with dynamic thresholds
+                from src.multi_tank.coupling.inter_tank_coupling import MissionAdaptivePressureValve
+
+                source_idx = rule.get('source_tank', 0)
+                target_idx = rule.get('target_tank', 1)
+
+                valve = MissionAdaptivePressureValve(
+                    source_idx=source_idx,
+                    target_idx=target_idx,
+                    mission_profile=rule.get('mission_profile', {}),
+                    discharge_piping=rule.get('discharge_piping', {}),
+                    control_params=rule.get('control_params', {}),
+                    max_flow_rate=rule.get('max_flow_rate', 0.005),
+                    orifice_diameter=rule.get('orifice_diameter', 0.001),
+                    coupling_id=rule.get('coupling_id', 'mission_adaptive_pressure_valve')
+                )
+
+                # Add tank name attributes expected by _calculate_coupling_flows
+                valve.source_tank = source_idx
+                valve.target_tank = target_idx
+
+                self.coupling_valves.append(valve)
+
+                pipe_d = rule.get('discharge_piping', {}).get('diameter_m', 0.01)
+                pipe_l = rule.get('discharge_piping', {}).get('length_m', 2.0)
+                margin = rule.get('control_params', {}).get('pressure_margin_bar', 1.0)
+
+                print(f"   🔗 Adaptive Valve: Tank{source_idx+1} → Tank{target_idx+1}")
+                print(f"      Dynamic thresholds based on mission flow ({pipe_d*1000:.0f}mm × {pipe_l:.1f}m piping)")
+                print(f"      Pressure margin: {margin:.1f} bar")
+                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.005)*1000:.1f} g/s")
+                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.15)*1000:.1f} g/s")
+                print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.01)*1000:.1f} mm")
+
+            elif rule_type == 'ohex_extraction':
+                # Create OHEX extraction coupling
+                from src.multi_tank.coupling.inter_tank_coupling import OHEXExtractionCoupling
+
+                source_idx = rule.get('source_tank', 1)  # Default to tank 2 (LH2)
+
+                ohex_coupling = OHEXExtractionCoupling(
+                    source_idx=source_idx,
+                    mission_profile=rule.get('mission_profile', {}),
+                    min_extraction_pressure=rule.get('min_extraction_pressure', 3.0e5),
+                    coupling_id=rule.get('coupling_id', 'ohex_extraction')
+                )
+
+                # Add tank name attributes expected by _calculate_coupling_flows
+                ohex_coupling.source_tank = source_idx
+                ohex_coupling.target_tank = -1  # No target tank for extraction
+
+                self.coupling_valves.append(ohex_coupling)
+
+                print(f"   🔗 OHEX Extraction: Tank{source_idx+1} → OHEX")
+                print(f"      Min extraction pressure: {rule.get('min_extraction_pressure', 3.0e5)/1e5:.1f} bar")
+                print(f"      Mission profile: {len(rule.get('mission_profile', {}).get('time_s', []))} time points")
+
+            else:
+                print(f"   ⚠️  Unsupported coupling rule type '{rule_type}' - skipping")
+                continue
 
         print(f"   ✅ {len(self.coupling_valves)} coupling rules configured")
 
@@ -418,21 +484,119 @@ class TankSystem:
 
         for valve in self.coupling_valves:
             source_state = multi_state.tank_states[valve.source_tank]
-            target_state = multi_state.tank_states[valve.target_tank]
 
-            # Calculate valve flow rate
-            flow_rate = valve.calculate_flow(source_state, target_state, t)
+            # Handle different coupling types
+            if valve.target_tank == -1:
+                # OHEX extraction - no target tank, just extract from source
+                flow_rate = valve.calculate_flow(source_state, None, t)
 
-            if flow_rate > 0:
-                # Source tank loses mass (negative), target tank gains mass (positive)
-                coupling_flows[valve.source_tank] -= flow_rate
-                coupling_flows[valve.target_tank] += flow_rate
+                if flow_rate > 0:
+                    # Source tank loses mass (negative) to OHEX
+                    coupling_flows[valve.source_tank] -= flow_rate
 
-                # Debug output for active coupling (throttled to avoid spam)
-                if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
-                    p1 = source_state.pressure / 1e5 if source_state.pressure else 0
-                    p2 = target_state.pressure / 1e5 if target_state.pressure else 0
-                    print(f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)")
+                    # Debug output for active coupling (throttled to avoid spam)
+                    if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
+                        p1 = source_state.pressure / 1e5 if source_state.pressure else 0
+                        print(f"  OHEX extraction T{valve.source_tank+1}→OHEX: {flow_rate*1000:.2f} g/s (P={p1:.1f}bar)")
+            else:
+                # Standard inter-tank coupling
+                target_state = multi_state.tank_states[valve.target_tank]
+
+                # Calculate valve flow rate
+                flow_rate = valve.calculate_flow(source_state, target_state, t)
+
+                if flow_rate > 0:
+                    # Source tank loses mass (negative), target tank gains mass (positive)
+                    coupling_flows[valve.source_tank] -= flow_rate
+                    coupling_flows[valve.target_tank] += flow_rate
+
+                    # Debug output for active coupling (throttled to avoid spam)
+                    if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
+                        p1 = source_state.pressure / 1e5 if source_state.pressure else 0
+                        p2 = target_state.pressure / 1e5 if target_state.pressure else 0
+                        print(f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)")
+
+        return coupling_flows
+
+    def _estimate_coupling_flows_for_postprocessing(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
+        """
+        Estimate coupling flows for post-processing without relying on valve state machines.
+
+        This method approximates coupling flows based on current pressure conditions,
+        since valve state is not preserved between post-processing calls.
+        """
+        import math
+        coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
+
+        for valve in self.coupling_valves:
+            if hasattr(valve, 'activation_threshold') and hasattr(valve, 'deactivation_threshold'):
+                # PressureTriggeredValve - estimate based on pressure conditions
+                source_state = multi_state.tank_states[valve.source_tank]
+                target_state = multi_state.tank_states[valve.target_tank]
+
+                # Ensure pressures are computed
+                if hasattr(source_state, 'compute_pressure'):
+                    source_state.compute_pressure()
+                if hasattr(target_state, 'compute_pressure'):
+                    target_state.compute_pressure()
+
+                target_pressure = target_state.pressure
+
+                # Estimate if valve would be active based on pressure conditions
+                # Use a more permissive threshold for post-processing estimation
+                # (avoids strict hysteresis that requires state history)
+                mid_threshold = (valve.activation_threshold + valve.deactivation_threshold) / 2
+
+                if target_pressure <= mid_threshold and source_state.pressure > target_state.pressure:
+                    # Estimate flow rate using simplified physics
+                    P1, P2 = source_state.pressure, target_state.pressure
+                    T1 = source_state.temperature
+                    rho1 = source_state.fuel_mass / source_state.tank.volume
+
+                    # Use valve's effective area and max flow rate
+                    effective_area = valve.effective_area
+                    max_flow_rate = valve.max_flow_rate
+
+                    # Simplified choked flow calculation
+                    gamma = 1.4  # Heat capacity ratio for hydrogen
+                    R_specific = 4124  # J/(kg⋅K) specific gas constant for hydrogen
+                    P_crit_ratio = (2/(gamma+1))**(gamma/(gamma-1))
+                    discharge_coeff = 0.6
+
+                    if P2/P1 < P_crit_ratio:
+                        # Choked flow
+                        sonic_velocity = math.sqrt(gamma * R_specific * T1)
+                        flow_rate = discharge_coeff * effective_area * rho1 * sonic_velocity
+                    else:
+                        # Subsonic flow
+                        velocity = math.sqrt(2 * (P1 - P2) / rho1)
+                        flow_rate = discharge_coeff * effective_area * rho1 * velocity
+
+                    # Apply limits
+                    flow_rate = min(flow_rate, max_flow_rate)
+                    max_safe_flow = 0.1 * source_state.fuel_mass
+                    flow_rate = min(flow_rate, max_safe_flow)
+
+                    # Apply to coupling flows
+                    coupling_flows[valve.source_tank] -= flow_rate
+                    coupling_flows[valve.target_tank] += flow_rate
+
+            elif hasattr(valve, 'target_tank') and valve.target_tank == -1:
+                # OHEX extraction coupling
+                flow_rate = valve.calculate_flow(multi_state.tank_states[valve.source_tank], None, t)
+                if flow_rate > 0:
+                    coupling_flows[valve.source_tank] -= flow_rate
+
+            else:
+                # Other coupling types - try to use their calculate_flow method
+                source_state = multi_state.tank_states[valve.source_tank]
+                target_state = multi_state.tank_states[valve.target_tank] if valve.target_tank >= 0 else None
+                flow_rate = valve.calculate_flow(source_state, target_state, t)
+
+                if flow_rate > 0:
+                    coupling_flows[valve.source_tank] -= flow_rate
+                    if valve.target_tank >= 0:
+                        coupling_flows[valve.target_tank] += flow_rate
 
         return coupling_flows
 
@@ -748,37 +912,22 @@ class TankSystem:
                 temp_multi_state = MultiTankState(tank_states=tank_states)
                 coupling_flows = self._calculate_coupling_flows(temp_multi_state, current_time)
 
-                # For post-processing, create a more realistic coupling flow approximation
-                # Since valve operations happen at high frequency during dynamics but we sample at lower frequency,
-                # we need to estimate the coupling flows based on whether conditions favor valve opening
-                for valve_idx, valve in enumerate(self.coupling_valves):
-                    p1 = tank_states[valve.source_tank].pressure / 1e5  # Convert to bar
-                    p2 = tank_states[valve.target_tank].pressure / 1e5
+                # Use the actual coupling rule flows instead of hardcoded approximations
+                # This ensures consistency with the physics used during integration
 
-                    # Enhanced coupling flow estimation: use a smoother transition around thresholds
-                    # instead of hard on/off switching
-                    activation_threshold = 20.0  # From config
-                    deactivation_threshold = 23.0  # From config
+                # WORKAROUND: For post-processing, valves lose their state between calls
+                # So we need to estimate coupling flows based on pressure conditions
+                # rather than relying on valve state machines
+                coupling_flows = self._estimate_coupling_flows_for_postprocessing(temp_multi_state, current_time)
 
-                    if p2 <= activation_threshold + 1.0:  # Within 1 bar of activation (accounting for sampling)
-                        # Estimate flow based on pressure differential and time-varying mission demand
-                        flow_fraction = max(0.0, (activation_threshold + 1.0 - p2) / 1.0)  # 0-1 based on how close to threshold
-
-                        # Add time-based variation to approximate valve oscillations
-                        # Use mission time to create realistic flow patterns
-                        time_factor = 1.0
-                        if current_time > 600:  # After 10 minutes, when valve activity was high in logs
-                            # Create oscillating pattern based on mission demand
-                            oscillation = 0.3 + 0.7 * abs(np.sin(current_time / 30.0))  # 30-second period oscillation
-                            time_factor = oscillation
-
-                        estimated_flow = 0.1 * flow_fraction * time_factor  # kg/s, up to max of 0.1 kg/s
-                        coupling_flows[valve.target_tank] = estimated_flow
-                        coupling_flows[valve.source_tank] = -estimated_flow
-
-                    # Debug output for coupling flow calculation (reduced frequency)
+                # Debug: Print coupling flows at this timestep
+                if any(abs(flow) > 1e-6 for flow in coupling_flows.values()):
+                    flows_str = ", ".join([f"T{i}:{flow*1000:.1f}g/s" for i, flow in coupling_flows.items() if abs(flow) > 1e-6])
+                    print(f"  Post-processing t={current_time:.1f}s: {flows_str}")
+                else:
+                    # Only print occasionally to avoid spam
                     if i < 5 or i % 200 == 0:
-                        print(f"  Debug t={current_time:.1f}s: P1={p1:.1f}bar, P2={p2:.1f}bar, coupling_flow={coupling_flows.get(valve.target_tank, 0.0)*1000:.1f}g/s")
+                        print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
 
                 # Update flow data with coupling flows
                 for tank_idx in range(len(tank_states)):

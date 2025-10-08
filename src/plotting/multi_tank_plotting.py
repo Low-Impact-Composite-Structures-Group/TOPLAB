@@ -242,7 +242,7 @@ class DelftColourPlotter:
                                include_isobars: bool = True,
                                isobar_pressures: List[float] = None,
                                reference_pressures: Optional[Dict[str, float]] = None,
-                               temperature_range: Tuple[float, float] = (15, 80),
+                               temperature_range: Optional[Tuple[float, float]] = None,
                                density_range: Tuple[float, float] = (0, 80),
                                save_path: Optional[str] = None) -> plt.Figure:
         """
@@ -258,7 +258,7 @@ class DelftColourPlotter:
             include_isobars: Whether to include isobar lines
             isobar_pressures: List of pressures [bar] for isobars. If None, uses default [450, 400, 100, 15, 5]
             reference_pressures: Dict with 'P_vent' and 'P_min' [bar] for highlighting special isobars
-            temperature_range: Min/max temperature range for the plot [K]
+            temperature_range: Min/max temperature range for the plot [K]. If None, auto-computed from data ± 10K
             density_range: Min/max density range for the plot [kg/m³]
             save_path: Optional path to save the plot
 
@@ -271,9 +271,9 @@ class DelftColourPlotter:
         if tank_index >= results.n_tanks:
             raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
 
-        # Set default isobar pressures if not provided
+        # Set default isobar pressures if not provided (match reference image style)
         if isobar_pressures is None:
-            isobar_pressures = [450, 400, 100, 15, 5]  # bar
+            isobar_pressures = [450, 400, 200, 100, 50, 15, 5]  # bar
 
         # Set default reference pressures if not provided
         if reference_pressures is None:
@@ -281,6 +281,15 @@ class DelftColourPlotter:
 
         # Extract tank data arrays
         tank_data = results._extract_tank_arrays(tank_index)
+
+        # Auto-compute temperature range based on actual data if not provided
+        if temperature_range is None:
+            temp_min = min(tank_data['temperatures']) - 7.0
+            temp_max = max(tank_data['temperatures']) + 7.0
+            temperature_range = (temp_min, temp_max)
+            print(f"   📊 Auto-computed temperature range: {temp_min:.1f}K to {temp_max:.1f}K")
+        else:
+            print(f"   📊 Using provided temperature range: {temperature_range[0]:.1f}K to {temperature_range[1]:.1f}K")
 
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -298,14 +307,15 @@ class DelftColourPlotter:
         tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
                             '-', label=f"Tank {tank_index + 1} Path", **line_style)
 
-        # Add direction arrow (about 1/3 along the path)
+        # Add direction arrow (about 1/3 along the path) - larger arrow for better visibility
         if len(tank_data['temperatures']) > 10:
             idx = len(tank_data['temperatures']) // 3
             ax.annotate('', xy=(tank_data['temperatures'][idx],
                                tank_data['densities'][idx]),
                        xytext=(tank_data['temperatures'][idx-5],
                                tank_data['densities'][idx-5]),
-                       arrowprops=dict(arrowstyle='->', color=primary_color, lw=1.5))
+                       arrowprops=dict(arrowstyle='->', color=primary_color, lw=3.0,
+                                     connectionstyle="arc3,rad=0"))
 
         # Optional: Add saturation line
         if include_saturation_line:
@@ -361,96 +371,97 @@ class DelftColourPlotter:
                 from CoolProp.CoolProp import PropsSI
                 fluid = 'hydrogen'
 
-                # Convert pressure levels to Pa
-                pressure_levels_pa = [P * 1e5 for P in isobar_pressures]  # Convert bar to Pa
-
-                # Temperature range for isobars (use data range)
-                temp_min, temp_max = np.min(tank_data['temperatures']), np.max(tank_data['temperatures'])
-                temp_padding = (temp_max - temp_min) * 0.2  # 20% padding for isobars
-                T_isobar_range = np.linspace(temp_min - temp_padding, temp_max + temp_padding, 100)
+                # Create temperature range for isobars
+                temps = np.linspace(temperature_range[0], temperature_range[1], 100)
 
                 # Define colors for different isobar types
                 p_vent_bar = reference_pressures.get('P_vent', None)
                 p_min_bar = reference_pressures.get('P_min', None)
 
-                for i, (P_pa, P_bar) in enumerate(zip(pressure_levels_pa, isobar_pressures)):
-                    rho_isobar = []
-                    T_valid = []
+                # Flag to track if we've added the general "Isobars" legend entry
+                isobar_legend_added = False
 
-                    for T in T_isobar_range:
+                for pressure in isobar_pressures:
+                    pressure_pa = pressure * 1e5  # Convert bar to Pa
+                    densities = []
+
+                    for temp in temps:
                         try:
-                            # Calculate density at this T, P
-                            rho = PropsSI('D', 'T', T, 'P', P_pa, fluid)
-                            # Use data-based density range for filtering
-                            density_min, density_max = np.min(tank_data['densities']), np.max(tank_data['densities'])
-                            if 0 <= rho <= density_max * 1.5:  # Allow some range above max data density
-                                rho_isobar.append(rho)
-                                T_valid.append(T)
+                            # Calculate density at this temperature and pressure
+                            density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'Hydrogen')
+                            densities.append(density)
                         except:
-                            continue
+                            densities.append(np.nan)
 
-                    if len(T_valid) > 5:  # Only plot if we have enough points
+                    # Remove NaN values
+                    valid_indices = ~np.isnan(densities)
+                    valid_temps = temps[valid_indices]
+                    valid_densities = np.array(densities)[valid_indices]
+
+                    if len(valid_temps) > 0:
                         # Determine color and style based on pressure type
-                        if p_vent_bar and abs(P_bar - p_vent_bar) < 0.1:  # Venting pressure
+                        if p_vent_bar and abs(pressure - p_vent_bar) < 0.1:  # Venting pressure
                             color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]  # Grey/Orange for venting
                             linewidth = 2
                             alpha = 0.8
-                            label = f'{P_bar:.0f} bar (Vent)'
-                        elif p_min_bar and abs(P_bar - p_min_bar) < 0.1:  # Minimum pressure
+                            label = f'{pressure:.0f} bar (Vent)'
+                        elif p_min_bar and abs(pressure - p_min_bar) < 0.1:  # Minimum pressure
                             color = self.color_palette[2] if self.use_greyscale else DELFT_PALETTE[5]  # Dark grey/Red for minimum
                             linewidth = 2
                             alpha = 0.8
-                            label = f'{P_bar:.0f} bar (Min)'
+                            label = f'{pressure:.0f} bar (Min)'
                         else:  # Regular isobar
                             color = self.color_palette[3] if self.use_greyscale else DELFT_PALETTE[2]  # Light grey/Blue for regular
                             linewidth = 1
-                            alpha = 0.5
-                            label = None
+                            alpha = 0.7
+                            # Add "Isobars" label only for the first regular isobar
+                            label = 'Isobars' if not isobar_legend_added else None
+                            if not isobar_legend_added:
+                                isobar_legend_added = True
 
-                        ax.plot(T_valid, rho_isobar, ':', color=color,
-                               linewidth=linewidth, alpha=alpha, label=label)
+                        # Plot isobar line with dotted style to match reference image
+                        ax.plot(valid_temps, valid_densities, ':', color=color, alpha=alpha, linewidth=linewidth, label=label)
 
-                        # Add pressure label to the right margin outside the plot area
-                        if T_valid and rho_isobar:
-                            # Position label at the rightmost end of the isobar line, but offset to the right margin
-                            label_x = T_valid[-1]  # Rightmost temperature point on the isobar
-                            label_y = rho_isobar[-1]  # Corresponding density
+                        # Add pressure labels at right edge of plot with arrows (following sb_plotting pattern)
+                        if len(valid_temps) > 0:
+                            # Find the rightmost point of the isobar line
+                            right_idx = -1  # Last point
+                            right_temp = valid_temps[right_idx]
+                            right_density = valid_densities[right_idx]
 
-                            # Offset the label to the right of the plot area
-                            temp_range = T_valid[-1] - T_valid[0]
+                            # Position label at right edge with 1K spacing from right edge
+                            label_x = temperature_range[1] - 1.0  # 1K from right edge
 
-                            ax.text(label_x, label_y, f'{P_bar:.0f} bar',
-                                   fontsize=10, alpha=0.8, color=color,
-                                   bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
-                                           alpha=0.7, edgecolor=color, linewidth=0.5),
-                                   verticalalignment='center')
+                            ax.annotate(f"{pressure} bar",
+                                      xy=(right_temp, right_density),
+                                      xytext=(label_x, right_density),
+                                      arrowprops=dict(arrowstyle='->', color='black', lw=1, alpha=0.8),
+                                      bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                                               edgecolor='black', alpha=0.95),
+                                      fontsize=9, ha='right', va='center')
 
             except Exception as e:
                 print(f"   ⚠️  Could not add isobars: {e}")
 
-        # Formatting
+        # Formatting to match reference image
         ax.set_xlabel('Temperature [K]')
         ax.set_ylabel('Density [kg/m³]')
-        ax.set_title(f'Density-Temperature Diagram - Tank {tank_index + 1}')
+        # ax.set_title(f'Density-Temperature Diagram - Tank {tank_index + 1}')
         ax.grid(True, alpha=0.3)
 
-        # Set axis limits based on data range with some padding
-        temp_min, temp_max = np.min(tank_data['temperatures']), np.max(tank_data['temperatures'])
-        density_min, density_max = np.min(tank_data['densities']), np.max(tank_data['densities'])
+        # Set axis limits to match reference image style using provided temperature and density ranges
+        ax.set_xlim(temperature_range)
+        ax.set_ylim(density_range)
 
-        # Add 10% padding to ranges
-        temp_padding = (temp_max - temp_min) * 0.1
-        density_padding = (density_max - density_min) * 0.1
-
-        ax.set_xlim(temp_min - temp_padding, temp_max + temp_padding)
-        ax.set_ylim(max(0, density_min - density_padding), density_max + density_padding)
-
-        # Add legend with 3D shadow effect in top left corner
-        legend = ax.legend(fontsize=9, loc='upper left', frameon=True, fancybox=True,
-                          shadow=True, framealpha=0.9, edgecolor='black')
+        # Add legend with title and 3D shadow effect in top left corner
+        legend = ax.legend(fontsize=9, loc='best', frameon=True, fancybox=True,
+                          shadow=True, framealpha=0.9, edgecolor='black', title='Legend')
         # Additional styling for 3D effect
         legend.get_frame().set_facecolor('white')
         legend.get_frame().set_linewidth(1.2)
+        # Style the legend title
+        legend.get_title().set_fontweight('bold')
+        legend.get_title().set_fontsize(10)
 
         # Improve layout (suppress tight_layout warnings for density-temperature plots)
         import warnings
