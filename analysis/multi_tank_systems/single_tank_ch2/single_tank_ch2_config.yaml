@@ -17,9 +17,9 @@ geometry:
   1:
     phi: 3.0                             # Length/radius ratio (L/R)
     initial_pressure: 700e5              # Pa (700 bar - high pressure gaseous storage)
-    initial_density: 36.36               # kg/m³ (gaseous hydrogen density)
+    initial_density: 40               # kg/m³ (gaseous hydrogen density)
     venting_pressure: 800e5              # Pa (800 bar - venting pressure)
-    minimum_pressure: 15e5               # Pa (15 bar - minimum allowable pressure)
+    minimum_pressure: 10e5               # Pa (15 bar - minimum allowable pressure)
 
 # Material specifications with NIST temperature-dependent properties
 materials:
@@ -91,7 +91,7 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [800, 700, 500, 300, 200, 100, 50, 15]  # Custom isobars to show [bar] - adjusted for CH2
+      isobar_pressures: [800, 700, 500, 300,  100, 15]  # Custom isobars to show [bar] - adjusted for CH2
       show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines

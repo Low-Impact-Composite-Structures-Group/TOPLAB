@@ -124,12 +124,12 @@ class DelftColourPlotter:
         # Create 2x2 subplot grid
         fig, axes = plt.subplots(2, 2, figsize=(14, 10) if should_overlay else (12, 8))
 
-        if should_overlay and results.n_tanks > 1:
-            fig.suptitle(f"{self.analysis_name} - Multi-Tank Evolution Comparison",
-                         fontsize=14, fontweight='bold')
-        else:
-            fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Evolution",
-                         fontsize=14, fontweight='bold')
+        # if should_overlay and results.n_tanks > 1:
+        #     fig.suptitle(f"{self.analysis_name} - Multi-Tank Evolution Comparison",
+        #                  fontsize=14, fontweight='bold')
+        # else:
+        #     fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Evolution",
+        #                  fontsize=14, fontweight='bold')
 
         # Get time array
         times_hours = results.times / 3600.0  # Convert to hours
@@ -243,7 +243,7 @@ class DelftColourPlotter:
                                isobar_pressures: List[float] = None,
                                reference_pressures: Optional[Dict[str, float]] = None,
                                temperature_range: Optional[Tuple[float, float]] = None,
-                               density_range: Tuple[float, float] = (0, 80),
+                               density_range: Tuple[float, float] = (0, 85),
                                save_path: Optional[str] = None) -> plt.Figure:
         """
         Plot density-temperature diagram for a single tank.
@@ -284,17 +284,14 @@ class DelftColourPlotter:
 
         # Auto-compute temperature range based on actual data if not provided
         if temperature_range is None:
-            temp_min = min(tank_data['temperatures']) - 7.0
-            temp_max = max(tank_data['temperatures']) + 7.0
+            temp_min = min(tank_data['temperatures']) - 30.0
+            temp_max = max(tank_data['temperatures']) + 30.0
             temperature_range = (temp_min, temp_max)
-            print(f"   📊 Auto-computed temperature range: {temp_min:.1f}K to {temp_max:.1f}K")
-        else:
-            print(f"   📊 Using provided temperature range: {temperature_range[0]:.1f}K to {temperature_range[1]:.1f}K")
 
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 8))
-        fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Density-Temperature Diagram",
-                     fontsize=14, fontweight='bold')
+        # fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Density-Temperature Diagram",
+                    #  fontsize=14, fontweight='bold')
 
         # Primary color for tank path (greyscale or color)
         primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color
@@ -310,12 +307,19 @@ class DelftColourPlotter:
         # Add direction arrow (about 1/3 along the path) - larger arrow for better visibility
         if len(tank_data['temperatures']) > 10:
             idx = len(tank_data['temperatures']) // 3
-            ax.annotate('', xy=(tank_data['temperatures'][idx],
-                               tank_data['densities'][idx]),
-                       xytext=(tank_data['temperatures'][idx-5],
-                               tank_data['densities'][idx-5]),
-                       arrowprops=dict(arrowstyle='->', color=primary_color, lw=3.0,
-                                     connectionstyle="arc3,rad=0"))
+            # pick a start index a bit further back for a longer arrow, but not before 0
+            start_idx = max(0, idx - 8)
+            ax.annotate('',
+                xy=(tank_data['temperatures'][idx], tank_data['densities'][idx]),
+                xytext=(tank_data['temperatures'][start_idx], tank_data['densities'][start_idx]),
+                arrowprops=dict(
+                    arrowstyle='-|>',            # solid shaft with triangular head
+                    color=primary_color,
+                    linewidth=4.0,              # thicker shaft
+                    mutation_scale=30,          # larger head
+                    alpha=0.95,
+                    connectionstyle="arc3,rad=0",
+                ))
 
         # Optional: Add saturation line
         if include_saturation_line:
@@ -549,7 +553,7 @@ class DelftColourPlotter:
         # Set up plot formatting to match other plots
         ax.set_xlabel('Time [hours]')
         ax.set_ylabel('Flow Rate [g/s]')
-        ax.set_title(f'Tank {tank_index + 1} Flow Rates')
+        # ax.set_title(f'Tank {tank_index + 1} Flow Rates')
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect (same styling as other plots)
@@ -609,13 +613,13 @@ class DelftColourPlotter:
                    transform=ax.transAxes, ha='center', va='center', fontsize=14)
             ax.set_xlabel('Time [hours]')
             ax.set_ylabel('Heat Flow Requirement [kW]')
-            ax.set_title(f'{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements')
+            # ax.set_title(f'{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements')
             return fig
 
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 6))
-        fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements",
-                     fontsize=14, fontweight='bold')
+        # fig.suptitle(f"{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements",
+                    #  fontsize=14, fontweight='bold')
 
         # Color scheme (greyscale or color)
         if self.use_greyscale:
@@ -634,7 +638,7 @@ class DelftColourPlotter:
         ihex_style = {'color': ihex_color, 'linewidth': 2, 'linestyle': '-'}
         if self.use_greyscale:
             ihex_style.update(self._get_marker_config(0, len(times_hours)))
-        ax.plot(times_hours, ihex_requirements_kw, label='iHEX (Internal Heat Exchanger)', **ihex_style)
+        ax.plot(times_hours, ihex_requirements_kw, label='IHEX', **ihex_style)
 
         # Plot oHEX requirements if available and requested
         ohex_plotted = False
@@ -646,7 +650,7 @@ class DelftColourPlotter:
                 ohex_style = {'color': ohex_color, 'linewidth': 2, 'linestyle': '-'}
                 if self.use_greyscale:
                     ohex_style.update(self._get_marker_config(1, len(times_hours)))
-                ax.plot(times_hours, ohex_requirements_kw, label='oHEX (Outboard Heat Exchanger)', **ohex_style)
+                ax.plot(times_hours, ohex_requirements_kw, label='OHEX', **ohex_style)
                 ohex_plotted = True
 
         # Plot total requirements if both are available and requested
@@ -667,7 +671,7 @@ class DelftColourPlotter:
         # Formatting
         ax.set_xlabel('Time [hours]')
         ax.set_ylabel('Heat Flow Requirement [kW]')
-        ax.set_title('Heat Exchanger Requirements vs Time')
+        # ax.set_title('Heat Exchanger Requirements vs Time')
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect (same as other plots)
@@ -845,8 +849,8 @@ class DelftColourPlotter:
 
         # Create 2x2 subplot grid
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        fig.suptitle(f"{self.analysis_name} - Sequential Tank {tank_index + 1} Evolution",
-                     fontsize=14, fontweight='bold')
+        # fig.suptitle(f"{self.analysis_name} - Sequential Tank {tank_index + 1} Evolution",
+        #              fontsize=14, fontweight='bold')
 
         # Colors (greyscale or Delft palette)
         if self.use_greyscale:
@@ -957,7 +961,7 @@ class DelftColourPlotter:
                                           isobar_pressures: List[float] = None,
                                           reference_pressures: Optional[Dict[str, float]] = None,
                                           temperature_range: Tuple[float, float] = (15, 80),
-                                          density_range: Tuple[float, float] = (0, 80),
+                                          density_range: Tuple[float, float] = (0, 85),
                                           save_path: Optional[str] = None) -> plt.Figure:
         """
         Plot sequential density-temperature diagram showing thermodynamic path across all missions.
@@ -987,8 +991,8 @@ class DelftColourPlotter:
 
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 8))
-        fig.suptitle(f"{self.analysis_name} - Sequential Density-Temperature (Tank {tank_index + 1})",
-                     fontsize=14, fontweight='bold')
+        # fig.suptitle(f"{self.analysis_name} - Sequential Density-Temperature (Tank {tank_index + 1})",
+        #              fontsize=14, fontweight='bold')
 
         # Different colors for each mission (greyscale or color)
         if self.use_greyscale:
@@ -1110,8 +1114,8 @@ class DelftColourPlotter:
 
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 6))
-        fig.suptitle(f"{self.analysis_name} - Sequential Mass Flows (Tank {tank_index + 1})",
-                     fontsize=14, fontweight='bold')
+        # fig.suptitle(f"{self.analysis_name} - Sequential Mass Flows (Tank {tank_index + 1})",
+        #              fontsize=14, fontweight='bold')
 
         # Plot flow rates (greyscale or color)
         primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color

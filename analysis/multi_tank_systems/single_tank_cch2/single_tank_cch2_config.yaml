@@ -100,3 +100,12 @@ output:
       figsize: [12, 6]
       filename: "mass_flows"
       include_venting_flow: true      # Show venting flow curve (true/false)
+    heat_exchanger_requirements:
+      enabled: true
+      figsize: [12, 6]
+      filename: "heat_exchanger_requirements"
+      include_ihex: true             # Calculate and show iHEX requirements
+      include_ohex: true             # Calculate and show oHEX requirements
+      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
+      ohex_target_pressure: 20e5     # Pa (20 bar) - target pressure for oHEX calculations
+      include_total: true            # Show total (iHEX + oHEX) curve

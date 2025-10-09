@@ -2055,6 +2055,292 @@ class SystemOrchestrator:
             print(f"   ❌ Error saving markdown summary: {e}")
             return None
 
+    def save_comprehensive_results(self) -> str:
+        """
+        Generate and save comprehensive results report to text file.
+
+        This method runs after simulation completion and generates a complete
+        analysis report using the exact data sources specified in the requirements table.
+
+        Returns:
+            str: Path to the saved results file
+        """
+        import numpy as np
+        from datetime import datetime
+        from pathlib import Path
+
+        if not self.results:
+            raise RuntimeError("No simulation results available. Run simulation first.")
+
+        # === EXTRACT DATA FROM YAML CONFIG ===
+        config_dict = self.scenario_config.config_dict
+
+        # Extract from geometry section (tank ID 1)
+        geometry_configs = config_dict.get('geometry', {})
+        if not geometry_configs:
+            raise RuntimeError("Problem accessing parameter: no geometry section in YAML config")
+
+        # Get tank 1 geometry config
+        tank_config = geometry_configs.get(1, {})  # Tank ID 1
+        if not tank_config:
+            raise RuntimeError("Problem accessing parameter: no geometry config for tank 1")
+
+        # Convert values, handling both numeric and string inputs
+        p_init_pa = tank_config.get('initial_pressure', 0)
+        p_init_bar = float(p_init_pa) / 1e5 if p_init_pa else 0  # Pa to bar
+
+        rho_init = float(tank_config.get('initial_density', 0))  # kg/m³
+        lr_ratio = float(tank_config.get('phi', 3.0))  # L/R ratio (phi in YAML)
+
+        p_min_pa = tank_config.get('minimum_pressure', 0)
+        p_min_bar = float(p_min_pa) / 1e5 if p_min_pa else 0  # Pa to bar
+
+        p_vent_pa = tank_config.get('venting_pressure', 0)
+        p_vent_bar = float(p_vent_pa) / 1e5 if p_vent_pa else 0  # Pa to bar
+
+        # Extract from materials section
+        materials_config = config_dict.get('materials', {})
+        liner_config = materials_config.get('liner', {})
+        liner_thickness = float(liner_config.get('thickness', 0.005))  # m
+        insulation_config = materials_config.get('insulation', {})
+        insulation_thickness = float(insulation_config.get('thickness', 0.05))  # m
+
+        # Extract from mission section
+        mission_config = config_dict.get('mission', {})
+        ambient_temp = float(mission_config.get('ambient_temperature', 288.15))  # K
+        ambient_htc = float(insulation_config.get('heat_transfer_coefficient', 30))  # W/m²K from insulation
+
+        # Material names
+        liner_material = config_dict.get('materials', {}).get('liner', {}).get('name', 'aluminum')
+        wall_material = config_dict.get('materials', {}).get('composite', {}).get('name', 'carbon-epoxy')
+
+        # === COMPUTED AT START OF SIMULATION ===
+        # T_init is computed at start of simulation - get from initial state
+        initial_state = self.results.multi_tank_states[0].get_tank_state(0)
+        t_init = initial_state.temperature  # K
+
+        # R (radius) - computed at start based on mission fuel requirement
+        tank_geometry = self.tank_geometries[0]
+        radius = tank_geometry.radius  # m
+
+        # H2 mass - computed at start of sim (initial fuel mass)
+        h2_mass = initial_state.fuel_mass  # kg
+
+        # === FROM MISSION PROFILE ===
+        # Calculate discharge rate from actual simulation results (more accurate than mission config)
+        if not (hasattr(self.scenario_config, 'mission_sequence') and
+                self.scenario_config.mission_sequence.missions):
+            raise RuntimeError("Problem accessing parameter: mission_sequence not available")
+
+        # Get mission duration data from mission profile
+        if not hasattr(self, 'mission_profile') or not self.mission_profile:
+            raise RuntimeError("Problem accessing parameter: no mission_profile loaded in orchestrator")
+
+        mission = self.mission_profile
+        mission_durations = []
+
+        for section in mission.sections:
+            mission_durations.append(section.duration)  # s
+
+        # Calculate average discharge rate from simulation results (most accurate)
+        initial_mass = self.results.multi_tank_states[0].get_tank_state(0).fuel_mass
+        final_mass = self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass
+        total_duration = self.results.times[-1]
+        fuel_consumed = initial_mass - final_mass
+
+        if total_duration <= 0:
+            raise RuntimeError("Problem accessing parameter: invalid simulation duration for discharge rate calculation")
+
+        avg_discharge_rate = fuel_consumed / total_duration  # kg/s
+
+        # === FROM GEOMETRY (TANK ATTRIBUTES) ===
+        # These should be tank attributes already computed
+        tank_volume = tank_geometry.volume  # m³
+        tank_length = lr_ratio * 2 * radius  # m (from radius and L/R)
+
+        # Get liner mass from tank system properties - NO FALLBACKS
+        if not (hasattr(self, 'tank_system') and self.tank_system):
+            raise RuntimeError("Problem accessing parameter: tank_system not available for liner_mass extraction")
+
+        try:
+            tank_props = self.tank_system._get_tank_properties(tank_geometry, "Tank1", 0)
+            if 'liner_mass' not in tank_props:
+                raise KeyError("liner_mass not found in tank properties")
+            liner_mass = tank_props['liner_mass']
+        except Exception as e:
+            raise RuntimeError(f"Problem accessing parameter: liner_mass - {e}")
+
+        # Inner area - get from thermal model, NO geometric fallback
+        if not (hasattr(self, 'tank_system') and hasattr(self.tank_system, 'thermal_models')):
+            raise RuntimeError("Problem accessing parameter: thermal_models not available for inner_area extraction")
+
+        try:
+            thermal_model = self.tank_system.thermal_models[0]
+            if not hasattr(thermal_model, 'A_in'):
+                raise AttributeError("A_in not found in thermal model")
+            inner_area = thermal_model.A_in
+        except Exception as e:
+            raise RuntimeError(f"Problem accessing parameter: inner_area (A_in) - {e}")
+
+        # === FROM STRUCTURAL MODEL ===
+        # Composite thickness and mass - computed in structural model, NO FALLBACKS
+        if not (hasattr(self, 'tank_system') and self.tank_system):
+            raise RuntimeError("Problem accessing parameter: tank_system not available for structural model data")
+
+        try:
+            tank_props = self.tank_system._get_tank_properties(tank_geometry, "Tank1", 0)
+            if 'wall_mass' not in tank_props:
+                raise KeyError("wall_mass not found in tank properties")
+            composite_mass = tank_props['wall_mass']
+
+            # Calculate thickness from mass and geometry - must be computed, no fallback
+            if radius <= 0:
+                raise ValueError("Invalid radius for composite thickness calculation")
+
+            composite_density = 1600  # kg/m³ carbon-epoxy (material property)
+            # Estimate thickness from mass (simplified spherical shell approximation)
+            composite_thickness = composite_mass / (4 * np.pi * radius**2 * composite_density)
+
+            if composite_thickness <= 0:
+                raise ValueError("Calculated composite thickness is invalid")
+
+        except Exception as e:
+            raise RuntimeError(f"Problem accessing parameter: composite structural data - {e}")
+
+        # === CALCULATED VALUES ===
+        total_structural_mass = liner_mass + composite_mass  # kg
+
+        # Outer area - get from thermal model, NO geometric fallback
+        if not (hasattr(self, 'tank_system') and hasattr(self.tank_system, 'thermal_models')):
+            raise RuntimeError("Problem accessing parameter: thermal_models not available for outer_area extraction")
+
+        try:
+            thermal_model = self.tank_system.thermal_models[0]
+            if not hasattr(thermal_model, 'A_out'):
+                raise AttributeError("A_out not found in thermal model")
+            outer_area = thermal_model.A_out
+        except Exception as e:
+            raise RuntimeError(f"Problem accessing parameter: outer_area (A_out) - {e}")
+
+        # Structural volume = outer volume - inner volume (tank volume)
+        # Calculate r_total from known thicknesses
+        r_total = radius + liner_thickness + composite_thickness + insulation_thickness
+        outer_volume = (4/3) * np.pi * r_total**3
+        structural_volume = outer_volume - tank_volume  # m³
+
+        # Efficiencies
+        gravimetric_efficiency = h2_mass / (h2_mass + total_structural_mass)
+        volumetric_efficiency = tank_volume / (tank_volume + structural_volume)
+
+        # === ENERGY CALCULATIONS (POST-SIMULATION) ===
+        times = np.array(self.results.times)
+
+        # iHEX energy - trapezoidal integration of ihex data
+        qdot_ihex = self._calculate_ihex_requirements(0)
+        ihex_energy_mj = np.trapz(np.abs(qdot_ihex), times) / 1e6  # W·s to MJ
+        ihex_energy_kwh = ihex_energy_mj * 1000 / 3600  # MJ to kWh
+
+        # OHEX energy - trapezoidal integration of ohex data
+        qdot_ohex = self._calculate_ohex_requirements(0)
+        ohex_energy_mj = np.trapz(qdot_ohex, times) / 1e6  # W·s to MJ
+        ohex_energy_kwh = ohex_energy_mj * 1000 / 3600  # MJ to kWh
+
+        # Total HEX energy
+        total_hex_energy_kwh = ihex_energy_kwh + ohex_energy_kwh
+
+        # === CREATE COMPREHENSIVE REPORT ===
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        report_text = f"""Single Tank CCH2 Benchmark - Comprehensive Analysis Report
+Generated: {timestamp}
+Analysis: {self.scenario_config.description}
+
+CONFIGURATION PARAMETERS (from YAML)
+================================================================================
+P_init [bar]:               {p_init_bar:.1f}
+rho_init [kg/m³]:           {rho_init:.1f}
+L/R [-]:                    {lr_ratio:.2f}
+Liner thickness [m]:        {liner_thickness:.4f}
+Ambient HTC [W/m²·K]:       {ambient_htc:.2f}
+P_min [bar]:                {p_min_bar:.1f}
+P_vent [bar]:               {p_vent_bar:.1f}
+Ambient temp [K]:           {ambient_temp:.1f}
+Insulation thickness [m]:   {insulation_thickness:.3f}
+Liner material:             {liner_material}
+Wall material:              {wall_material}
+
+COMPUTED VALUES (at start of simulation)
+================================================================================
+T_init [K]:                 {t_init:.1f}
+R [m]:                      {radius:.3f}
+H2 mass [kg]:               {h2_mass:.1f}
+
+MISSION PROFILE DATA
+================================================================================
+Discharge rate [kg/s]:      {avg_discharge_rate:.6f} (calculated from simulation)
+Mission sections:           {len(mission_durations)}
+Mission durations [s]:      {mission_durations}
+
+GEOMETRY (tank attributes)
+================================================================================
+Liner mass [kg]:            {liner_mass:.1f}
+Inner area [m²]:            {inner_area:.2f}
+Tank volume [m³]:           {tank_volume:.3f}
+Tank length [m]:            {tank_length:.2f}
+
+STRUCTURAL MODEL RESULTS
+================================================================================
+Composite thickness [m]:    {composite_thickness:.4f}
+Composite mass [kg]:        {composite_mass:.1f}
+
+CALCULATED VALUES
+================================================================================
+Total structural mass [kg]: {total_structural_mass:.1f}
+Outer area [m²]:            {outer_area:.2f}
+Structural volume [m³]:     {structural_volume:.3f}
+Gravimetric efficiency:     {gravimetric_efficiency:.3f}
+Volumetric efficiency:      {volumetric_efficiency:.3f}
+
+ENERGY REQUIREMENTS (post-simulation integration)
+================================================================================
+Required iHEX energy [kWh]: {ihex_energy_kwh:.1f}
+Required OHEX energy [kWh]: {ohex_energy_kwh:.1f}
+Total required HEX energy [kWh]: {total_hex_energy_kwh:.1f}
+
+SIMULATION SUMMARY
+================================================================================
+Mission Duration:           {times[-1]/3600:.2f} hours ({times[-1]:.1f} seconds)
+Data Points:                {len(times)}
+Final Mass:                 {self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass:.1f} kg
+Fuel Consumed:              {h2_mass - self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass:.1f} kg
+
+================================================================================
+Analysis completed successfully using trapezoidal integration
+All values extracted from specified data sources as per requirements table
+================================================================================
+"""
+
+        # Create output directory and save file
+        output_dir = Path("output/results")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        analysis_name = self.scenario_config.analysis_name.replace(' ', '_').lower()
+        timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = output_dir / f"{analysis_name}_comprehensive_report_{timestamp_str}.txt"
+
+        with open(output_file, 'w') as f:
+            f.write(report_text)
+
+        # Print summary to console
+        print(f"📊 COMPREHENSIVE RESULTS SUMMARY:")
+        print(f"   🔥 OHEX Energy: {ohex_energy_kwh:.1f} kWh")
+        print(f"   ❄️  iHEX Energy: {ihex_energy_kwh:.1f} kWh")
+        print(f"   ⚡ Total HEX Energy: {total_hex_energy_kwh:.1f} kWh")
+        print(f"   📈 Gravimetric Efficiency: {gravimetric_efficiency:.1%}")
+        print(f"   📦 Volumetric Efficiency: {volumetric_efficiency:.1%}")
+
+        return str(output_file)
+
 
 def main():
     """Test the complete ScenarioConfig → SystemOrchestrator → MultiTankSystem pipeline."""
@@ -2111,7 +2397,5 @@ def main():
         print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
-
-
 if __name__ == "__main__":
     main()

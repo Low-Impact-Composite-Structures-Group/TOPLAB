@@ -82,9 +82,6 @@ def main():
         # Display component summary
         orchestrator.print_scenario_summary()
 
-        # Display comprehensive analysis summary
-        orchestrator.print_comprehensive_analysis_summary()
-
     except Exception as e:
         print(f"❌ Orchestrator creation failed: {e}")
         import traceback
@@ -183,6 +180,17 @@ def main():
 
         except Exception as e:
             print(f"   ⚠️ Plot generation failed: {e}")
+
+        # Generate comprehensive results report
+        print(f"\n📋 Generating comprehensive results report...")
+        try:
+            report_file = orchestrator.save_comprehensive_results()
+            print(f"   ✓ Comprehensive report generated successfully")
+            print(f"   Report saved to: {report_file}")
+        except Exception as e:
+            print(f"   ⚠️ Comprehensive report generation failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         print(f"\n✅ ANALYSIS COMPLETED SUCCESSFULLY!")
         print(f"   Total execution time: {time.time() - start_time:.2f} seconds")

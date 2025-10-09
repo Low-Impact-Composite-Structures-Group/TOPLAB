@@ -32,7 +32,7 @@ materials:
     thickness: "calculated"              # Calculated from pressure requirements
   insulation:
     thickness: 0.050                     # m (50mm insulation layer)
-    heat_transfer_coefficient: 0.025     # W/m²K (vacuum insulation)
+    heat_transfer_coefficient: 0.005     # W/m²K (vacuum insulation)
   safety_margin: 1.25                    # Structural design safety factor
 
 # Mission profile configuration
@@ -91,7 +91,7 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [20, 16, 15, 10, 8, 6, 4]    # Custom isobars to show [bar] - adjusted for SLH2
+      isobar_pressures: [6, 16, 20, 100]    # Custom isobars to show [bar] - adjusted for SLH2
       show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
