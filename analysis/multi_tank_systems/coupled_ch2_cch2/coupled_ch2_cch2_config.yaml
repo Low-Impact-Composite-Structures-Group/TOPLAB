@@ -107,32 +107,55 @@ output:
     # Plotting style options
     style:
       use_greyscale: true              # Set to true for greyscale plots with markers
-      enable_multi_tank_overlay: true   # Overlay multiple tanks on same evolution plot
+      enable_multi_tank_overlay: false   # Overlay multiple tanks on same evolution plot
+
+    # Reference lines configuration
+    reference_lines:
+      pressure:
+        show_p_min: true           # Show minimum allowable pressure line
+        show_p_vent: true          # Show maximum allowable / venting pressure line
+      temperature:
+        show_t_ambient: false       # Show ambient temperature line
+      density:
+        show_stopping_density: false # Show stopping density line
 
     # Individual plot configurations
     tank_states:
       enabled: true
       figsize: [12, 10]
       filename: "tank_states"
+      event_lines:
+        - time: 0.17              # Time in hours
+          label: "First valve opening event"
+        - time: 1.0               # Time in hours
+          label: "1 hour mark"
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
       filename: "fuel_flow_profile"
     density_temperature:
-      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]
-      show_reference_pressures: true
-      include_saturation_line: true
-      include_isobars: true
+      enabled: true
+      figsize: [12, 8]
+      filename: "density_temperature"
+      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]  # Custom isobars to show [bar]
+      show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
+      include_saturation_line: true   # Show liquid/vapor saturation lines
+      include_isobars: true           # Show isobar lines
+      arrow_position: 0.25            # Position along path for direction arrow (0.0-1.0)
+      arrow_size: 1.0                 # Size multiplier for the direction arrow
+      valve_marker_size: 8.0          # Size of valve opening/closing markers
     mass_flows:
       enabled: true
+      figsize: [12, 6]
       filename: "mass_flows"
-      include_venting_flow: true
+      include_venting_flow: true      # Show venting flow curve (true/false)
       include_coupling_flows: true
     heat_exchanger_requirements:
       enabled: false  # Optional - enable for heat exchanger analysis
+      figsize: [12, 6]
       filename: "heat_exchanger_requirements"
-      include_ohex: true
-      include_ihex: true
-      include_total: true
+      include_ihex: true             # Calculate and show iHEX requirements
+      include_ohex: true             # Calculate and show oHEX requirements
       ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
-      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations
+      ohex_target_pressure: 20e5     # Pa (20 bar) - target pressure for oHEX calculations
+      include_total: true            # Show total (iHEX + oHEX) curve

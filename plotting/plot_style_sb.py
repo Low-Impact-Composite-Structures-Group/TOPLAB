@@ -15,6 +15,10 @@ import matplotlib.font_manager as fm
 # Constants that might be useful
 CM_TO_INCH = 0.393701
 
+# Global font settings
+FONT_SIZE = 16
+FONT_NAME = "Cambria"
+
 DONKERBLAUW = "#0C2340"  # Dark Blue
 TURKOOIS = "#00B8C8"  # Turquoise
 KONINGSBLAUW = "#0076C2"  # Royal Blue
@@ -88,7 +92,7 @@ def show_available_fonts():
         print(f"  - {font}")
     return fonts
 
-def set_font_with_fallbacks(primary_font="Cambria", fallbacks=["Times New Roman", "Arial", "DejaVu Serif"]):
+def set_font_with_fallbacks(primary_font=FONT_NAME, fallbacks=["Times New Roman", "Arial", "DejaVu Serif"]):
     """Attempt to set the primary font, falling back to alternatives if not available."""
     # Get all available fonts
     available_fonts = set([f.name for f in fm.fontManager.ttflist])
@@ -163,14 +167,14 @@ def configure_plot_style(font: str = "Cambria",
     plt.rcParams["figure.dpi"] = dpi
     plt.rcParams["axes.grid"] = grid
 
-    # Improve readability
+    # Improve readability using global font size
     plt.rcParams["axes.labelpad"] = 10
-    plt.rcParams["figure.titlesize"] = 14
-    plt.rcParams["axes.titlesize"] = 12
-    plt.rcParams["axes.labelsize"] = 11
-    plt.rcParams["xtick.labelsize"] = 10
-    plt.rcParams["ytick.labelsize"] = 10
-    plt.rcParams["legend.fontsize"] = 10
+    plt.rcParams["figure.titlesize"] = FONT_SIZE + 2
+    plt.rcParams["axes.titlesize"] = FONT_SIZE
+    plt.rcParams["axes.labelsize"] = FONT_SIZE - 1
+    plt.rcParams["xtick.labelsize"] = FONT_SIZE - 2
+    plt.rcParams["ytick.labelsize"] = FONT_SIZE - 2
+    plt.rcParams["legend.fontsize"] = FONT_SIZE - 2
 
     # print(f"Plot style configured with figure size: {figure_size}, dpi: {dpi}")
 

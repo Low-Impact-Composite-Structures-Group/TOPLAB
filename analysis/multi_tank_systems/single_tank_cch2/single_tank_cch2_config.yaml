@@ -79,10 +79,23 @@ output:
     style:
       use_greyscale: true           # Enable greyscale plotting mode
 
+    # Reference lines configuration
+    reference_lines:
+      pressure:
+        show_p_min: false           # Show minimum allowable pressure line
+        show_p_vent: false          # Show maximum allowable / venting pressure line
+      temperature:
+        show_t_ambient: false       # Show ambient temperature line
+      density:
+        show_stopping_density: false # Show stopping density line
+
     tank_states:
       enabled: true
       figsize: [12, 10]
       filename: "tank_states"
+      event_lines:
+        - time: 0.2               # Time in hours (adjusted for single tank)
+          label: "Test event marker"
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
@@ -95,6 +108,9 @@ output:
       show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
+      arrow_position: 0.25            # Position along path for direction arrow (0.0-1.0)
+      arrow_size: 1.0                 # Size multiplier for the direction arrow
+      valve_marker_size: 8.0          # Size of valve opening/closing markers
     mass_flows:
       enabled: true
       figsize: [12, 6]

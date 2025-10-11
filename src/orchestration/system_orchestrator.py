@@ -1131,7 +1131,8 @@ class SystemOrchestrator:
 
             # Create reference lines from tank configuration
             tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
-            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+            ref_line_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('reference_lines', {})
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data, ref_line_config)
 
             # Add mission ambient temperature if available
             if self.scenario_config.mission_sequence and self.scenario_config.mission_sequence.missions:
@@ -1224,7 +1225,8 @@ class SystemOrchestrator:
 
             # Create reference lines from first tank configuration (for overlay mode)
             tank_config_data = list(self.scenario_config.tank_geometries.values())[0]
-            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+            ref_line_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('reference_lines', {})
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data, ref_line_config)
 
             # Add mission ambient temperature if available
             mission = self.scenario_config.mission_sequence.missions[0]
@@ -1239,10 +1241,16 @@ class SystemOrchestrator:
                 save_ext = Path(save_path).suffix or '.png'
                 overlay_save_path = save_dir / f"{save_name}_evolution_all_tanks{save_ext}"
 
+            # Get event lines configuration from tank_states config
+            tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
+            event_lines = tank_states_config.get('event_lines', [])
+
             fig = plotter.plot_tank_evolution(
                 results=self.results,
                 tank_index=0,  # Not used in overlay mode
                 reference_lines=reference_lines,
+                reference_lines_config=ref_line_config,
+                event_lines=event_lines,
                 save_path=str(overlay_save_path) if overlay_save_path else None,
                 overlay_all_tanks=True
             )
@@ -1252,7 +1260,8 @@ class SystemOrchestrator:
         for tank_idx in range(num_tanks):
             # Create reference lines from tank configuration
             tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
-            reference_lines = plotter.create_reference_lines_from_config(tank_config_data)
+            ref_line_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('reference_lines', {})
+            reference_lines = plotter.create_reference_lines_from_config(tank_config_data, ref_line_config)
 
             # Add mission ambient temperature if available
             mission = self.scenario_config.mission_sequence.missions[0]
@@ -1271,10 +1280,16 @@ class SystemOrchestrator:
                     save_ext = Path(save_path).suffix or '.png'
                     tank_save_path = save_dir / f"{save_name}_evolution_tank{tank_idx + 1}{save_ext}"
 
+                # Get event lines configuration from tank_states config
+                tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
+                event_lines = tank_states_config.get('event_lines', [])
+
                 fig = plotter.plot_tank_evolution(
                     results=self.results,
                     tank_index=tank_idx,
                     reference_lines=reference_lines,
+                    reference_lines_config=ref_line_config,
+                    event_lines=event_lines,
                     save_path=str(tank_save_path) if tank_save_path else None
                 )
                 figures.append(fig)
@@ -1305,6 +1320,20 @@ class SystemOrchestrator:
             show_saturation = include_saturation_line
             show_isobars = include_isobars
 
+            # Extract valve events for multi-tank systems
+            valve_events = None
+            if len(self.tank_geometries) > 1:
+                try:
+                    valve_events = plotter._extract_valve_events(self.results)
+                except Exception as e:
+                    print(f"   ⚠️ Valve event extraction failed for tank {tank_idx}: {e}")
+
+            # Get arrow configuration from density_temperature config
+            dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
+            arrow_position = dt_config.get('arrow_position', 0.25)
+            arrow_size = dt_config.get('arrow_size', 1.0)
+            valve_marker_size = dt_config.get('valve_marker_size', 8.0)
+
             dt_fig = plotter.plot_density_temperature(
                 results=self.results,
                 tank_index=tank_idx,
@@ -1312,6 +1341,10 @@ class SystemOrchestrator:
                 include_isobars=show_isobars,
                 isobar_pressures=isobar_pressures,
                 reference_pressures=ref_pressures,
+                valve_events=valve_events,
+                arrow_position=arrow_position,
+                arrow_size=arrow_size,
+                valve_marker_size=valve_marker_size,
                 save_path=str(dt_save_path) if dt_save_path else None
             )
             figures.append(dt_fig)
