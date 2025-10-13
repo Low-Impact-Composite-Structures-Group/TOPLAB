@@ -2209,30 +2209,25 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         # Create figure and axes
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Greyscale colors and markers for each scenario
+        # Greyscale colors for each scenario
         discharge_color = self.palette[0]  # Black
         refuel_color = self.palette[1]     # Dark grey
         dormancy_color = self.palette[2]   # Medium grey
 
-        # Plot each scenario with markers for greyscale
-        discharge_marker_config = self._get_marker_config(0, len(scenario_data['discharge']['temperatures']))
-        refuel_marker_config = self._get_marker_config(1, len(scenario_data['refuel']['temperatures']))
-        dormancy_marker_config = self._get_marker_config(2, len(scenario_data['dormancy']['temperatures']))
-
-        # Discharge (black solid line with circles)
+        # Discharge (black solid line, no markers)
         discharge_line, = ax.plot(scenario_data['discharge']['temperatures'],
                 scenario_data['discharge']['densities'],
-                '-', color=discharge_color, linewidth=2, label="Discharge", **discharge_marker_config)
+                '-', color=discharge_color, linewidth=2, label="Discharge")
 
-        # Refuel (dark grey solid line with squares)
+        # Refuel (dark grey solid line, no markers)
         refuel_line, = ax.plot(scenario_data['refuel']['temperatures'],
                 scenario_data['refuel']['densities'],
-                '-', color=refuel_color, linewidth=2, label="Refuelling", **refuel_marker_config)
+                '-', color=refuel_color, linewidth=2, label="Refuelling")
 
-        # Dormancy (medium grey solid line with triangles)
+        # Dormancy (medium grey solid line, no markers)
         dormancy_line, = ax.plot(scenario_data['dormancy']['temperatures'],
                 scenario_data['dormancy']['densities'],
-                '-', color=dormancy_color, linewidth=2, label="Dormancy", **dormancy_marker_config)
+                '-', color=dormancy_color, linewidth=2, label="Dormancy")
 
         # Add reference data from literature if requested
         ref_discharge_line = None
@@ -2315,6 +2310,9 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Optional: Add saturation line
         saturation_line = None
+        critical_point = None
+        T_crit = None
+        rho_crit = None
         if include_saturation_line:
             # Get critical point data
             try:
@@ -2373,7 +2371,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         isobar_line = None
         if include_isobars:
             # Define key pressure levels in bar
-            pressure_levels = [8, 15, 25, 100, 400, 450]
+            pressure_levels = [8, 15, 25, 400, 450]
 
             # Create temperature points
             temps = np.linspace(temperature_range[0], temperature_range[1], 100)
@@ -2463,7 +2461,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         if critical_point is not None:
             legend_elements.append(critical_point)
-            legend_labels.append(f'Critical Point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
+            legend_labels.append(f'Critical point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
 
         if isobar_line is not None:
             legend_elements.append(isobar_line)
@@ -2474,7 +2472,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             legend_labels.append('Starting point')
 
         legend = ax.legend(legend_elements, legend_labels,
-                           loc='upper left', title='Legend', fontsize=9, frameon=True, fancybox=True,
+                           loc='center right', title='Legend', fontsize=9, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
 
         # Set labels and limits
@@ -2528,16 +2526,14 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             # Use provided separate IHEX data
             time_hours, ihex_heat_flow = ihex_data
             ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
-            marker_config = self._get_marker_config(0, len(time_hours))
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="IHEX Heat Flow Requirement", linewidth=2)
         elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
             # Use data from simulation results
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
-            marker_config = self._get_marker_config(0, len(time_hours))
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="IHEX Heat Flow Requirement", linewidth=2)
 
         # Plot OHEX heat flow requirement
         ohex_plotted = False
@@ -2546,18 +2542,16 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             # Use provided separate OHEX data
             time_hours_ohex, ohex_heat_flow = ohex_data
             ohex_heat_flow_kw = [q / 1000 for q in ohex_heat_flow]  # Convert W to kW
-            marker_config = self._get_marker_config(1, len(time_hours_ohex))
             ax.plot(time_hours_ohex, ohex_heat_flow_kw, '-', color=ohex_color,
-                    label="OHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="OHEX Heat Flow Requirement", linewidth=2)
             ohex_plotted = True
             ohex_values = ohex_heat_flow_kw
         elif 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
             # Use data from simulation results (only if non-zero values exist)
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
-            marker_config = self._get_marker_config(1, len(time_hours))
             ax.plot(time_hours, ohex_heat_flow_kw, '-', color=ohex_color,
-                    label="OHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="OHEX Heat Flow Requirement", linewidth=2)
             ohex_plotted = True
             ohex_values = ohex_heat_flow_kw
 
@@ -2585,9 +2579,8 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             # Calculate and plot total if we have both datasets
             if ihex_values_kw is not None and ohex_values_kw is not None and len(ihex_values_kw) == len(ohex_values_kw):
                 total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values_kw)]
-                marker_config = self._get_marker_config(2, len(total_time_hours))
                 ax.plot(total_time_hours, total_heat_flow, '--', color=total_color,
-                        label="Total Heat Flow Requirement", linewidth=2, alpha=0.8, **marker_config)
+                        label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
 
         # Add a zero reference line
         ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
@@ -2649,28 +2642,25 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         ohex_color = self.palette[2]        # Medium grey for OHEX
         total_color = self.palette[3]       # Light grey for total
 
-        # Plot IHEX heat flow requirement (Qdot_disch)
+        # Plot IHEX heat flow requirement (Qdot_disch) — no markers
         if ihex_data is not None:
             # Use provided separate IHEX data
             time_hours, ihex_heat_flow = ihex_data
             ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
-            marker_config = self._get_marker_config(0, len(time_hours))
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="IHEX Heat Flow Requirement", linewidth=2)
         elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
             # Use data from simulation results
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
-            marker_config = self._get_marker_config(0, len(time_hours))
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                    label="IHEX Heat Flow Requirement", linewidth=2)
 
-        # Plot reference data if provided
+        # Plot reference data if provided — no markers
         if reference_data is not None:
             ref_time_hours, ref_heat_flow_kw = reference_data
-            marker_config = self._get_marker_config(1, len(ref_time_hours))
             ax.plot(ref_time_hours, ref_heat_flow_kw, '--', color=reference_color,
-                    label="IHEX Heat Flow Requirement (Ref)", linewidth=2, alpha=0.8, **marker_config)
+                    label="IHEX Heat Flow Requirement (Ref)", linewidth=2, alpha=0.8)
 
         # Only plot OHEX and total if not suppressed
         if not suppress_ohex_total:
@@ -2681,9 +2671,8 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                 # Use data from simulation results (only if non-zero values exist)
                 time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
                 ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
-                marker_config = self._get_marker_config(2, len(time_hours))
                 ax.plot(time_hours, ohex_heat_flow_kw, '-', color=ohex_color,
-                        label="OHEX Heat Flow Requirement", linewidth=2, **marker_config)
+                        label="OHEX Heat Flow Requirement", linewidth=2)
                 ohex_plotted = True
                 ohex_values = ohex_heat_flow_kw
 
@@ -2700,12 +2689,11 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                     total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
                     ihex_values_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
 
-                # Calculate and plot total if we have both datasets
+                # Calculate and plot total if we have both datasets — no markers
                 if ihex_values_kw is not None and ohex_values is not None and len(ihex_values_kw) == len(ohex_values):
                     total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values)]
-                    marker_config = self._get_marker_config(3, len(total_time_hours))
                     ax.plot(total_time_hours, total_heat_flow, '--', color=total_color,
-                            label="Total Heat Flow Requirement", linewidth=2, alpha=0.8, **marker_config)
+                            label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
 
         # Add a zero reference line
         ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
