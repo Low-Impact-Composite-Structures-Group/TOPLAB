@@ -28,6 +28,7 @@ from plotting.plot_style_sb import (
     apply_custom_ticks, format_axis_labels, add_legend, DELFT_PALETTE,
     FONT_SIZE, FONT_NAME
 )
+import plotting.plot_style_sb as plot_style
 
 # Multi-tank system data structures
 from src.multi_tank.system.state_management import MultiTankResults
@@ -174,7 +175,7 @@ class DelftColourPlotter:
 
             # Plot 2: Temperature vs Time
             ax2.plot(times_hours, tank_data['temperatures'], color=color, linewidth=2, linestyle=line_style,
-                    label=f'{tank_label} Temperature' if should_overlay else None)
+                    label=f'{tank_label} Temperature' if should_overlay else 'Temperature')
 
             # Plot 3: Density vs Time
             ax3.plot(times_hours, tank_data['densities'], color=color, linewidth=2, linestyle=line_style,
@@ -243,9 +244,9 @@ class DelftColourPlotter:
                 # Add vertical line across all subplots with proper z-order and full extent
                 for ax in [ax1, ax2, ax3]:
                     # Draw line with low z-order to appear behind legend and other elements
-                    ax.axvline(x=event_time, color=event_line_color, linestyle='--', 
+                    ax.axvline(x=event_time, color=event_line_color, linestyle='--',
                              linewidth=1.5, alpha=0.8, zorder=0.5)
-                    
+
                 # Remove gaps between subplots to make lines appear continuous
                 # This is handled by tight subplot spacing
 
@@ -253,10 +254,10 @@ class DelftColourPlotter:
                 # Smart positioning to avoid data interference
                 y_range = ax1.get_ylim()[1] - ax1.get_ylim()[0]
                 y_top = ax1.get_ylim()[1]
-                
+
                 # Position in top 25% of plot, alternating height for multiple events
-                y_pos = y_top - y_range * (0.05 + i * 0.08)  # Start from 5% down, step by 8%
-                
+                y_pos = y_top - y_range * (0.25 + i * 0.08)  # Start from 12% down, step by 8%
+
                 # Use larger offsets and position further from event line to avoid data
                 x_offset = 30 if i % 2 == 0 else -30  # Larger horizontal offset
                 y_offset = 15 if i % 2 == 0 else -15  # Slightly larger vertical offset
@@ -272,7 +273,7 @@ class DelftColourPlotter:
                                    alpha=1.0, linewidth=1.2),  # Opaque background
                            arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0',
                                          color=event_line_color, linewidth=1.2),
-                           fontsize=FONT_SIZE * 0.75,
+                           fontsize=plot_style.LEGEND_FONT_SIZE,
                            fontweight='bold',
                            color=event_line_color,
                            ha=ha)
@@ -281,21 +282,36 @@ class DelftColourPlotter:
         for ax in [ax1, ax2, ax3]:
             # Get all lines with actual labels (not '_nolegend_' or None)
             lines = ax.get_lines()
-            labeled_lines = [line for line in lines 
+            labeled_lines = [line for line in lines
                            if line.get_label() and not line.get_label().startswith('_')]
-            
-            # Show legend if there are any labeled items (reference lines or multiple data series)
-            if len(labeled_lines) > 0:
+
+            # Count data curves vs reference lines
+            data_curves = 0
+            reference_lines_count = 0
+            for line in labeled_lines:
+                label = line.get_label()
+                # Reference lines typically contain specific keywords
+                if any(keyword in label.lower() for keyword in ['minimum', 'maximum', 'venting', 'ambient', 'stopping']):
+                    reference_lines_count += 1
+                else:
+                    data_curves += 1
+
+            # Show legend only if:
+            # 1. Multiple data curves (overlay mode), OR
+            # 2. At least one reference line is present
+            should_show_legend = (data_curves > 1) or (reference_lines_count > 0)
+
+            if should_show_legend:
                 # Try different locations for optimal positioning
                 # For pressure subplot (ax1), try lower locations to avoid interfering with data
                 if ax == ax1:  # Pressure subplot
-                    loc = 'lower right'  # Move legend to bottom right for pressure
-                elif ax == ax2:  # Temperature subplot  
+                    loc = 'best'
+                elif ax == ax2:  # Temperature subplot
                     loc = 'best'  # Let matplotlib choose best position
                 else:  # Density subplot (ax3)
                     loc = 'best'  # Let matplotlib choose best position
-                    
-                legend = ax.legend(fontsize=FONT_SIZE, loc=loc, frameon=True, fancybox=True,
+
+                legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=loc, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
                 # Ensure legend stays within plot boundaries
                 legend.set_bbox_to_anchor(None)
@@ -375,7 +391,7 @@ class DelftColourPlotter:
 
         # Only show legend if multiple tanks are overlaid
         if should_overlay and results.n_tanks > 1:
-            legend = ax.legend(fontsize=FONT_SIZE, frameon=True, fancybox=True,
+            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
                               shadow=True, framealpha=0.9, edgecolor='black')
             legend.get_frame().set_facecolor('white')
             legend.get_frame().set_linewidth(1.2)        # Improve layout
@@ -506,7 +522,7 @@ class DelftColourPlotter:
 
         # Auto-compute temperature range based on actual data if not provided
         if temperature_range is None:
-            temp_min = min(tank_data['temperatures']) - 7
+            temp_min = min(tank_data['temperatures']) - 4
             temp_max = max(tank_data['temperatures']) + 7
             temperature_range = (temp_min, temp_max)
 
@@ -521,7 +537,7 @@ class DelftColourPlotter:
         # Plot tank path (no markers, just lines)
         tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
                             '-', color=primary_color, linewidth=2,
-                            label=f"Tank {tank_index + 1} Path")
+                            label=f"Tank {tank_index + 1} path")
 
         # Add configurable direction arrow
         if len(tank_data['temperatures']) > 10:
@@ -557,15 +573,15 @@ class DelftColourPlotter:
                     density = tank_data['densities'][closest_idx]
 
                     if event_type == 'open':
-                        # Circle marker for valve opening
-                        ax.plot(temp, density, 'o', color=primary_color, markersize=valve_marker_size,
-                               markerfacecolor='none', markeredgewidth=2,
+                        # Circle marker for valve opening - white fill with thin black outline
+                        ax.plot(temp, density, 'o', markerfacecolor='white', markeredgecolor='black',
+                               markersize=valve_marker_size, markeredgewidth=1.0,
                                label='Valve Opening' if not any('Valve Opening' in line.get_label()
                                                                for line in ax.get_lines()) else "")
                     elif event_type == 'close':
-                        # Cross marker for valve closing
-                        ax.plot(temp, density, 'x', color=primary_color, markersize=valve_marker_size * 1.2,
-                               markeredgewidth=3,
+                        # Cross marker for valve closing - white fill with thin black outline
+                        ax.plot(temp, density, 'x', markerfacecolor='white', markeredgecolor='black',
+                               markersize=valve_marker_size * 1.2, markeredgewidth=1.0,
                                label='Valve Closing' if not any('Valve Closing' in line.get_label()
                                                                for line in ax.get_lines()) else "")
 
@@ -612,7 +628,7 @@ class DelftColourPlotter:
 
                 # Mark critical point
                 ax.plot(T_crit, rho_crit, 'o', color=crit_color, markersize=8,
-                       label=f'Critical Point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
+                       label=f'Critical point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
 
             except Exception as e:
                 print(f"   ⚠️  Could not add saturation line: {e}")
@@ -656,12 +672,12 @@ class DelftColourPlotter:
                             color = self.color_palette[1] if self.use_greyscale else DELFT_PALETTE[6]  # Grey/Orange for venting
                             linewidth = 2
                             alpha = 0.8
-                            label = f'{pressure:.0f} bar (Vent)'
+                            label = f'{pressure:.0f} bar (vent)'
                         elif p_min_bar and abs(pressure - p_min_bar) < 0.1:  # Minimum pressure
                             color = self.color_palette[2] if self.use_greyscale else DELFT_PALETTE[5]  # Dark grey/Red for minimum
                             linewidth = 2
                             alpha = 0.8
-                            label = f'{pressure:.0f} bar (Min)'
+                            label = f'{pressure:.0f} bar (min)'
                         else:  # Regular isobar
                             color = self.color_palette[3] if self.use_greyscale else DELFT_PALETTE[2]  # Light grey/Blue for regular
                             linewidth = 1
@@ -690,7 +706,7 @@ class DelftColourPlotter:
                                       arrowprops=dict(arrowstyle='->', color='black', lw=1, alpha=0.8),
                                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
                                                edgecolor='black', alpha=0.95),
-                                      fontsize=9, ha='right', va='center')
+                                      fontsize=plot_style.LEGEND_FONT_SIZE, ha='right', va='center')
 
             except Exception as e:
                 print(f"   ⚠️  Could not add isobars: {e}")
@@ -707,13 +723,14 @@ class DelftColourPlotter:
 
         # Only show legend if there are multiple curves (tank data + reference lines)
         lines = ax.get_lines()
-        labeled_lines = [line for line in lines 
+        labeled_lines = [line for line in lines
                         if line.get_label() and not line.get_label().startswith('_')]
-        
+
         # Show legend only if there are multiple labeled lines (tank data + reference lines)
         if len(labeled_lines) > 1:
-            legend = ax.legend(fontsize=FONT_SIZE, loc='best', frameon=True, fancybox=True,
-                              shadow=True, framealpha=0.9, edgecolor='black', title='Legend')
+            # Use 'upper left' to avoid overlap with isobar callouts on the right side
+            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='center left', frameon=True, fancybox=True,
+                              shadow=True, framealpha=0.9, edgecolor='black')
             # Additional styling for 3D effect
             legend.get_frame().set_facecolor('white')
             legend.get_frame().set_linewidth(1.2)
@@ -809,7 +826,7 @@ class DelftColourPlotter:
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect (same styling as other plots)
-        legend = ax.legend(fontsize=FONT_SIZE, loc='best', frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect to match tank evolution plots
         legend.get_frame().set_facecolor('white')
@@ -862,7 +879,7 @@ class DelftColourPlotter:
             # Create empty plot
             fig, ax = plt.subplots(figsize=(12, 6))
             ax.text(0.5, 0.5, 'No Heat Exchanger Data Available',
-                   transform=ax.transAxes, ha='center', va='center', fontsize=14)
+                   transform=ax.transAxes, ha='center', va='center', fontsize=plot_style.LEGEND_FONT_SIZE)
             ax.set_xlabel('Time [hours]')
             ax.set_ylabel('Heat Flow Requirement [kW]')
             # ax.set_title(f'{self.analysis_name} - Tank {tank_index + 1} Heat Exchanger Requirements')
@@ -910,7 +927,7 @@ class DelftColourPlotter:
                 total_requirements_kw = [req / 1000.0 for req in total_requirements]
                 total_linestyle = '-.' if self.use_greyscale else '--'
                 ax.plot(times_hours, total_requirements_kw, color=total_color, linewidth=2,
-                        linestyle=total_linestyle, alpha=0.8, label='Total Heat Exchanger Requirement')
+                        linestyle=total_linestyle, alpha=0.8, label='Total heat exchanger requirement')
             except Exception as e:
                 print(f"   ⚠️  Could not calculate total requirements: {e}")
 
@@ -924,7 +941,7 @@ class DelftColourPlotter:
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect (same as other plots)
-        legend = ax.legend(fontsize=FONT_SIZE, loc='best', frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect
         legend.get_frame().set_facecolor('white')
@@ -1097,7 +1114,7 @@ class DelftColourPlotter:
                            linestyle='--', alpha=0.7, label=f"P_vent = {reference_lines['P_vent']:.0f} bar")
 
         if reference_lines and ('P_min' in reference_lines or 'P_vent' in reference_lines):
-            ax1.legend(fontsize=FONT_SIZE)
+            ax1.legend(fontsize=plot_style.LEGEND_FONT_SIZE)
 
         # Plot 2: Temperature vs Time
         ax2 = axes[0, 1]
@@ -1115,7 +1132,7 @@ class DelftColourPlotter:
         if reference_lines and 'T_ambient' in reference_lines:
             ax2.axhline(y=reference_lines['T_ambient'], color=reference_color,
                        linestyle='--', alpha=0.7, label=f"T_ambient = {reference_lines['T_ambient']:.0f} K")
-            ax2.legend(fontsize=FONT_SIZE)
+            ax2.legend(fontsize=plot_style.LEGEND_FONT_SIZE)
 
         # Plot 3: Mass vs Time
         ax3 = axes[1, 0]
@@ -1145,13 +1162,13 @@ class DelftColourPlotter:
         if reference_lines and 'rho_stop' in reference_lines:
             ax4.axhline(y=reference_lines['rho_stop'], color=reference_color,
                        linestyle='--', alpha=0.7, label=f"ρ_stop = {reference_lines['rho_stop']:.1f} kg/m³")
-            ax4.legend(fontsize=FONT_SIZE)
+            ax4.legend(fontsize=plot_style.LEGEND_FONT_SIZE)
 
         # Add mission labels at the top of the plot
         for i, mission in enumerate(mission_labels):
             mid_time = (mission['start_time'] + mission['end_time']) / 2
             ax1.text(mid_time, ax1.get_ylim()[1] * 0.95, mission['name'],
-                    ha='center', va='top', fontsize=10, fontweight='bold',
+                    ha='center', va='top', fontsize=plot_style.LEGEND_FONT_SIZE, fontweight='bold',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
         # Improve layout
@@ -1172,7 +1189,7 @@ class DelftColourPlotter:
                                           include_isobars: bool = True,
                                           isobar_pressures: List[float] = None,
                                           reference_pressures: Optional[Dict[str, float]] = None,
-                                          temperature_range: Tuple[float, float] = (15, 80),
+                                          temperature_range: Tuple[float, float] = (15, 85),
                                           density_range: Tuple[float, float] = (0, 85),
                                           save_path: Optional[str] = None) -> plt.Figure:
         """
@@ -1247,7 +1264,7 @@ class DelftColourPlotter:
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect
-        legend = ax.legend(fontsize=FONT_SIZE, frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect
         legend.get_frame().set_facecolor('white')
@@ -1347,7 +1364,7 @@ class DelftColourPlotter:
             mid_time = (mission['start_time'] + mission['end_time']) / 2
             y_pos = ax.get_ylim()[1] * 0.9 if mission['name'] != 'Dormancy' else ax.get_ylim()[1] * 0.1
             ax.text(mid_time, y_pos, mission['name'],
-                   ha='center', va='center', fontsize=10, fontweight='bold',
+                   ha='center', va='center', fontsize=plot_style.LEGEND_FONT_SIZE, fontweight='bold',
                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
         ax.set_xlabel('Time [hours]')
@@ -1356,7 +1373,7 @@ class DelftColourPlotter:
         ax.grid(True, alpha=0.3)
 
         # Add legend with 3D shadow effect
-        legend = ax.legend(fontsize=FONT_SIZE, frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect
         legend.get_frame().set_facecolor('white')

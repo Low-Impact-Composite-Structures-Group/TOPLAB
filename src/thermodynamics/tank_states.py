@@ -743,9 +743,16 @@ class IsochoricTankState:
         if self.pressure is None:
             from CoolProp.CoolProp import PropsSI
             try:
+                # Check for valid temperature range
+                if self.temperature <= 0:
+                    print(f"⚠️ Invalid temperature {self.temperature:.2f} K detected - using fallback pressure")
+                    self.pressure = 1e5  # Default to 1 bar
+                    return
+
                 self.pressure = PropsSI("P", "T", self.temperature, "Dmass", self.density, "hydrogen")
             except Exception as e:
                 # Fallback for extreme conditions
+                print(f"⚠️ CoolProp error for T={self.temperature:.2f}K, ρ={self.density:.2f}kg/m³: {e}")
                 self.pressure = 1e5  # Default to 1 bar
 
     def _needs_hydrogen_update(self) -> bool:

@@ -196,6 +196,8 @@ class MultiTankSystem:
 
     def _get_tank_properties(self, tank: SphericalTank, tank_id: str = "Unknown"):
         """Calculate tank properties from SphericalTank geometry"""
+        print(f"   🔧 _get_tank_properties called for {tank_id} - VERSION WITH NETTING ANALYSIS")
+
         if tank is None:
             print(f"   ⚠️  No {tank_id} tank provided, using minimal defaults")
             return {
@@ -219,20 +221,131 @@ class MultiTankSystem:
         outer_surface_area = 4 * math.pi * radius**2
         inner_diameter = 2 * inner_radius
 
-        # Material masses (simplified calculation)
-        liner_material = tank.material  # Aluminum 6061-T6
-        liner_thickness = 0.005  # 5mm
+        # Material masses using proper netting analysis and NIST materials from config
+        from src.tank_design.structural_models import CompositeCylinder
+        import math
 
-        # Liner mass: ρ × V_shell = ρ × 4π × r_avg × thickness × r_outer
-        liner_avg_radius = radius - liner_thickness/2
-        liner_volume = 4 * math.pi * liner_avg_radius**2 * liner_thickness
-        liner_mass = liner_material.density * liner_volume
+        print(f"   🔧 Starting material and netting analysis for {tank_id}")
 
-        # Wall mass (G10 composite, simplified)
-        wall_thickness = 0.05  # 50mm insulation/structural
-        wall_avg_radius = radius + wall_thickness/2
-        wall_volume = 4 * math.pi * wall_avg_radius**2 * wall_thickness
-        wall_mass = 1800.0 * wall_volume  # G10 density kg/m³
+        # Get materials and properties from configuration
+        try:
+            # Extract materials from config if available (for SystemOrchestrator-driven analyses)
+            if hasattr(self.config, 'materials') and self.config.materials:
+                liner_material = self.config.materials.get('liner')
+                composite_material = self.config.materials.get('composite')
+
+                # Get thickness from material config
+                liner_thickness = getattr(liner_material, 'thickness', 0.005) if liner_material else 0.005
+                winding_angle = getattr(composite_material, 'winding_angle', math.radians(54.7)) if composite_material else math.radians(54.7)
+
+                # Get design pressures from config
+                design_pressure = getattr(self.config, 'design_pressure', 450e5)  # Default 450 bar
+                safety_factor = getattr(self.config, 'safety_factor', 1.25)  # Default SF = 1.25
+
+            else:
+                # Fallback: create NIST materials directly
+                from src.materials.nist_materials import NISTMetal, NISTComposite
+                liner_material = NISTMetal.aluminum_6061T6_nist()
+                composite_material = NISTComposite.g10_nist(math.radians(54.7))
+                liner_thickness = 0.005  # 5mm default
+                winding_angle = math.radians(54.7)
+                design_pressure = 450e5  # 450 bar default
+                safety_factor = 1.25
+
+        except Exception as e:
+            # Emergency fallback with basic materials
+            from src.materials.nist_materials import NISTMetal, NISTComposite
+            print(f"   ⚠️ Config material access failed ({e}), using NIST defaults")
+            print(f"   ⚠️ Exception type: {type(e)}")
+            print(f"   ⚠️ Config type: {type(self.config) if hasattr(self, 'config') else 'No config attribute'}")
+            if hasattr(self, 'config'):
+                print(f"   ⚠️ Config has materials: {hasattr(self.config, 'materials')}")
+                if hasattr(self.config, 'materials'):
+                    print(f"   ⚠️ Materials type: {type(self.config.materials)}")
+                    print(f"   ⚠️ Materials content: {self.config.materials}")
+            liner_material = NISTMetal.aluminum_6061T6_nist()
+            composite_material = NISTComposite.g10_nist(math.radians(54.7))
+            liner_thickness = 0.005
+            winding_angle = math.radians(54.7)
+            design_pressure = 450e5
+            safety_factor = 1.25
+
+        # Calculate composite wall thickness using netting analysis
+        # Tank section interface for structural model
+        class TankSectionInterface:
+            def __init__(self, radius, material):
+                self.radius = radius
+                self.material = material
+
+        # Proper geometry: Cylindrical tank with spherical endcaps
+        # L/R = 3.0 means cylindrical section length = 3R (endcaps add 2R to total length)
+        from src.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
+
+        tank_section = TankSectionInterface(radius, composite_material)
+        cylinder_model = CompositeCylinder()
+        endcap_model = CompositeSphericalEndCap()
+
+        # Calculate working pressure for thickness design
+        working_pressure = design_pressure / safety_factor
+
+        # Calculate composite thickness for both sections
+        cylinder_thickness = cylinder_model.compute_thickness(tank_section, working_pressure)
+        endcap_thickness = endcap_model.compute_thickness(tank_section, working_pressure)
+
+        # Use the governing (thicker) section for design - typically the cylinder
+        wall_thickness = max(cylinder_thickness, endcap_thickness)
+
+        # Debug output for thickness calculation validation
+        print(f"   🔧 Netting Analysis Debug for {tank_id}:")
+        print(f"      Geometry: Cylindrical (L/R=3.0) + Spherical endcaps")
+        print(f"      Radius: {radius:.3f} m")
+        print(f"      Cylindrical section length: {3*radius:.3f} m (3R)")
+        print(f"      Total tank length: {5*radius:.3f} m (3R + 2R endcaps)")
+        print(f"      Design pressure: {design_pressure/1e5:.0f} bar")
+        print(f"      Safety factor: {safety_factor:.2f}")
+        print(f"      Working pressure: {working_pressure/1e5:.0f} bar")
+        print(f"      Material failure stress: {composite_material.failure_stress/1e6:.0f} MPa")
+        print(f"      Winding angle: {math.degrees(composite_material.winding_angle):.1f}° ({composite_material.winding_angle:.4f} rad)")
+        print(f"      cos²(θ): {math.cos(composite_material.winding_angle)**2:.4f}")
+        print(f"      Cylinder thickness: {cylinder_thickness*1000:.2f} mm")
+        print(f"      Endcap thickness: {endcap_thickness*1000:.2f} mm")
+        print(f"      Governing thickness: {wall_thickness*1000:.2f} mm")
+        print(f"      Liner material density: {liner_material.density:.0f} kg/m³")
+        print(f"      Composite material density: {composite_material.density:.0f} kg/m³")
+
+        # Mass calculations for cylindrical tank with spherical endcaps
+        # Geometry: cylinder (length = 3R) + 2 spherical endcaps (radius = R)
+        cylinder_length = 3 * radius  # L/R = 3.0, so L = 3R
+
+        # Liner mass (aluminum, inner surface)
+        liner_inner_radius = radius - liner_thickness
+        # Cylindrical section liner volume
+        liner_cyl_volume = math.pi * ((radius**2) - (liner_inner_radius**2)) * cylinder_length
+        # Spherical endcaps liner volume (2 caps)
+        liner_sphere_volume = 2 * (4/3) * math.pi * (radius**3 - liner_inner_radius**3)
+        liner_total_volume = liner_cyl_volume + liner_sphere_volume
+        liner_mass = liner_material.density * liner_total_volume
+
+        # Wall mass (composite, outer surface)
+        wall_outer_radius = radius + wall_thickness
+        # Cylindrical section wall volume
+        wall_cyl_volume = math.pi * ((wall_outer_radius**2) - (radius**2)) * cylinder_length
+        # Spherical endcaps wall volume (2 caps)
+        wall_sphere_volume = 2 * (4/3) * math.pi * (wall_outer_radius**3 - radius**3)
+        wall_total_volume = wall_cyl_volume + wall_sphere_volume
+        wall_mass = composite_material.density * wall_total_volume
+
+        print(f"      Mass Calculation Details:")
+        print(f"        Liner volume: {liner_total_volume*1000:.1f} L")
+        print(f"        Wall volume: {wall_total_volume*1000:.1f} L")
+        print(f"        Liner mass: {liner_mass:.1f} kg")
+        print(f"        Wall mass: {wall_mass:.1f} kg")
+
+        # Add cylinder section length and total length to properties for reporting
+        cylindrical_section_length = 3 * radius  # L/R = 3.0
+        total_tank_length = 5 * radius  # 3R + 2R (cylinder + endcaps)
+
+        print(f"   🔧 Adding calculated thickness {wall_thickness*1000:.2f} mm to properties dictionary")
 
         properties = {
             'volume': volume,
@@ -242,7 +355,13 @@ class MultiTankSystem:
             'liner_mass': liner_mass,
             'wall_mass': wall_mass,
             'radius': radius,
-            'inner_radius': inner_radius
+            'inner_radius': inner_radius,
+            'wall_thickness': wall_thickness,  # Add the calculated thickness
+            'cylinder_thickness': cylinder_thickness,  # Individual section thicknesses
+            'endcap_thickness': endcap_thickness,
+            'composite_density': composite_material.density,  # Add actual density used
+            'cylindrical_section_length': cylindrical_section_length,  # Length of cylinder only
+            'total_tank_length': total_tank_length  # Total length including endcaps
         }
 
         print(f"   🔧 {tank_id} properties calculated:")
@@ -393,6 +512,10 @@ class MultiTankSystem:
             if self.enable_coupling and self.coupling_rules:
                 try:
                     for rule in self.coupling_rules:
+                        # Debug output for early timesteps
+                        if t < 10:
+                            print(f"DEBUG MULTI-TANK: t={t:.1f}s - Evaluating coupling rule: {type(rule).__name__}")
+
                         # Evaluate if coupling should be active
                         if rule.evaluate(t, tank_states):
                             # Calculate flow rate

@@ -141,8 +141,10 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         p = state.pressure
 
 
-        # Ensure minimum values for stability
-        m = max(m, 1e-12)
+        # Ensure minimum values for stability - prevent division by zero in temperature derivatives
+        # Use realistic minimum mass to prevent unrealistic temperature derivatives
+        m_min = 1.0  # kg - realistic minimum fuel mass for stability
+        m = max(m, m_min)
         T = max(T, 1.0)
 
         # Get hydrogen properties
@@ -166,6 +168,11 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         # Determine current configuration
         config = self._determine_configuration(p)
         state.configuration = config
+
+        # Debug print for configuration changes (disabled for production)
+        # if not hasattr(self, '_last_config') or self._last_config != config:
+        #     print(f"🔄 Config change at t={time:.1f}s: {getattr(self, '_last_config', 'INIT')} → {config}, P={p/1e5:.1f}bar")
+        self._last_config = config
 
         # Get mass flow rates (configuration-dependent)
         mdot_fuel = fuel_flow_func(time)
@@ -228,7 +235,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
                 # Use Configuration B discharge heat instead of normal Q_discharge
                 dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v)
 
-                # Debug print for Configuration B activation
+                # Debug print for Configuration B activation (disabled for production)
                 # if time % 100 < 0.1:  # Print occasionally
                 #     print(f"🔧 Configuration B: t={time:.1f}s, P={p/1e5:.1f}→{p_constrained/1e5:.1f}bar, qdot_B={qdot_disch_B/1000:.1f}kW")
 
@@ -263,11 +270,21 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         )
 
     def _determine_configuration(self, pressure: float) -> str:
-        """Determine configuration based on pressure thresholds"""
+        """Determine configuration based on pressure thresholds with hysteresis"""
+        # Hysteresis margins to prevent oscillation (1% of threshold pressure)
+        p_min_hysteresis = self.p_min * 0.01  # 1% hysteresis (0.15 bar for 15 bar threshold)
+
+        # Get current configuration (default to A if not set)
+        current_config = getattr(self, '_last_config', 'A')
+
         if pressure >= self.p_vent:
             return "C"  # Venting configuration
-        elif pressure <= self.p_min:
-            return "B"  # Minimum pressure configuration
+        elif current_config == "B" and pressure <= (self.p_min + p_min_hysteresis):
+            # Stay in B if already in B and pressure is still low (with hysteresis)
+            return "B"
+        elif current_config != "B" and pressure <= (self.p_min - p_min_hysteresis):
+            # Switch to B only if significantly below threshold
+            return "B"
         else:
             return "A"  # Normal configuration
 

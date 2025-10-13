@@ -18,6 +18,7 @@ CM_TO_INCH = 0.393701
 # Global font settings
 FONT_SIZE = 16
 FONT_NAME = "Cambria"
+LEGEND_FONT_SIZE = 14
 
 DONKERBLAUW = "#0C2340"  # Dark Blue
 TURKOOIS = "#00B8C8"  # Turquoise
@@ -36,6 +37,28 @@ DONKERGRIJS = "#4B4B4D"  # Dark Gray
 
 # Delft University color palette
 DELFT_PALETTE = [DONKERBLAUW, TURKOOIS, KONINGSBLAUW, PAARS, ROZE, BORDEAUX, ROOD, ORANJE, GEEL, BOSGROEN, DONKERGRIJS]
+
+# Palette mapping for different styles
+PALETTE_MAP = {
+    "delft": DELFT_PALETTE,
+    "Set2": "Set2",
+    "viridis": "viridis",
+    "plasma": "plasma"
+}
+
+# Legend positioning options
+LEGEND_BBOX_TO_ANCHOR = {
+    "upper_right": (1.0, 1.0),
+    "upper_left": (0.0, 1.0),
+    "lower_right": (1.0, 0.0),
+    "lower_left": (0.0, 0.0),
+    "center": (0.5, 0.5),
+    "outside_right": (1.02, 1.0)
+}
+
+# Global variables for current settings
+CURRENT_PALETTE = DELFT_PALETTE
+LEGEND_BBOX_TO_ANCHOR_DEFAULT = (1.02, 1.0)
 
 import os
 import matplotlib.font_manager as fm
@@ -141,44 +164,91 @@ def set_seaborn_style(font: str = "Cambria", palette: str = "delft",
     # print(f"Seaborn style set with font: {actual_font}, palette: {palette}, style: {style}, context: {context}")
 
 
-def configure_plot_style(font: str = "Cambria",
-                        palette: str = "delft",
-                        style: str = "whitegrid",
-                        context: str = "paper",
-                        figure_size: tuple = (8, 6),
-                        dpi: int = 100,
-                        grid: bool = True):
-    """Configure comprehensive styling for all plots.
-
-    Args:
-        font: Font family
-        palette: Color palette name or list of colors
-        style: Seaborn style ("whitegrid", "darkgrid", "white", "dark", "ticks")
-        context: Scaling parameters ("paper", "notebook", "talk", "poster")
-        figure_size: Default figure size (width, height) in inches
-        dpi: Figure resolution
-        grid: Whether to show grid lines
+def update_font_settings(master_size=None, legend_size=None, font_name=None):
     """
-    # Set the base style
-    set_seaborn_style(font, palette, style, context)
+    Update global font settings dynamically.
 
-    # Additional configurations
-    plt.rcParams["figure.figsize"] = figure_size
-    plt.rcParams["figure.dpi"] = dpi
-    plt.rcParams["axes.grid"] = grid
+    Parameters:
+    -----------
+    master_size : int, optional
+        Master font size for all text elements
+    legend_size : int, optional
+        Font size specifically for legends and isobar callouts
+    font_name : str, optional
+        Font family name
+    """
+    global FONT_SIZE, LEGEND_FONT_SIZE, FONT_NAME
 
-    # Improve readability using global font size
-    plt.rcParams["axes.labelpad"] = 10
-    plt.rcParams["figure.titlesize"] = FONT_SIZE + 2
-    plt.rcParams["axes.titlesize"] = FONT_SIZE
-    plt.rcParams["axes.labelsize"] = FONT_SIZE - 1
-    plt.rcParams["xtick.labelsize"] = FONT_SIZE - 2
-    plt.rcParams["ytick.labelsize"] = FONT_SIZE - 2
-    plt.rcParams["legend.fontsize"] = FONT_SIZE - 2
+    if master_size is not None:
+        FONT_SIZE = master_size
+        plt.rcParams['font.size'] = FONT_SIZE
+        print(f"   🔧 Updated FONT_SIZE to {FONT_SIZE}")
+    if legend_size is not None:
+        LEGEND_FONT_SIZE = legend_size
+        plt.rcParams['legend.fontsize'] = LEGEND_FONT_SIZE
+        print(f"   🔧 Updated LEGEND_FONT_SIZE to {LEGEND_FONT_SIZE}")
+    if font_name is not None:
+        FONT_NAME = font_name
+        plt.rcParams['font.family'] = FONT_NAME
+        print(f"   🔧 Updated FONT_NAME to '{FONT_NAME}'")
 
-    # print(f"Plot style configured with figure size: {figure_size}, dpi: {dpi}")
+def configure_plot_style(font="Cambria", palette="delft", bbox_to_anchor_key=None, legend_position=None,
+                        style="white", context="paper", figure_size=None, dpi=None, **kwargs):
+    """
+    Configure the global plot style settings.
 
+    Parameters:
+    -----------
+    font : str, optional
+        Font family to use for all text (default: "Cambria")
+    palette : str, optional
+        Color palette to use (default: "delft")
+    bbox_to_anchor_key : str, optional
+        Key to look up legend position from LEGEND_BBOX_TO_ANCHOR
+    legend_position : tuple, optional
+        Direct specification of legend position as (x, y)
+    style : str, optional
+        Seaborn style (ignored for backward compatibility)
+    context : str, optional
+        Seaborn context (ignored for backward compatibility)
+    figure_size : tuple, optional
+        Figure size (ignored for backward compatibility)
+    dpi : int, optional
+        DPI setting (ignored for backward compatibility)
+    **kwargs : dict
+        Additional parameters (ignored for backward compatibility)
+    """
+    global CURRENT_PALETTE, LEGEND_BBOX_TO_ANCHOR_DEFAULT
 
+    # Use the current global font name if font parameter is default
+    if font == "Cambria":
+        font = FONT_NAME
+
+    # Set global font configuration using the current global font sizes
+    plt.rcParams['font.family'] = font
+    plt.rcParams['font.size'] = FONT_SIZE
+    plt.rcParams['legend.fontsize'] = LEGEND_FONT_SIZE
+
+    # Configure seaborn style
+    sns.set_theme(style="white", palette=PALETTE_MAP.get(palette, "Set2"), rc={
+        'font.family': font,
+        'font.size': FONT_SIZE,
+        'axes.titlesize': FONT_SIZE,
+        'axes.labelsize': FONT_SIZE,
+        'xtick.labelsize': FONT_SIZE,
+        'ytick.labelsize': FONT_SIZE,
+        'legend.fontsize': LEGEND_FONT_SIZE,
+        'figure.titlesize': FONT_SIZE
+    })
+
+    # Store current palette for reference
+    CURRENT_PALETTE = PALETTE_MAP.get(palette, "Set2")
+
+    # Set legend position if specified
+    if bbox_to_anchor_key and bbox_to_anchor_key in LEGEND_BBOX_TO_ANCHOR:
+        LEGEND_BBOX_TO_ANCHOR_DEFAULT = LEGEND_BBOX_TO_ANCHOR[bbox_to_anchor_key]
+    elif legend_position:
+        LEGEND_BBOX_TO_ANCHOR_DEFAULT = legend_position
 def get_palette_colors(n_colors: int = 10, palette: str = None):
     """Get a list of colors from the specified palette or current palette.
 

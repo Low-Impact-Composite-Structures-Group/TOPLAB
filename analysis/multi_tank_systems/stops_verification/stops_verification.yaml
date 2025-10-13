@@ -149,6 +149,11 @@ output:
     style:
       use_greyscale: true               # Set to true for greyscale plots with markers
       enable_multi_tank_overlay: false  # Single tank system - no overlay needed
+      # Font configuration
+      font:
+        master_size: 16                # Master font size for axis labels, titles, etc.
+        legend_size: 10                # Font size for legends and isobar callouts
+        font_name: "Cambria"           # Font family name
 
     tank_states:
       enabled: true

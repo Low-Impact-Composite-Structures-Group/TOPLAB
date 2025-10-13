@@ -421,7 +421,16 @@ class FlowControlledPressurizationRule(CouplingRule):
         ch2_flow_rate = min(ch2_flow_rate, self.max_pressurization_rate)
 
         # Ensure CH2 tank has sufficient mass and pressure
+        ch2_pressure_bar = ch2_state.pressure / 1e5
         if ch2_state.fuel_mass < 0.1 or ch2_state.pressure < (self.min_source_pressure_bar * 1e5):
+            # Debug output for pressure constraint
+            if time > 0 and (time % 300 < 5 or ch2_pressure_bar < (self.min_source_pressure_bar + 5)):  # Every 5 min or near limit
+                if ch2_state.fuel_mass < 0.1:
+                    print(f"  CH2 Constraint t={time/3600:.2f}h: Low mass ({ch2_state.fuel_mass:.1f}kg < 0.1kg)")
+                if ch2_pressure_bar < self.min_source_pressure_bar:
+                    print(f"  CH2 Constraint t={time/3600:.2f}h: Low pressure ({ch2_pressure_bar:.1f}bar < {self.min_source_pressure_bar:.1f}bar) - FLOW DISABLED")
+                elif ch2_pressure_bar < (self.min_source_pressure_bar + 5):
+                    print(f"  CH2 Constraint t={time/3600:.2f}h: Approaching limit ({ch2_pressure_bar:.1f}bar, limit={self.min_source_pressure_bar:.1f}bar)")
             ch2_flow_rate = 0.0
 
         # Create flow rate dictionary
@@ -728,13 +737,12 @@ class MissionAdaptivePressurizationRule(CouplingRule):
             return False
 
         # Must have adequate pressure difference
-        pressure_difference = source_pressure_bar - (target_state.pressure / 1e5)
+        target_pressure_bar = target_state.pressure / 1e5
+        pressure_difference = source_pressure_bar - target_pressure_bar
         if pressure_difference < self.min_pressure_difference_bar:
             return False
 
         # Check LH2 pressure against dynamic activation threshold
-        target_pressure_bar = target_state.pressure / 1e5
-
         # Use hysteresis: different thresholds for activation vs deactivation
         if not self.state.is_active:
             # Activation condition: LH2 pressure below activation threshold

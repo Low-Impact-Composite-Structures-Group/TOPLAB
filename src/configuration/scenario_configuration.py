@@ -81,7 +81,8 @@ class ScenarioConfig:
         self.version = config_dict.get('version', '1.0')
 
         self.mission_sequence = MissionSequenceConfig.from_dict(config_dict)
-        self.materials = self._parse_materials()
+        self.materials = self._parse_materials()  # Global materials (backward compatibility)
+        self.tank_materials = self._parse_tank_materials()  # Per-tank materials
         self.tank_geometries = self._parse_tank_geometries()
 
     @classmethod
@@ -100,6 +101,7 @@ class ScenarioConfig:
         return scenario
 
     def _parse_materials(self) -> Dict[str, NISTMaterial]:
+        """Parse global materials for backward compatibility"""
         materials = {}
         materials_data = self.config_dict.get('materials', {})
 
@@ -115,6 +117,28 @@ class ScenarioConfig:
                     print(f"Warning: Could not load NIST material {nist_path}: {e}")
 
         return materials
+
+    def _parse_tank_materials(self) -> Dict[int, Dict[str, NISTMaterial]]:
+        """Parse per-tank materials configuration"""
+        tank_materials = {}
+        tank_materials_data = self.config_dict.get('tank_materials', {})
+
+        for tank_id, tank_material_data in tank_materials_data.items():
+            tank_id_int = int(tank_id)
+            tank_materials[tank_id_int] = {}
+
+            for material_name, material_data in tank_material_data.items():
+                if material_name == 'safety_margin':
+                    continue
+
+                nist_path = material_data.get('nist_path')
+                if nist_path:
+                    try:
+                        tank_materials[tank_id_int][material_name] = get_material_by_nist_path(nist_path)
+                    except ValueError as e:
+                        print(f"Warning: Could not load NIST material {nist_path} for tank {tank_id}: {e}")
+
+        return tank_materials
 
     def _parse_tank_geometries(self) -> Dict[int, Dict[str, Any]]:
         geometries = {}
@@ -136,6 +160,27 @@ class ScenarioConfig:
 
     def get_mission_count(self) -> int:
         return len(self.mission_sequence.missions)
+
+    def get_tank_materials(self, tank_id: int) -> Dict[str, NISTMaterial]:
+        """Get materials for specific tank - per-tank materials are mandatory"""
+        if tank_id in self.tank_materials:
+            return self.tank_materials[tank_id]
+        else:
+            raise RuntimeError(f"No materials configuration found for tank {tank_id}. "
+                             f"Per-tank materials must be specified in 'tank_materials' section.")
+
+    def get_tank_material_config(self, tank_id: int) -> Dict[str, Any]:
+        """Get raw material configuration for specific tank - per-tank materials are mandatory"""
+        tank_materials_data = self.config_dict.get('tank_materials', {})
+
+        # Try both string and int keys
+        for key in [str(tank_id), tank_id]:
+            if key in tank_materials_data:
+                return tank_materials_data[key]
+
+        # No fallback - per-tank materials are mandatory
+        raise RuntimeError(f"No material configuration found for tank {tank_id}. "
+                         f"Each tank must have materials specified in 'tank_materials' section.")
 
     def summary(self) -> str:
         lines = []

@@ -25,7 +25,7 @@ geometry:
 materials:
   liner:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-    thickness: 0.005                     # m (5mm aluminum liner)
+    thickness: 0.001                     # m (5mm aluminum liner)
   composite:
     nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
@@ -57,7 +57,7 @@ solver:
   method: "LSODA"                        # Primary integration method
   rtol: 1e-6                            # Relative tolerance
   atol: 1e-9                            # Absolute tolerance
-  time_step: 1.0                        # Base time step [s]
+  time_step: 0.1                        # Base time step [s]
   max_step: 10.0                        # Maximum step size [s]
   custom_config: false                   # true if custom solver precision needed (handled in driver)
 
@@ -78,12 +78,17 @@ output:
     # Plotting style configuration
     style:
       use_greyscale: true           # Enable greyscale plotting mode
+      # Font configuration
+      font:
+        master_size: 16                # Master font size for axis labels, titles, etc.
+        legend_size: 8                # Font size for legends and isobar callouts
+        font_name: "Cambria"           # Font family name
 
     # Reference lines configuration
     reference_lines:
       pressure:
-        show_p_min: false           # Show minimum allowable pressure line
-        show_p_vent: false          # Show maximum allowable / venting pressure line
+        show_p_min: true           # Show minimum allowable pressure line
+        show_p_vent: true          # Show maximum allowable / venting pressure line
       temperature:
         show_t_ambient: false       # Show ambient temperature line
       density:
@@ -94,8 +99,8 @@ output:
       figsize: [12, 10]
       filename: "tank_states"
       event_lines:
-        - time: 0.2               # Time in hours (adjusted for single tank)
-          label: "Test event marker"
+        - time: 0.185               # Time in hours (adjusted for single tank)
+          label: "IHEX activation"
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]

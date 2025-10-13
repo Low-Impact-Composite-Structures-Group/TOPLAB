@@ -49,6 +49,34 @@ materials:
     heat_transfer_coefficient: 0.025     # W/m²K (vacuum insulation)
   safety_margin: 1.25                    # Structural design safety factor
 
+# Per-tank material specifications (overrides global materials when present)
+tank_materials:
+  1:  # Tank 1 (CH2) - High pressure room temperature tank
+    liner:
+      nist_path: "aluminum_6061T6_nist"
+      thickness: 0.001                   # m (1mm aluminum liner)
+    composite:
+      nist_path: "carbon_epoxy_nist"
+      winding_angle: 54.7                # degrees (optimal winding angle)
+    insulation:
+      nist_path: "g10_nist"
+      thickness: 0.050                   # m (50mm insulation layer)
+      heat_transfer_coefficient: 0.01    # W/m²K (excellent vacuum insulation)
+    safety_margin: 1.25                  # Structural design safety factor
+
+  2:  # Tank 2 (CCH2) - Cryocompressed tank
+    liner:
+      nist_path: "aluminum_6061T6_nist"
+      thickness: 0.001                   # m (1mm aluminum liner)
+    composite:
+      nist_path: "carbon_epoxy_nist"
+      winding_angle: 54.7                # degrees (optimal winding angle)
+    insulation:
+      nist_path: "g10_nist"
+      thickness: 0.050                   # m (50mm insulation layer)
+      heat_transfer_coefficient: 0.01    # W/m²K (excellent vacuum insulation)
+    safety_margin: 1.25                  # Structural design safety factor
+
 # Mission profile configuration
 mission:
   type: "discharge"                      # Mission type: discharge
@@ -61,6 +89,68 @@ stopping_criteria:
   minimum_density: 5.8                  # kg/m³ (CCH2 minimum density requirement)
   use_density_stopping_events: true     # Use density-based stopping events
   use_duration_stopping: true           # Stop when mission duration is reached
+
+# Flow physics configuration - all flow calculation parameters
+flow_physics:
+  # Fluid properties calculation method
+  fluid_properties:
+    use_coolprop: true                   # Use CoolProp for temperature/pressure-dependent properties
+    coolprop_fluid: "H2"                 # CoolProp fluid identifier
+
+    # Backup/override values (only used if CoolProp fails or use_coolprop=false)
+    backup_properties:
+      specific_gas_constant: 4124.0     # J/(kg·K) - R_specific for H2
+      heat_capacity_ratio: 1.4          # γ (gamma) - dimensionless
+      kinematic_viscosity: 1.55e-6      # m²/s - at standard conditions
+      speed_of_sound: 1354.0            # m/s - at standard conditions
+
+  # Orifice/valve flow characteristics
+  orifice_flow:
+    discharge_coefficient: 0.6           # Cd - sharp-edged orifice (dimensionless)
+    flow_coefficient_units: "dimensionless"  # Cd is dimensionless, orifice area handled separately
+
+    # Alternative: if using flow coefficient instead of discharge coefficient + area
+    # flow_coefficient: 0.0001           # Cv in m² (effective flow area = Cd * A)
+    # use_flow_coefficient: false        # Set true to use Cv instead of Cd * A
+
+  # Choked flow parameters
+  choked_flow:
+    enable_choked_flow: true             # Enable choked flow calculations
+    critical_pressure_ratio_override: null  # null = calculate from γ, or provide value
+    sonic_velocity_factor: 1.0           # Multiplier for CoolProp sonic velocity
+    choked_flow_pressure_factor: 2.0     # Pressure increase factor for choked conditions
+
+  # Pipe flow parameters (for discharge piping calculations)
+  pipe_flow:
+    atmospheric_pressure: 101325.0       # Pa - standard atmospheric pressure
+
+    # Flow regime parameters
+    reynolds_transition: 2300.0          # Laminar to turbulent transition
+
+    # Friction factor correlations
+    friction_correlations:
+      laminar_factor: 64.0              # f = 64/Re for laminar flow
+      turbulent_correlation: "blasius"   # "blasius", "colebrook", or "explicit"
+      turbulent_factor: 0.316           # Blasius: f = 0.316/Re^0.25
+      turbulent_exponent: 0.25          # Blasius exponent
+
+    # Pipe roughness (if not specified in coupling rule)
+    default_roughness: 1.5e-6           # m - drawn tubing roughness
+
+    # Choked flow detection for pipes
+    velocity_choked_fraction: 0.5        # Fraction of sonic velocity for choked flow
+
+  # Safety and limiting parameters
+  safety_limits:
+    max_mass_transfer_fraction: 0.1      # Maximum fraction of tank mass per timestep
+    minimum_pressure_pa: 1000.0          # Pa - minimum absolute pressure for flow
+    maximum_velocity_ms: 2000.0          # m/s - maximum allowable flow velocity
+
+  # Numerical parameters
+  numerical:
+    pressure_tolerance_pa: 100.0         # Pa - pressure tolerance for flow calculations
+    flow_rate_tolerance_kg_s: 1e-8      # kg/s - minimum flow rate threshold
+    property_update_frequency: 1         # Update fluid properties every N timesteps (1=every step)
 
 # Coupling rules for inter-tank pressure compensation
 coupling_rules:
@@ -77,9 +167,10 @@ coupling_rules:
       flow_resistance: 100.0             # Flow resistance parameter
       bidirectional: false               # Only source → target flow
       max_flow_rate_kg_s: 0.10          # kg/s
+      orifice_diameter_m: 0.002          # m - physical orifice diameter
     hysteresis:
-      activation_threshold_bar: 16.0    # Open valve when Tank 2 pressure ≤ 20 bar (activation condition)
-      deactivation_threshold_bar: 20.0  # Close valve when Tank 2 pressure ≥ 23 bar (deactivation condition)
+      activation_threshold_bar: 16.0    # Open valve when Tank 2 pressure ≤ 15 bar (activation condition)
+      deactivation_threshold_bar: 30.0  # Close valve when Tank 2 pressure ≥ 25 bar (deactivation condition - wider band)
 
 # Solver configuration - optimized for coupling dynamics
 solver:
@@ -106,14 +197,19 @@ output:
   plots:
     # Plotting style options
     style:
-      use_greyscale: true              # Set to true for greyscale plots with markers
+      use_greyscale: true              # Set to true for greyscale plots
       enable_multi_tank_overlay: false   # Overlay multiple tanks on same evolution plot
+      # Font configuration
+      font:
+        master_size: 16                # Master font size for axis labels, titles, etc.
+        legend_size: 8                # Font size for legends and isobar callouts
+        font_name: "Cambria"           # Font family name
 
     # Reference lines configuration
     reference_lines:
       pressure:
         show_p_min: true           # Show minimum allowable pressure line
-        show_p_vent: true          # Show maximum allowable / venting pressure line
+        show_p_vent: false          # Show maximum allowable / venting pressure line
       temperature:
         show_t_ambient: false       # Show ambient temperature line
       density:
@@ -125,10 +221,8 @@ output:
       figsize: [12, 10]
       filename: "tank_states"
       event_lines:
-        - time: 0.17              # Time in hours
+        - time: 0.195              # Time in hours
           label: "First valve opening event"
-        - time: 1.0               # Time in hours
-          label: "1 hour mark"
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
@@ -137,13 +231,13 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [450, 400, 200, 100, 50, 15, 5]  # Custom isobars to show [bar]
+      isobar_pressures: [450, 400, 15, 5]  # Custom isobars to show [bar]
       show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
-      arrow_position: 0.25            # Position along path for direction arrow (0.0-1.0)
-      arrow_size: 1.0                 # Size multiplier for the direction arrow
-      valve_marker_size: 8.0          # Size of valve opening/closing markers
+      arrow_position: 0.05            # Position along path for direction arrow (0.0-1.0)
+      arrow_size: 1.0                # Size multiplier for the direction arrow
+      valve_marker_size: 4.0          # Size of valve opening/closing markers
     mass_flows:
       enabled: true
       figsize: [12, 6]

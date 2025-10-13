@@ -24,7 +24,8 @@ from src.thermodynamics.tank_states import IsochoricTankState
 from src.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 
 from .state_management import MultiTankState, MultiTankResults
-from ..coupling.inter_tank_coupling import PressureTriggeredValve
+from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
+from src.fluids.flow_physics import FlowPhysics
 
 
 @dataclass
@@ -68,7 +69,8 @@ class TankSystem:
     def __init__(self,
                  tank_geometries: List[SphericalTank],
                  config: TankSystemConfig,
-                 coupling_rules: List[Dict] = None):
+                 coupling_rules: List[Dict] = None,
+                 scenario_config=None):
         """
         Initialize tank system.
 
@@ -81,6 +83,7 @@ class TankSystem:
 
         self.tank_geometries = tank_geometries
         self.config = config
+        self.scenario_config = scenario_config  # Store full scenario config for materials
         self.coupling_rules = coupling_rules or []
 
         # Validate configuration
@@ -93,6 +96,18 @@ class TankSystem:
         self.thermal_models = []
         self.dynamic_models = []
         self.coupling_valves = []
+
+        # Initialize flow physics if configuration is available
+        self.flow_physics = None
+        if scenario_config and hasattr(scenario_config, 'config_dict') and 'flow_physics' in scenario_config.config_dict:
+            try:
+                self.flow_physics = FlowPhysics(scenario_config.config_dict['flow_physics'])
+                print(f"✓ Flow physics initialized from configuration")
+            except Exception as e:
+                print(f"⚠️ Failed to initialize flow physics: {e}")
+                print("   Using fallback hardcoded values")
+        else:
+            print("⚠️ Flow physics configuration not found - using fallback hardcoded values")
 
         # Initialize caching system
         self._cached_tank_properties = {}
@@ -116,7 +131,7 @@ class TankSystem:
         for i, (tank_geom, tank_config) in enumerate(zip(self.tank_geometries, self.config.tanks)):
             print(f"Setting up Tank {i+1} ({tank_config.name})...")
 
-            tank_properties = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}")
+            tank_properties = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
             thermal_model = self._create_thermal_model(tank_properties)
             dynamic_model = IsochoricModelSwitcher(
                 scenario=tank_config.scenario,
@@ -130,6 +145,46 @@ class TankSystem:
             self.dynamic_models.append(dynamic_model)
 
             print(f"   ✅ Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m²")
+
+    def _extract_mission_profile_data(self) -> dict:
+        """Extract mission profile data from system configuration."""
+        if not self.config.mission_profile:
+            return {}
+
+        try:
+            # Import flow types
+            from src.mission.mission_sections import OutFlow
+
+            # Extract time points and flow rates from mission sections
+            times = [0.0]
+            flow_rates = [0.0]
+            current_time = 0.0
+
+            for section in self.config.mission_profile.sections:
+                current_time += section.duration
+                times.append(current_time)
+
+                # Find OutFlow rate for this section
+                section_flow_rate = 0.0
+                for flow in section.fuel_flows:
+                    if isinstance(flow, OutFlow):
+                        # Get flow rate from mass_flow attribute (use absolute value for positive rate)
+                        if isinstance(flow.mass_flow, list):
+                            section_flow_rate = abs(flow.mass_flow[0])  # First value for start of section
+                        else:
+                            section_flow_rate = abs(flow.mass_flow)
+                        break
+
+                flow_rates.append(section_flow_rate)
+
+            return {
+                'time_s': times,
+                'flow_rate_kg_s': flow_rates
+            }
+
+        except Exception as e:
+            print(f"   ⚠️ Failed to extract mission profile: {e}")
+            return {}
 
     def _setup_coupling_rules(self):
         """Setup inter-tank coupling based on rules."""
@@ -156,7 +211,8 @@ class TankSystem:
                     p_open=rule.get('opening_pressure', 17e5),  # 17 bar default
                     p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
                     max_flow_rate=rule.get('max_flow_rate', 0.005),       # 5 g/s default (realistic for pressurization)
-                    orifice_diameter=rule.get('orifice_diameter', 0.001)  # 1 mm default (realistic for pressurization)
+                    orifice_diameter=rule.get('orifice_diameter', 0.001),  # 1 mm default (realistic for pressurization)
+                    flow_physics=self.flow_physics  # Pass configuration-driven flow physics
                 )
 
                 # Add tank name attributes expected by _calculate_coupling_flows
@@ -177,6 +233,13 @@ class TankSystem:
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
 
+                # Get target tank configuration for minimum pressure
+                target_tank_config = {}
+                if target_idx < len(self.config.tanks):
+                    target_tank_config = {
+                        'minimum_pressure': self.config.tanks[target_idx].P_MIN
+                    }
+
                 valve = MissionAdaptivePressureValve(
                     source_idx=source_idx,
                     target_idx=target_idx,
@@ -185,25 +248,37 @@ class TankSystem:
                     control_params=rule.get('control_params', {}),
                     max_flow_rate=rule.get('max_flow_rate', 0.005),
                     orifice_diameter=rule.get('orifice_diameter', 0.001),
-                    coupling_id=rule.get('coupling_id', 'mission_adaptive_pressure_valve')
+                    coupling_id=rule.get('coupling_id', 'mission_adaptive_pressure_valve'),
+                    flow_physics=self.flow_physics,  # Pass configuration-driven flow physics
+                    target_tank_config=target_tank_config  # Pass target tank configuration
                 )
 
                 # Add tank name attributes expected by _calculate_coupling_flows
                 valve.source_tank = source_idx
                 valve.target_tank = target_idx
 
+                # If no hardcoded mission profile in coupling rule, set it from system config
+                if not rule.get('mission_profile', {}) and self.config.mission_profile:
+                    mission_data = self._extract_mission_profile_data()
+                    if mission_data:
+                        valve.set_mission_profile(mission_data)
+
                 self.coupling_valves.append(valve)
 
                 pipe_d = rule.get('discharge_piping', {}).get('diameter_m', 0.01)
                 pipe_l = rule.get('discharge_piping', {}).get('length_m', 2.0)
                 margin = rule.get('control_params', {}).get('pressure_margin_bar', 1.0)
+                control_interval = rule.get('control_params', {}).get('control_interval_s', 10.0)
+                target_min_pressure = target_tank_config.get('minimum_pressure', 300000) / 1e5
 
-                print(f"   🔗 Adaptive Valve: Tank{source_idx+1} → Tank{target_idx+1}")
-                print(f"      Dynamic thresholds based on mission flow ({pipe_d*1000:.0f}mm × {pipe_l:.1f}m piping)")
+                print(f"   🔗 Adaptive Valve: Tank{source_idx+1} → Tank{target_idx+1} (Mission-Adaptive)")
+                print(f"      Dynamic thresholds based on real-time mission flow")
+                print(f"      Discharge piping: {pipe_d*1000:.0f}mm × {pipe_l:.1f}m")
                 print(f"      Pressure margin: {margin:.1f} bar")
-                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.005)*1000:.1f} g/s")
-                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.15)*1000:.1f} g/s")
-                print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.01)*1000:.1f} mm")
+                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.05)*1000:.0f} g/s")
+                print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.001)*1000:.1f} mm")
+                print(f"   Control system: Time-based ({control_interval:.1f}s intervals)")
+                print(f"   Target tank minimum pressure: {target_min_pressure:.1f} bar")
 
             elif rule_type == 'ohex_extraction':
                 # Create OHEX extraction coupling
@@ -254,10 +329,85 @@ class TankSystem:
 
         inner_radius = tank.radius  # Tank internal radius
 
-        # Layer thicknesses (typical values for cryocompressed hydrogen tanks)
-        thickness_liner = 0.005      # 5mm aluminum liner
-        thickness_wall = 0.020       # 20mm composite wall
-        thickness_insulation = 0.050 # 50mm insulation
+        # Calculate thicknesses using proper netting analysis and NIST materials FROM CONFIG
+        from src.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
+        import math
+
+        # Get materials from configuration - NO HARDCODED VALUES
+        if not self.scenario_config:
+            raise RuntimeError("No scenario configuration available - cannot determine materials")
+
+        # Per-tank materials are now mandatory - the get_tank_materials method will handle the error
+
+        # Get materials from config - support per-tank materials
+        # Convert 0-based tank_index to 1-based tank_id for YAML configuration
+        tank_id_yaml = tank_index + 1
+        tank_materials = self.scenario_config.get_tank_materials(tank_id_yaml)
+        liner_material = tank_materials.get('liner')
+        composite_material = tank_materials.get('composite')
+
+        if not liner_material or not composite_material:
+            raise RuntimeError(f"Liner or composite material not found in configuration for tank {tank_id_yaml}")
+
+        # Get thicknesses from configuration - support per-tank configuration
+        # Use per-tank material config (convert 0-based index to 1-based tank ID)
+        materials_config = self.scenario_config.get_tank_material_config(tank_id_yaml)
+        thickness_liner = materials_config.get('liner', {}).get('thickness', None)
+        if thickness_liner is None:
+            raise RuntimeError("Liner thickness not specified in configuration")
+
+        thickness_insulation = materials_config.get('insulation', {}).get('thickness', None)
+        if thickness_insulation is None:
+            raise RuntimeError("Insulation thickness not specified in configuration")
+
+        # Get design parameters from configuration - NO HARDCODED VALUES
+        safety_factor = materials_config.get('safety_margin', None)
+        if safety_factor is None:
+            raise RuntimeError("Safety margin not specified in configuration")
+
+        # Get design pressure from tank configuration
+        design_pressure = None
+        working_pressure = None
+        geometry_config = self.scenario_config.config_dict.get('geometry', {})
+        for tank_config in [geometry_config.get('1', {}), geometry_config.get(1, {}), geometry_config.get('tank1', {}), geometry_config.get('cch2_tank', {})]:
+            if 'venting_pressure' in tank_config:
+                design_pressure = float(eval(str(tank_config['venting_pressure'])))  # p_max is venting pressure, convert from string
+            if 'initial_pressure' in tank_config:
+                working_pressure = float(eval(str(tank_config['initial_pressure'])))  # working pressure, convert from string
+            if design_pressure and working_pressure:
+                break
+
+        if design_pressure is None:
+            raise RuntimeError("Design pressure (venting_pressure) not found in configuration")
+        if working_pressure is None:
+            raise RuntimeError("Working pressure (initial_pressure) not found in configuration")
+
+        # Calculate composite wall thickness using netting analysis for cylindrical+spherical geometry
+        # Tank section interface for structural model
+        class TankSectionInterface:
+            def __init__(self, radius, material):
+                self.radius = radius
+                self.material = material
+
+        tank_section = TankSectionInterface(inner_radius, composite_material)
+        cylinder_model = CompositeCylinder()
+        endcap_model = CompositeSphericalEndCap()
+
+        # Calculate thickness for both sections
+        cylinder_thickness = cylinder_model.compute_thickness(tank_section, working_pressure)
+        endcap_thickness = endcap_model.compute_thickness(tank_section, working_pressure)
+        thickness_wall = max(cylinder_thickness, endcap_thickness)  # Governing thickness
+
+        print(f"   🔧 Netting Analysis Results for {tank_id}:")
+        print(f"      Radius: {inner_radius:.3f} m")
+        print(f"      Design pressure: {design_pressure/1e5:.0f} bar, Working: {working_pressure/1e5:.0f} bar")
+        print(f"      Safety factor: {safety_factor:.2f} (from config)")
+        print(f"      Liner: {type(liner_material).__name__}, thickness: {thickness_liner*1000:.1f}mm")
+        print(f"      Composite: {type(composite_material).__name__}, σ_failure = {composite_material.failure_stress/1e6:.0f} MPa")
+        print(f"      Winding angle: {math.degrees(composite_material.winding_angle):.1f}°")
+        print(f"      Cylinder thickness: {cylinder_thickness*1000:.1f} mm")
+        print(f"      Endcap thickness: {endcap_thickness*1000:.1f} mm")
+        print(f"      Governing wall thickness: {thickness_wall*1000:.1f} mm")
 
         # Calculate radii at each layer
         liner_outer_radius = inner_radius + thickness_liner
@@ -269,12 +419,40 @@ class TankSystem:
         inner_surface_area = 4 * math.pi * inner_radius**2
         outer_surface_area = 4 * math.pi * external_radius**2
 
-        # Calculate masses - use reasonable defaults if not specified
-        # For a 0.5 m³ tank, typical structural mass ratios are:
-        # Liner: ~2-3 kg/m³ of tank volume (aluminum liner)
-        # Wall: ~5-8 kg/m³ of tank volume (composite pressure vessel)
-        liner_mass = getattr(tank.sections[0], 'liner_mass', volume * 2.5) if hasattr(tank, 'sections') and tank.sections else volume * 2.5
-        wall_mass = getattr(tank.sections[0], 'wall_mass', volume * 6.5) if hasattr(tank, 'sections') and tank.sections else volume * 6.5
+        # Calculate masses using proper cylindrical+spherical geometry and NIST densities
+        # Geometry: Cylindrical section (L = 3R) + 2 spherical endcaps (R)
+        cylinder_length = 3 * inner_radius  # L/R = 3.0
+
+        # Liner mass (aluminum, inner shell)
+        liner_inner_radius = inner_radius
+        liner_outer_radius = inner_radius + thickness_liner
+        # Cylindrical section + spherical endcaps
+        liner_cyl_volume = math.pi * (liner_outer_radius**2 - liner_inner_radius**2) * cylinder_length
+        liner_sphere_volume = 2 * (4/3) * math.pi * (liner_outer_radius**3 - liner_inner_radius**3)
+        liner_total_volume = liner_cyl_volume + liner_sphere_volume
+        liner_mass = liner_material.density * liner_total_volume
+
+        # Wall mass (composite, outer shell)
+        wall_inner_radius = liner_outer_radius
+        wall_outer_radius = liner_outer_radius + thickness_wall
+        # Cylindrical section + spherical endcaps
+        wall_cyl_volume = math.pi * (wall_outer_radius**2 - wall_inner_radius**2) * cylinder_length
+        wall_sphere_volume = 2 * (4/3) * math.pi * (wall_outer_radius**3 - wall_inner_radius**3)
+        wall_total_volume = wall_cyl_volume + wall_sphere_volume
+        wall_mass = composite_material.density * wall_total_volume
+
+        print(f"      Geometry: Cylinder (L={cylinder_length:.2f}m) + 2 spherical endcaps")
+        print(f"      Liner mass: {liner_mass:.1f} kg (ρ={liner_material.density} kg/m³)")
+        print(f"      Wall mass: {wall_mass:.1f} kg (ρ={composite_material.density} kg/m³)")
+
+        # Update the properties to include calculated thickness for orchestrator
+        thickness_info = {
+            'wall_thickness': thickness_wall,
+            'cylinder_thickness': cylinder_thickness,
+            'endcap_thickness': endcap_thickness,
+            'composite_density': composite_material.density,
+            'cylindrical_section_length': cylinder_length
+        }
 
         # Only print properties during initialization, not during simulation
         if hasattr(self, '_properties_printed') and tank_index not in self._properties_printed:
@@ -297,7 +475,9 @@ class TankSystem:
             'liner_mass': liner_mass,
             'wall_mass': wall_mass,
             'radius': inner_radius,
-            'inner_radius': inner_radius
+            'inner_radius': inner_radius,
+            # Add netting analysis results
+            **thickness_info
         }
 
     def _create_thermal_model(self, tank_properties: Dict[str, float]):
@@ -482,10 +662,10 @@ class TankSystem:
         # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
         coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
 
-        for valve in self.coupling_valves:
-            source_state = multi_state.tank_states[valve.source_tank]
+        # Removed debug output - coupling system working correctly
 
-            # Handle different coupling types
+        for valve in self.coupling_valves:
+            source_state = multi_state.tank_states[valve.source_tank]            # Handle different coupling types
             if valve.target_tank == -1:
                 # OHEX extraction - no target tank, just extract from source
                 flow_rate = valve.calculate_flow(source_state, None, t)
@@ -586,6 +766,50 @@ class TankSystem:
                 flow_rate = valve.calculate_flow(multi_state.tank_states[valve.source_tank], None, t)
                 if flow_rate > 0:
                     coupling_flows[valve.source_tank] -= flow_rate
+
+            elif hasattr(valve, 'update_time_based_control'):
+                # MissionAdaptivePressureValve - special handling for time-based control
+                from src.multi_tank.coupling.inter_tank_coupling import MissionAdaptivePressureValve
+                if isinstance(valve, MissionAdaptivePressureValve):
+                    source_state = multi_state.tank_states[valve.source_tank]
+                    target_state = multi_state.tank_states[valve.target_tank]
+
+                    # Ensure pressures are computed
+                    if hasattr(source_state, 'compute_pressure'):
+                        source_state.compute_pressure()
+                    if hasattr(target_state, 'compute_pressure'):
+                        target_state.compute_pressure()
+
+                    # Get LH2 density
+                    if hasattr(target_state, 'density'):
+                        lh2_density = target_state.density
+                    else:
+                        lh2_density = target_state.fuel_mass / target_state.tank.volume
+
+                    # Force update time-based control for post-processing
+                    valve.last_control_update = -1.0  # Force update
+                    valve.update_time_based_control(t, target_state.pressure, lh2_density)
+
+                    # Now calculate flow rate
+                    tank_states = [source_state if i == valve.source_tank else
+                                 target_state if i == valve.target_tank else None
+                                 for i in range(len(multi_state.tank_states))]
+
+                    flow_rate = valve.calculate_flow_rate(t, multi_state.tank_states)
+
+                    if flow_rate > 0:
+                        coupling_flows[valve.source_tank] -= flow_rate
+                        coupling_flows[valve.target_tank] += flow_rate
+                else:
+                    # Other coupling types with time-based control
+                    source_state = multi_state.tank_states[valve.source_tank]
+                    target_state = multi_state.tank_states[valve.target_tank] if valve.target_tank >= 0 else None
+                    flow_rate = valve.calculate_flow(source_state, target_state, t)
+
+                    if flow_rate > 0:
+                        coupling_flows[valve.source_tank] -= flow_rate
+                        if valve.target_tank >= 0:
+                            coupling_flows[valve.target_tank] += flow_rate
 
             else:
                 # Other coupling types - try to use their calculate_flow method

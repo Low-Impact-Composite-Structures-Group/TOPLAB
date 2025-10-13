@@ -25,7 +25,7 @@ geometry:
 materials:
   liner:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-    thickness: 0.005                     # m (5mm aluminum liner)
+    thickness: 0.001                     # m (1mm aluminum liner)
   composite:
     nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
@@ -78,11 +78,19 @@ output:
     # Plotting style configuration
     style:
       use_greyscale: true           # Enable greyscale plotting mode
+      # Font configuration
+      font:
+        master_size: 16                # Master font size for axis labels, titles, etc.
+        legend_size: 10                # Font size for legends and isobar callouts
+        font_name: "Cambria"           # Font family name
 
     tank_states:
       enabled: true
       figsize: [12, 10]
       filename: "tank_states"
+      event_lines:
+        - time: 0.016              # Time in hours
+          label: "IHEX activation"
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
@@ -111,3 +119,11 @@ output:
       include_total: true            # Show total (iHEX + oHEX) curve (true/false)
       ohex_target_temperature: 200.0 # K - Target temperature for oHEX calculation
       ohex_target_pressure: 20e5     # Pa - Target pressure for oHEX calculation (20 bar)
+    reference_lines:
+      pressure:
+        show_p_min: true           # Show minimum allowable pressure line
+        show_p_vent: true          # Show maximum allowable / venting pressure line
+      temperature:
+        show_t_ambient: false       # Show ambient temperature line
+      density:
+        show_stopping_density: false # Show stopping density line

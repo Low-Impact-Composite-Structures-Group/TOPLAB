@@ -235,7 +235,8 @@ class SystemOrchestrator:
         self.tank_system = TankSystem(
             tank_geometries=self.tank_geometries,
             config=self.tank_system_config,
-            coupling_rules=tank_system_coupling_rules  # Pass converted config
+            coupling_rules=tank_system_coupling_rules,  # Pass converted config
+            scenario_config=self.scenario_config  # Pass full scenario config for materials
         )
         print(f"   ✓ TankSystem DAE engine initialized")
 
@@ -804,22 +805,51 @@ class SystemOrchestrator:
         # Beyond mission duration
         return 0.0
 
-    def run_simulation(self, solver_method: str = "RK45", solver_config: dict = None) -> Any:
+    def run_simulation(self, solver_method: str = None, solver_config: dict = None) -> Any:
         """
         Execute the complete multi-tank simulation using ScenarioConfig.
 
         Args:
-            solver_method: Override solver method (RK45, LSODA, etc.)
-            solver_config: Optional solver configuration parameters (timestep, rtol, atol, max_step)
+            solver_method: Override solver method (RK45, LSODA, etc.). If None, reads from scenario_config.solver.method
+            solver_config: Optional solver configuration parameters (timestep, rtol, atol, max_step). If None, reads from scenario_config.solver
 
         Returns:
             MultiTankResults: Analysis results from DAE integration
         """
+        # Read solver configuration from scenario config if not provided
+        if solver_method is None or solver_config is None:
+            solver_config_dict = self.scenario_config.config_dict.get('solver', {})
+
+            if solver_method is None:
+                solver_method = solver_config_dict.get('method', 'RK45')
+
+            if solver_config is None:
+                # Convert string values to float for numerical parameters
+                rtol = solver_config_dict.get('rtol', 1e-6)
+                atol = solver_config_dict.get('atol', 1e-9)
+                max_step = solver_config_dict.get('max_step', None)
+
+                # Handle string values from YAML
+                if isinstance(rtol, str):
+                    rtol = float(rtol)
+                if isinstance(atol, str):
+                    atol = float(atol)
+                if isinstance(max_step, str):
+                    max_step = float(max_step)
+
+                solver_config = {
+                    'rtol': rtol,
+                    'atol': atol,
+                    'max_step': max_step
+                }
+
         print("\n🚀 Starting ScenarioConfig-based simulation...")
         print(f"   Analysis: {self.scenario_config.analysis_name}")
         print(f"   Tanks: {len(self.tank_geometries)}")
         print(f"   Mission: {self.scenario_config.mission_sequence.missions[0].type}")
-        print(f"   Solver: {solver_method}")
+        print(f"   Solver: {solver_method} (from {'config' if solver_method != 'RK45' else 'default'})")
+        if solver_config:
+            print(f"   Tolerances: rtol={solver_config.get('rtol')}, atol={solver_config.get('atol')}")
 
         start_time = time.time()
 
@@ -1061,6 +1091,24 @@ class SystemOrchestrator:
             # Get plotting configuration from config
             plot_config = self.scenario_config.config_dict.get('output', {}).get('plots', {})
             style_config = plot_config.get('style', {})
+
+            # Load font configuration and update global font settings
+            font_config = style_config.get('font', {})
+            if font_config:
+                from plotting.plot_style_sb import update_font_settings
+
+                master_size = font_config.get('master_size')
+                legend_size = font_config.get('legend_size')
+                font_name = font_config.get('font_name')
+
+                # Update global font settings if specified in config
+                update_font_settings(
+                    master_size=master_size,
+                    legend_size=legend_size,
+                    font_name=font_name
+                )
+
+                print(f"   🎨 Font configuration loaded: master={master_size}, legend={legend_size}, font='{font_name}'")
 
             # Create plotter with analysis name and styling options from config
             plotter = DelftColourPlotter(
@@ -2189,7 +2237,7 @@ class SystemOrchestrator:
         # === FROM GEOMETRY (TANK ATTRIBUTES) ===
         # These should be tank attributes already computed
         tank_volume = tank_geometry.volume  # m³
-        tank_length = lr_ratio * 2 * radius  # m (from radius and L/R)
+        cylindrical_length = lr_ratio * radius  # m (L/R * R = L, length of cylindrical section only)
 
         # Get liner mass from tank system properties - NO FALLBACKS
         if not (hasattr(self, 'tank_system') and self.tank_system):
@@ -2226,13 +2274,20 @@ class SystemOrchestrator:
                 raise KeyError("wall_mass not found in tank properties")
             composite_mass = tank_props['wall_mass']
 
-            # Calculate thickness from mass and geometry - must be computed, no fallback
-            if radius <= 0:
-                raise ValueError("Invalid radius for composite thickness calculation")
+            # Use the calculated thickness from netting analysis instead of recalculating
+            if 'wall_thickness' in tank_props:
+                composite_thickness = tank_props['wall_thickness']
+                print(f"   ✓ Using netting analysis thickness: {composite_thickness*1000:.2f} mm")
+            else:
+                # Fallback: Calculate thickness from mass and geometry
+                if radius <= 0:
+                    raise ValueError("Invalid radius for composite thickness calculation")
 
-            composite_density = 1600  # kg/m³ carbon-epoxy (material property)
-            # Estimate thickness from mass (simplified spherical shell approximation)
-            composite_thickness = composite_mass / (4 * np.pi * radius**2 * composite_density)
+                # Use actual composite density from tank properties if available
+                composite_density = tank_props.get('composite_density', 1800)  # NIST G10 density
+                # Estimate thickness from mass (simplified spherical shell approximation)
+                composite_thickness = composite_mass / (4 * np.pi * radius**2 * composite_density)
+                print(f"   ⚠️ Fallback thickness calculation: {composite_thickness*1000:.2f} mm")
 
             if composite_thickness <= 0:
                 raise ValueError("Calculated composite thickness is invalid")
@@ -2319,7 +2374,7 @@ GEOMETRY (tank attributes)
 Liner mass [kg]:            {liner_mass:.1f}
 Inner area [m²]:            {inner_area:.2f}
 Tank volume [m³]:           {tank_volume:.3f}
-Tank length [m]:            {tank_length:.2f}
+Length of cylindrical section [m]: {cylindrical_length:.2f}
 
 STRUCTURAL MODEL RESULTS
 ================================================================================

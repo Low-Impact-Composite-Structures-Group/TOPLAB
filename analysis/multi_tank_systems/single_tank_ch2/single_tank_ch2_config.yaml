@@ -25,7 +25,7 @@ geometry:
 materials:
   liner:
     nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-    thickness: 0.005                     # m (5mm aluminum liner)
+    thickness: 0.001                     # m (5mm aluminum liner)
   composite:
     nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
     winding_angle: 54.7                  # degrees (optimal winding angle)
@@ -78,6 +78,11 @@ output:
     # Plotting style configuration
     style:
       use_greyscale: true           # Enable greyscale plotting mode
+      # Font configuration
+      font:
+        master_size: 16                # Master font size for axis labels, titles, etc.
+        legend_size: 10                # Font size for legends and isobar callouts
+        font_name: "Cambria"           # Font family name
 
     tank_states:
       enabled: true
@@ -92,7 +97,7 @@ output:
       figsize: [12, 8]
       filename: "density_temperature"
       isobar_pressures: [800, 700, 500, 300,  100, 15]  # Custom isobars to show [bar] - adjusted for CH2
-      show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
+      show_reference_pressures: false  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
     mass_flows:

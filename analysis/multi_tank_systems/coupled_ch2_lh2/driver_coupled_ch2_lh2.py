@@ -31,6 +31,102 @@ from src.configuration.scenario_configuration import ScenarioConfig
 from src.orchestration.system_orchestrator import SystemOrchestrator
 
 
+def _generate_pressure_requirements_plot(orchestrator, output_dir):
+    """Generate custom plot showing pressure requirements evolution."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Check if we have a mission-adaptive coupling valve
+    if not hasattr(orchestrator.tank_system, 'coupling_valves'):
+        print("   ⚠️ No coupling valves found")
+        return
+
+    # Find the mission-adaptive valve
+    adaptive_valve = None
+    for valve in orchestrator.tank_system.coupling_valves:
+        if hasattr(valve, 'get_diagnostic_data'):
+            adaptive_valve = valve
+            break
+
+    if adaptive_valve is None:
+        print("   ⚠️ No mission-adaptive valve found")
+        return
+
+    # Get diagnostic data from the valve
+    try:
+        diag_data = adaptive_valve.get_diagnostic_data()
+    except AttributeError as e:
+        print(f"   ⚠️ Cannot get diagnostic data: {e}")
+        # Try to access data directly
+        if hasattr(adaptive_valve, 'time_history') and hasattr(adaptive_valve, 'required_pressure_history'):
+            diag_data = {
+                'time_history': adaptive_valve.time_history,
+                'required_pressure_history': adaptive_valve.required_pressure_history,
+                'activation_threshold_history': getattr(adaptive_valve, 'activation_threshold_history', [])
+            }
+        else:
+            print("   ⚠️ No pressure history data available")
+            return
+
+    if not diag_data['time_history']:
+        print("   ⚠️ No pressure history data available")
+        return
+
+    # Convert to numpy arrays for plotting
+    times = np.array(diag_data['time_history']) / 3600.0  # Convert to hours
+    required_pressures = np.array(diag_data['required_pressure_history']) / 1e5  # Convert to bar
+    activation_thresholds = np.array(diag_data['activation_threshold_history']) / 1e5  # Convert to bar
+
+    # Also get actual Tank 2 pressure from results for comparison
+    combined_data = orchestrator.results.get_combined_data()
+    tank2_pressures = combined_data['pressures'][1]  # Already in bar from _extract_tank_arrays
+    result_times = combined_data['times'] / 3600.0  # Result times in hours
+
+    # Create the plot
+    try:
+        plt.style.use('seaborn-v0_8')
+    except OSError:
+        # Fallback if seaborn style is not available
+        try:
+            plt.style.use('seaborn')
+        except OSError:
+            plt.style.use('default')
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Plot the pressure requirements
+    ax.plot(times, required_pressures, 'b-', linewidth=2, label='Minimum Required Pressure')
+    ax.plot(times, activation_thresholds, 'r--', linewidth=2, label='Activation Threshold (Required + Margin)')
+    ax.plot(result_times, tank2_pressures, 'g-', linewidth=1.5, alpha=0.8, label='Actual LH2 Tank Pressure')
+
+    # Add reference lines
+    ax.axhline(y=2.0, color='orange', linestyle=':', alpha=0.7, label='Tank Minimum (2 bar)')
+
+    # Formatting
+    ax.set_xlabel('Time [hours]', fontsize=14)
+    ax.set_ylabel('Pressure [bar]', fontsize=14)
+    ax.set_title('LH2 Tank Pressure Requirements vs Actual Pressure', fontsize=16, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=12)
+
+    # Set reasonable y-limits
+    y_min = min(min(required_pressures), min(tank2_pressures), 2.5) - 0.5
+    y_max = max(max(activation_thresholds), max(tank2_pressures)) + 0.5
+    ax.set_ylim(y_min, y_max)
+
+    # Save the plot
+    plot_filename = "LH2_Pressure_Requirements.png"
+    plot_path = output_dir / plot_filename
+    fig.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+    print(f"   ✓ Custom pressure requirements plot saved: {plot_filename}")
+    print(f"     Data points: {len(times)} pressure requirement points")
+    print(f"     Time range: {times[0]:.2f} - {times[-1]:.2f} hours")
+    print(f"     Required pressure range: {min(required_pressures):.2f} - {max(required_pressures):.2f} bar")
+    print(f"     Activation threshold range: {min(activation_thresholds):.2f} - {max(activation_thresholds):.2f} bar")
+
+
 def main():
     """Main execution function for coupled CH2-LH2 multi-tank analysis."""
 
@@ -292,6 +388,15 @@ def main():
 
         except Exception as e:
             print(f"   ⚠️ Plot generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Generate custom pressure requirements plot
+        print(f"\n📊 Generating custom pressure requirements plot...")
+        try:
+            _generate_pressure_requirements_plot(orchestrator, output_dir)
+        except Exception as e:
+            print(f"   ⚠️ Custom pressure requirements plot failed: {e}")
             import traceback
             traceback.print_exc()
 
