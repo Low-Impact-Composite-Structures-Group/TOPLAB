@@ -615,8 +615,6 @@ class MissionAdaptivePressurizationRule(CouplingRule):
         # Control parameters
         control_params = self.config['control_parameters']
         self.pressure_margin_bar = control_params['pressure_margin_bar']
-        self.deactivation_margin_bar = control_params['deactivation_margin_bar']
-        self.control_gain = control_params.get('control_gain', 0.5)
         self.max_pressurization_rate = control_params['max_pressurization_rate_kg_s']
         self.min_source_pressure_bar = control_params['min_source_pressure_bar']
 
@@ -626,10 +624,6 @@ class MissionAdaptivePressurizationRule(CouplingRule):
         self.response_time = flow_params.get('response_time_s', 5.0)
         self.max_ch2_flow_rate = flow_params.get('max_flow_rate_kg_s', 0.005)  # 5 g/s limit
         self.ch2_orifice_diameter = flow_params.get('orifice_diameter_m', 0.001)  # 1mm
-
-        # Activation threshold parameters
-        activation_params = self.config['activation_conditions']
-        self.min_pressure_difference_bar = activation_params['min_pressure_difference_bar']
 
         # State tracking for dynamic thresholds
         self.current_mission_flow_rate = 0.0
@@ -739,7 +733,7 @@ class MissionAdaptivePressurizationRule(CouplingRule):
         # Must have adequate pressure difference
         target_pressure_bar = target_state.pressure / 1e5
         pressure_difference = source_pressure_bar - target_pressure_bar
-        if pressure_difference < self.min_pressure_difference_bar:
+        if pressure_difference < 5.0:  # Default 5 bar minimum pressure difference
             return False
 
         # Check LH2 pressure against dynamic activation threshold

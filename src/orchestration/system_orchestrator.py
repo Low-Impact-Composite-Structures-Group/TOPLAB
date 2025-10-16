@@ -1465,6 +1465,35 @@ class SystemOrchestrator:
                 )
                 figures.append(hex_fig)
 
+        # Generate pressure requirements plot for mission-adaptive systems (not per-tank)
+        pressure_req_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('pressure_requirements', {})
+        pressure_req_enabled = pressure_req_config.get('enabled', False)
+
+        if pressure_req_enabled:
+            pressure_req_save_path = None
+            if save_path:
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_name = Path(save_path).stem
+                save_ext = Path(save_path).suffix or '.png'
+
+                # Use filename from config if available
+                pressure_req_filename = pressure_req_config.get('filename', 'pressure_requirements')
+                pressure_req_save_path = save_dir / f"{save_name}_{pressure_req_filename}{save_ext}"
+
+            # Get tank index from config (default to 1 for LH2 tank)
+            tank_index = pressure_req_config.get('tank_index', 1)
+
+            try:
+                pressure_req_fig = plotter.plot_pressure_requirements(
+                    orchestrator=self,
+                    tank_index=tank_index,
+                    save_path=str(pressure_req_save_path) if pressure_req_save_path else None
+                )
+                figures.append(pressure_req_fig)
+            except Exception as e:
+                print(f"   ⚠️ Pressure requirements plot failed: {e}")
+
         # Count plots generated
         mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
         heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
@@ -1476,12 +1505,16 @@ class SystemOrchestrator:
             plots_per_tank += 1
 
         total_plots = len(self.results.tank_metadata) * plots_per_tank
+        if pressure_req_enabled:
+            total_plots += 1  # Add pressure requirements plot
 
         plot_types = ['evolution', 'density-temperature']
         if mass_flows_enabled:
             plot_types.append('mass flows')
         if heat_exchanger_enabled:
             plot_types.append('heat exchanger requirements')
+        if pressure_req_enabled:
+            plot_types.append('pressure requirements')
 
         print(f"   ✅ Generated {len(figures)} tank plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
 

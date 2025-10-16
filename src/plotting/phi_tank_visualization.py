@@ -29,7 +29,37 @@ class MyCycler:
         self.colors = ["#00A6D6", "#E03C31", "#009B77", "#A50034"]  # Delft colors
 
 def set_font():
-    pass
+    """Set the font to Cambria from the local fonts directory"""
+    import matplotlib.font_manager as fm
+
+    # Path to the Cambria font file
+    font_path = os.path.join(os.path.dirname(__file__), '..', '..', 'plotting', 'fonts', 'cambria.ttf')
+
+    if os.path.exists(font_path):
+        # Register the Cambria font
+        fm.fontManager.addfont(font_path)
+        plt.rcParams['font.family'] = 'Cambria'
+        print(f"Successfully loaded Cambria font from {font_path}")
+    else:
+        # Fallback to available serif fonts
+        available_fonts = [f.name for f in fm.fontManager.ttflist]
+        preferred_fonts = ['Times New Roman', 'Georgia', 'Times', 'Palatino']
+
+        selected_font = 'serif'  # Default fallback
+        for font in preferred_fonts:
+            if font in available_fonts:
+                selected_font = font
+                break
+
+        plt.rcParams['font.family'] = selected_font
+        print(f"Cambria font not found, using {selected_font}")
+
+    plt.rcParams['font.size'] = 10
+    plt.rcParams['axes.labelsize'] = 12
+    plt.rcParams['axes.titlesize'] = 12
+    plt.rcParams['legend.fontsize'] = 10
+    plt.rcParams['xtick.labelsize'] = 10
+    plt.rcParams['ytick.labelsize'] = 10
 
 FIGURE_WIDTH = 10.0
 FIGURE_HEIGHT = 8.8
@@ -237,6 +267,85 @@ def create_side_view_comparison():
     return fig
 
 
+def create_side_view_comparison_greyscale():
+    """Create a 2D side view comparison of all tank geometries in greyscale"""
+
+    set_font()
+    phi_values = [0, 1, 2, 3]
+
+    # Define greyscale colors and line styles
+    # black solid, black dashed, grey solid, grey dashed
+    colors = ['black', 'black', 'grey', 'grey']
+    linestyles = ['-', '--', '-', '--']
+
+    # Make figure wider than tall (landscape orientation)
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+
+    y_offset = 0
+    spacing = 2.5
+
+    for phi, color, linestyle in zip(phi_values, colors, linestyles):
+        tank_geo = TankGeometry(phi=phi, radius=1.0)
+
+        # Draw tank outline
+        if phi == 0:  # Sphere
+            circle = plt.Circle((0, y_offset), tank_geo.radius,
+                              fill=False, color=color, linewidth=2, linestyle=linestyle)
+            ax.add_patch(circle)
+        else:  # Cylinder with domes
+            # Draw only horizontal lines of cylinder (no vertical sides)
+            rect_width = tank_geo.cylinder_length
+            # Top horizontal line
+            ax.plot([-rect_width/2, rect_width/2],
+                   [y_offset + tank_geo.radius, y_offset + tank_geo.radius],
+                   color=color, linewidth=2, linestyle=linestyle, marker='')
+            # Bottom horizontal line
+            ax.plot([-rect_width/2, rect_width/2],
+                   [y_offset - tank_geo.radius, y_offset - tank_geo.radius],
+                   color=color, linewidth=2, linestyle=linestyle, marker='')
+
+            # Draw only curved parts of semicircles (no straight diameter)
+            # Left semicircle - draw as arc only
+            theta_left = np.linspace(np.pi/2, 3*np.pi/2, 100)
+            x_left = -rect_width/2 + tank_geo.radius * np.cos(theta_left)
+            y_left = y_offset + tank_geo.radius * np.sin(theta_left)
+            ax.plot(x_left, y_left, color=color, linewidth=2, linestyle=linestyle, marker='')
+
+            # Right semicircle - draw as arc only
+            theta_right = np.linspace(3*np.pi/2, 5*np.pi/2, 100)
+            x_right = rect_width/2 + tank_geo.radius * np.cos(theta_right)
+            y_right = y_offset + tank_geo.radius * np.sin(theta_right)
+            ax.plot(x_right, y_right, color=color, linewidth=2, linestyle=linestyle, marker='')
+
+        # Add to legend with appropriate style (no markers)
+        ax.plot([], [], color=color, linewidth=2, linestyle=linestyle, marker='', label=f'φ = {phi}')
+
+        y_offset += spacing
+
+    # Set equal aspect ratio and limits for vertical layout
+    ax.set_xlim(-4, 4)
+    ax.set_ylim(-1.5, 9.5)
+    ax.set_aspect('equal')
+    ax.grid(True, alpha=0.3)
+    # Place legend on plot but out of the way with 3D shadow effect
+    legend = ax.legend(loc='lower right', frameon=True, fancybox=True,
+                      shadow=True, framealpha=0.9, edgecolor='black')
+    # Additional styling for 3D effect
+    legend.get_frame().set_facecolor('white')
+    legend.get_frame().set_linewidth(1.2)
+    ax.set_xlabel('Normalized Length')
+    # ax.set_ylabel('Tank Position')
+    # Set y-ticks for grid but hide the labels
+    y_ticks = np.arange(-1, 10, 1)  # Y-ticks every 1 unit from -1 to 9
+    ax.set_yticks(y_ticks)
+    x_ticks = np.arange(-4, 4, 1)  # X-ticks every 1 unit from -4 to 4
+    ax.set_xticks(x_ticks)
+    ax.set_yticklabels([])  # Hide the labels but keep the tick positions for grid
+    # Remove title as requested
+
+    return fig
+
+
 def show_figures():
     """Generate and display both visualization figures without saving"""
 
@@ -248,9 +357,12 @@ def show_figures():
     # Create and display 2D side view comparison
     fig_2d = create_side_view_comparison()
 
+    # Create and display 2D side view comparison in greyscale
+    fig_2d_grey = create_side_view_comparison_greyscale()
+
     print("✓ Figures generated and ready to display")
 
-    return fig_3d, fig_2d
+    return fig_3d, fig_2d, fig_2d_grey
 
 
 def visualize_single_tank(phi: float, radius: float = 1.0, color: str = None,
@@ -357,13 +469,51 @@ def main():
     print()
 
     # Generate and display figures
-    fig_3d, fig_2d = show_figures()
+    fig_3d, fig_2d, fig_2d_grey = show_figures()
+
+    # Save the greyscale version
+    fig_2d_grey.savefig("phi_geom_greyscale.png", dpi=300, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+    print("✓ Greyscale figure saved to: phi_geom_greyscale.png")
 
     # Display the plots
     plt.show()
 
-    return fig_3d, fig_2d
+    return fig_3d, fig_2d, fig_2d_grey
+
+
+def generate_greyscale_phi_plot(save_path=None):
+    """Generate and save the greyscale 2D side view comparison"""
+
+    print("Generating greyscale tank phi ratio visualization...")
+
+    # Create greyscale 2D side view comparison
+    fig_grey = create_side_view_comparison_greyscale()
+
+    # Save the plot if path provided
+    if save_path:
+        fig_grey.savefig(save_path, dpi=300, bbox_inches='tight',
+                        facecolor='white', edgecolor='none')
+        print(f"✓ Greyscale figure saved to: {save_path}")
+    else:
+        # Default save location
+        default_path = "phi_geom_greyscale.png"
+        fig_grey.savefig(default_path, dpi=300, bbox_inches='tight',
+                        facecolor='white', edgecolor='none')
+        print(f"✓ Greyscale figure saved to: {default_path}")
+
+    print("✓ Greyscale figure generated and ready to display")
+
+    # Display the plot
+    plt.show()
+
+    return fig_grey
 
 
 if __name__ == "__main__":
-    main()
+    # Check if user wants only greyscale plot
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--greyscale':
+        generate_greyscale_phi_plot()
+    else:
+        main()

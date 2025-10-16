@@ -255,8 +255,8 @@ class DelftColourPlotter:
                 y_range = ax1.get_ylim()[1] - ax1.get_ylim()[0]
                 y_top = ax1.get_ylim()[1]
 
-                # Position in top 25% of plot, alternating height for multiple events
-                y_pos = y_top - y_range * (0.25 + i * 0.08)  # Start from 12% down, step by 8%
+                # Position in top 50% of plot, alternating height for multiple events
+                y_pos = y_top - y_range * (0.50 + i * 0.08)  # Start from 50% down, step by 8%
 
                 # Use larger offsets and position further from event line to avoid data
                 x_offset = 30 if i % 2 == 0 else -30  # Larger horizontal offset
@@ -324,7 +324,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Tank evolution plot completed")
@@ -399,7 +399,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Mass evolution plot completed")
@@ -523,7 +523,7 @@ class DelftColourPlotter:
         # Auto-compute temperature range based on actual data if not provided
         if temperature_range is None:
             temp_min = min(tank_data['temperatures']) - 4
-            temp_max = max(tank_data['temperatures']) + 7
+            temp_max = max(tank_data['temperatures']) + 15
             temperature_range = (temp_min, temp_max)
 
         # Create figure
@@ -537,7 +537,7 @@ class DelftColourPlotter:
         # Plot tank path (no markers, just lines)
         tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
                             '-', color=primary_color, linewidth=2,
-                            label=f"Tank {tank_index + 1} path")
+                            label=f"Thermodynamic path")
 
         # Add configurable direction arrow
         if len(tank_data['temperatures']) > 10:
@@ -576,13 +576,13 @@ class DelftColourPlotter:
                         # Circle marker for valve opening - white fill with thin black outline
                         ax.plot(temp, density, 'o', markerfacecolor='white', markeredgecolor='black',
                                markersize=valve_marker_size, markeredgewidth=1.0,
-                               label='Valve Opening' if not any('Valve Opening' in line.get_label()
+                               label='Valve opening' if not any('Valve opening' in line.get_label()
                                                                for line in ax.get_lines()) else "")
                     elif event_type == 'close':
                         # Cross marker for valve closing - white fill with thin black outline
                         ax.plot(temp, density, 'x', markerfacecolor='white', markeredgecolor='black',
                                markersize=valve_marker_size * 1.2, markeredgewidth=1.0,
-                               label='Valve Closing' if not any('Valve Closing' in line.get_label()
+                               label='Valve closing' if not any('Valve closing' in line.get_label()
                                                                for line in ax.get_lines()) else "")
 
         # Optional: Add saturation line
@@ -706,7 +706,7 @@ class DelftColourPlotter:
                                       arrowprops=dict(arrowstyle='->', color='black', lw=1, alpha=0.8),
                                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
                                                edgecolor='black', alpha=0.95),
-                                      fontsize=plot_style.LEGEND_FONT_SIZE, ha='right', va='center')
+                                      fontsize=9, ha='right', va='center')
 
             except Exception as e:
                 print(f"   ⚠️  Could not add isobars: {e}")
@@ -729,7 +729,7 @@ class DelftColourPlotter:
         # Show legend only if there are multiple labeled lines (tank data + reference lines)
         if len(labeled_lines) > 1:
             # Use 'upper left' to avoid overlap with isobar callouts on the right side
-            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='center left', frameon=True, fancybox=True,
+            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='upper right', frameon=True, fancybox=True,
                               shadow=True, framealpha=0.9, edgecolor='black')
             # Additional styling for 3D effect
             legend.get_frame().set_facecolor('white')
@@ -752,7 +752,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Density-temperature plot completed")
@@ -792,10 +792,29 @@ class DelftColourPlotter:
         # Get flow data for the specific tank using the exact same pattern as working multi_tank_analysis
         tank_data = results._extract_tank_arrays(tank_index)
 
-        # Use the exact same approach as the working multi_tank_analysis:
-        # Combine flows and make outflows negative for display (data is already in g/s)
-        inflow_total = tank_data['inflow_rates'] + tank_data['coupling_inflow_rates']
-        outflow_total = -(tank_data['outflow_rates'] + tank_data['coupling_outflow_rates'])  # Make negative
+        # Get flow data - coupling flows are incorporated into inflow/outflow
+        # For multi-tank systems:
+        # - Tank 1 (source): coupling appears as additional outflow
+        # - Tank 2 (target): coupling appears as additional inflow
+        # This correctly represents the mass transfer between tanks
+
+        coupling_inflow_rates = tank_data['coupling_inflow_rates']
+        coupling_outflow_rates = tank_data['coupling_outflow_rates']
+
+        # Total inflow = mission inflow + coupling inflow
+        total_inflow = []
+        for i in range(len(tank_data['inflow_rates'])):
+            mission_inflow = tank_data['inflow_rates'][i] if i < len(tank_data['inflow_rates']) else 0
+            coupling_inflow = coupling_inflow_rates[i] if i < len(coupling_inflow_rates) else 0
+            total_inflow.append(mission_inflow + coupling_inflow)
+
+        # Total outflow = mission outflow + coupling outflow (make negative for display)
+        total_outflow = []
+        for i in range(len(tank_data['outflow_rates'])):
+            mission_outflow = tank_data['outflow_rates'][i] if i < len(tank_data['outflow_rates']) else 0
+            coupling_outflow = coupling_outflow_rates[i] if i < len(coupling_outflow_rates) else 0
+            total_outflow.append(-(mission_outflow + coupling_outflow))  # Negative for display
+
         vent = -tank_data['vent_rates']  # Make negative
 
         # Use consistent color palette approach to match other plots
@@ -806,12 +825,12 @@ class DelftColourPlotter:
         # Plot with different line styles for greyscale distinction
         inflow_linestyle = '-'
         outflow_linestyle = '--' if self.use_greyscale else '-'
-        vent_linestyle = '-.' if self.use_greyscale else '--'
+        vent_linestyle = '-.' if self.use_greyscale else '--'  # dash-dot pattern
 
-        # Plot all flows with no markers, using line styles for distinction
-        ax.plot(times_hours, inflow_total, color=inflow_color, linewidth=2,
+        # Plot only inflow, outflow, and vent (coupling flows are incorporated into inflow/outflow)
+        ax.plot(times_hours, total_inflow, color=inflow_color, linewidth=2,
                 linestyle=inflow_linestyle, label='Inflow')
-        ax.plot(times_hours, outflow_total, color=outflow_color, linewidth=2,
+        ax.plot(times_hours, total_outflow, color=outflow_color, linewidth=2,
                 linestyle=outflow_linestyle, label='Outflow')
         ax.plot(times_hours, vent, color=vent_color, linewidth=2,
                 linestyle=vent_linestyle, label='Vent')
@@ -835,7 +854,7 @@ class DelftColourPlotter:
         plt.tight_layout()
 
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Mass flow plot completed")
@@ -952,7 +971,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Heat exchanger requirements plot completed")
@@ -1176,7 +1195,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Sequential tank evolution plot completed")
@@ -1278,7 +1297,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Sequential density-temperature plot completed")
@@ -1383,10 +1402,457 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Sequential mass flows plot completed")
+        return fig
+
+    def plot_pressure_requirements(self,
+                                 orchestrator,
+                                 tank_index: int = 1,  # LH2 tank is typically tank 2 (index 1)
+                                 save_path: Optional[str] = None) -> plt.Figure:
+        """
+        Plot pressure requirements evolution for mission-adaptive pressure control.
+
+        Shows the dynamic pressure requirements, activation thresholds, and actual tank pressure
+        for mission-adaptive coupling systems.
+
+        Args:
+            orchestrator: System orchestrator containing coupling valve diagnostic data
+            tank_index: Index of tank to analyze (default 1 for LH2 tank)
+            save_path: Optional path to save the plot
+
+        Returns:
+            matplotlib Figure object
+        """
+        print(f"🔵 Plotting pressure requirements for Tank {tank_index + 1}...")
+
+        # Check if we have a mission-adaptive coupling valve
+        if not hasattr(orchestrator.tank_system, 'coupling_valves'):
+            print("   ⚠️ No coupling valves found")
+            return self._create_empty_plot("No coupling valves found")
+
+        # Find the mission-adaptive valve
+        adaptive_valve = None
+        for valve in orchestrator.tank_system.coupling_valves:
+            if hasattr(valve, 'get_diagnostic_data'):
+                adaptive_valve = valve
+                break
+
+        if adaptive_valve is None:
+            print("   ⚠️ No mission-adaptive valve found")
+            return self._create_empty_plot("No mission-adaptive valve found")
+
+        # Get diagnostic data from the valve
+        try:
+            diag_data = adaptive_valve.get_diagnostic_data()
+        except AttributeError as e:
+            print(f"   ⚠️ Cannot get diagnostic data: {e}")
+            # Try to access data directly
+            if hasattr(adaptive_valve, 'time_history') and hasattr(adaptive_valve, 'required_pressure_history'):
+                diag_data = {
+                    'time_history': adaptive_valve.time_history,
+                    'required_pressure_history': adaptive_valve.required_pressure_history,
+                    'activation_threshold_history': getattr(adaptive_valve, 'activation_threshold_history', [])
+                }
+            else:
+                print("   ⚠️ No pressure history data available")
+                return self._create_empty_plot("No pressure history data available")
+
+        if not diag_data['time_history']:
+            print("   ⚠️ No pressure history data available")
+            return self._create_empty_plot("No pressure history data available")
+
+        # Convert to numpy arrays for plotting
+        times = np.array(diag_data['time_history']) / 3600.0  # Convert to hours
+        required_pressures = np.array(diag_data['required_pressure_history']) / 1e5  # Convert to bar
+        activation_thresholds = np.array(diag_data.get('activation_threshold_history', [])) / 1e5  # Convert to bar
+
+        # Get actual tank pressure from results for comparison
+        combined_data = orchestrator.results.get_combined_data()
+        tank_pressures = combined_data['pressures'][tank_index]  # Already in bar
+        result_times = combined_data['times'] / 3600.0  # Result times in hours
+
+        # Create the plot with proper styling
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # Use greyscale colors if specified
+        if self.use_greyscale:
+            required_color = 'lightgrey'                # Light grey dashed
+            activation_color = '#555555'                # Darker grey dashed
+            actual_color = 'black'                      # Black solid
+            min_color = 'lightgrey'                     # Light grey dotted
+
+            required_style = '--'                       # Light grey dashed
+            activation_style = '--'                     # Darker grey dashed
+            actual_style = '-'                          # Black solid
+            min_style = ':'                             # Light grey dotted
+        else:
+            required_color = self.color_palette[0]      # Delft blue
+            activation_color = self.color_palette[1]    # Delft red
+            actual_color = self.color_palette[2]        # Delft green
+            min_color = self.color_palette[3]           # Delft orange
+
+            required_style = '-'
+            activation_style = '--'
+            actual_style = '-'
+            min_style = ':'
+
+        # Plot pressure curves - avoid connecting discontinuous segments
+        # Split data where there are gaps to prevent straight line connections
+
+        def plot_with_gaps(ax, x_data, y_data, gap_threshold_hours=0.002, **plot_kwargs):
+            """Plot data with gaps to avoid connecting discontinuous segments."""
+            if len(x_data) <= 1:
+                return ax.plot(x_data, y_data, **plot_kwargs)
+
+            # Convert to numpy arrays for easier handling
+            x_data = np.array(x_data)
+            y_data = np.array(y_data)
+
+            # Find gaps in time data AND pressure jumps
+            segments = []
+            current_segment_x = [x_data[0]]
+            current_segment_y = [y_data[0]]
+
+            for i in range(1, len(x_data)):
+                time_gap = x_data[i] - x_data[i-1]
+                pressure_jump = abs(y_data[i] - y_data[i-1])
+
+                # Calculate adaptive pressure jump threshold based on data range
+                pressure_range = np.ptp(y_data) if len(y_data) > 1 else 1.0
+                pressure_threshold = max(0.2, pressure_range * 0.05)  # At least 0.2 bar or 5% of range
+
+                # End segment if there's a significant time gap OR pressure jump
+                if time_gap > gap_threshold_hours or pressure_jump > pressure_threshold:
+                    # Only save segment if it has multiple points
+                    if len(current_segment_x) > 1:
+                        segments.append((current_segment_x.copy(), current_segment_y.copy()))
+                    # Start new segment
+                    current_segment_x = [x_data[i]]
+                    current_segment_y = [y_data[i]]
+                else:
+                    # Continue current segment
+                    current_segment_x.append(x_data[i])
+                    current_segment_y.append(y_data[i])
+
+            # Add final segment if it has multiple points
+            if len(current_segment_x) > 1:
+                segments.append((current_segment_x, current_segment_y))
+
+            # Plot each segment separately
+            lines = []
+            for i, (seg_x, seg_y) in enumerate(segments):
+                if len(seg_x) > 1:  # Only plot segments with multiple points
+                    # Only show label on first segment
+                    label = plot_kwargs.get('label') if i == 0 else None
+                    plot_kwargs_copy = plot_kwargs.copy()
+                    plot_kwargs_copy['label'] = label
+                    line = ax.plot(seg_x, seg_y, **plot_kwargs_copy)
+                    lines.extend(line)
+
+            return lines
+
+        # Plot pressure requirements - identify continuous segments to avoid connecting discontinuous data
+        # The valve switches between different operational states, creating disconnected segments
+
+        def plot_continuous_segments(ax, times, pressures, min_threshold=2.1, **plot_kwargs):
+            """Plot only continuous segments where valve is active, avoiding connecting ends."""
+            if len(times) <= 1 or len(pressures) <= 1:
+                return
+
+            # Find where valve is active (pressure above minimum threshold)
+            active_mask = pressures > min_threshold
+
+            if not np.any(active_mask):
+                return
+
+            # Find continuous segments by detecting breaks in the active mask
+            diff_mask = np.diff(active_mask.astype(int))
+            start_indices = np.where(diff_mask == 1)[0] + 1  # Start of active segments
+            end_indices = np.where(diff_mask == -1)[0] + 1   # End of active segments
+
+            # Handle edge cases
+            if active_mask[0]:  # Starts active
+                start_indices = np.concatenate(([0], start_indices))
+            if active_mask[-1]:  # Ends active
+                end_indices = np.concatenate((end_indices, [len(active_mask)]))
+
+            # Plot each continuous segment separately
+            for i, (start_idx, end_idx) in enumerate(zip(start_indices, end_indices)):
+                if end_idx > start_idx + 1:  # Need at least 2 points to draw a line
+                    segment_times = times[start_idx:end_idx]
+                    segment_pressures = pressures[start_idx:end_idx]
+
+                    # Only show label on first segment
+                    label = plot_kwargs.get('label') if i == 0 else None
+                    plot_kwargs_copy = plot_kwargs.copy()
+                    plot_kwargs_copy['label'] = label
+                    ax.plot(segment_times, segment_pressures, **plot_kwargs_copy)
+
+        # Debug: Check for time ordering issues
+        if len(times) > 1:
+            time_diffs = np.diff(times)
+            negative_diffs = np.sum(time_diffs < 0)
+            if negative_diffs > 0:
+                print(f"   ⚠️ Found {negative_diffs} negative time differences in pressure data")
+
+        # Use scatter plots to avoid line connection artifacts from non-monotonic data
+        # This prevents the dashed lines from appearing solid due to overlapping segments
+
+        # Plot minimum required pressure as scatter points
+        if len(required_pressures) > 0:
+            # Filter out points at minimum threshold to show only active valve states
+            active_mask = required_pressures > 2.1
+            if np.any(active_mask):
+                ax.scatter(times[active_mask], required_pressures[active_mask],
+                          color=required_color, marker='o', s=8, alpha=0.7,
+                          label='Minimum required pressure to supply mission')
+
+        # Plot activation thresholds as scatter points
+        if len(activation_thresholds) > 0:
+            # Filter out points at minimum threshold to show only active valve states
+            active_mask = activation_thresholds > 2.1
+            if np.any(active_mask):
+                ax.scatter(times[active_mask], activation_thresholds[active_mask],
+                          color=activation_color, marker='s', s=8, alpha=0.7,
+                          label='Activation threshold (required + margin)')
+
+        # Plot actual tank pressure (continuous data, no filtering needed)
+        ax.plot(result_times, tank_pressures,
+               color=actual_color, linestyle=actual_style, linewidth=2.0, alpha=0.8,
+               label=f'Actual tank {tank_index + 1} pressure')
+
+        # Add reference lines
+        ax.axhline(y=2.0, color=min_color, linestyle=min_style, alpha=0.7,
+                  label='Absolute minimum tank pressure')
+
+        # Formatting with consistent style
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Pressure [bar]')
+        ax.grid(True, alpha=0.3)
+
+        # Add legend with 3D shadow effect (same styling as other plots)
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True,
+                          fancybox=True, shadow=True, framealpha=0.9, edgecolor='black')
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
+
+        # Set reasonable y-limits
+        if len(required_pressures) > 0 and len(tank_pressures) > 0:
+            y_min = min(min(required_pressures), min(tank_pressures), 1.5) - 0.5
+            if len(activation_thresholds) > 0:
+                y_max = max(max(activation_thresholds), max(tank_pressures)) + 0.5
+            else:
+                y_max = max(max(required_pressures), max(tank_pressures)) + 0.5
+            ax.set_ylim(y_min, y_max)
+
+        plt.tight_layout()
+
+        # Save if requested
+        if save_path:
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {save_path}")
+
+        print(f"   ✅ Pressure requirements plot completed")
+        return fig
+
+    def _create_empty_plot(self, message: str) -> plt.Figure:
+        """Create an empty plot with a message."""
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.text(0.5, 0.5, message, transform=ax.transAxes, ha='center', va='center',
+               fontsize=plot_style.LEGEND_FONT_SIZE)
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Pressure [bar]')
+        return fig
+
+    def plot_atr72_mass_flow(self,
+                            save_path: Optional[str] = None) -> plt.Figure:
+        """
+        Plot ATR72 mission mass flow vs time in greyscale with mission segment labels.
+
+        Shows positive fuel flow with labeled segments based on the mission profile.
+        No legend since there's only one curve. Matches reference image styling.
+
+        Args:
+            save_path: Optional path to save the plot
+
+        Returns:
+            matplotlib Figure object
+        """
+        print("🔵 Plotting ATR72 mission mass flow...")
+
+        # Import mission here to avoid circular imports
+        from src.mission.mission import Mission
+
+        # Get ATR72 mission
+        atr72_mission = Mission.atr72()
+
+        # Extract time and flow data
+        times = []
+        flows = []
+        segment_boundaries = []
+        segment_labels = []
+
+        current_time = 0.0
+
+        # Create meaningful labels from the numerical fuel_flow_keys
+        label_mapping = {
+            'one': 'Pre-taxi',
+            'two': 'Taxi Out',
+            'three': 'Take Off',
+            'four': 'Cruise',
+            'five': 'Initial Descent',
+            'six': 'Approach',
+            'seven': 'Landing',
+            'eight': 'Taxi In',
+            'nine': 'Hold',
+            'ten': 'Final Approach',
+            'eleven': 'Ground'
+        }
+
+        for i, section in enumerate(atr72_mission.sections):
+            # Get section duration in hours
+            duration_hours = section.duration / 3600.0
+
+            # Get fuel flow - make positive since we want to show consumption as positive
+            if section.fuel_flows:
+                fuel_flow = section.fuel_flows[0]
+                if isinstance(fuel_flow.mass_flow, list) and len(fuel_flow.mass_flow) >= 2:
+                    # Linear interpolation for variable flow segments
+                    start_rate = abs(fuel_flow.mass_flow[0])
+                    end_rate = abs(fuel_flow.mass_flow[-1])
+
+                    # Create interpolated points for smooth visualization
+                    num_points = max(10, int(duration_hours * 3600 / 60))  # At least 10 points or 1 per minute
+                    time_points = np.linspace(0, duration_hours, num_points)
+
+                    for j, dt in enumerate(time_points):
+                        # Linear interpolation: start + (end - start) * (t / duration)
+                        if duration_hours > 0:
+                            interpolation_factor = dt / duration_hours
+                        else:
+                            interpolation_factor = 0
+                        flow_rate = start_rate + (end_rate - start_rate) * interpolation_factor
+                        flow_rate_gs = flow_rate * 1000.0  # Convert to g/s
+
+                        times.append(current_time + dt)
+                        flows.append(flow_rate_gs)
+
+                elif isinstance(fuel_flow.mass_flow, list) and len(fuel_flow.mass_flow) == 1:
+                    # Single value in list - treat as constant
+                    flow_rate = abs(fuel_flow.mass_flow[0])
+                    flow_rate_gs = flow_rate * 1000.0
+
+                    # Add start and end points for step function
+                    times.append(current_time)
+                    flows.append(flow_rate_gs)
+                    times.append(current_time + duration_hours)
+                    flows.append(flow_rate_gs)
+                else:
+                    # Constant flow rate
+                    flow_rate = abs(fuel_flow.mass_flow)
+                    flow_rate_gs = flow_rate * 1000.0
+
+                    # Add start and end points for step function
+                    times.append(current_time)
+                    flows.append(flow_rate_gs)
+                    times.append(current_time + duration_hours)
+                    flows.append(flow_rate_gs)
+            else:
+                # No fuel flow - add zero flow points
+                times.append(current_time)
+                flows.append(0.0)
+                times.append(current_time + duration_hours)
+                flows.append(0.0)
+
+            # Calculate end time for this section
+            end_time = current_time + duration_hours
+
+            # Store segment info with meaningful labels
+            segment_key = section.fuel_flow_key or f'segment_{i+1}'
+            meaningful_label = label_mapping.get(segment_key, segment_key.title())
+
+            # For variable flow segments, get representative flow for labeling
+            if section.fuel_flows:
+                fuel_flow = section.fuel_flows[0]
+                if isinstance(fuel_flow.mass_flow, list) and len(fuel_flow.mass_flow) >= 2:
+                    # Use average flow for labeling
+                    start_rate = abs(fuel_flow.mass_flow[0])
+                    end_rate = abs(fuel_flow.mass_flow[-1])
+                    representative_flow_gs = ((start_rate + end_rate) / 2) * 1000.0
+                else:
+                    representative_flow_gs = abs(fuel_flow.mass_flow) * 1000.0 if isinstance(fuel_flow.mass_flow, (int, float)) else abs(fuel_flow.mass_flow[0]) * 1000.0
+            else:
+                representative_flow_gs = 0.0
+
+            # Only add label if segment is significant (> 0.005 hours or has flow > 1 g/s)
+            if duration_hours > 0.005 or representative_flow_gs > 1.0:
+                segment_boundaries.append(current_time)
+                segment_labels.append({
+                    'name': meaningful_label,
+                    'start_time': current_time,
+                    'end_time': end_time,
+                    'mid_time': current_time + duration_hours / 2,
+                    'duration': duration_hours,
+                    'flow': representative_flow_gs
+                })
+
+            current_time = end_time
+
+        # Create figure with greyscale styling
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # Plot mass flow - single black line with clean styling
+        ax.plot(times, flows, color='black', linewidth=2.5, linestyle='-')        # Set up plot formatting to match reference image
+        ax.set_xlabel('Time [h]', fontsize=FONT_SIZE)
+        ax.set_ylabel('Mass Flow [g/s]', fontsize=FONT_SIZE)
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+
+        # Set y-limits to show data clearly
+        if flows:
+            y_max = max(flows) * 1.05  # Minimal headroom for clean appearance
+            ax.set_ylim(0, y_max)
+
+        # Set x-limits with small margins
+        if times:
+            x_max = max(times)
+            ax.set_xlim(-0.01, x_max * 1.02)
+
+        # Apply tight layout
+        plt.tight_layout()
+
+        # Save figure - either to provided path or default location
+        if save_path:
+            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {save_path}")
+        else:
+            # Save in same directory as the calling script
+            import inspect
+            import os
+
+            # Get the directory of the calling script
+            frame = inspect.currentframe()
+            try:
+                caller_frame = frame.f_back
+                while caller_frame:
+                    filename = caller_frame.f_code.co_filename
+                    if not filename.endswith('multi_tank_plotting.py'):
+                        script_dir = os.path.dirname(os.path.abspath(filename))
+                        break
+                    caller_frame = caller_frame.f_back
+                else:
+                    # Fallback to current working directory
+                    script_dir = os.getcwd()
+            finally:
+                del frame
+
+            default_path = os.path.join(script_dir, 'atr72_mass_flow.png')
+            fig.savefig(default_path, dpi=900, bbox_inches='tight', facecolor='white')
+            print(f"   💾 Saved to: {default_path}")
+
+        print("   ✅ ATR72 mass flow plot completed")
         return fig
 
 

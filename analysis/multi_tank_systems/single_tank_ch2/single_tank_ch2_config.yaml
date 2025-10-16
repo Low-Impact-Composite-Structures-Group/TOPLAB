@@ -22,18 +22,20 @@ geometry:
     minimum_pressure: 10e5               # Pa (15 bar - minimum allowable pressure)
 
 # Material specifications with NIST temperature-dependent properties
-materials:
-  liner:
-    nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-    thickness: 0.001                     # m (5mm aluminum liner)
-  composite:
-    nist_path: "carbon_epoxy_nist"                # Path to NIST materials library
-    winding_angle: 54.7                  # degrees (optimal winding angle)
-    thickness: "calculated"              # Calculated from pressure requirements
-  insulation:
-    thickness: 0.050                     # m (50mm insulation layer)
-    heat_transfer_coefficient: 50     # W/m²K (vacuum insulation)
-  safety_margin: 1.25                    # Structural design safety factor
+# Per-tank materials configuration
+tank_materials:
+  1:
+    liner:
+      nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
+      thickness: 0.001                     # m (1mm aluminum liner)
+    composite:
+      nist_path: "carbon_epoxy_nist"       # Path to NIST materials library
+      winding_angle: 54.7                  # degrees (optimal winding angle)
+      thickness: "calculated"              # Calculated from pressure requirements
+    insulation:
+      thickness: 0.050                     # m (50mm insulation layer)
+      heat_transfer_coefficient: 50        # W/m²K (vacuum insulation)
+    safety_margin: 1.25                    # Structural design safety factor
 
 # Mission profile configuration
 mission:
@@ -81,7 +83,7 @@ output:
       # Font configuration
       font:
         master_size: 16                # Master font size for axis labels, titles, etc.
-        legend_size: 10                # Font size for legends and isobar callouts
+        legend_size: 16                # Font size for legends and isobar callouts
         font_name: "Cambria"           # Font family name
 
     tank_states:
@@ -96,7 +98,7 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [800, 700, 500, 300,  100, 15]  # Custom isobars to show [bar] - adjusted for CH2
+      isobar_pressures: [800, 700, 500, 300,  100, 20]  # Custom isobars to show [bar] - adjusted for CH2
       show_reference_pressures: false  # Show venting and minimum pressure isobars highlighted
       include_saturation_line: true   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines

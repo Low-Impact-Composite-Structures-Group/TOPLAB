@@ -824,6 +824,82 @@ class TankSystem:
 
         return coupling_flows
 
+    def _calculate_coupling_flows_stateless(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
+        """Calculate coupling flows using stateless pressure evaluation for post-processing."""
+        coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
+
+        for valve in self.coupling_valves:
+            # Only handle PressureTriggeredValve for now
+            if not hasattr(valve, 'activation_threshold'):
+                continue
+
+            source_state = multi_state.tank_states[valve.source_tank]
+            target_state = multi_state.tank_states[valve.target_tank]
+
+            # Ensure pressures are computed
+            if hasattr(source_state, 'compute_pressure'):
+                source_state.compute_pressure()
+            if hasattr(target_state, 'compute_pressure'):
+                target_state.compute_pressure()
+
+            # Check if valve should be active based on pressure conditions
+            # For post-processing, we use a simplified logic without hysteresis state
+            target_pressure = target_state.pressure
+            source_pressure = source_state.pressure
+
+            # Debug pressure conditions
+            if t < 100:  # Debug early times
+                print(f"    Valve T{valve.source_tank}→T{valve.target_tank}: P_target={target_pressure/1e5:.1f}bar, P_source={source_pressure/1e5:.1f}bar")
+                print(f"    Activation_threshold={valve.activation_threshold/1e5:.1f}bar, Pressure_diff={source_pressure-target_pressure:.0f}Pa")
+
+            # Valve should be active if target pressure is below activation threshold
+            # and there's sufficient pressure difference for flow
+            should_be_active = (
+                target_pressure <= valve.activation_threshold and
+                source_pressure > target_pressure + 1e5  # At least 1 bar pressure difference
+            )
+
+            if should_be_active:
+                # Calculate flow using the valve's flow physics
+                try:
+                    # Create mock tank_states list for compatibility
+                    tank_states = [None] * max(valve.source_tank + 1, valve.target_tank + 1)
+                    tank_states[valve.source_tank] = source_state
+                    tank_states[valve.target_tank] = target_state
+
+                    # Temporarily set valve active for flow calculation
+                    original_state = valve.is_active
+                    valve.is_active = True
+
+                    flow_rate = valve.calculate_flow_rate(t, tank_states)
+
+                    # Restore original state
+                    valve.is_active = original_state
+
+                    if flow_rate > 0:
+                        coupling_flows[valve.source_tank] -= flow_rate
+                        coupling_flows[valve.target_tank] += flow_rate
+
+                except Exception as e:
+                    # Fall back to simple orifice flow calculation
+                    if source_pressure > target_pressure:
+                        # Simple choked flow approximation
+                        P_ratio = target_pressure / source_pressure
+                        if P_ratio < 0.528:  # Choked flow
+                            flow_rate = 0.6 * valve.effective_area * source_pressure * math.sqrt(0.7 / (287 * source_state.temperature))
+                        else:  # Subsonic flow
+                            flow_rate = 0.6 * valve.effective_area * math.sqrt(2 * source_state.density * (source_pressure - target_pressure))
+
+                        # Apply reasonable limits
+                        flow_rate = min(flow_rate, valve.max_flow_rate)
+                        flow_rate = min(flow_rate, 0.1 * source_state.fuel_mass)  # Don't drain tank too fast
+
+                        if flow_rate > 1e-6:  # Only apply significant flows
+                            coupling_flows[valve.source_tank] -= flow_rate
+                            coupling_flows[valve.target_tank] += flow_rate
+
+        return coupling_flows
+
     def _get_outflow_rate(self, time: float, tank_index: int) -> float:
         """
         Get outflow (discharge) rate for specific tank at given time based on mission profile.
@@ -1129,19 +1205,18 @@ class TankSystem:
                     'coupling_outflow_rate': 0.0
                 })
 
+                # Set basic flow attributes on tank state (coupling flows set later)
+                tank_state.inflow_rate = inflow_rate / 1000.0  # Convert g/s to kg/s for storage
+                tank_state.outflow_rate = outflow_rate / 1000.0
+                tank_state.vent_rate = vent_rate / 1000.0
+                tank_state.coupling_inflow_rate = 0.0
+                tank_state.coupling_outflow_rate = 0.0
+
                 tank_states.append(tank_state)
 
             # Calculate coupling flows now that all tank states are available
             if len(tank_states) > 1:  # Multi-tank system
                 temp_multi_state = MultiTankState(tank_states=tank_states)
-                coupling_flows = self._calculate_coupling_flows(temp_multi_state, current_time)
-
-                # Use the actual coupling rule flows instead of hardcoded approximations
-                # This ensures consistency with the physics used during integration
-
-                # WORKAROUND: For post-processing, valves lose their state between calls
-                # So we need to estimate coupling flows based on pressure conditions
-                # rather than relying on valve state machines
                 coupling_flows = self._estimate_coupling_flows_for_postprocessing(temp_multi_state, current_time)
 
                 # Debug: Print coupling flows at this timestep
@@ -1153,12 +1228,20 @@ class TankSystem:
                     if i < 5 or i % 200 == 0:
                         print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
 
-                # Update flow data with coupling flows
+                # Update flow data with coupling flows AND set tank state attributes
                 for tank_idx in range(len(tank_states)):
                     if tank_idx in coupling_flows:
                         net_coupling_flow = coupling_flows[tank_idx]
-                        flow_data[tank_idx]['coupling_inflow_rate'] = max(0.0, net_coupling_flow)   # Positive = receiving
-                        flow_data[tank_idx]['coupling_outflow_rate'] = max(0.0, -net_coupling_flow) # Negative = sending
+                        coupling_inflow = max(0.0, net_coupling_flow)   # Positive = receiving
+                        coupling_outflow = max(0.0, -net_coupling_flow) # Negative = sending
+
+                        # Update flow_data
+                        flow_data[tank_idx]['coupling_inflow_rate'] = coupling_inflow
+                        flow_data[tank_idx]['coupling_outflow_rate'] = coupling_outflow
+
+                        # Update tank state attributes (convert to kg/s for consistency)
+                        tank_states[tank_idx].coupling_inflow_rate = coupling_inflow
+                        tank_states[tank_idx].coupling_outflow_rate = coupling_outflow
 
             # Create MultiTankState and manually set flow data
             multi_tank_state = MultiTankState(tank_states=tank_states)

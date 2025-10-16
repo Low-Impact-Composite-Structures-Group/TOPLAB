@@ -19,7 +19,7 @@ geometry:
   # Tank 1: CH2 - High pressure compressed hydrogen (user-defined sizing)
   1:
     phi: 3.0                             # Length/radius ratio (L/R)
-    radius: 1.4                    # m (increased from 0.6m for extended mission capability)
+    radius: 0.8                   # m (increased from 0.6m for extended mission capability)
     initial_pressure: 100000000           # Pa (700 bar - high pressure gaseous storage)
     initial_temperature: 288.15           # K (room temperature - ensure proper initialization)
     initial_density: 60.0                # kg/m³ (calculated for 700 bar at 288K)
@@ -29,10 +29,10 @@ geometry:
   # Tank 2: LH2 - Moderate pressure requiring CH2 assistance during high flow periods
   2:
     phi: 3.0                             # Length/radius ratio (L/R)
-    initial_pressure: 1500000             # Pa (8 bar - requires pressurization during high flow)
+    initial_pressure: 1000000             # Pa (8 bar - requires pressurization during high flow)
     initial_temperature: 23.5            # K (saturated liquid at 8 bar)
     initial_density: 68.0                # kg/m³ (liquid hydrogen density at 8 bar)
-    venting_pressure: 1900000            # Pa (15 bar - venting pressure)
+    venting_pressure: 1500000            # Pa (15 bar - venting pressure)
     minimum_pressure: 200000             # Pa (3 bar - minimum to avoid excessive two-phase)
     mission_based_sizing: true           # Size based on ATR72 mission requirements
 
@@ -99,8 +99,8 @@ flow_physics:
 
   # Choked flow parameters
   choked_flow:
-    enable_choked_flow: false            # Disable choked flow calculations for performance
-    critical_pressure_ratio_override: 0.528  # Fixed value to avoid calculations
+    enable_choked_flow: true            # Disable choked flow calculations for performance
+    # critical_pressure_ratio_override: 0.528  # Fixed value to avoid calculations
     sonic_velocity_factor: 1.0           # Multiplier for CoolProp sonic velocity
     choked_flow_pressure_factor: 2.0     # Pressure increase factor for choked conditions
     velocity_choked_fraction: 0.5        # Fraction of sonic velocity for choked flow detection
@@ -124,7 +124,7 @@ flow_physics:
 
   # Safety and limiting parameters
   safety_limits:
-    max_mass_transfer_fraction: 0.1      # Maximum fraction of tank mass per timestep
+    # max_mass_transfer_fraction: 0.1      # Maximum fraction of tank mass per timestep
     minimum_pressure_pa: 1000.0          # Pa - minimum absolute pressure for flow
     maximum_velocity_ms: 2000.0          # m/s - maximum allowable flow velocity
 
@@ -138,16 +138,12 @@ flow_physics:
 coupling_rules:
   - coupling_id: "ch2_lh2_simple_mission_adaptive"
     coupling_type: "mission_adaptive_pressurization"
-    description: "Time-based coupling: CH2 flow rate adjusted every 10s based on LH2 pressure requirements for mission flow through 5mm×1m pipe with 30% margin"
+    description: "PID-controlled variable flow coupling: Continuous CH2 flow modulation based on LH2 pressure requirements for mission discharge"
     participants:
       source: 1                          # CH2 tank (pressurization gas source)
       target: 2                          # LH2 tank (mission fuel tank)
 
-    # Mission flow profile (ATR72 - imported from Mission.atr72())
-    mission_parameters:
-      mission_profile:
-        time_s: [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700, 3000, 3300, 3600]  # Sample times [s]
-        flow_rate_kg_s: [0.0, 0.005, 0.015, 0.025, 0.035, 0.045, 0.055, 0.065, 0.075, 0.085, 0.095, 0.085, 0.0]  # Sample ATR72-like profile
+    # Mission profile loaded from system (ATR72)
 
     # Simple discharge piping - your specifications
     discharge_piping:
@@ -155,38 +151,31 @@ coupling_rules:
       length_m: 1.0                      # 1m pipe length (as requested)
       roughness_m: 1.5e-6                # Standard stainless steel roughness
       loss_coefficient: 1.0              # Minimal minor losses
-      choked_flow_enabled: false         # Disable for performance
+      choked_flow_enabled: true         # Disable for performance
 
-    # Enhanced control - prevent pressure dips and iHEX activation
+    # PID-controlled variable flow pressurization
     control_parameters:
-      pressure_margin_bar: 1.0           # Reasonable margin: 0.5 bar above required
-      deactivation_margin_bar: 0.5       # 0.5 bar hysteresis to prevent oscillation
-      max_pressurization_rate_kg_s: 0.08 # 80 g/s max flow (exceed peak mission demand)
-      min_source_pressure_bar: 15.0      # Minimum CH2 pressure (reduced from 50 bar)
-      control_interval_s: 5               # Every 5 seconds (for reference)
-      minimum_safety_pressure_bar: 3.5   # Safety floor: 0.5 bar above tank minimum
+      pressure_margin_bar: 0.5           # Reduced pressure margin for better responsiveness
+      max_pressurization_rate_kg_s: 0.08 # 80 g/s max flow rate
+      min_source_pressure_bar: 15.0      # Minimum CH2 pressure for operation
+      # minimum_safety_pressure_bar: 3.5   # Safety floor above tank minimum
 
-      # PID Controller parameters (more responsive tuning for large deficits)
-      pid_kp: 0.2                        # Proportional gain (higher for faster response)
-      pid_ki: 0.02                       # Integral gain (higher to eliminate steady-state error)
-      pid_kd: 0.05                       # Derivative gain (moderate for stability)
+      # PID Controller parameters - OPTIMIZED for better tracking
+      pid_kp: 0.8                        # Proportional gain (4x increase for better response)
+      pid_ki: 0.08                       # Integral gain (4x increase for better steady-state)
+      pid_kd: 0.1                        # Derivative gain (2x increase for better stability)
 
-    # Simple flow parameters
+    # Variable flow valve parameters
     flow_parameters:
-      max_flow_rate_kg_s: 0.11          # 110 g/s maximum (sufficient to exceed peak mission demand of 98 g/s)
-      orifice_diameter_m: 0.008         # 8mm orifice (larger to handle higher flow)
-      bidirectional: false               # Only CH2 → LH2
-
-    # Simple activation conditions
-    activation_conditions:
-      min_pressure_difference_bar: 10.0  # Minimum ΔP to activate
+      max_flow_rate_kg_s: 0.11          # 110 g/s maximum flow rate
+      orifice_diameter_m: 0.008         # 8mm orifice diameter
 
 # Solver configuration - fast and accurate
 solver:
   method: "LSODA"                         # Adaptive method good for coupling dynamics
-  rtol: 1e-3                            # Relaxed relative tolerance for performance
-  atol: 1e-6                            # Relaxed absolute tolerance for performance
-  time_step: 10.0                       # Larger time step for performance [s]
+  rtol: 1e-6                            # Relaxed relative tolerance for performance
+  atol: 1e-8                             # Relaxed absolute tolerance for performance
+  time_step: 1.0                       # Larger time step for performance [s]
   max_step: 20.0                        # Larger maximum step size [s]
   custom_config: true                   # Use custom solver precision for performance
 
@@ -211,7 +200,7 @@ output:
       # Font configuration
       font:
         master_size: 16                # Master font size for axis labels, titles, etc.
-        legend_size: 10                # Font size for legends and isobar callouts
+        legend_size: 16                # Font size for legends and isobar callouts
         font_name: "Cambria"           # Font family name
 
     # Reference lines configuration
@@ -233,6 +222,10 @@ output:
       enabled: true
       figsize: [14, 10]
       filename: "fuel_flow_profile"
+    pressure_requirements:
+      enabled: true
+      figsize: [14, 10]
+      filename: "pressure_requirements"
     density_temperature:
       enabled: true
       figsize: [12, 8]
@@ -241,7 +234,7 @@ output:
       show_reference_pressures: false
       include_saturation_line: true
       include_isobars: true
-      arrow_position: 0.05            # Position along path for direction arrow (0.0-1.0)
+      arrow_position: 0.03            # Position along path for direction arrow (0.0-1.0)
       arrow_size: 1.0                # Size multiplier for the direction arrow
     mass_flows:
       enabled: true

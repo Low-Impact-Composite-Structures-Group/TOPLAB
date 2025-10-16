@@ -202,7 +202,7 @@ output:
       # Font configuration
       font:
         master_size: 16                # Master font size for axis labels, titles, etc.
-        legend_size: 8                # Font size for legends and isobar callouts
+        legend_size: 16                # Font size for legends and isobar callouts
         font_name: "Cambria"           # Font family name
 
     # Reference lines configuration
@@ -231,19 +231,19 @@ output:
       enabled: true
       figsize: [12, 8]
       filename: "density_temperature"
-      isobar_pressures: [450, 400, 15, 5]  # Custom isobars to show [bar]
-      show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
-      include_saturation_line: true   # Show liquid/vapor saturation lines
+      isobar_pressures: [700, 500]  # Custom isobars to show [bar]
+      show_reference_pressures: false  # Show venting and minimum pressure isobars highlighted
+      include_saturation_line: false   # Show liquid/vapor saturation lines
       include_isobars: true           # Show isobar lines
-      arrow_position: 0.05            # Position along path for direction arrow (0.0-1.0)
+      arrow_position: 0.98            # Position along path for direction arrow (0.0-1.0)
       arrow_size: 1.0                # Size multiplier for the direction arrow
-      valve_marker_size: 4.0          # Size of valve opening/closing markers
+      valve_marker_size: 8.0          # Size of valve opening/closing markers
     mass_flows:
       enabled: true
       figsize: [12, 6]
       filename: "mass_flows"
       include_venting_flow: true      # Show venting flow curve (true/false)
-      include_coupling_flows: true
+      include_coupling_flows: true    # Show inter-tank coupling flows
     heat_exchanger_requirements:
       enabled: false  # Optional - enable for heat exchanger analysis
       figsize: [12, 6]

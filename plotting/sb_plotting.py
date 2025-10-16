@@ -2371,7 +2371,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         isobar_line = None
         if include_isobars:
             # Define key pressure levels in bar
-            pressure_levels = [8, 15, 25, 400, 450]
+            pressure_levels = [15, 25, 400, 450]
 
             # Create temperature points
             temps = np.linspace(temperature_range[0], temperature_range[1], 100)
@@ -2413,7 +2413,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
                                   arrowprops=dict(arrowstyle='->', color='black', lw=1, alpha=0.8),
                                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
                                            edgecolor='black', alpha=0.95),
-                                  fontsize=9, ha='right', va='center')
+                                  fontsize=10, ha='right', va='center')
 
         # Mark starting points of each scenario with X
         starting_point = None
@@ -2445,15 +2445,15 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
         if include_ref_data:
             if ref_discharge_line is not None:
                 legend_elements.append(ref_discharge_line)
-                legend_labels.append('Discharge (Ref)')
+                legend_labels.append('Discharge (ref)')
 
             if ref_refuel_line is not None:
                 legend_elements.append(ref_refuel_line)
-                legend_labels.append('Refuelling (Ref)')
+                legend_labels.append('Refuelling (ref)')
 
             if ref_dormancy_line is not None:
                 legend_elements.append(ref_dormancy_line)
-                legend_labels.append('Dormancy (Ref)')
+                legend_labels.append('Dormancy (ref)')
 
         if saturation_line is not None:
             legend_elements.append(saturation_line)
@@ -2472,7 +2472,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             legend_labels.append('Starting point')
 
         legend = ax.legend(legend_elements, legend_labels,
-                           loc='center right', title='Legend', fontsize=9, frameon=True, fancybox=True,
+                           loc='center right', fontsize=16, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
 
         # Set labels and limits
@@ -2484,6 +2484,8 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Apply tight layout
         fig.tight_layout()
+
+        fig.savefig('density_temperature_combined_bw.png', dpi=900)
 
         return fig
 
@@ -2527,13 +2529,13 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             time_hours, ihex_heat_flow = ihex_data
             ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2)
+                    label="IHEX heat flow requirement", linewidth=2)
         elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
             # Use data from simulation results
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2)
+                    label="IHEX heat flow requirement", linewidth=2)
 
         # Plot OHEX heat flow requirement
         ohex_plotted = False
@@ -2543,7 +2545,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             time_hours_ohex, ohex_heat_flow = ohex_data
             ohex_heat_flow_kw = [q / 1000 for q in ohex_heat_flow]  # Convert W to kW
             ax.plot(time_hours_ohex, ohex_heat_flow_kw, '-', color=ohex_color,
-                    label="OHEX Heat Flow Requirement", linewidth=2)
+                    label="OHEX heat flow requirement", linewidth=2)
             ohex_plotted = True
             ohex_values = ohex_heat_flow_kw
         elif 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
@@ -2551,7 +2553,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
             ax.plot(time_hours, ohex_heat_flow_kw, '-', color=ohex_color,
-                    label="OHEX Heat Flow Requirement", linewidth=2)
+                    label="OHEX heat flow requirement", linewidth=2)
             ohex_plotted = True
             ohex_values = ohex_heat_flow_kw
 
@@ -2595,7 +2597,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Add legend if we have data to plot
         if len(ax.get_lines()) > 1:  # More than just the reference line
-            ax.legend(loc='best', fontsize=9, frameon=True, fancybox=True,
+            ax.legend(loc='best', fontsize=16, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
 
         # Apply grid
@@ -2603,6 +2605,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Apply tight layout
         fig.tight_layout()
+
 
         return fig
 
@@ -2648,19 +2651,19 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
             time_hours, ihex_heat_flow = ihex_data
             ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2)
+                    label="IHEX heat flow requirement", linewidth=2)
         elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
             # Use data from simulation results
             time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
             ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
             ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
-                    label="IHEX Heat Flow Requirement", linewidth=2)
+                    label="IHEX heat flow requirement", linewidth=2)
 
         # Plot reference data if provided — no markers
         if reference_data is not None:
             ref_time_hours, ref_heat_flow_kw = reference_data
             ax.plot(ref_time_hours, ref_heat_flow_kw, '--', color=reference_color,
-                    label="IHEX Heat Flow Requirement (Ref)", linewidth=2, alpha=0.8)
+                    label="IHEX heat flow requirement (ref)", linewidth=2, alpha=0.8)
 
         # Only plot OHEX and total if not suppressed
         if not suppress_ohex_total:
@@ -2708,7 +2711,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Add legend if we have data to plot
         if len(ax.get_lines()) > 1:  # More than just the reference line
-            ax.legend(loc='best', fontsize=9, frameon=True, fancybox=True,
+            ax.legend(loc='best', fontsize=16, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
 
         # Apply grid
@@ -2716,5 +2719,7 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Apply tight layout
         fig.tight_layout()
+
+        fig.savefig('heat_exchanger_requirements_bw.png', dpi=900)
 
         return fig
