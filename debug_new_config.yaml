@@ -1,0 +1,124 @@
+analysis:
+  description: Cryocompressed hydrogen single tank validation case using orchestrated
+    framework
+  name: Single Tank CCH2 Benchmark
+  version: '1.0'
+mission:
+  ambient_temperature: 288.15
+  assigned_to_node: 1
+  profile: atr72
+  type: discharge
+network:
+  edges: []
+  nodes:
+  - description: Tank 1
+    fluid: CcH2
+    geometry:
+      mission_based_sizing: true
+      phi: 3.0
+    initial_conditions:
+      density: 80.0
+      pressure: 40000000.0
+    materials:
+      composite:
+        nist_path: carbon_epoxy_nist
+        thickness: calculated
+        winding_angle: 54.7
+      insulation:
+        heat_transfer_coefficient: 0.025
+        thickness: 0.05
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      safety_margin: 1.25
+    node_id: 1
+    operating_limits:
+      minimum_pressure: 1500000.0
+      venting_pressure: 45000000.0
+    plotting: {}
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: false
+    type: tank
+output:
+  data_format: csv
+  identifier: single_tank_cch2
+  plot_formats:
+  - png
+  - pdf
+  plots:
+    density_temperature:
+      arrow_position: 0.0
+      arrow_size: 1.0
+      enabled: true
+      figsize:
+      - 12
+      - 8
+      filename: density_temperature
+      include_isobars: true
+      include_saturation_line: true
+      isobar_pressures:
+      - 450
+      - 400
+      - 15
+      - 5
+      show_reference_pressures: true
+      valve_marker_size: 8.0
+    fuel_flow_profile:
+      enabled: true
+      figsize:
+      - 14
+      - 10
+      filename: fuel_flow_profile
+    heat_exchanger_requirements:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: heat_exchanger_requirements
+      include_ihex: true
+      include_ohex: true
+      include_total: true
+      ohex_target_pressure: 20e5
+      ohex_target_temperature: 200.0
+    mass_flows:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: mass_flows
+      include_venting_flow: true
+    reference_lines:
+      density:
+        show_stopping_density: false
+      pressure:
+        show_p_min: true
+        show_p_vent: true
+      temperature:
+        show_t_ambient: false
+    style:
+      font:
+        font_name: Cambria
+        legend_size: 16
+        master_size: 16
+      use_greyscale: true
+    tank_states:
+      enabled: true
+      event_lines:
+      - label: IHEX activation
+        time: 0.185
+      figsize:
+      - 12
+      - 10
+      filename: tank_states
+  plots_directory: output/plots
+  results_directory: output/results
+  save_data: true
+  save_plots: true
+solver:
+  atol: 1e-9
+  custom_config: false
+  max_step: 10.0
+  method: LSODA
+  rtol: 1e-6
+  time_step: 0.1

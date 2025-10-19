@@ -1,0 +1,217 @@
+analysis:
+  name: Coupled CH2-LH2 Multi-Tank System
+  description: 'Two-tank coupled system: CH2 (700 bar, 330K) pressurizes LH2 (3-15 bar, 20K) for mission discharge with mission-adaptive pressure control'
+  version: '1.0'
+stopping_criteria:
+  minimum_density: 5.0    # kg/m^3; global threshold to avoid premature LH2 stop
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: CH2
+    geometry:
+      phi: 3.0
+      radius: 0.8
+    initial_conditions:
+      pressure: 100000000
+      temperature: 288.15
+      density: 60.0
+    operating_limits:
+      minimum_pressure: 100000
+      venting_pressure: 110000000
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 50
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+  - node_id: 2
+    type: tank
+    description: Tank 2
+    fluid: LH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 1000000
+      temperature: 25.0
+      density: 68.0
+    operating_limits:
+      minimum_pressure: 200000
+      venting_pressure: 1500000
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 0.025
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+coupling_rules:
+- coupling_id: ch2_lh2_pressurization
+  coupling_type: mission_adaptive_pressurization
+  description: 'Mission-adaptive pressure control: CH2 maintains LH2 pressure at level needed for mission discharge'
+  participants:
+    source: 1  # CH2 tank
+    target: 2  # LH2 tank
+  mission_parameters:
+    mission_profile:
+      time_s: [0, 30, 64, 970, 2576, 2608, 2974, 2983, 3111, 3271, 3300, 3688]
+      flow_rate_kg_s: [0.000, 0.098, 0.098, 0.098, 0.098, 0.091, 0.087, 0.079, 0.075, 0.069, 0.015, 0.000]
+  control_parameters:
+    pressure_margin_bar: 0.5
+    max_pressurization_rate_kg_s: 0.02
+    min_source_pressure_bar: 15.0
+    activation_delay_seconds: 120.0  # Wait 2 minutes for initial transients to settle
+    pid_kp: 0.02
+    pid_ki: 0.01
+    pid_kd: 0.005
+    # Actuator dynamics (optional)
+    valve_response_time_s: 2.0        # first-order valve time constant (s)
+    max_valve_rate_per_s: 0.5         # max fractional change per second
+  flow_parameters:
+    max_flow_rate_kg_s: 0.5
+    orifice_diameter_m: 0.003
+  discharge_piping:
+    diameter_m: 0.005
+    length_m: 1.0
+    roughness_m: 1.5e-06
+    loss_coefficient: 1.0
+    choked_flow_enabled: true
+mission:
+  type: discharge
+  profile: atr72
+  ambient_temperature: 288.15
+  assigned_to_node: 2
+physics:
+  fluid_properties:
+    use_coolprop: true
+    coolprop_fluid: H2
+    backup_properties:
+      specific_gas_constant: 4124.0
+      heat_capacity_ratio: 1.4
+      kinematic_viscosity: 1e-7
+      speed_of_sound: 1000.0
+  orifice_flow:
+    discharge_coefficient: 0.6
+    flow_coefficient_units: dimensionless
+  choked_flow:
+    enable_choked_flow: true
+    sonic_velocity_factor: 1.0
+    choked_flow_pressure_factor: 2.0
+    velocity_choked_fraction: 0.5
+  pipe_flow:
+    atmospheric_pressure: 101325.0
+    reynolds_transition: 2300.0
+    friction_correlations:
+      laminar_factor: 64.0
+      turbulent_correlation: blasius
+      turbulent_factor: 0.316
+      turbulent_exponent: 0.25
+    default_roughness: 1.5e-06
+  safety_limits:
+    minimum_pressure_pa: 1000.0
+    maximum_velocity_ms: 2000.0
+  numerical:
+    pressure_tolerance_pa: 1000.0
+    flow_rate_tolerance_kg_s: 1e-5
+    property_update_frequency: 1
+solver:
+  method: LSODA
+  rtol: 1e-4
+  atol: 1e-6
+  time_step: 1.0
+  max_step: 20.0
+  custom_config: true
+output:
+  identifier: coupled_ch2_lh2_pressurization
+  save_plots: true
+  plot_formats:
+  - png
+  - pdf
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
+  plots:
+    style:
+      use_greyscale: true
+      enable_multi_tank_overlay: false
+      font:
+        master_size: 16
+        legend_size: 16
+        font_name: Cambria
+    reference_lines:
+      pressure:
+        show_p_min: true
+        show_p_vent: false
+      temperature:
+        show_t_ambient: false
+      density:
+        show_stopping_density: false
+    tank_states:
+      enabled: true
+      figsize:
+      - 12
+      - 10
+      filename: tank_states
+    fuel_flow_profile:
+      enabled: true
+      figsize:
+      - 14
+      - 10
+      filename: fuel_flow_profile
+    pressure_requirements:
+      enabled: true
+      figsize:
+      - 14
+      - 10
+      filename: pressure_requirements
+    density_temperature:
+      enabled: true
+      figsize:
+      - 12
+      - 8
+      filename: density_temperature
+      isobar_pressures:
+      - 5
+      - 15
+      - 100
+      - 400
+      show_reference_pressures: false
+      include_saturation_line: true
+      include_isobars: true
+      arrow_position: 0.03
+      arrow_size: 1.0
+    mass_flows:
+      enabled: true
+      filename: mass_flows
+      include_venting_flow: true
+      include_coupling_flows: true
+    heat_exchanger_requirements:
+      enabled: false
+      filename: heat_exchanger_requirements
+      include_ohex: true
+      include_ihex: true
+      include_total: true
+      ohex_target_temperature: 200.0
+      ohex_target_pressure: 2000000

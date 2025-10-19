@@ -1,0 +1,221 @@
+\begin{table}[H]
+\centering
+\caption{\gls{pid}-controlled mission-adaptive pressurisation configuration for the coupled \gls{ch2}--\gls{lh2} storage system.}
+\label{tab:ch2-lh2-coupling}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value / Description} \\ \midrule
+Coupling type & Mission-adaptive pressurisation \\
+Control logic & \gls{pid}-controlled variable flow valve \\
+Pressure margin [bar] & 0.5 (above minimum required) \\
+Minimum source pressure [bar] & 15.0 \\
+Maximum pressurisation flow rate [kg/s] & 0.11 \\ \midrule
+\multicolumn{2}{c}{\textbf{\gls{pid} controller parameters}} \\ \midrule
+Proportional gain, $K_p$ [-] & 0.8 \\
+Integral gain, $K_i$ [-] & 0.08 \\
+Derivative gain, $K_d$ [-] & 0.1 \\
+Deadband control [bar] & 0.05 \\ \midrule
+\multicolumn{2}{c}{\textbf{Discharge physics}} \\ \midrule
+Discharge piping diameter [mm] & 5.0 \\
+Discharge piping length [m] & 1.0 \\
+Discharge coefficient [-] & 0.6 \\
+Pipe surface roughness [m] & $1.5 \times 10^{-6}$ (stainless steel) \\
+Loss coefficient [-] & 1.0 (minimal minor losses) \\ \midrule
+\multicolumn{2}{c}{\textbf{Coupling physics configuration}} \\ \midrule
+Fluid properties & CoolProp (H$_2$) \\
+Choked flow & Enabled for demonstration \\
+Reynolds transition [-] & 2300 (laminar to turbulent) \\
+Orifice diameter [mm] & 8.0 \\
+Friction correlation [-] & Blasius \cite{blasius} \\
+Maximum velocity limit [m/s] & 2000 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{\gls{pid}-controlled mission-adaptive pressurisation configuration for the coupled \gls{ch2}--\gls{lh2} storage system (compact summary).}
+\label{tab:ch2-lh2-coupling-transposed}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Category} & \textbf{Parameter} & \textbf{Value} & \textbf{Parameter} & \textbf{Value} & \textbf{Units} \\ \midrule
+\multirow{3}{*}{\rotatebox{90}{\textbf{Control}}} 
+& Coupling type & Mission-adaptive & Control logic & \gls{pid} valve & -- \\
+& Pressure margin & 0.5 & Min. source pressure & 15.0 & bar \\
+& Max. press. flow rate & 0.11 & & & kg/s \\ \midrule
+\multirow{2}{*}{\rotatebox{90}{\textbf{\gls{pid}}}} 
+& $K_p$ & 0.8 & $K_i$ & 0.08 & -- \\
+& $K_d$ & 0.1 & Deadband & 0.05 & bar \\ \midrule
+\multirow{3}{*}{\rotatebox{90}{\textbf{Discharge}}} 
+& Pipe diameter & 5.0 & Pipe length & 1.0 & mm/m \\
+& Discharge coeff. & 0.6 & Surface roughness & $1.5 \times 10^{-6}$ & --/m \\
+& Loss coefficient & 1.0 & & & -- \\ \midrule
+\multirow{3}{*}{\rotatebox{90}{\textbf{Physics}}} 
+& Fluid properties & CoolProp (H$_2$) & Choked flow & Enabled & -- \\
+& Reynolds trans. & 2300 & Orifice diameter & 8.0 & --/mm \\
+& Max. velocity & 2000 & Friction corr. & Blasius \cite{blasius} & m/s/-- \\ \bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[H]
+\centering
+\caption{Input parameters for the coupled \gls{ch2}--\gls{lh2} system. Tank~1 serves as the high-pressure pressurisation source, and tank~2 supplies mission fuel.}
+\label{tab:ch2-lh2-tanks}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Parameter} & \textbf{Tank 1 (\gls{ch2})} & \textbf{Tank 2 (\gls{lh2})} \\ \midrule
+Storage type & \gls{ch2} & \gls{lh2} \\
+$P_{\text{init}}$ [bar] & 1000 & 10 \\
+$T_{\text{init}}$ [K] & 288.1 & 23.5 \\
+$\rho_{\text{init}}$ [kg/m$^3$] & 60.0 & 68.0 \\
+$P_{\text{vent}}$ [bar] & 1100 & 15 \\
+$P_{\text{min}}$ [bar] & 1 & 2 \\
+Tank volume [m$^3$] & 2.145 & 3.230 \\
+Tank radius [m] & 0.80 & 0.917 \\
+Wall material [-] & Carbon-epoxy & Carbon-epoxy \\
+Liner material [-] & Aluminium 6061-T6 & Aluminium 6061-T6 \\
+Liner thickness [mm] & 1.0 & 1.0 \\
+Insulation \gls{htc} [W/m$^2$K] & 50 & 0.025 \\
+Sizing method [-] & User-defined radius & Mission-based \\
+Discharge rate [kg/s] & Determined by coupling logic & ATR72 mission profile \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Input parameters for the coupled \gls{ch2}--\gls{lh2} system (side-by-side comparison).}
+\label{tab:ch2-lh2-tanks-transposed}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lccclccc@{}}
+\toprule
+\multicolumn{3}{c}{\textbf{Tank 1 (\gls{ch2}) -- Pressurisation Source}} & & \multicolumn{3}{c}{\textbf{Tank 2 (\gls{lh2}) -- Mission Fuel}} \\
+\cmidrule{1-3} \cmidrule{5-7}
+\textbf{Parameter} & \textbf{Value} & \textbf{Unit} & & \textbf{Parameter} & \textbf{Value} & \textbf{Unit} \\ \midrule
+Storage type & \gls{ch2} & -- & & Storage type & \gls{lh2} & -- \\
+$P_{\text{init}}$ & 1000 & bar & & $P_{\text{init}}$ & 10 & bar \\
+$T_{\text{init}}$ & 288.1 & K & & $T_{\text{init}}$ & 23.5 & K \\
+$\rho_{\text{init}}$ & 60.0 & kg/m$^3$ & & $\rho_{\text{init}}$ & 68.0 & kg/m$^3$ \\
+$P_{\text{vent}}$ & 1100 & bar & & $P_{\text{vent}}$ & 15 & bar \\
+$P_{\text{min}}$ & 1 & bar & & $P_{\text{min}}$ & 2 & bar \\
+Tank volume & 2.145 & m$^3$ & & Tank volume & 3.230 & m$^3$ \\
+Tank radius & 0.80 & m & & Tank radius & 0.917 & m \\
+Wall material & Carbon-epoxy & -- & & Wall material & Carbon-epoxy & -- \\
+Liner material & Aluminium 6061-T6 & -- & & Liner material & Aluminium 6061-T6 & -- \\
+Liner thickness & 1.0 & mm & & Liner thickness & 1.0 & mm \\
+Insulation \gls{htc} & 50 & W/m$^2$K & & Insulation \gls{htc} & 0.025 & W/m$^2$K \\
+Sizing method & User-defined radius & -- & & Sizing method & Mission-based & -- \\
+Discharge rate & Coupling logic & -- & & Discharge rate & ATR72 profile & -- \\ \bottomrule
+\end{tabular}%
+}
+\end{table>
+
+\begin{table}[H]
+\centering
+\caption{Coupling and valve-control configuration for the coupled \gls{ch2}-\gls{cch2} storage system.}
+\label{tab:ch2-cch2-coupling}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value / Description} \\ \midrule
+Activation pressure [bar] & 16.0 (target tank) \\
+Deactivation pressure [bar] & 30.0 (target tank) \\
+Minimum source pressure [bar] & 50.0 \\
+Maximum target pressure [bar] & 450.0 \\
+Pressure differential [bar] & 5.0 \\
+Maximum flow rate [kg/s] & 0.10 \\
+Orifice diameter [mm] & 2.0 \\
+Discharge coefficient [-] & 0.6 \\
+Flow resistance [-] & 100.0 \\
+Heat capacity ratio, $\gamma$ [-] & Computed by CoolProp \\
+Specific gas constant [J/(kg·K)] & Computed by CoolProp \\
+Speed of sound [m/s] & Computed by CoolProp \\
+Kinematic viscosity [m$^2$/s] & Computed by CoolProp \\
+Critical pressure ratio [-] & Computed by CoolProp \\
+Minimum absolute pressure for flow [bar] & 1.0 \\
+Maximum velocity limit [m/s] & 2000 \\
+Choked flow pressure factor [-] & 2.0 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Coupling and valve-control configuration for the coupled \gls{ch2}-\gls{cch2} storage system (categorized view).}
+\label{tab:ch2-cch2-coupling-transposed}
+\begin{tabular}{@{}llclc@{}}
+\toprule
+\textbf{Category} & \textbf{Parameter} & \textbf{Value} & \textbf{Parameter} & \textbf{Value} \\ \midrule
+\multirow{5}{*}{\rotatebox{90}{\textbf{Pressure Control}}} 
+& Activation pressure & 16.0 bar (target) & Deactivation pressure & 30.0 bar (target) \\
+& Min. source pressure & 50.0 bar & Max. target pressure & 450.0 bar \\
+& Pressure differential & 5.0 bar & Max. flow rate & 0.10 kg/s \\
+& Orifice diameter & 2.0 mm & Discharge coefficient & 0.6 \\
+& Flow resistance & 100.0 & & \\ \midrule
+\multirow{4}{*}{\rotatebox{90}{\textbf{Fluid Properties}}} 
+& Heat capacity ratio & \multicolumn{3}{l}{Computed by CoolProp} \\
+& Specific gas constant & \multicolumn{3}{l}{Computed by CoolProp} \\
+& Speed of sound & \multicolumn{3}{l}{Computed by CoolProp} \\
+& Kinematic viscosity & \multicolumn{3}{l}{Computed by CoolProp} \\ \midrule
+\multirow{3}{*}{\rotatebox{90}{\textbf{Flow Limits}}} 
+& Critical pressure ratio & \multicolumn{3}{l}{Computed by CoolProp} \\
+& Min. abs. pressure & 1.0 bar & Max. velocity limit & 2000 m/s \\
+& Choked flow factor & 2.0 & & \\ \bottomrule
+\end{tabular}
+\end{table>
+
+\begin{table}[H]
+\centering
+\caption{Computed tank geometry, mass, and heat exchanger energy requirements for single-tank cases.}
+\label{tab:summary-single-tank}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Parameter} & \textbf{\gls{cch2}} & \textbf{\gls{slh2}} & \textbf{\gls{ch2}} \\ \midrule
+$\text{H}_2$ mass [kg] & 219.6 & 219.6 & 219.6 \\
+Radius $R$ [m] & 0.869 & 0.945 & 1.094 \\
+Cylindrical length [m] & 2.61 & 2.84 & 3.28 \\
+Composite thickness [m] & 0.0104 & 0.0005 & 0.023 \\
+Composite mass [kg] & 524.8 & 26.8 & 1848.9 \\
+Liner mass [kg] & 89.7 & 106.2 & 142.3 \\
+Total structural mass [kg] & 614.4 & 133.0 & 1991.3 \\
+Inner area [m$^2$] & 9.48 & 11.23 & 15.05 \\
+Outer area [m$^2$] & 10.87 & 12.49 & 17.16 \\
+Tank volume [m$^3$] & 2.746 & 3.540 & 5.491 \\
+Structural volume [m$^3$] & 0.625 & 0.610 & 1.191 \\
+Volumetric efficiency [-] & 0.815 & 0.853 & 0.822 \\
+Gravimetric efficiency [-] & 0.263 & 0.623 & 0.099 \\
+Required \gls{ihex} $\text{energy}^{\dagger}$ \tnote{a} [kWh] & 11.4 & 7.0 & -- \\
+Required \gls{ohex} energy [kWh] & 122.3 & 10.2 & 0.2 \\
+Total HEX energy [kWh] & 133.6 & 10.7 & 0.2 \\ \bottomrule
+\end{tabular}
+\begin{tablenotes}
+            \item[a] $\dagger$ Here, the energy refers to the area under the required power curve. See \autoref{fig:cch2-1t-hex}, \autoref{fig:slh2-1t-hex}, and \autoref{fig:ch2-1t-hex}.
+        \end{tablenotes}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Computed tank geometry, mass, and heat exchanger energy requirements for single-tank cases (performance comparison).}
+\label{tab:summary-single-tank-transposed}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lccc|lccc|lccc@{}}
+\toprule
+\multicolumn{4}{c|}{\textbf{\gls{cch2} Storage}} & \multicolumn{4}{c|}{\textbf{\gls{slh2} Storage}} & \multicolumn{4}{c}{\textbf{\gls{ch2} Storage}} \\
+\cmidrule{1-4} \cmidrule{5-8} \cmidrule{9-12}
+\textbf{Parameter} & \textbf{Value} & \textbf{Unit} & & \textbf{Parameter} & \textbf{Value} & \textbf{Unit} & & \textbf{Parameter} & \textbf{Value} & \textbf{Unit} & \\ \midrule
+H$_2$ mass & 219.6 & kg & & H$_2$ mass & 219.6 & kg & & H$_2$ mass & 219.6 & kg & \\
+Radius & 0.869 & m & & Radius & 0.945 & m & & Radius & 1.094 & m & \\
+Length & 2.61 & m & & Length & 2.84 & m & & Length & 3.28 & m & \\
+Composite thick. & 0.0104 & m & & Composite thick. & 0.0005 & m & & Composite thick. & 0.023 & m & \\
+Composite mass & 524.8 & kg & & Composite mass & 26.8 & kg & & Composite mass & 1848.9 & kg & \\
+Liner mass & 89.7 & kg & & Liner mass & 106.2 & kg & & Liner mass & 142.3 & kg & \\
+Total struct. mass & 614.4 & kg & & Total struct. mass & 133.0 & kg & & Total struct. mass & 1991.3 & kg & \\
+Tank volume & 2.746 & m$^3$ & & Tank volume & 3.540 & m$^3$ & & Tank volume & 5.491 & m$^3$ & \\
+Vol. efficiency & 0.815 & -- & & Vol. efficiency & 0.853 & -- & & Vol. efficiency & 0.822 & -- & \\
+Grav. efficiency & 0.263 & -- & & Grav. efficiency & 0.623 & -- & & Grav. efficiency & 0.099 & -- & \\ \midrule
+\gls{ihex} energy$^{\dagger}$ & 11.4 & kWh & & \gls{ihex} energy$^{\dagger}$ & 7.0 & kWh & & \gls{ihex} energy$^{\dagger}$ & -- & kWh & \\
+\gls{ohex} energy & 122.3 & kWh & & \gls{ohex} energy & 10.2 & kWh & & \gls{ohex} energy & 0.2 & kWh & \\
+\textbf{Total HEX} & \textbf{133.6} & \textbf{kWh} & & \textbf{Total HEX} & \textbf{10.7} & \textbf{kWh} & & \textbf{Total HEX} & \textbf{0.2} & \textbf{kWh} & \\ \bottomrule
+\end{tabular}%
+}
+\begin{tablenotes}
+            \item[a] $\dagger$ Here, the energy refers to the area under the required power curve. See \autoref{fig:cch2-1t-hex}, \autoref{fig:slh2-1t-hex}, and \autoref{fig:ch2-1t-hex}.
+        \end{tablenotes}
+\end{table}

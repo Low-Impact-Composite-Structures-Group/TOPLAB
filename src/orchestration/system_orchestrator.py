@@ -25,8 +25,8 @@ from CoolProp.CoolProp import PropsSI
 # Add parent directories for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Configuration system
-from src.configuration.scenario_configuration import ScenarioConfig
+# Configuration system - enhanced version with migration support
+from src.configuration.enhanced_scenario_configuration import ScenarioConfig
 
 # Multi-tank DAE physics engine
 from src.multi_tank.system.tank_system import TankSystem, TankSystemConfig, TankConfig
@@ -181,6 +181,32 @@ class SystemOrchestrator:
                 print(f"     Dynamic thresholds based on mission flow requirements")
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'flow_matching_pressurization':
+                # Convert flow-matching pressurization to MassFlowPIDControlledValve
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                control_params = rule_config.get('control_parameters', {})
+                mission_params = rule_config.get('mission_parameters', {})
+                discharge_piping = rule_config.get('discharge_piping', {})
+
+                tank_system_rule = {
+                    'type': 'mass_flow_pid_valve',
+                    'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
+                    'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
+                    'mission_profile': mission_params.get('mission_profile', {}),
+                    'discharge_piping': discharge_piping,
+                    'control_params': control_params,
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.005),
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.001),
+                    'coupling_id': rule_config.get('coupling_id', 'flow_matching_pressurization')
+                }
+
+                print(f"   ✓ Flow-matching pressurization → MassFlowPIDControlledValve")
+                print(f"     Direct flow-to-flow PID control")
+                print(f"     PID gains: kp={control_params.get('pid_kp', 1.0)}, ki={control_params.get('pid_ki', 0.1)}, kd={control_params.get('pid_kd', 0.01)}")
 
                 tank_system_coupling_rules.append(tank_system_rule)
 

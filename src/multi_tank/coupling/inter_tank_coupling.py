@@ -347,6 +347,10 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         # Control parameters
         self.pressure_margin_bar = control_params['pressure_margin_bar']
         self.minimum_safety_pressure_bar = control_params.get('minimum_safety_pressure_bar', 3.0)  # Safety floor
+        self.activation_delay_seconds = control_params.get('activation_delay_seconds', 0.0)  # Time delay before controller starts
+        # Actuator dynamics (optional, with sensible defaults)
+        self.valve_response_time_s = control_params.get('valve_response_time_s', 2.0)  # ~63% time constant
+        self.max_valve_rate_per_s = control_params.get('max_valve_rate_per_s', 0.5)     # fraction per second
 
         # Target tank configuration (for minimum pressure)
         self.target_tank_config = target_tank_config or {}
@@ -364,6 +368,8 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         self.previous_flow_coefficient = 0.0  # For rate limiting valve movements
         self.is_active = False  # Track if valve is currently open
         self.first_timestep = True  # Flag to handle t=0 case
+        # Monotonic control time to tolerate solver backtracking
+        self._control_time = 0.0
 
         # Calculate effective area using flow physics or fallback
         if self.flow_physics and not self.flow_physics.use_flow_coefficient:
@@ -386,9 +392,12 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         self.ki = control_params.get('pid_ki', 0.01)  # Integral gain
         self.kd = control_params.get('pid_kd', 0.05)  # Derivative gain
 
+        # Debug: print activation delay value
+        print(f"  🔧 DEBUG: Activation delay set to {self.activation_delay_seconds:.1f} seconds")
+
         # PID state variables
         self.pid_integral = 0.0
-        self.pid_previous_error = 0.0
+        self.pid_previous_error = None  # Start with None to avoid stale derivative on first call
         self.pid_previous_time = 0.0
 
         # Anti-windup limits
@@ -407,10 +416,40 @@ class MissionAdaptivePressureValve(InterTankCoupling):
             self.mission_times = mission_profile['time_s']
             self.mission_flow_rates = mission_profile['flow_rate_kg_s']
             self.mission_profile = mission_profile
+            print(f"   ✓ Mission profile loaded: {len(self.mission_times)} time points, max flow: {max(self.mission_flow_rates):.3f} kg/s")
+        else:
+            print(f"   ⚠️ Mission profile loading failed: missing keys in {list(mission_profile.keys())}")
 
     def get_mission_flow_rate(self, time: float) -> float:
-        """Simple constant mission flow rate - no complex logic."""
-        return 0.054  # 54 g/s constant flow rate
+        """Get mission flow rate from actual mission profile using safe interpolation."""
+        if not hasattr(self, 'mission_times') or not hasattr(self, 'mission_flow_rates'):
+            # Return fallback value instead of crashing
+            return 0.0
+
+        if len(self.mission_times) == 0 or len(self.mission_flow_rates) == 0:
+            # Return fallback value instead of crashing
+            return 0.0
+
+        # Boundary conditions with safety checks
+        if time <= self.mission_times[0]:
+            return self.mission_flow_rates[0]
+        elif time >= self.mission_times[-1]:
+            return self.mission_flow_rates[-1]
+        else:
+            # Safe manual linear interpolation to avoid numpy issues
+            for i in range(len(self.mission_times) - 1):
+                if self.mission_times[i] <= time <= self.mission_times[i + 1]:
+                    # Manual linear interpolation
+                    t1, t2 = self.mission_times[i], self.mission_times[i + 1]
+                    f1, f2 = self.mission_flow_rates[i], self.mission_flow_rates[i + 1]
+
+                    if t2 - t1 == 0:  # Avoid division by zero
+                        return f1
+
+                    return f1 + (f2 - f1) * (time - t1) / (t2 - t1)
+
+            # Fallback if no interpolation range found
+            return self.mission_flow_rates[-1]
 
     def calculate_minimum_discharge_pressure(self, flow_rate_kg_s: float, lh2_density: float) -> float:
         """Calculate minimum tank pressure required to achieve target flow rate through discharge piping."""
@@ -521,60 +560,129 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         Returns:
             Desired flow rate [kg/s] (0 to max_flow_rate)
         """
-        # Calculate time step
+        # Calculate time step with stability checks
         if self.pid_previous_time == 0.0:
             dt = 1.0  # Default for first call
         else:
             dt = time - self.pid_previous_time
 
-        if dt <= 0:
-            dt = 1.0  # Prevent division by zero
+        # More robust time step handling to prevent numerical instability
+        if dt <= 0.01:  # Prevent very small time steps that cause instability (increased to 0.01s)
+            # Return the previous result to avoid derivative spikes and control chatter
+            return getattr(self, '_last_pid_output', 0.0)
 
-        # Calculate error (positive error means we need more pressure)
-        error = target_pressure_pa - current_pressure_pa
+        # Limit maximum time step to prevent integration errors
+        if dt > 5.0:  # Reduced from 10s to 5s for better control responsiveness
+            dt = 5.0
 
-        # OPTIMIZED gain scheduling: less aggressive reduction for better startup tracking
-        controller_active_time = time - 100.0  # Time since controller activation
-        if controller_active_time < 30.0:  # REDUCED startup period with higher gains
-            # IMPROVED startup gains (80% of nominal instead of 50%)
-            gain_factor = 0.8
+        # Minimum pressure maintenance logic with continuous deadband control
+        # Use smooth transition functions instead of discrete zones
+        pressure_deficit = target_pressure_pa - current_pressure_pa
+
+        # Control deadband: symmetric around target pressure for smooth oscillatory control
+        control_deadband = 0.3e5  # 0.3 bar deadband 
+        extended_deadband = 2.0 * control_deadband  # 0.6 bar for gradual reduction
+
+        # Continuous gain modulation based on distance from target
+        # Uses smooth sigmoid/tanh functions instead of discrete zones
+        
+        # Calculate distance-based gain factors (continuous, not discrete)
+        deficit_normalized = pressure_deficit / control_deadband
+        
+        # Smooth gain reduction when pressure is above target (deficit < 0)
+        # Using tanh for smooth continuous transition instead of discrete zones
+        if pressure_deficit < -extended_deadband:
+            # Pressure well above target - apply gradual flow reduction
+            excess_normalized = abs(pressure_deficit + extended_deadband) / control_deadband
+            reduction_factor = 0.1 + 0.9 * math.exp(-excess_normalized)  # Exponential decay, minimum 10%
         else:
-            # Full gains for steady-state performance
-            gain_factor = 1.0
+            reduction_factor = 1.0
+        
+        # Continuous gain scaling based on proximity to target
+        # Far from target (deficit > 1): use full gains
+        # Near target (|deficit| < 1): reduce gains smoothly
+        proximity_factor = math.tanh(abs(deficit_normalized))  # 0 to 1, smooth transition
+        
+        # Integral control factor: reduce integration when close to target
+        integral_factor = math.tanh(max(0, deficit_normalized))  # Only integrate when below target
+        
+        # Use PID gains directly from configuration with continuous modulation
+        kp_effective = self.kp * proximity_factor
+        ki_effective = self.ki * integral_factor * 0.5  # More conservative integral
+        kd_effective = self.kd * proximity_factor
 
-        kp_effective = self.kp * gain_factor
-        ki_effective = self.ki * gain_factor
-        kd_effective = self.kd * gain_factor
+        # Controller is active when pressure deficit warrants action
+        if pressure_deficit >= -extended_deadband:
+            # Use error as pressure deficit for PID calculation
+            error = pressure_deficit
+            
+            # Proportional term with continuous gain modulation
+            proportional = kp_effective * error
 
-        # Proportional term
-        proportional = kp_effective * error
+            # Integral term with anti-windup and continuous modulation
+            if dt < 10.0 and integral_factor > 0.1:  # Only integrate when significantly below target
+                self.pid_integral += error * dt * integral_factor
+                self.pid_integral = max(self.integral_min, min(self.integral_max, self.pid_integral))
+            elif pressure_deficit < -control_deadband:
+                # Gradually reduce integral when pressure is above target
+                decay_rate = 1.0 - 0.05 * min(1.0, abs(pressure_deficit) / control_deadband)
+                self.pid_integral *= decay_rate
+            integral = ki_effective * self.pid_integral
 
-        # Integral term with anti-windup (since we start after 30 seconds, integral works immediately)
-        self.pid_integral += error * dt
-        self.pid_integral = max(self.integral_min, min(self.integral_max, self.pid_integral))
-        integral = ki_effective * self.pid_integral
+            # Derivative term with continuous smoothing
+            if self.pid_previous_error is not None and dt > 0:
+                raw_derivative = (error - self.pid_previous_error) / dt
+                derivative = kd_effective * max(-1e4, min(1e4, raw_derivative))
 
-        # Derivative term
-        derivative = kd_effective * (error - self.pid_previous_error) / dt
+                # Enhanced derivative smoothing for continuity
+                if hasattr(self, '_smoothed_derivative'):
+                    alpha = 0.85  # Higher smoothing for more continuity
+                    self._smoothed_derivative = alpha * self._smoothed_derivative + (1 - alpha) * derivative
+                    derivative = self._smoothed_derivative
+                else:
+                    self._smoothed_derivative = derivative
+            else:
+                derivative = 0.0
 
-        # PID output
-        pid_output = proportional + integral + derivative
+            # PID output with continuous modulation
+            pid_output = proportional + integral + derivative
 
-        # Convert PID output to flow rate (positive output = need more flow)
-        # OPTIMIZED scaling factor for better pressure tracking
-        flow_scale_factor = 5e-7  # INCREASED scaling for more responsive flow control (was 1e-7)
-        desired_flow = pid_output * flow_scale_factor
+            # Scale PID output from pressure units to flow rate units
+            pressure_to_flow_scaling = self.max_flow_rate / 1e5  # kg/s per Pa
+            desired_flow = pid_output * pressure_to_flow_scaling
 
-        # Constrain to physical limits
-        desired_flow = max(0.0, min(self.max_flow_rate, desired_flow))
+            # Apply continuous flow reduction (no discrete switching)
+            desired_flow *= reduction_factor
+
+            # Constrain to physical limits
+            desired_flow = max(0.0, min(self.max_flow_rate, desired_flow))
+        else:
+            # Controller inactive (pressure well above extended deadband)
+            desired_flow = 0.0
+
+        # Cache the result for stability
+        self._last_pid_output = desired_flow
 
         # Debug output every 100 seconds to track PID behavior
-        if abs(time % 100) < 1.0 and desired_flow > 0:
-            error_bar = error / 1e5
-            print(f"  PID Debug t={time:.1f}s: error={error_bar:.2f}bar, P={proportional:.1f}, I={integral:.1f}, D={derivative:.1f}, flow={desired_flow*1000:.1f}g/s, gains={gain_factor:.1f}x")
+        if abs(time % 100) < 1.0 and pressure_deficit > -extended_deadband:
+            deficit_bar = pressure_deficit / 1e5
+            current_bar = current_pressure_pa / 1e5
+            target_bar = target_pressure_pa / 1e5
+            deadband_bar = control_deadband / 1e5
+
+            # Show continuous factors instead of discrete zones
+            proximity_pct = int(proximity_factor * 100)
+            integral_pct = int(integral_factor * 100) 
+            reduction_pct = int(reduction_factor * 100)
+            
+            print(f"  PID Debug t={time:.1f}s: P_current={current_bar:.1f}bar, P_target={target_bar:.1f}bar, deficit={deficit_bar:.2f}bar, proximity={proximity_pct}%, integral={integral_pct}%, reduction={reduction_pct}%, flow={desired_flow*1000:.1f}g/s, dt={dt:.6f}s")
 
         # Update state for next iteration
-        self.pid_previous_error = error
+        # Only track error when controller is active (within extended deadband range)
+        if pressure_deficit > -extended_deadband:
+            self.pid_previous_error = pressure_deficit
+        else:
+            self.pid_previous_error = None  # Reset when outside control range
         self.pid_previous_time = time
 
         return desired_flow
@@ -586,178 +694,183 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         future_flow = self.get_mission_flow_rate(future_time)
         return max(current_flow, future_flow)
 
-    def update_continuous_control(self, time: float, lh2_pressure: float, lh2_density: float):
-        """Continuous control logic with predictive pre-activation to prevent pressure drops."""
+    def update_continuous_control(self, time: float, lh2_pressure: float, lh2_density: float, base_flow_capacity: float = None):
+        """Update valve control with realistic actuator dynamics and smooth interpolation.
 
-        # Debug for early timesteps
-        if time < 10.0:
-            print(f"  Early Control t={time:.1f}s: P={lh2_pressure/1e5:.1f}bar, first_step={self.first_timestep}")
+        Args:
+            time: Simulation time [s]
+            lh2_pressure: Target tank pressure [Pa]
+            lh2_density: Target tank density [kg/m³]
+            base_flow_capacity: Optional current coupling flow capacity [kg/s] for fully open valve
+                                computed from source/target states (P1,P2,T1,ρ1). When provided,
+                                we map desired PID flow to valve coefficient against this capacity
+                                to avoid systematic under/over-delivery when capacity ≠ max_flow_rate.
+        """
 
-        # Handle first timestep (t=0) with predictive pre-activation
-        if self.first_timestep:
-            self.first_timestep = False
+        # Initialize control state tracking
+        if not hasattr(self, '_last_control_time'):
+            self._last_control_time = 0.0
+            self._previous_coefficient = 0.0
+            self._target_coefficient = 0.0
+            self._pid_update_time = 0.0
+            self._last_interpolation_time = 0.0
+            self._last_coefficient = 0.0
 
-            # Pre-emptive coupling activation: Look ahead to see if mission will start soon
-            upcoming_flow = self.get_mission_flow_rate(5.0)  # Check flow in next 5 seconds
-            if upcoming_flow > 0.001:  # If significant flow expected (>1 g/s)
-                # Pre-calculate required pressure for upcoming mission flow
-                required_pressure = self.calculate_minimum_discharge_pressure(upcoming_flow, lh2_density)
-                margin_pressure = self.pressure_margin_bar * 1e5
-                target_pressure = required_pressure + margin_pressure
+        # Advance internal control clock monotonically (handles solver backtracking)
+        if not hasattr(self, '_control_time'):
+            self._control_time = 0.0
+        self._control_time = max(self._control_time, time)
+        ct = self._control_time
 
-                # Calculate smooth ramp-down from initial pressure to target
-                pressure_drop_needed = lh2_pressure - target_pressure
-                if pressure_drop_needed > 1e5:  # If we need to drop more than 1 bar
-                    # Start with very gentle opening to gradually reduce pressure
-                    initial_opening = min(0.15, pressure_drop_needed / 10e5)  # Scale with pressure drop
-                    self.current_flow_coefficient = initial_opening
-                    self.is_active = True
-                    print(f"  Gentle pre-activation t={time:.1f}s: Expected flow={upcoming_flow*1000:.1f}g/s, initial_opening={initial_opening:.1f}, P_drop_needed={pressure_drop_needed/1e5:.1f}bar")
-                    return
-
-            # Normal startup - valve closed
-            self.current_flow_coefficient = 0.0
+        # Check activation delay - controller activates AT the specified time
+        if ct < self.activation_delay_seconds:
+            # Controller is not yet active - force valve closed with smooth approach
+            self._target_coefficient = 0.0
+            self._previous_coefficient = self.current_flow_coefficient
+            self._pid_update_time = ct
             self.is_active = False
-            return
 
-        # Use CURRENT pressure for control decisions (no lag)
-        control_pressure = lh2_pressure
+            # Still store data for plotting (with zero values)
+            self.time_history.append(time)
+            self.required_pressure_history.append(0.0)  # No requirement yet
+            self.activation_threshold_history.append(0.0)  # No threshold yet
+            self.mission_flow_history.append(0.0)  # No mission flow consideration yet
 
-        # Get current AND future mission flow requirements for predictive control
-        current_mission_flow = self.get_mission_flow_rate(time)
-        future_mission_flow = self.get_future_flow_rate(time, lookahead_seconds=10.0)  # Look ahead 10 seconds
-
-        # Use the higher of current or future flow for pressure requirement calculation
-        # This prevents pressure drops before they occur
-        control_mission_flow = max(current_mission_flow, future_mission_flow)
-
-        # Calculate required LH2 pressure for control mission flow (current or future)
-        required_pressure_pa = self.calculate_minimum_discharge_pressure(control_mission_flow, lh2_density)
-
-        # Calculate activation threshold for PID control
-        base_margin = self.pressure_margin_bar * 1e5
-        activation_threshold = required_pressure_pa + base_margin
-
-        # Tank minimum pressure from configuration
-        p_min_pa = self.target_minimum_pressure_pa
-
-        # Safety floor
-        safety_pressure_pa = self.minimum_safety_pressure_bar * 1e5
-
-        # Store data for plotting
-        self.time_history.append(time)
-        self.required_pressure_history.append(required_pressure_pa)  # Store in Pa for consistency
-        self.activation_threshold_history.append(activation_threshold)  # Store in Pa
-        self.mission_flow_history.append(current_mission_flow)
-
-        # Variable flow control logic - valve continuously modulates flow
-        # The goal is to maintain actual pressure at or slightly above the activation threshold
-        # Don't override with safety floors - let the activation threshold drive the control
-        effective_target = activation_threshold
-
-        # Calculate pressure error (positive = need more pressure)
-        pressure_error_pa = effective_target - control_pressure
-        pressure_error_bar = pressure_error_pa / 1e5
-
-        # Variable flow control: PID controller directly sets flow coefficient
-        # No binary on/off - valve position varies continuously from 0-100%
-
-        # OPTIMIZED startup stabilization mode - much shorter startup period with smaller deadbands
-        if time < 60:  # First 1 minute only - reduced startup period
-            startup_stabilization_mode = True
-            deadband_bar = 0.2  # REDUCED deadband for better initial tracking (was 1.0)
-        elif time < 120:  # 1-2 minutes - quick transition to normal control
-            startup_stabilization_mode = False
-            deadband_bar = 0.1  # REDUCED transition deadband (was 0.3)
+            print(f"  Control t={time:.6f}s: Controller inactive (activation delay: {self.activation_delay_seconds:.1f}s, diff={time-self.activation_delay_seconds:.6f})")
         else:
-            startup_stabilization_mode = False
-            deadband_bar = 0.05  # REDUCED normal deadband for precise control (was 0.1)
+            # 1) Interpolate toward the last PID target first (advance actuator state)
+            if hasattr(self, '_target_coefficient') and hasattr(self, '_pid_update_time'):
+                # Use monotonic control time deltas (clamped to >= 0)
+                time_since_update = max(0.0, ct - self._pid_update_time)
+                valve_response_time = max(1e-3, float(self.valve_response_time_s))
 
-        # Debug output during problematic periods
-        debug_condition = (time > 0 and abs(time % 600) < 5.0) or \
-                         (0 <= time <= 720) or \
-                         (2520 <= time <= 3600)
+                # First-order response (exponential approach to target)
+                response_factor = 1.0 - math.exp(-time_since_update / valve_response_time)
 
-        # Extra debug during early mission to understand opening/closing
-        early_debug = time <= 300 and (int(time) % 30 == 0)  # Every 30s for first 5 minutes
+                # Smooth interpolation from previous to target coefficient
+                interpolated_coefficient = (
+                    self._previous_coefficient +
+                    response_factor * (self._target_coefficient - self._previous_coefficient)
+                )
 
-        if (debug_condition and int(time) % 60 == 0) or early_debug:
-            deadband_status = "deadband" if abs(pressure_error_bar) < deadband_bar else "active"
-            print(f"  Control Debug t={time/3600:.2f}h: P={control_pressure/1e5:.1f}bar, act_thresh={activation_threshold/1e5:.1f}bar, error={pressure_error_bar:.2f}bar, flow_coeff={self.current_flow_coefficient:.3f}, deadband={deadband_bar:.2f}bar, status={deadband_status}")
+                # Optional: Add rate limiting for extra realism
+                max_rate = float(self.max_valve_rate_per_s)
+                dt_interp = ct - self._last_interpolation_time if hasattr(self, '_last_interpolation_time') and self._last_interpolation_time > 0 else 0.01
+                dt_interp = max(0.0, dt_interp)
 
-        # Startup stabilization mode - use simple open-loop control to prevent oscillations
-        if startup_stabilization_mode:
-            # During startup, use very gentle and predictable valve control
-            if pressure_error_bar > deadband_bar:
-                # Pressure too low - very gentle opening
-                target_opening = 0.1  # Very conservative opening during startup
-                if self.current_flow_coefficient < target_opening:
-                    self.current_flow_coefficient = min(target_opening, self.current_flow_coefficient + 0.02)
-            elif pressure_error_bar < -deadband_bar:
-                # Pressure too high - very gentle closing
-                if self.current_flow_coefficient > 0.001:
-                    self.current_flow_coefficient = max(0.001, self.current_flow_coefficient - 0.01)  # Maintain minimum maintenance flow
-            # If within large deadband, maintain current position - no changes at all
+                if dt_interp > 0.0:
+                    max_change = max_rate * dt_interp
+                    actual_change = interpolated_coefficient - self._last_coefficient
+                    if abs(actual_change) > max_change:
+                        interpolated_coefficient = self._last_coefficient + math.copysign(max_change, actual_change)
 
-        elif abs(pressure_error_bar) < deadband_bar:
-            # Within deadband - maintain current position with minimum maintenance flow
-            # Ensure minimum flow coefficient to represent maintenance flow needed for pressure stability
-            if self.current_flow_coefficient < 0.001:  # Minimum 0.1% opening for maintenance flow
-                self.current_flow_coefficient = 0.001
-        elif pressure_error_bar > deadband_bar:
-            # Need more pressure - calculate desired flow coefficient
-            desired_flow_rate = self.calculate_pid_flow_rate(control_pressure, effective_target, time)
+                self.current_flow_coefficient = interpolated_coefficient
+                self._last_coefficient = self.current_flow_coefficient
+                self._last_interpolation_time = ct
 
-            # Convert flow rate to flow coefficient (0.0 to 1.0 representing 0-100% valve opening)
-            if desired_flow_rate > 0:
-                # Scale flow rate to flow coefficient - INCREASED scaling for better response
-                flow_coefficient_scale = 8.0  # INCREASED for more responsive valve control (was 3.0)
-                target_flow_coefficient = min(1.0, desired_flow_rate * flow_coefficient_scale)
+            # 2) Update the PID target on cadence (after interpolation)
+            if ct - self._last_control_time >= 0.1:
+                # Get target pressure based on mission requirements
+                mission_flow_rate = self.get_mission_flow_rate(ct)
 
-                # OPTIMIZED rate limiting - faster response while preventing oscillations
-                if time < 60:  # First 1 minute - moderate valve movements
-                    max_change_rate = 0.15  # INCREASED change rate during startup (was 0.05)
+                # Calculate activation threshold with slight margin
+                required_pressure_pa = self.calculate_minimum_discharge_pressure(mission_flow_rate, lh2_density)
+                effective_target = required_pressure_pa + (self.pressure_margin_bar * 1e5)
+
+                # Debug output to understand target calculation
+                if abs(ct % 60) < 1.0:  # Every 60 seconds on control clock
+                    print(f"  TARGET DEBUG t={ct:.0f}s: mission_flow={mission_flow_rate*1000:.1f}g/s, required_P={required_pressure_pa/1e5:.1f}bar, target_P={effective_target/1e5:.1f}bar")
+
+                # Store data for plotting
+                self.time_history.append(ct)
+                self.required_pressure_history.append(required_pressure_pa)  # Store in Pa for consistency
+                self.activation_threshold_history.append(effective_target)  # Store in Pa
+                self.mission_flow_history.append(mission_flow_rate)
+
+                # Use PID control for mission_adaptive_pressurization
+                # Calculate desired flow rate using PID controller
+                desired_flow_rate = self.calculate_pid_flow_rate(lh2_pressure, effective_target, ct)
+
+                # Convert desired flow rate to valve coefficient (0.0 to 1.0)
+                # Prefer mapping to the actual base flow capacity at current conditions (fully open valve)
+                # to prevent under-delivery when capacity >> configured max, or over-demand when low.
+                if base_flow_capacity is not None and base_flow_capacity > 1e-12:
+                    denom = min(self.max_flow_rate, base_flow_capacity) if self.max_flow_rate > 0 else base_flow_capacity
+                    target_coeff = max(0.0, min(1.0, desired_flow_rate / denom))
                 else:
-                    max_change_rate = 0.25   # INCREASED change rate for faster normal response (was 0.1)
+                    # Fallback to previous behavior (map to configured maximum)
+                    if self.max_flow_rate > 0:
+                        target_coeff = min(1.0, desired_flow_rate / self.max_flow_rate)
+                    else:
+                        target_coeff = 0.0
 
-                if hasattr(self, 'previous_flow_coefficient'):
-                    max_change = max_change_rate
-                    change = target_flow_coefficient - self.previous_flow_coefficient
-                    limited_change = max(-max_change, min(max_change, change))
-                    self.current_flow_coefficient = self.previous_flow_coefficient + limited_change
-                else:
-                    self.current_flow_coefficient = target_flow_coefficient
+                # Store the target for next interpolation step
+                self._previous_coefficient = self.current_flow_coefficient
+                self._target_coefficient = target_coeff
+                self._pid_update_time = ct
+                self._last_control_time = ct
 
-                # Ensure minimum opening for stable flow
-                self.current_flow_coefficient = max(0.02, self.current_flow_coefficient)
-            else:
-                # Rate-limited closure
-                if hasattr(self, 'previous_flow_coefficient'):
-                    self.current_flow_coefficient = max(0.001, self.previous_flow_coefficient - 0.05)  # Minimum maintenance flow
-                else:
-                    self.current_flow_coefficient = 0.001  # Minimum maintenance flow instead of complete closure
-        else:
-            # Pressure too high - reduce flow (rate-limited)
-            if hasattr(self, 'previous_flow_coefficient'):
-                self.current_flow_coefficient = max(0.001, self.previous_flow_coefficient - 0.03)  # Minimum maintenance flow
-            else:
-                self.current_flow_coefficient = 0.001  # Minimum maintenance flow instead of complete closure
+                # Debug output every 60 seconds (control clock)
+                if abs(ct % 60) < 0.5:
+                    current_bar = lh2_pressure / 1e5
+                    target_bar = effective_target / 1e5
+                    deficit_bar = (effective_target - lh2_pressure) / 1e5
+                    cap_str = f", cap={base_flow_capacity*1000:.1f}g/s" if base_flow_capacity is not None else ""
+                    print(f"  Control t={ct:.6f}s: P={current_bar:.1f}bar, target={target_bar:.1f}bar, deficit={deficit_bar:.2f}bar, target_coeff={target_coeff:.3f}, PID_flow={desired_flow_rate*1000:.1f}g/s{cap_str}")
+                # Always log when a new PID target is set
+                print(f"[PID SET] t={ct:.1f}s: target_coeff={target_coeff:.3f}, desired_flow={desired_flow_rate*1000:.1f} g/s")
 
-        # Store for next control cycle
-        self.previous_flow_coefficient = self.current_flow_coefficient
+        # Smooth interpolation between PID updates (realistic valve dynamics)
+        if hasattr(self, '_target_coefficient') and hasattr(self, '_pid_update_time'):
+            # Use monotonic control time deltas (clamped to >= 0)
+            time_since_update = max(0.0, ct - self._pid_update_time)
+            valve_response_time = max(1e-3, float(self.valve_response_time_s))
+            
+            # First-order response (exponential approach to target)
+            response_factor = 1.0 - math.exp(-time_since_update / valve_response_time)
+            
+            # Smooth interpolation from previous to target coefficient
+            interpolated_coefficient = (
+                self._previous_coefficient + 
+                response_factor * (self._target_coefficient - self._previous_coefficient)
+            )
+            
+            # Optional: Add rate limiting for extra realism
+            max_rate = float(self.max_valve_rate_per_s)
+            dt = ct - self._last_interpolation_time if hasattr(self, '_last_interpolation_time') and self._last_interpolation_time > 0 else 0.01
+            dt = max(0.0, dt)
 
-        # Valve is considered "active" if it has any opening (eliminates binary state)
-        self.is_active = self.current_flow_coefficient > 0.01
+            if dt > 0.0:
+                max_change = max_rate * dt
+                actual_change = interpolated_coefficient - self._last_coefficient
+                if abs(actual_change) > max_change:
+                    interpolated_coefficient = self._last_coefficient + math.copysign(max_change, actual_change)
+            
+            self.current_flow_coefficient = interpolated_coefficient
+            self._last_coefficient = self.current_flow_coefficient
+            self._last_interpolation_time = ct
+
+        # Clamp to valid range
+        self.current_flow_coefficient = max(0.0, min(1.0, self.current_flow_coefficient))
+
+        # Valve is considered "active" if it has any opening
+        self.is_active = self.current_flow_coefficient > 0.0
+
+        # Throttled debug: show key control values every ~30s
+        try:
+            if abs(ct % 30.0) < 1.0:
+                tgt = getattr(self, '_target_coefficient', 0.0)
+                prev = getattr(self, '_previous_coefficient', 0.0)
+                pidt = getattr(self, '_pid_update_time', 0.0)
+                last_pid_flow = getattr(self, '_last_pid_output', 0.0)
+                print(f"[VALVE CTRL] t={ct:.1f}s coeff={self.current_flow_coefficient:.3f} target={tgt:.3f} prev={prev:.3f} pid_flow={last_pid_flow*1000:.1f} g/s (ΔtPID={ct-pidt:.2f}s)")
+        except Exception:
+            pass
 
 
 
     def evaluate(self, t: float, tank_states: List) -> bool:
-        """Determine if valve should be active using PID control after settling period."""
-        # Skip control for first ~100 seconds - let initial pressure settle before starting control
-        if t < 100.0:
-            self.current_flow_coefficient = 0.0
-            return False
-
+        """Determine if valve should be active using control system from t=0."""
         target_state = tank_states[self.target_idx]
 
         # Update dynamic thresholds based on current mission requirements
@@ -772,52 +885,96 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         if target_state.pressure is None:
             target_state.compute_pressure()
 
-        # Use continuous control to determine valve state and flow coefficient
-        self.update_continuous_control(t, target_state.pressure, lh2_density)
+        # Estimate current fully-open base flow capacity to improve coefficient mapping
+        try:
+            source_state = tank_states[self.source_idx]
+            if source_state.pressure is None:
+                source_state.compute_pressure()
+            P1 = source_state.pressure
+            P2 = target_state.pressure
+            T1 = source_state.temperature
+            rho1 = source_state.fuel_mass / source_state.tank.volume
+            if self.flow_physics:
+                base_capacity = self.flow_physics.calculate_orifice_flow_rate(
+                    upstream_pressure=P1,
+                    downstream_pressure=P2,
+                    upstream_temperature=T1,
+                    upstream_density=rho1,
+                    orifice_diameter=self.orifice_diameter
+                )
+            else:
+                gamma = 1.4
+                R = 4124
+                critical_pressure_ratio = (2/(gamma+1))**(gamma/(gamma-1))
+                P_critical = P1 * critical_pressure_ratio
+                if P2 <= P_critical:
+                    rho_throat = rho1 * (2/(gamma+1))**(1/(gamma-1))
+                    T_throat = T1 * (2/(gamma+1))
+                    c_throat = (gamma * R * T_throat)**0.5
+                    base_capacity = rho_throat * c_throat * self.effective_area
+                else:
+                    base_capacity = self.effective_area * (2 * rho1 * (P1 - P2))**0.5
+            # Guard against negatives
+            base_capacity = max(0.0, float(base_capacity))
+        except Exception:
+            base_capacity = None
+
+        # Use continuous control to determine valve state and flow coefficient, using capacity if available
+        self.update_continuous_control(t, target_state.pressure, lh2_density, base_flow_capacity=base_capacity)
+
+        # Debug timing synchronization
+        if abs(t % 60) < 0.1:  # Debug every 60s
+            print(f"[SYNC DEBUG] t={t:.1f}s: evaluate() updated coeff to {self.current_flow_coefficient:.3f}")
 
         # Return True if valve is active (flow coefficient > 0)
         return self.current_flow_coefficient > 0.0
 
     def calculate_flow_rate(self, t: float, tank_states: List) -> float:
         """Calculate flow rate using time-based control with variable flow coefficient."""
+        # print(f"[COUPLING DEBUG] t={t:.1f}s: Starting calculate_flow_rate")
         source_state = tank_states[self.source_idx]
         target_state = tank_states[self.target_idx]
 
-        # Default coupling flows to 0 during settling period (before 100 seconds)
-        if t < 100.0:
-            if t < 5.0 or (int(t) % 30 == 0):  # Debug during startup or every 30 seconds
-                print(f"Storage Debug t={t:.1f}s: Tank{self.source_idx+1} coupling=0.0g/s (controller delayed), inflow=0.0g/s, outflow=0.0g/s")
-            return 0.0
+        # Allow coupling flows from t=0 for discharge missions
 
         # Get current states
         if source_state.fuel_mass < 1.0:
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Source mass too low ({source_state.fuel_mass:.1f}kg), returning 0")
             return 0.0
 
+        # print(f"[COUPLING DEBUG] t={t:.1f}s: Computing pressures...")
         if source_state.pressure is None:
             source_state.compute_pressure()
         if target_state.pressure is None:
             target_state.compute_pressure()
+        # print(f"[COUPLING DEBUG] t={t:.1f}s: Pressures computed - P1={source_state.pressure/1e5:.1f}bar, P2={target_state.pressure/1e5:.1f}bar")
+
+        # Flow coefficient is updated by evaluate() method at proper intervals
+        # DO NOT call update_continuous_control here - it causes multiple PID calls per timestep
+
+        # print(f"[COUPLING DEBUG] t={t:.1f}s: Pressures computed - P1={source_state.pressure/1e5:.1f}bar, P2={target_state.pressure/1e5:.1f}bar")
 
         # If valve is completely closed, return zero flow
         # Note: flow coefficient is already updated by evaluate() method
         if self.current_flow_coefficient <= 0.0:
-            if t > 100.0 and t < 106.0:  # Debug for first few seconds after controller starts
-                print(f"  Flow Debug t={t:.1f}s: Valve closed, flow_coeff={self.current_flow_coefficient:.3f}")
+            if abs(t % 60) < 0.1:  # Debug every 60s
+                print(f"[FLOW DEBUG] t={t:.1f}s: Valve closed (coeff={self.current_flow_coefficient:.3f}), returning 0")
             return 0.0
 
         P1, P2 = source_state.pressure, target_state.pressure
 
         # If no pressure differential, no flow possible regardless of valve position
         if P1 <= P2:
-            if t > 64.0 and t < 70.0:
-                print(f"  Flow Debug t={t:.1f}s: No pressure differential, P1={P1/1e5:.1f}bar, P2={P2/1e5:.1f}bar")
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: No pressure differential (P1={P1/1e5:.1f} <= P2={P2/1e5:.1f}), returning 0")
             return 0.0
 
+        # print(f"[COUPLING DEBUG] t={t:.1f}s: Computing flow rate with coeff={self.current_flow_coefficient:.3f}")
         T1 = source_state.temperature
         rho1 = source_state.fuel_mass / source_state.tank.volume
 
         # Use configuration-driven flow physics with variable flow coefficient
         if self.flow_physics:
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Using flow_physics.calculate_orifice_flow_rate...")
             # Calculate base flow rate
             flow_rate = self.flow_physics.calculate_orifice_flow_rate(
                 upstream_pressure=P1,
@@ -826,17 +983,27 @@ class MissionAdaptivePressureValve(InterTankCoupling):
                 upstream_density=rho1,
                 orifice_diameter=self.orifice_diameter
             )
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Base flow rate calculated: {flow_rate:.6f} kg/s")
+
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Base flow rate calculated: {flow_rate:.6f} kg/s")
 
             # Apply variable flow coefficient (acts like variable valve opening)
+            base_flow_rate = flow_rate  # Store base flow rate for debug
             flow_rate *= self.current_flow_coefficient
+
+            # Debug output for flow coefficient application
+            if abs(t % 30) < 0.1:  # Debug every 30s
+                print(f"[FLOW DEBUG] t={t:.1f}s: P1={P1/1e5:.1f}→P2={P2/1e5:.1f} bar, base={base_flow_rate*1000:.1f} g/s, coeff={self.current_flow_coefficient:.3f}, flow={flow_rate*1000:.1f} g/s")
 
             # Apply valve capacity limit
             flow_rate = min(flow_rate, self.max_flow_rate)
 
             # Apply safety limits
             flow_rate = self.flow_physics.apply_safety_limits(flow_rate, source_state.fuel_mass)
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Final flow rate after limits: {flow_rate:.6f} kg/s")
 
         else:
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Using fallback calculation...")
             # Fallback calculation with hardcoded values
             # Gas properties for hydrogen
             gamma = 1.4  # Heat capacity ratio for hydrogen
@@ -851,17 +1018,26 @@ class MissionAdaptivePressureValve(InterTankCoupling):
                 rho_throat = rho1 * (2/(gamma+1))**(1/(gamma-1))
                 T_throat = T1 * (2/(gamma+1))
                 c_throat = (gamma * R * T_throat)**0.5
-                flow_rate = rho_throat * c_throat * self.effective_area
+                base_flow_rate = rho_throat * c_throat * self.effective_area
+                # print(f"[COUPLING DEBUG] t={t:.1f}s: Choked flow: {flow_rate:.6f} kg/s")
             else:
                 # Subsonic flow
                 pressure_ratio = P2/P1
-                flow_rate = self.effective_area * (2 * rho1 * (P1 - P2))**0.5
+                base_flow_rate = self.effective_area * (2 * rho1 * (P1 - P2))**0.5
+                # print(f"[COUPLING DEBUG] t={t:.1f}s: Subsonic flow: {flow_rate:.6f} kg/s")
+            # Apply variable flow coefficient in fallback path as well
+            flow_rate = base_flow_rate * self.current_flow_coefficient
+
+            # Debug output for fallback coefficient application
+            if abs(t % 30) < 0.1:
+                print(f"[FLOW DEBUG] t={t:.1f}s (fallback): P1={P1/1e5:.1f}→P2={P2/1e5:.1f} bar, base={base_flow_rate*1000:.1f} g/s, coeff={self.current_flow_coefficient:.3f}, flow={flow_rate*1000:.1f} g/s")
 
             flow_rate = min(flow_rate, self.max_flow_rate)
+            # print(f"[COUPLING DEBUG] t={t:.1f}s: Final fallback flow rate: {flow_rate:.6f} kg/s")
 
-        # Debug output for flow rate calculations
-        if t > 100.0 and t < 106.0:
-            print(f"  Flow Debug t={t:.1f}s: Calculated flow={flow_rate:.3f}kg/s, coeff={self.current_flow_coefficient:.3f}, P1={P1/1e5:.1f}bar, P2={P2/1e5:.1f}bar")
+        # Minimal debug output every 60 seconds
+        if abs(t % 60) < 0.1:
+            print(f"  t={t:.0f}s: P2={P2/1e5:.1f}bar, flow={flow_rate:.3f}kg/s")
 
         return flow_rate
 
@@ -891,9 +1067,7 @@ class MissionAdaptivePressureValve(InterTankCoupling):
 
     def calculate_flow(self, source_state, target_state, t):
         """Interface method expected by TankSystem._calculate_coupling_flows"""
-        # Default coupling flows to 0 during settling period (before 100 seconds)
-        if t < 100.0:
-            return 0.0
+        # Allow coupling flows from t=0 for discharge missions
 
         # Update pressure computations
         if hasattr(source_state, 'compute_pressure'):
@@ -908,4 +1082,233 @@ class MissionAdaptivePressureValve(InterTankCoupling):
         self.evaluate(t, tank_states)
 
         # Use the time-based control flow rate calculation
+        return self.calculate_flow_rate(t, tank_states)
+
+
+class MassFlowPIDControlledValve(InterTankCoupling):
+    """
+    Mass flow PID controlled valve for direct flow-to-flow control.
+
+    Instead of controlling pressure, this valve directly matches the target tank's
+    outflow (mission demand) by adjusting the coupling inflow using PID control.
+    This eliminates pressure dynamics from the control loop.
+    """
+
+    def __init__(self, source_idx: int, target_idx: int,
+                 control_params: dict,
+                 max_flow_rate: float = 0.005,
+                 orifice_diameter: float = 0.001,
+                 coupling_id: str = None,
+                 flow_physics: Optional[FlowPhysics] = None,
+                 mission_profile: dict = None):
+
+        print(f"DEBUG: Creating MassFlowPIDControlledValve {coupling_id} from tank {source_idx} to tank {target_idx}")
+        super().__init__(source_idx, target_idx, coupling_id)
+
+        # Control parameters
+        self.kp = control_params.get('pid_kp', 1.0)  # Proportional gain
+        self.ki = control_params.get('pid_ki', 0.1)  # Integral gain
+        self.kd = control_params.get('pid_kd', 0.01)  # Derivative gain
+
+        # Flow parameters
+        self.max_flow_rate = max_flow_rate
+        self.orifice_diameter = orifice_diameter
+        self.flow_physics = flow_physics
+
+        # Mission profile for getting target outflow rates
+        self.mission_profile = mission_profile
+
+        # Add pipe parameters for compatibility with driver (default values)
+        self.pipe_diameter = 0.005  # 5mm default
+        self.pipe_length = 1.0      # 1m default
+        self.pressure_margin_bar = 0.5  # Default pressure margin
+
+        # PID state variables
+        self.pid_integral = 0.0
+        self.pid_previous_error = None
+        self.pid_previous_time = 0.0
+        self.integral_min = -1000.0  # Anti-windup limits
+        self.integral_max = 1000.0
+
+        # Calculate effective area for flow physics
+        if self.flow_physics and not self.flow_physics.use_flow_coefficient:
+            orifice_area = math.pi * (orifice_diameter / 2)**2
+            self.effective_area = self.flow_physics.discharge_coefficient * orifice_area
+        elif self.flow_physics and self.flow_physics.use_flow_coefficient:
+            self.effective_area = self.flow_physics.flow_coefficient
+        else:
+            # Fallback for backward compatibility
+            self.effective_area = 0.6 * math.pi * (orifice_diameter / 2)**2
+
+        # State tracking
+        self.is_active = False
+        self.current_flow_coefficient = 0.0
+
+        # Flow tracking for plotting
+        self.outflow_history = {
+            'time': [],
+            'target_outflow': [],
+            'actual_outflow': [],
+            'coupling_inflow': []
+        }
+
+    def get_mission_outflow_rate(self, time: float) -> float:
+        """Get the target outflow rate from mission profile at given time."""
+        if not self.mission_profile or 'time_s' not in self.mission_profile:
+            return 0.0
+
+        times = self.mission_profile['time_s']
+        flow_rates = self.mission_profile['flow_rate_kg_s']
+
+        # Simple linear interpolation
+        if time <= times[0]:
+            return flow_rates[0]
+        elif time >= times[-1]:
+            return flow_rates[-1]
+        else:
+            # Find surrounding points and interpolate
+            for i in range(len(times) - 1):
+                if times[i] <= time <= times[i + 1]:
+                    t_ratio = (time - times[i]) / (times[i + 1] - times[i])
+                    return flow_rates[i] + t_ratio * (flow_rates[i + 1] - flow_rates[i])
+
+        return 0.0
+
+    def calculate_achievable_outflow(self, tank_state, target_outflow: float, time: float = 0.0) -> float:
+        """
+        Calculate the actual achievable outflow from target tank based on its pressure.
+
+        This is the critical insight - the actual outflow depends on tank pressure
+        and discharge characteristics, not just mission demand.
+        """
+        # Ensure pressure is computed
+        if hasattr(tank_state, 'compute_pressure'):
+            tank_state.compute_pressure()
+
+        tank_pressure_bar = tank_state.pressure / 1e5  # Convert Pa to bar
+
+        # Simplified discharge model: outflow depends on available pressure
+        # This is where the physics comes in - tank can only discharge what pressure allows
+
+        # Minimum pressure needed for any discharge (back-pressure, line losses, etc.)
+        min_discharge_pressure = 2.0  # bar
+
+        if tank_pressure_bar <= min_discharge_pressure:
+            return 0.0  # Cannot discharge if pressure too low
+
+        # Available pressure for discharge
+        available_pressure = tank_pressure_bar - min_discharge_pressure
+
+        # Discharge capacity based on available pressure (simplified linear model)
+        # In reality this would involve choked/unchoked flow, orifice equations, etc.
+        max_discharge_capacity = available_pressure * 0.010  # kg/s per bar of available pressure
+
+        # Actual outflow is limited by both mission demand and tank discharge capacity
+        achievable_outflow = min(target_outflow, max_discharge_capacity)
+
+        # Add debug output to track this
+        if target_outflow > 0.001:  # Only log when there's significant demand
+            print(f"  OutflowCalc t={time:.1f}s: P={tank_pressure_bar:.1f}bar, target={target_outflow*1000:.1f}g/s, achievable={achievable_outflow*1000:.1f}g/s")
+
+        return achievable_outflow
+
+    def calculate_pid_flow_rate(self, target_outflow: float, actual_outflow: float, time: float) -> float:
+        """
+        Calculate desired coupling inflow using PID controller to match target outflow.
+
+        Args:
+            target_outflow: Desired outflow rate from target tank [kg/s]
+            actual_outflow: Current outflow rate from target tank [kg/s]
+            time: Current simulation time [s]
+
+        Returns:
+            Desired coupling inflow rate [kg/s]
+        """
+        # Calculate time step
+        if self.pid_previous_time == 0.0:
+            dt = 1.0
+        else:
+            dt = time - self.pid_previous_time
+
+        if dt <= 1e-6:
+            return getattr(self, '_last_pid_output', 0.0)
+
+        # Flow error: positive when we need more coupling flow
+        flow_error = target_outflow - actual_outflow
+
+        # PID terms
+        proportional = self.kp * flow_error
+
+        # Integral with anti-windup
+        if dt < 10.0:
+            self.pid_integral += flow_error * dt
+            self.pid_integral = max(self.integral_min, min(self.integral_max, self.pid_integral))
+        integral = self.ki * self.pid_integral
+
+        # Derivative
+        if self.pid_previous_error is not None:
+            derivative = self.kd * (flow_error - self.pid_previous_error) / dt
+            derivative = max(-1e6, min(1e6, derivative))  # Limit spikes
+        else:
+            derivative = 0.0
+
+        # PID output is desired coupling inflow
+        desired_coupling_inflow = proportional + integral + derivative
+
+        # Constrain to physical limits
+        desired_coupling_inflow = max(0.0, min(self.max_flow_rate, desired_coupling_inflow))
+
+        # Debug output
+        if abs(time % 100) < 1.0:
+            print(f"  FlowPID t={time:.1f}s: target={target_outflow*1000:.1f}g/s, actual={actual_outflow*1000:.1f}g/s, error={flow_error*1000:.1f}g/s, coupling={desired_coupling_inflow*1000:.1f}g/s")
+
+        # Update state
+        self.pid_previous_error = flow_error
+        self.pid_previous_time = time
+        self._last_pid_output = desired_coupling_inflow
+
+        return desired_coupling_inflow
+
+    def calculate_flow_rate(self, t: float, tank_states: List) -> float:
+        """Calculate flow rate based on flow matching PID control."""
+        if len(tank_states) <= max(self.source_idx, self.target_idx):
+            return 0.0
+
+        source_state = tank_states[self.source_idx]
+        target_state = tank_states[self.target_idx]
+
+        # Get target outflow from mission profile
+        target_outflow = self.get_mission_outflow_rate(t)
+
+        # Calculate actual achievable outflow based on target tank pressure
+        actual_outflow = self.calculate_achievable_outflow(target_state, target_outflow, t)
+
+        # Use PID to determine coupling inflow needed
+        coupling_inflow = self.calculate_pid_flow_rate(target_outflow, actual_outflow, t)
+
+        # Store data for plotting
+        if t > 0 and len(self.outflow_history['time']) < 10000:  # Limit storage
+            self.outflow_history['time'].append(t)
+            self.outflow_history['target_outflow'].append(target_outflow)
+            self.outflow_history['actual_outflow'].append(actual_outflow)
+            self.outflow_history['coupling_inflow'].append(coupling_inflow)
+
+        return coupling_inflow
+
+    def set_mission_profile(self, mission_data: dict):
+        """Set mission profile for getting target outflow rates."""
+        self.mission_profile = mission_data
+        print(f"DEBUG: MassFlowPIDControlledValve mission profile set with {len(mission_data.get('time_s', []))} time points")
+
+    def calculate_flow(self, source_state, target_state, t):
+        """Interface method expected by TankSystem._calculate_coupling_flows"""
+        # Update pressure computations
+        if hasattr(source_state, 'compute_pressure'):
+            source_state.compute_pressure()
+        if hasattr(target_state, 'compute_pressure'):
+            target_state.compute_pressure()
+
+        # Create tank_states list for compatibility
+        tank_states = [source_state, target_state]
+
         return self.calculate_flow_rate(t, tank_states)

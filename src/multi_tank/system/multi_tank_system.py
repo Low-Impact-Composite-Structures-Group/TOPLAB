@@ -498,6 +498,9 @@ class MultiTankSystem:
             Returns:
                 dy/dt: State derivatives
             """
+            # IMMEDIATE DEBUG - First thing in function
+            print(f"🔵 ODE_SYSTEM CALLED: t={t:.4f}s", flush=True)
+
             # Create multi-tank state from state vector
             try:
                 multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
@@ -505,6 +508,21 @@ class MultiTankSystem:
             except Exception as e:
                 print(f"❌ Failed to create multi-tank state at t={t:.1f}s: {e}")
                 return np.zeros_like(y)
+
+            # ====== DEBUG SNAPSHOT: Print every 10th step or when near problem area ======
+            # print_snapshot = (int(t) % 10 == 0) or (100 <= t <= 110)
+            # if print_snapshot:
+            print(f"\n{'='*80}")
+            print(f"📸 SNAPSHOT at t={t:.2f}s (t/60={t/60:.2f}min)")
+            print(f"{'='*80}")
+            for idx, ts in enumerate(tank_states):
+                print(f"  Tank {idx+1} ({self.tanks[idx].fluid_name}):")
+                print(f"    Mass:        {ts.fuel_mass:.3f} kg")
+                print(f"    Pressure:    {ts.pressure/1e5:.3f} bar")
+                print(f"    Temperature: {ts.temperature:.2f} K")
+                print(f"    Density:     {ts.density:.2f} kg/m³")
+                print(f"    Volume:      {ts.volume:.4f} m³")
+            print(f"{'='*80}\n")
 
             # Step 1: Evaluate coupling rules and calculate inter-tank flows
             coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
@@ -535,6 +553,13 @@ class MultiTankSystem:
                 except Exception as e:
                     print(f"❌ Coupling evaluation failed at t={t:.1f}s: {e}")
                     # Continue with zero coupling flows
+
+            # ====== DEBUG: Show coupling flows if snapshot time ======
+            # if print_snapshot and self.enable_coupling:
+            print(f"  Coupling flows (kg/s):")
+            for tank_idx, flow in coupling_flows.items():
+                flow_gs = flow * 1000  # Convert to g/s
+                print(f"    Tank {tank_idx+1}: {flow_gs:+.3f} g/s ({'gaining' if flow > 0 else 'losing' if flow < 0 else 'no flow'})")
 
             # Step 2: Compute derivatives for each tank with coupling contributions
             derivatives = []
@@ -629,6 +654,17 @@ class MultiTankSystem:
                     'flow_data': self._current_flow_data.copy()
                 })
                 self._current_flow_data = []  # Reset for next evaluation
+
+            # ====== DEBUG: Show derivatives if snapshot time ======
+            # if print_snapshot:
+            print(f"  Computed derivatives:")
+            for idx in range(len(self.tanks)):
+                base = idx * 3
+                dm_dt = derivatives[base]
+                dT_dt = derivatives[base + 1]
+                dTs_dt = derivatives[base + 2]
+                print(f"    Tank {idx+1}: dm/dt={dm_dt:.6f} kg/s, dT/dt={dT_dt:.4f} K/s, dTs/dt={dTs_dt:.4f} K/s")
+            print(f"{'='*80}\n")
 
             return np.array(derivatives)
 

@@ -27,7 +27,7 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent.parent))
 
 # Import orchestrated framework
-from src.configuration.scenario_configuration import ScenarioConfig
+from src.configuration.enhanced_scenario_configuration import EnhancedScenarioConfig
 from src.orchestration.system_orchestrator import SystemOrchestrator
 
 
@@ -44,7 +44,7 @@ def main():
     print("=" * 80)
 
     # Load configuration
-    config_path = current_dir / "coupled_ch2_lh2_config.yaml"
+    config_path = current_dir / "coupled_ch2_lh2_config_new_format.yaml"
 
     if not config_path.exists():
         print(f"❌ Configuration file not found: {config_path}")
@@ -53,7 +53,7 @@ def main():
     print(f"📄 Loading multi-tank configuration: {config_path.name}")
 
     try:
-        config = ScenarioConfig.from_yaml(str(config_path))
+        config = EnhancedScenarioConfig.from_yaml(str(config_path))
         print(f"✅ Configuration loaded: {config}")
 
         # Display configuration summary

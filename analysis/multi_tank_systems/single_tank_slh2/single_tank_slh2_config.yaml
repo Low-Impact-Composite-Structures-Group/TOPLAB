@@ -10,7 +10,7 @@ network:
   external_sink: true
   tanks:
     - tank_id: 1
-      tank_type: "SlH2"
+      tank_type: "SLH2"
 
 # Tank geometry and initial conditions
 geometry:
