@@ -26,7 +26,7 @@ sys.path.insert(0, str(current_dir.parent.parent.parent))
 
 # Import orchestrated framework
 from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
-from src.orchestration.system_orchestrator import SystemOrchestrator
+from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
 
 
 def main():
