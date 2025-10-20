@@ -64,40 +64,37 @@ network:
       use_density_stopping_events: true
       use_duration_stopping: true
     plotting: {}
-  edges: []
-
-coupling_rules:
-- coupling_id: ch2_lh2_feedforward
-  coupling_type: feedforward_pressure_enforcer
-  description: 'Per-derivative feedforward: invert mdot_in to match required LH2 pressure'
-  participants:
-    source: 1
-    target: 2
-  control_parameters:
-    # Source constraints
-    min_source_pressure_bar: 15.0
-    safety_mass_fraction_per_s: 0.10
-    # Bisection/search
-    bracket_margin: 1.15         # narrower bracket reduces overshoot at saturation
-    max_bisection_iters: 14
-    tol_pressure_bar: 0.01       # tighter target tracking
-    # Branch-free feedforward tuning
-    enforcement_horizon_s: 0.30  # shorter horizon for gentler corrections
-    overpressure_margin_bar: 0.5 # slight bias above requirement to avoid chatter
-    mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
-    soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
-    # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
-    min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
-    min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
-  flow_parameters:
-    max_flow_rate_kg_s: 0.6       # slightly higher capacity to address early deficit
-    orifice_diameter_m: 0.0035    # +0.5 mm to increase hydraulic capacity
-  discharge_piping:
-    diameter_m: 0.005
-    length_m: 1.0
-    roughness_m: 1.5e-06
-    loss_coefficient: 1.0
-    choked_flow_enabled: true
+  edges:
+  - edge_id: ch2_lh2_feedforward
+    connection_type: feedforward_pressure_enforcer
+    description: 'Per-derivative feedforward: invert mdot_in to match required LH2 pressure'
+    from_node: 1
+    to_node: 2
+    control_parameters:
+      # Source constraints
+      min_source_pressure_bar: 15.0
+      safety_mass_fraction_per_s: 0.10
+      # Bisection/search
+      bracket_margin: 1.15         # narrower bracket reduces overshoot at saturation
+      max_bisection_iters: 14
+      tol_pressure_bar: 0.01       # tighter target tracking
+      # Branch-free feedforward tuning
+      enforcement_horizon_s: 0.30  # shorter horizon for gentler corrections
+      overpressure_margin_bar: 0.5 # slight bias above requirement to avoid chatter
+      mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
+      soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
+      # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
+      min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
+      min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
+    flow_parameters:
+      max_flow_rate_kg_s: 0.6       # slightly higher capacity to address early deficit
+      orifice_diameter_m: 0.0035    # +0.5 mm to increase hydraulic capacity
+    discharge_piping:
+      diameter_m: 0.005
+      length_m: 1.0
+      roughness_m: 1.5e-06
+      loss_coefficient: 1.0
+      choked_flow_enabled: true
 
 mission:
   type: discharge

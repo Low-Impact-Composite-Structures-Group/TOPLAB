@@ -152,12 +152,22 @@ def main():
     if hasattr(orchestrator, 'coupling_rules'):
         print(f"\n🔗 Active Coupling Rules:")
         for rule in orchestrator.coupling_rules:
-            print(f"   {rule.coupling_id}: {type(rule).__name__}")
-            if hasattr(rule, 'target_tank'):
-                print(f"     Participants: Tank {rule.source_tank} → Tank {rule.target_tank}")
+            # Handle both dict (config) and object (instantiated) types
+            if isinstance(rule, dict):
+                coupling_id = rule.get('coupling_id', 'unknown')
+                coupling_type = rule.get('coupling_type', 'unknown')
+                participants = rule.get('participants', {})
+                source = participants.get('source', '?')
+                target = participants.get('target', '?')
+                print(f"   {coupling_id}: {coupling_type}")
+                print(f"     Participants: Tank {source} → Tank {target}")
             else:
-                # OHEX extraction rule - no target tank
-                print(f"     Participants: Tank {rule.source_tank} → OHEX")
+                print(f"   {rule.coupling_id}: {type(rule).__name__}")
+                if hasattr(rule, 'target_tank'):
+                    print(f"     Participants: Tank {rule.source_tank} → Tank {rule.target_tank}")
+                else:
+                    # OHEX extraction rule - no target tank
+                    print(f"     Participants: Tank {rule.source_tank} → OHEX")
 
     # Show TankSystem coupling valves
     if hasattr(orchestrator.tank_system, 'coupling_valves'):

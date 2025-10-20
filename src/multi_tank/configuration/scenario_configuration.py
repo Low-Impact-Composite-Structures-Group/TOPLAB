@@ -154,12 +154,16 @@ class ScenarioConfig:
                 rule = {
                     'coupling_id': edge_id,
                     'coupling_type': connection_type,
+                    'description': edge.get('description', ''),
                     'participants': {
                         'source': from_node,
                         'target': to_node,
                     },
                     'activation_conditions': edge.get('activation_conditions', {}),
+                    'control_parameters': edge.get('control_parameters', {}),
+                    'flow_parameters': edge.get('flow_parameters', {}),
                     'flow_physics': edge.get('flow_physics', {}),
+                    'discharge_piping': edge.get('discharge_piping', {}),
                 }
                 coupling_rules.append(rule)
 
