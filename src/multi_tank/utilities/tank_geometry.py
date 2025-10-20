@@ -65,15 +65,14 @@ def create_tank_from_mission(
     # Apply safety margin
     required_fuel_mass = total_fuel_mass * safety_margin
 
-    # Calculate hydrogen density at initial conditions
+    # Calculate hydrogen density at initial state
     try:
-        # Use CoolProp to get hydrogen density at initial P & T
         rho_h2 = CP.PropsSI('D', 'P', initial_pressure, 'T', initial_temperature, 'Hydrogen')  # kg/m³
     except Exception as e:
-        # Fallback to ideal gas law if CoolProp fails
-        R_specific_h2 = 4124.0  # J/(kg·K) for H2
-        rho_h2 = initial_pressure / (R_specific_h2 * initial_temperature)
-        print(f"Warning: CoolProp failed, using ideal gas fallback. Error: {e}")
+        raise RuntimeError(
+            f"CoolProp failed to calculate hydrogen density at P={initial_pressure/1e5:.1f} bar, T={initial_temperature:.1f} K. "
+            f"CoolProp is required for all fluid property calculations. Error: {e}"
+        ) from e
 
     # Calculate required fuel volume
     fuel_volume_required = required_fuel_mass / rho_h2  # m³
@@ -141,15 +140,15 @@ def create_tank_from_fuel_mass(
         SphericalTank: Tank designed for operating pressure
     """
 
-    # Calculate hydrogen density at initial conditions
+        # Calculate hydrogen density at initial state using CoolProp
     try:
         # Use CoolProp to get hydrogen density at initial P & T
         rho_h2 = CP.PropsSI('D', 'P', initial_pressure, 'T', initial_temperature, 'Hydrogen')  # kg/m³
     except Exception as e:
-        # Fallback to ideal gas law if CoolProp fails
-        R_specific_h2 = 4124.0  # J/(kg·K) for H2
-        rho_h2 = initial_pressure / (R_specific_h2 * initial_temperature)
-        print(f"Warning: CoolProp failed, using ideal gas fallback. Error: {e}")
+        raise RuntimeError(
+            f"CoolProp failed to calculate hydrogen density at P={initial_pressure/1e5:.1f} bar, T={initial_temperature:.1f} K. "
+            f"CoolProp is required for all fluid property calculations. Error: {e}"
+        ) from e
 
     # Calculate required fuel volume
     fuel_volume_required = fuel_mass / rho_h2  # m³

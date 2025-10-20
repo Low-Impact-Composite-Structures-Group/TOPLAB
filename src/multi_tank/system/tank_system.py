@@ -102,15 +102,29 @@ class TankSystem:
 
         # Initialize flow physics if configuration is available
         self.flow_physics = None
-        if scenario_config and hasattr(scenario_config, 'config_dict') and 'flow_physics' in scenario_config.config_dict:
-            try:
-                self.flow_physics = FlowPhysics(scenario_config.config_dict['flow_physics'])
-                print(f"✓ Flow physics initialized from configuration")
-            except Exception as e:
-                print(f"⚠️ Failed to initialize flow physics: {e}")
-                print("   Using fallback hardcoded values")
-        else:
-            print("⚠️ Flow physics configuration not found - using fallback hardcoded values")
+        if scenario_config and hasattr(scenario_config, 'config_dict'):
+            # Check for 'physics' section (new schema) or 'flow_physics' (legacy)
+            physics_config = scenario_config.config_dict.get('physics', scenario_config.config_dict.get('flow_physics'))
+            if physics_config:
+                try:
+                    self.flow_physics = FlowPhysics(physics_config)
+                    print(f"✓ Flow physics initialized from configuration")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to initialize flow physics from configuration. "
+                        f"Check your 'physics:' section in the YAML file. Error: {e}"
+                    ) from e
+            elif self.coupling_rules:
+                # Only raise error if we have coupling rules that need flow physics
+                raise ValueError(
+                    "No 'physics' section found in configuration, but coupling rules are defined. "
+                    "Flow physics configuration is required for multi-tank systems with coupling. "
+                    "Add a 'physics:' section to your YAML configuration file with orifice_flow, "
+                    "safety_limits, and other flow physics parameters."
+                )
+            else:
+                # No coupling rules, no physics needed
+                print("   No coupling rules - flow physics not required")
 
         # Initialize caching system
         self._cached_tank_properties = {}
@@ -274,7 +288,15 @@ class TankSystem:
                 control_params = rule.get('control_parameters', rule.get('control_params', {}))
                 margin = control_params.get('pressure_margin_bar', 1.0)
                 control_interval = control_params.get('control_interval_s', 10.0)
-                target_min_pressure = target_tank_config.get('minimum_pressure', 300000) / 1e5
+
+                # Require explicit minimum pressure in config - no silent defaults
+                if 'minimum_pressure' not in target_tank_config:
+                    raise KeyError(
+                        f"Coupling rule {rule.get('coupling_id', 'unknown')} requires "
+                        f"'minimum_pressure' in target tank configuration. "
+                        f"No default value provided - must be explicitly configured."
+                    )
+                target_min_pressure = target_tank_config['minimum_pressure'] / 1e5
 
                 print(f"   🔗 Adaptive Valve: Tank{source_idx+1} → Tank{target_idx+1} (Mission-Adaptive)")
                 print(f"      Dynamic thresholds based on real-time mission flow")
@@ -446,10 +468,18 @@ class TankSystem:
 
                 source_idx = rule.get('source_tank', 1)  # Default to tank 2 (LH2)
 
+                # Require explicit min_extraction_pressure - no silent defaults
+                if 'min_extraction_pressure' not in rule:
+                    raise KeyError(
+                        f"OHEX extraction coupling {rule.get('coupling_id', 'unknown')} requires "
+                        f"'min_extraction_pressure' parameter. "
+                        f"No default value provided - must be explicitly configured."
+                    )
+
                 ohex_coupling = OHEXExtractionCoupling(
                     source_idx=source_idx,
                     mission_profile=rule.get('mission_profile', {}),
-                    min_extraction_pressure=rule.get('min_extraction_pressure', 3.0e5),
+                    min_extraction_pressure=rule['min_extraction_pressure'],
                     coupling_id=rule.get('coupling_id', 'ohex_extraction')
                 )
 
@@ -474,18 +504,17 @@ class TankSystem:
             self._cached_tank_properties[i] = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
 
     def _get_tank_properties(self, tank: SphericalTank, tank_id: str = "Unknown", tank_index: int = -1):
-        """Calculate tank properties from SphericalTank geometry"""
+        """Calculate tank properties from SphericalTank geometry.
+
+        Raises:
+            ValueError: If tank is None (indicates configuration error)
+        """
         if tank is None:
-            print(f"   ⚠️  No {tank_id} tank provided, using minimal defaults")
-            return {
-                'volume': 0.1,
-                'inner_surface_area': 1.0,
-                'outer_surface_area': 1.05,
-                'inner_diameter': 0.6,
-                'outer_diameter': 0.61,
-                'liner_mass': 1.0,
-                'wall_mass': 10.0
-            }
+            raise ValueError(
+                f"No tank object provided for {tank_id} (index {tank_index}). "
+                f"This indicates a configuration error - cannot calculate geometry from None. "
+                f"Check that tank was properly initialized before calling this method."
+            )
 
         inner_radius = tank.radius  # Tank internal radius
 
@@ -715,11 +744,8 @@ class TankSystem:
         Each tank has 3 state variables: mass, temperature, solid temperature
         """
         # --- Debug heartbeat and stuck-step detection ---
-        try:
-            import os
-            debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
-        except Exception:
-            debug_enabled = False
+        import os
+        debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
 
         # Detect potential stuck integration (solver calling RHS without advancing time)
         if not hasattr(self, '_last_ode_t'):
@@ -737,27 +763,20 @@ class TankSystem:
 
         # Heartbeat: print state summary at start, then every 60s of simulated time or when debug enabled
         if debug_enabled or (t - getattr(self, '_ode_heartbeat_last_t', -1e9) >= 60.0) or (t <= 1.0):
-            try:
-                tank_summaries = []
-                for i in range(len(self.tanks)):
-                    idx = i * 3
-                    m_i = float(y[idx])
-                    T_i = float(y[idx + 1])
-                    vol = getattr(self.tanks[i], 'volume', 1.0)
-                    density = m_i / max(vol, 1e-9)
-                    # Quick pressure estimate
-                    try:
-                        from CoolProp.CoolProp import PropsSI
-                        P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
-                    except Exception:
-                        R = 4124.0
-                        P_i = density * R * max(T_i, 1.0)
-                    tank_summaries.append((P_i / 1e5, m_i))
-                press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
-                mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
-                print(f"[ODE HB] t={t:.1f}s | {press_str} | {mass_str}")
-            except Exception:
-                pass
+            tank_summaries = []
+            for i in range(len(self.tanks)):
+                idx = i * 3
+                m_i = float(y[idx])
+                T_i = float(y[idx + 1])
+                vol = getattr(self.tanks[i], 'volume', 1.0)
+                density = m_i / max(vol, 1e-9)
+                # Quick pressure estimate using CoolProp (required)
+                from CoolProp.CoolProp import PropsSI
+                P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
+                tank_summaries.append((P_i / 1e5, m_i))
+            press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
+            mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
+            print(f"[ODE HB] t={t:.1f}s | {press_str} | {mass_str}")
             self._ode_heartbeat_last_t = t
         try:
             # Check if we've already flagged stopping

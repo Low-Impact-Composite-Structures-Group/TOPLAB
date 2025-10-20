@@ -49,17 +49,23 @@ class PressureTriggeredValve(InterTankCoupling):
         self.deactivation_threshold = p_close # Close valve when P_target ≥ this
 
         # Flow physics calculator (configuration-driven)
+        # IMPORTANT: flow_physics should be provided for accurate flow calculations
+        # If None, raise a clear error directing user to configuration
+        if flow_physics is None:
+            raise ValueError(
+                f"PressureTriggeredValve requires 'flow_physics' configuration. "
+                f"Add a 'flow_physics' section to your coupling rule configuration with: "
+                f"discharge_coefficient, atmospheric_pressure, and safety parameters. "
+                f"See documentation for FlowPhysics configuration schema."
+            )
         self.flow_physics = flow_physics
 
-        # Calculate effective area using flow physics or fallback
-        if self.flow_physics and not self.flow_physics.use_flow_coefficient:
+        # Calculate effective area using flow physics
+        if not self.flow_physics.use_flow_coefficient:
             orifice_area = math.pi * (orifice_diameter / 2)**2
             self.effective_area = self.flow_physics.discharge_coefficient * orifice_area
-        elif self.flow_physics and self.flow_physics.use_flow_coefficient:
-            self.effective_area = self.flow_physics.flow_coefficient
         else:
-            # Fallback for backward compatibility
-            self.effective_area = 0.6 * math.pi * (orifice_diameter / 2)**2
+            self.effective_area = self.flow_physics.flow_coefficient
 
         if p_close <= p_open:
             raise ValueError(f"deactivation_threshold ({p_close/1e5:.1f} bar) must be > activation_threshold ({p_open/1e5:.1f} bar)")
@@ -117,45 +123,20 @@ class PressureTriggeredValve(InterTankCoupling):
         T1 = source_state.temperature
         rho1 = source_state.fuel_mass / source_state.tank.volume
 
-        # Use configuration-driven flow physics if available
-        if self.flow_physics:
-            flow_rate = self.flow_physics.calculate_orifice_flow_rate(
-                upstream_pressure=P1,
-                downstream_pressure=P2,
-                upstream_temperature=T1,
-                upstream_density=rho1,
-                orifice_diameter=self.orifice_diameter
-            )
+        # Use configuration-driven flow physics (required - no fallback)
+        flow_rate = self.flow_physics.calculate_orifice_flow_rate(
+            upstream_pressure=P1,
+            downstream_pressure=P2,
+            upstream_temperature=T1,
+            upstream_density=rho1,
+            orifice_diameter=self.orifice_diameter
+        )
 
-            # Apply valve capacity limit
-            flow_rate = min(flow_rate, self.max_flow_rate)
+        # Apply valve capacity limit
+        flow_rate = min(flow_rate, self.max_flow_rate)
 
-            # Apply safety limits
-            flow_rate = self.flow_physics.apply_safety_limits(flow_rate, source_state.fuel_mass)
-
-        else:
-            # Fallback calculation for backward compatibility
-            # Gas properties - FALLBACK VALUES ONLY
-            gamma = 1.4  # Heat capacity ratio for hydrogen
-            R_specific = 4124  # J/(kg⋅K) specific gas constant for hydrogen
-            P_crit_ratio = (2/(gamma+1))**(gamma/(gamma-1))  # Critical pressure ratio ≈ 0.528
-            discharge_coeff = 0.6  # Discharge coefficient for sharp-edged orifice
-
-            if P2/P1 < P_crit_ratio:
-                # Choked flow - sonic velocity condition
-                sonic_velocity = math.sqrt(gamma * R_specific * T1)
-                flow_rate = discharge_coeff * self.effective_area * rho1 * sonic_velocity
-            else:
-                # Subsonic flow
-                velocity = math.sqrt(2 * (P1 - P2) / rho1)
-                flow_rate = discharge_coeff * self.effective_area * rho1 * velocity
-
-            # Apply valve capacity limit
-            flow_rate = min(flow_rate, self.max_flow_rate)
-
-            # Safety limit: prevent excessive mass transfer rate
-            max_safe_flow = 0.1 * source_state.fuel_mass
-            flow_rate = min(flow_rate, max_safe_flow)
+        # Apply safety limits
+        flow_rate = self.flow_physics.apply_safety_limits(flow_rate, source_state.fuel_mass)
 
         return flow_rate
 
@@ -873,15 +854,12 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self.is_active = self.current_flow_coefficient > 0.0
 
         # Throttled debug: show key control values every ~30s
-        try:
-            if abs(ct % 30.0) < 1.0:
-                tgt = getattr(self, '_target_coefficient', 0.0)
-                prev = getattr(self, '_previous_coefficient', 0.0)
-                pidt = getattr(self, '_pid_update_time', 0.0)
-                last_pid_flow = getattr(self, '_last_pid_output', 0.0)
-                print(f"[VALVE CTRL] t={ct:.1f}s coeff={self.current_flow_coefficient:.3f} target={tgt:.3f} prev={prev:.3f} pid_flow={last_pid_flow*1000:.1f} g/s (ΔtPID={ct-pidt:.2f}s)")
-        except Exception:
-            pass
+        if abs(ct % 30.0) < 1.0:
+            tgt = getattr(self, '_target_coefficient', 0.0)
+            prev = getattr(self, '_previous_coefficient', 0.0)
+            pidt = getattr(self, '_pid_update_time', 0.0)
+            last_pid_flow = getattr(self, '_last_pid_output', 0.0)
+            print(f"[VALVE CTRL] t={ct:.1f}s coeff={self.current_flow_coefficient:.3f} target={tgt:.3f} prev={prev:.3f} pid_flow={last_pid_flow*1000:.1f} g/s (ΔtPID={ct-pidt:.2f}s)")
 
 
 
@@ -902,38 +880,24 @@ class OHEXExtractionCoupling(InterTankCoupling):
             target_state.compute_pressure()
 
         # Estimate current fully-open base flow capacity to improve coefficient mapping
-        try:
-            source_state = tank_states[self.source_idx]
-            if source_state.pressure is None:
-                source_state.compute_pressure()
-            P1 = source_state.pressure
-            P2 = target_state.pressure
-            T1 = source_state.temperature
-            rho1 = source_state.fuel_mass / source_state.tank.volume
-            if self.flow_physics:
-                base_capacity = self.flow_physics.calculate_orifice_flow_rate(
-                    upstream_pressure=P1,
-                    downstream_pressure=P2,
-                    upstream_temperature=T1,
-                    upstream_density=rho1,
-                    orifice_diameter=self.orifice_diameter
-                )
-            else:
-                gamma = 1.4
-                R = 4124
-                critical_pressure_ratio = (2/(gamma+1))**(gamma/(gamma-1))
-                P_critical = P1 * critical_pressure_ratio
-                if P2 <= P_critical:
-                    rho_throat = rho1 * (2/(gamma+1))**(1/(gamma-1))
-                    T_throat = T1 * (2/(gamma+1))
-                    c_throat = (gamma * R * T_throat)**0.5
-                    base_capacity = rho_throat * c_throat * self.effective_area
-                else:
-                    base_capacity = self.effective_area * (2 * rho1 * (P1 - P2))**0.5
-            # Guard against negatives
-            base_capacity = max(0.0, float(base_capacity))
-        except Exception:
-            base_capacity = None
+        source_state = tank_states[self.source_idx]
+        if source_state.pressure is None:
+            source_state.compute_pressure()
+        P1 = source_state.pressure
+        P2 = target_state.pressure
+        T1 = source_state.temperature
+        rho1 = source_state.fuel_mass / source_state.tank.volume
+
+        # Use flow_physics for capacity calculation (required - no fallback)
+        base_capacity = self.flow_physics.calculate_orifice_flow_rate(
+            upstream_pressure=P1,
+            downstream_pressure=P2,
+            upstream_temperature=T1,
+            upstream_density=rho1,
+            orifice_diameter=self.orifice_diameter
+        )
+        # Guard against negatives
+        base_capacity = max(0.0, float(base_capacity))
 
         # Use continuous control to determine valve state and flow coefficient, using capacity if available
         self.update_continuous_control(t, target_state.pressure, lh2_density, base_flow_capacity=base_capacity)
@@ -1325,37 +1289,31 @@ class OHEXExtractionCoupling(InterTankCoupling):
         return float(self.max_valve_close_rate_per_s)
 
     def _compute_base_capacity(self, source_state, target_state) -> Optional[float]:
-        try:
-            if source_state.pressure is None:
-                source_state.compute_pressure()
-            if target_state.pressure is None:
-                target_state.compute_pressure()
-            P1, P2 = source_state.pressure, target_state.pressure
-            T1 = source_state.temperature
-            rho1 = source_state.fuel_mass / source_state.tank.volume
-            if self.flow_physics:
-                cap = self.flow_physics.calculate_orifice_flow_rate(
-                    upstream_pressure=P1,
-                    downstream_pressure=P2,
-                    upstream_temperature=T1,
-                    upstream_density=rho1,
-                    orifice_diameter=self.orifice_diameter
-                )
-            else:
-                gamma = 1.4
-                R = 4124
-                critical_pressure_ratio = (2/(gamma+1))**(gamma/(gamma-1))
-                P_critical = P1 * critical_pressure_ratio
-                if P2 <= P_critical:
-                    rho_throat = rho1 * (2/(gamma+1))**(1/(gamma-1))
-                    T_throat = T1 * (2/(gamma+1))
-                    c_throat = (gamma * R * T_throat)**0.5
-                    cap = rho_throat * c_throat * self.effective_area
-                else:
-                    cap = self.effective_area * (2 * rho1 * (P1 - P2))**0.5
-            return max(0.0, float(cap))
-        except Exception:
-            return None
+        """Compute fully-open valve capacity for coefficient mapping.
+
+        Returns:
+            Flow capacity in kg/s, or None if computation fails
+
+        Raises:
+            RuntimeError: If critical computation fails
+        """
+        if source_state.pressure is None:
+            source_state.compute_pressure()
+        if target_state.pressure is None:
+            target_state.compute_pressure()
+        P1, P2 = source_state.pressure, target_state.pressure
+        T1 = source_state.temperature
+        rho1 = source_state.fuel_mass / source_state.tank.volume
+
+        # Use flow_physics for capacity (required - no fallback)
+        cap = self.flow_physics.calculate_orifice_flow_rate(
+            upstream_pressure=P1,
+            downstream_pressure=P2,
+            upstream_temperature=T1,
+            upstream_density=rho1,
+            orifice_diameter=self.orifice_diameter
+        )
+        return max(0.0, float(cap))
 
     def evaluate(self, t: float, tank_states: List) -> bool:
         """Update valve coefficient using margin-free governor at a fixed cadence."""
@@ -1751,15 +1709,23 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         return self.mission_flow_rates[-1]
 
     def _required_pressure_pa(self, flow_rate_kg_s: float, lh2_density: float, temperature_K: float, pressure_Pa: float) -> float:
-        # Reuse same method as governor for consistency
+        """Calculate required LH2 pressure for given mission flow rate.
+
+        Args:
+            flow_rate_kg_s: Mission outflow rate [kg/s]
+            lh2_density: LH2 density [kg/m³]
+            temperature_K: LH2 temperature [K]
+            pressure_Pa: Current LH2 pressure [Pa]
+
+        Returns:
+            Required pressure [Pa] including atmospheric and piping losses
+        """
         if flow_rate_kg_s <= 0:
             return 1e5
+
         if self.flow_physics:
-            # Prefer current LH2 state for viscosity; fall back to nominal if needed
-            try:
-                props = self.flow_physics.get_fluid_properties(pressure_Pa, temperature_K)
-            except Exception:
-                props = self.flow_physics.get_fluid_properties(300000, 20.4)
+            # Get fluid properties at current state
+            props = self.flow_physics.get_fluid_properties(pressure_Pa, temperature_K)
             kinematic_viscosity = props['kinematic_viscosity']
             pressure_drop = self.flow_physics.calculate_pipe_pressure_drop(
                 flow_rate=flow_rate_kg_s,
@@ -1770,12 +1736,10 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                 pipe_roughness=self.pipe_roughness,
                 loss_coefficient=self.loss_coefficient
             )
-            try:
-                atm = self.flow_physics.atmospheric_pressure
-            except Exception:
-                atm = 1.01325e5
+            atm = self.flow_physics.atmospheric_pressure
             return atm + pressure_drop
-        # Fallback
+
+        # Fallback simplified calculation
         volumetric_flow = flow_rate_kg_s / max(lh2_density, 1e-9)
         area = math.pi * (self.pipe_diameter/2)**2
         velocity = volumetric_flow / max(area, 1e-12)
@@ -1787,51 +1751,47 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         return 1.01325e5 + dp
 
     def _capacity_kg_s(self, source_state, target_state) -> float:
-        # Fully open valve capacity at current P1,P2,T1,ρ1
-        try:
-            if source_state.pressure is None:
-                source_state.compute_pressure()
-            if target_state.pressure is None:
-                target_state.compute_pressure()
-            P1, P2 = source_state.pressure, target_state.pressure
-            T1 = source_state.temperature
-            rho1 = source_state.fuel_mass / source_state.tank.volume
-            if self.flow_physics:
-                base = self.flow_physics.calculate_orifice_flow_rate(
-                    upstream_pressure=P1, downstream_pressure=P2,
-                    upstream_temperature=T1, upstream_density=rho1,
-                    orifice_diameter=self.orifice_diameter
-                )
-            else:
-                gamma, R = 1.4, 4124
-                critical_ratio = (2/(gamma+1))**(gamma/(gamma-1))
-                if P2 <= P1 * critical_ratio:
-                    rho_th = rho1 * (2/(gamma+1))**(1/(gamma-1))
-                    T_th = T1 * (2/(gamma+1))
-                    c_th = (gamma * R * T_th)**0.5
-                    area = 0.6 * math.pi * (self.orifice_diameter/2)**2
-                    base = rho_th * c_th * area
-                else:
-                    area = 0.6 * math.pi * (self.orifice_diameter/2)**2
-                    base = area * (2 * rho1 * max(P1 - P2, 0.0))**0.5
-            base = max(0.0, float(base))
-            base = min(base, self.max_flow_rate)
-            # Safety limit relative to source mass
-            base = min(base, self.safety_mass_fraction_per_s * max(source_state.fuel_mass, 0.0))
-            return base
-        except Exception:
-            return 0.0
+        """Calculate fully-open valve capacity at current conditions.
+
+        Returns:
+            Flow capacity [kg/s] including safety limits
+        """
+        if source_state.pressure is None:
+            source_state.compute_pressure()
+        if target_state.pressure is None:
+            target_state.compute_pressure()
+        P1, P2 = source_state.pressure, target_state.pressure
+        T1 = source_state.temperature
+        rho1 = source_state.fuel_mass / source_state.tank.volume
+
+        # Use flow_physics for capacity (required - no fallback)
+        base = self.flow_physics.calculate_orifice_flow_rate(
+            upstream_pressure=P1, downstream_pressure=P2,
+            upstream_temperature=T1, upstream_density=rho1,
+            orifice_diameter=self.orifice_diameter
+        )
+        base = max(0.0, float(base))
+        base = min(base, self.max_flow_rate)
+        # Safety limit relative to source mass
+        base = min(base, self.safety_mass_fraction_per_s * max(source_state.fuel_mass, 0.0))
+        return base
 
     def _predict_pressure_pa(self, mass: float, temperature: float, volume: float) -> float:
-        # Isochoric EOS mapping: P = PropsSI("P", "T", T, "Dmass", rho, "hydrogen")
-        try:
-            from CoolProp.CoolProp import PropsSI
-            density = mass / max(volume, 1e-9)
-            if temperature <= 0:
-                return 1e5
-            return float(PropsSI("P", "T", temperature, "Dmass", density, "hydrogen"))
-        except Exception:
-            return 1e5
+        """Predict pressure using isochoric EOS: P = PropsSI("P", "T", T, "Dmass", ρ, "hydrogen")
+
+        Args:
+            mass: Tank fuel mass [kg]
+            temperature: Temperature [K]
+            volume: Tank volume [m³]
+
+        Returns:
+            Predicted pressure [Pa]
+        """
+        from CoolProp.CoolProp import PropsSI
+        density = mass / max(volume, 1e-9)
+        if temperature <= 0:
+            raise ValueError(f"Invalid temperature for pressure prediction: {temperature} K")
+        return float(PropsSI("P", "T", temperature, "Dmass", density, "hydrogen"))
 
     def evaluate(self, t: float, tank_states: List) -> bool:
         # Stateless w.r.t valve position; compute at each call
@@ -1841,11 +1801,8 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         source_state = tank_states[self.source_idx]
         target_state = tank_states[self.target_idx]
         # Debug gating
-        try:
-            import os
-            debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
-        except Exception:
-            debug_enabled = False
+        import os
+        debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
 
         # Ensure pressures
         if hasattr(source_state, 'compute_pressure'):
@@ -1912,20 +1869,17 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         else:
             used_linear = False
             if self.use_linearized_predictor:
-                try:
-                    # Estimate dP/drho at current state via finite difference (isochoric, T-frozen)
-                    rho = target_state.fuel_mass / max(V, 1e-12)
-                    delta_rho = max(1e-6 * rho, 1e-7)
-                    from CoolProp.CoolProp import PropsSI
-                    P_plus = float(PropsSI("P", "T", T, "Dmass", rho + delta_rho, "hydrogen"))
-                    dP_drho = (P_plus - P_now) / delta_rho
-                    dP_dm = dP_drho / max(V, 1e-12)
-                    if dP_dm > 1e-9:
-                        deltaP = P_target_ctrl - P_now
-                        mdot_star = mission_outflow + (deltaP / dP_dm) / dt_ctrl
-                        used_linear = True
-                except Exception:
-                    used_linear = False
+                # Estimate dP/drho at current state via finite difference (isochoric, T-frozen)
+                rho = target_state.fuel_mass / max(V, 1e-12)
+                delta_rho = max(1e-6 * rho, 1e-7)
+                from CoolProp.CoolProp import PropsSI
+                P_plus = float(PropsSI("P", "T", T, "Dmass", rho + delta_rho, "hydrogen"))
+                dP_drho = (P_plus - P_now) / delta_rho
+                dP_dm = dP_drho / max(V, 1e-12)
+                if dP_dm > 1e-9:
+                    deltaP = P_target_ctrl - P_now
+                    mdot_star = mission_outflow + (deltaP / dP_dm) / dt_ctrl
+                    used_linear = True
 
             if not used_linear:
                 # Bisection for mdot_in where pred_p(mdot) ≈ P_target_ctrl
@@ -1982,10 +1936,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self._last_time = t
 
         if debug_enabled and (int(t) % 60 == 0 or t <= 5.0):
-            try:
-                print(f"[FF DEBUG] t={t:.1f}s: mdot={mdot_applied*1000:.2f}g/s, cap={cap*1000:.1f}g/s, deficit={self._last_deficit_bar:.3f}bar")
-            except Exception:
-                pass
+            print(f"[FF DEBUG] t={t:.1f}s: mdot={mdot_applied*1000:.2f}g/s, cap={cap*1000:.1f}g/s, deficit={self._last_deficit_bar:.3f}bar")
 
         return mdot_applied
 
