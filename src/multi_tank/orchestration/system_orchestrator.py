@@ -1228,15 +1228,20 @@ class SystemOrchestrator:
                 enable_multi_tank_overlay=style_config.get('enable_multi_tank_overlay', False)
             )
 
+            # Get figure_prefix from config (if specified)
+            figure_prefix = plot_config.get('figure_prefix', None)
+            if figure_prefix:
+                print(f"   📝 Using figure prefix from config: '{figure_prefix}'")
+
             # Check if this is a sequential mission analysis
             is_sequential = self._is_sequential_mission_analysis()
 
             if is_sequential:
                 print("🔍 Detected sequential mission analysis - using sequential plotting methods")
-                return self._generate_sequential_plots(plotter, save_path)
+                return self._generate_sequential_plots(plotter, save_path, figure_prefix)
             else:
                 print("🔍 Detected single mission analysis - using standard plotting methods")
-                return self._generate_single_mission_plots(plotter, save_path)
+                return self._generate_single_mission_plots(plotter, save_path, figure_prefix)
 
         except Exception as e:
             print(f"   ⚠️ Plot generation failed: {e}")
@@ -1273,7 +1278,7 @@ class SystemOrchestrator:
         print("   🔎 Single mission analysis detected")
         return False
 
-    def _generate_sequential_plots(self, plotter, save_path: str = None):
+    def _generate_sequential_plots(self, plotter, save_path: str = None, figure_prefix: str = None):
         """Generate plots for sequential mission analysis."""
         if not hasattr(self, 'mission_results'):
             print("⚠️  No mission results available for sequential plotting")
@@ -1301,9 +1306,10 @@ class SystemOrchestrator:
             if save_path:
                 from pathlib import Path
                 save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
                 save_ext = Path(save_path).suffix or '.png'
-                plot_path = save_dir / f"{save_name}_sequential_evolution_tank{tank_idx + 1}{save_ext}"
+                # Use figure_prefix if provided, otherwise use the original save_path stem
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                plot_path = save_dir / f"{base_name}_sequential_evolution_tank{tank_idx + 1}{save_ext}"
             else:
                 plot_path = None
 
@@ -1317,7 +1323,11 @@ class SystemOrchestrator:
 
             # Sequential density-temperature diagram
             if save_path:
-                plot_path = save_dir / f"{save_name}_sequential_density_temperature_tank{tank_idx + 1}{save_ext}"
+                from pathlib import Path
+                save_dir = Path(save_path).parent
+                save_ext = Path(save_path).suffix or '.png'
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                plot_path = save_dir / f"{base_name}_sequential_density_temperature_tank{tank_idx + 1}{save_ext}"
             else:
                 plot_path = None
 
@@ -1345,8 +1355,12 @@ class SystemOrchestrator:
             mf_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {})
             if mf_config.get('enabled', True):
                 if save_path:
+                    from pathlib import Path
+                    save_dir = Path(save_path).parent
+                    save_ext = Path(save_path).suffix or '.png'
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
                     mf_filename = mf_config.get('filename', 'mass_flows')
-                    plot_path = save_dir / f"{save_name}_sequential_{mf_filename}_tank{tank_idx + 1}{save_ext}"
+                    plot_path = save_dir / f"{base_name}_sequential_{mf_filename}_tank{tank_idx + 1}{save_ext}"
                 else:
                     plot_path = None
 
@@ -1371,7 +1385,7 @@ class SystemOrchestrator:
         # Return the first figure (or all figures if multiple tanks)
         return figures[0] if len(figures) == 1 else figures
 
-    def _generate_single_mission_plots(self, plotter, save_path: str = None):
+    def _generate_single_mission_plots(self, plotter, save_path: str = None, figure_prefix: str = None):
         """Generate plots for single mission analysis."""
         figures = []
 
@@ -1396,32 +1410,34 @@ class SystemOrchestrator:
             if save_path:
                 from pathlib import Path
                 save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
                 save_ext = Path(save_path).suffix or '.png'
-                overlay_save_path = save_dir / f"{save_name}_evolution_all_tanks{save_ext}"
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                overlay_save_path = save_dir / f"{base_name}_evolution_all_tanks{save_ext}"
 
             # Get event lines configuration from tank_states config
             tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
             event_lines = tank_states_config.get('event_lines', [])
 
-            # Extract valve events (if any) for vertical markers
-            valve_events = None
-            try:
-                valve_events = plotter._extract_valve_events(self.results)
-            except Exception as e:
-                print(f"   ⚠️ Valve event extraction failed (overlay): {e}")
+            # Get axis limits and legend locations from config
+            xlim = tank_states_config.get('xlim', None)
+            ylim_pressure = tank_states_config.get('ylim_pressure', None)
+            ylim_temperature = tank_states_config.get('ylim_temperature', None)
+            ylim_density = tank_states_config.get('ylim_density', None)
+            legend_locations = tank_states_config.get('legend_locations', None)
 
             fig = plotter.plot_tank_evolution(
                 results=self.results,
                 tank_index=0,  # Not used in overlay mode
                 reference_lines=reference_lines,
                 reference_lines_config=ref_line_config,
-                event_lines=(event_lines or []) + [
-                    {"time": ev.get("time", 0.0) / 3600.0, "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank', '?')+1})"}
-                    for ev in (valve_events or [])
-                ],
+                event_lines=event_lines,
                 save_path=str(overlay_save_path) if overlay_save_path else None,
-                overlay_all_tanks=True
+                overlay_all_tanks=True,
+                xlim=xlim,
+                ylim_pressure=ylim_pressure,
+                ylim_temperature=ylim_temperature,
+                ylim_density=ylim_density,
+                legend_locations=legend_locations
             )
             figures.append(fig)
 
@@ -1445,31 +1461,33 @@ class SystemOrchestrator:
                     # Create tank-specific save path
                     from pathlib import Path
                     save_dir = Path(save_path).parent
-                    save_name = Path(save_path).stem
                     save_ext = Path(save_path).suffix or '.png'
-                    tank_save_path = save_dir / f"{save_name}_evolution_tank{tank_idx + 1}{save_ext}"
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                    tank_save_path = save_dir / f"{base_name}_evolution_tank{tank_idx + 1}{save_ext}"
 
                 # Get event lines configuration from tank_states config
                 tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
                 event_lines = tank_states_config.get('event_lines', [])
 
-                # Extract valve events for vertical markers on per-tank plots
-                valve_events = None
-                try:
-                    valve_events = plotter._extract_valve_events(self.results)
-                except Exception as e:
-                    print(f"   ⚠️ Valve event extraction failed (tank {tank_idx+1}): {e}")
+                # Get axis limits and legend locations from config
+                xlim = tank_states_config.get('xlim', None)
+                ylim_pressure = tank_states_config.get('ylim_pressure', None)
+                ylim_temperature = tank_states_config.get('ylim_temperature', None)
+                ylim_density = tank_states_config.get('ylim_density', None)
+                legend_locations = tank_states_config.get('legend_locations', None)
 
                 fig = plotter.plot_tank_evolution(
                     results=self.results,
                     tank_index=tank_idx,
                     reference_lines=reference_lines,
                     reference_lines_config=ref_line_config,
-                    event_lines=(event_lines or []) + [
-                        {"time": ev.get("time", 0.0) / 3600.0, "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank', '?')+1})"}
-                        for ev in (valve_events or [])
-                    ],
-                    save_path=str(tank_save_path) if tank_save_path else None
+                    event_lines=event_lines,
+                    save_path=str(tank_save_path) if tank_save_path else None,
+                    xlim=xlim,
+                    ylim_pressure=ylim_pressure,
+                    ylim_temperature=ylim_temperature,
+                    ylim_density=ylim_density,
+                    legend_locations=legend_locations
                 )
                 figures.append(fig)
 
@@ -1478,9 +1496,9 @@ class SystemOrchestrator:
             if save_path:
                 from pathlib import Path
                 save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
                 save_ext = Path(save_path).suffix or '.png'
-                dt_save_path = save_dir / f"{save_name}_density_temperature_tank{tank_idx + 1}{save_ext}"
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                dt_save_path = save_dir / f"{base_name}_density_temperature_tank{tank_idx + 1}{save_ext}"
 
             # Get density-temperature plot configuration
             dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
@@ -1512,6 +1530,7 @@ class SystemOrchestrator:
             arrow_position = dt_config.get('arrow_position', 0.25)
             arrow_size = dt_config.get('arrow_size', 1.0)
             valve_marker_size = dt_config.get('valve_marker_size', 8.0)
+            legend_location = dt_config.get('legend_location', 'upper right')
 
             dt_fig = plotter.plot_density_temperature(
                 results=self.results,
@@ -1524,7 +1543,8 @@ class SystemOrchestrator:
                 arrow_position=arrow_position,
                 arrow_size=arrow_size,
                 valve_marker_size=valve_marker_size,
-                save_path=str(dt_save_path) if dt_save_path else None
+                save_path=str(dt_save_path) if dt_save_path else None,
+                legend_location=legend_location
             )
             figures.append(dt_fig)
 
@@ -1536,40 +1556,31 @@ class SystemOrchestrator:
             if save_path:
                 from pathlib import Path
                 save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
                 save_ext = Path(save_path).suffix or '.png'
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
 
                 # Use filename from config if available
                 mf_filename = mf_config.get('filename', 'mass_flows')
-                mf_save_path = save_dir / f"{save_name}_{mf_filename}_tank{tank_idx + 1}{save_ext}"
+                mf_save_path = save_dir / f"{base_name}_{mf_filename}_tank{tank_idx + 1}{save_ext}"
 
             # Check if mass flow plots are enabled
             if mf_config.get('enabled', True):
                 # Extract plot parameters from config with defaults
                 include_venting_flow = mf_config.get('include_venting_flow', True)
                 include_coupling_flows = mf_config.get('include_coupling_flows', True)
-
-                # Extract valve events for this tank to add vertical markers on flow plots
-                mf_event_lines = []
-                try:
-                    valve_events = plotter._extract_valve_events(self.results)
-                    # Only include events relevant to this tank (target/source both show activity via combined flow)
-                    for ev in (valve_events or []):
-                        # Show events for any tank since flows are shown per tank; annotate which tank the event came from
-                        mf_event_lines.append({
-                            "time": ev.get("time", 0.0) / 3600.0,
-                            "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank','?')+1})"
-                        })
-                except Exception as e:
-                    print(f"   ⚠️ Valve event extraction failed for mass flow plot (tank {tank_idx+1}): {e}")
+                xlim = mf_config.get('xlim', None)
+                ylim = mf_config.get('ylim', None)
+                legend_location = mf_config.get('legend_location', 'best')
 
                 mf_fig = plotter.plot_mass_flows(
                     results=self.results,
                     tank_index=tank_idx,
                     include_venting_flow=include_venting_flow,
                     include_coupling_flows=include_coupling_flows,
-                    event_lines=mf_event_lines,
-                    save_path=str(mf_save_path) if mf_save_path else None
+                    save_path=str(mf_save_path) if mf_save_path else None,
+                    xlim=xlim,
+                    ylim=ylim,
+                    legend_location=legend_location
                 )
                 figures.append(mf_fig)
 
@@ -1582,12 +1593,12 @@ class SystemOrchestrator:
                 if save_path:
                     from pathlib import Path
                     save_dir = Path(save_path).parent
-                    save_name = Path(save_path).stem
                     save_ext = Path(save_path).suffix or '.png'
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
 
                     # Use filename from config if available
-                    hex_filename = hex_config.get('filename', 'heat_exchanger_requirements')
-                    hex_save_path = save_dir / f"{save_name}_{hex_filename}_tank{tank_idx + 1}{save_ext}"
+                    hex_filename = hex_config.get('filename', 'hex')
+                    hex_save_path = save_dir / f"{base_name}_{hex_filename}_tank{tank_idx + 1}{save_ext}"
 
                 # Calculate OHEX data if needed
                 qdot_ohex = self._calculate_ohex_requirements(tank_idx) if hex_config.get('include_ohex', True) else []
@@ -1602,12 +1613,19 @@ class SystemOrchestrator:
                     'ohex_requirements': qdot_ohex
                 }
 
+                xlim = hex_config.get('xlim', None)
+                ylim = hex_config.get('ylim', None)
+                legend_location = hex_config.get('legend_location', 'best')
+
                 hex_fig = plotter.plot_heat_exchanger_requirements(
                     heat_exchanger_data=heat_exchanger_data,
                     tank_index=tank_idx,
                     include_ohex=hex_config.get('include_ohex', True),
                     include_total=hex_config.get('include_total', True),
-                    save_path=str(hex_save_path) if hex_save_path else None
+                    save_path=str(hex_save_path) if hex_save_path else None,
+                    xlim=xlim,
+                    ylim=ylim,
+                    legend_location=legend_location
                 )
                 figures.append(hex_fig)
 
@@ -1620,12 +1638,12 @@ class SystemOrchestrator:
             if save_path:
                 from pathlib import Path
                 save_dir = Path(save_path).parent
-                save_name = Path(save_path).stem
                 save_ext = Path(save_path).suffix or '.png'
+                base_name = figure_prefix if figure_prefix else Path(save_path).stem
 
                 # Use filename from config if available
                 pressure_req_filename = pressure_req_config.get('filename', 'pressure_requirements')
-                pressure_req_save_path = save_dir / f"{save_name}_{pressure_req_filename}{save_ext}"
+                pressure_req_save_path = save_dir / f"{base_name}_{pressure_req_filename}{save_ext}"
 
             # Get tank index from config (default to 1 for LH2 tank)
             tank_index = pressure_req_config.get('tank_index', 1)

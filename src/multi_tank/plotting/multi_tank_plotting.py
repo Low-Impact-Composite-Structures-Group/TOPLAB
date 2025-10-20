@@ -91,7 +91,12 @@ class DelftColourPlotter:
                           reference_lines_config: Optional[Dict[str, Dict[str, bool]]] = None,
                           event_lines: Optional[List[Dict[str, any]]] = None,
                           save_path: Optional[str] = None,
-                          overlay_all_tanks: bool = None) -> plt.Figure:
+                          overlay_all_tanks: bool = None,
+                          xlim: Optional[Tuple[float, float]] = None,
+                          ylim_pressure: Optional[Tuple[float, float]] = None,
+                          ylim_temperature: Optional[Tuple[float, float]] = None,
+                          ylim_density: Optional[Tuple[float, float]] = None,
+                          legend_locations: Optional[Dict[str, str]] = None) -> plt.Figure:
         """
         Plot tank evolution with 3 vertical subplots: pressure, temperature, and density vs time.
 
@@ -115,6 +120,14 @@ class DelftColourPlotter:
                 - Each item: {'time': float (hours), 'label': str}
             save_path: Optional path to save the plot
             overlay_all_tanks: Whether to overlay all tanks (overrides class setting)
+            xlim: Optional tuple (xmin, xmax) for x-axis range [hours]
+            ylim_pressure: Optional tuple (ymin, ymax) for pressure subplot [bar]
+            ylim_temperature: Optional tuple (ymin, ymax) for temperature subplot [K]
+            ylim_density: Optional tuple (ymin, ymax) for density subplot [kg/m³]
+            legend_locations: Optional dict with legend locations per subplot:
+                - 'pressure': location string (e.g., 'best', 'upper left')
+                - 'temperature': location string
+                - 'density': location string
 
         Returns:
             matplotlib Figure object (main evolution plot)
@@ -240,6 +253,11 @@ class DelftColourPlotter:
             for i, event in enumerate(event_lines):
                 event_time = event.get('time', 0.0)  # Time in hours
                 event_label = event.get('label', 'Event')
+                # Get normalized y position (0-1 range, where 0=bottom, 1=top)
+                # Default to 0.75 (25% from top) if not specified
+                y_position_norm = event.get('y_position', 0.75)
+                # Clamp to valid range
+                y_position_norm = max(0.0, min(1.0, y_position_norm))
 
                 # Add vertical line across all subplots with proper z-order and full extent
                 for ax in [ax1, ax2, ax3]:
@@ -251,12 +269,12 @@ class DelftColourPlotter:
                 # This is handled by tight subplot spacing
 
                 # Add callout annotation only on the top subplot (pressure) to avoid clutter
-                # Smart positioning to avoid data interference
+                # Use normalized position from config (0=bottom, 1=top)
                 y_range = ax1.get_ylim()[1] - ax1.get_ylim()[0]
-                y_top = ax1.get_ylim()[1]
+                y_bottom = ax1.get_ylim()[0]
 
-                # Position in top 50% of plot, alternating height for multiple events
-                y_pos = y_top - y_range * (0.50 + i * 0.08)  # Start from 50% down, step by 8%
+                # Calculate y position: bottom + (range * normalized_position)
+                y_pos = y_bottom + y_range * y_position_norm
 
                 # Use larger offsets and position further from event line to avoid data
                 x_offset = 30 if i % 2 == 0 else -30  # Larger horizontal offset
@@ -277,6 +295,20 @@ class DelftColourPlotter:
                            fontweight='bold',
                            color=event_line_color,
                            ha=ha)
+
+        # Apply custom axis limits if provided
+        if xlim is not None:
+            for ax in [ax1, ax2, ax3]:
+                ax.set_xlim(xlim)
+
+        if ylim_pressure is not None:
+            ax1.set_ylim(ylim_pressure)
+
+        if ylim_temperature is not None:
+            ax2.set_ylim(ylim_temperature)
+
+        if ylim_density is not None:
+            ax3.set_ylim(ylim_density)
 
         # Add legends when there are labeled items to display
         for ax in [ax1, ax2, ax3]:
@@ -302,14 +334,16 @@ class DelftColourPlotter:
             should_show_legend = (data_curves > 1) or (reference_lines_count > 0)
 
             if should_show_legend:
-                # Try different locations for optimal positioning
-                # For pressure subplot (ax1), try lower locations to avoid interfering with data
-                if ax == ax1:  # Pressure subplot
+                # Determine legend location - use custom if provided, otherwise default to 'best'
+                if legend_locations:
+                    if ax == ax1:  # Pressure subplot
+                        loc = legend_locations.get('pressure', 'best')
+                    elif ax == ax2:  # Temperature subplot
+                        loc = legend_locations.get('temperature', 'best')
+                    else:  # Density subplot (ax3)
+                        loc = legend_locations.get('density', 'best')
+                else:
                     loc = 'best'
-                elif ax == ax2:  # Temperature subplot
-                    loc = 'best'  # Let matplotlib choose best position
-                else:  # Density subplot (ax3)
-                    loc = 'best'  # Let matplotlib choose best position
 
                 legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=loc, frameon=True, fancybox=True,
                                  shadow=True, framealpha=0.9, edgecolor='black')
@@ -480,7 +514,8 @@ class DelftColourPlotter:
                                arrow_size: float = 1.0,
                                valve_events: Optional[List[Dict[str, Any]]] = None,
                                valve_marker_size: float = 8.0,
-                               save_path: Optional[str] = None) -> plt.Figure:
+                               save_path: Optional[str] = None,
+                               legend_location: str = 'upper right') -> plt.Figure:
         """
         Plot density-temperature diagram for a single tank.
 
@@ -501,6 +536,7 @@ class DelftColourPlotter:
             valve_events: List of valve events with 'time' and 'type' ('open'/'close') for multi-tank systems
             valve_marker_size: Size of valve opening/closing markers
             save_path: Optional path to save the plot
+            legend_location: Location string for legend (e.g., 'best', 'upper left', 'center left')
 
         Returns:
             matplotlib Figure object
@@ -730,8 +766,8 @@ class DelftColourPlotter:
 
         # Show legend only if there are multiple labeled lines (tank data + reference lines)
         if len(labeled_lines) > 1:
-            # Use 'upper left' to avoid overlap with isobar callouts on the right side
-            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='upper right', frameon=True, fancybox=True,
+            # Use provided legend location or default
+            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location, frameon=True, fancybox=True,
                               shadow=True, framealpha=0.9, edgecolor='black')
             # Additional styling for 3D effect
             legend.get_frame().set_facecolor('white')
@@ -765,8 +801,10 @@ class DelftColourPlotter:
                        tank_index: int = 0,
                        include_venting_flow: bool = True,
                        include_coupling_flows: bool = True,
-                       event_lines: Optional[List[Dict[str, any]]] = None,
-                       save_path: Optional[str] = None) -> plt.Figure:
+                       save_path: Optional[str] = None,
+                       xlim: Optional[Tuple[float, float]] = None,
+                       ylim: Optional[Tuple[float, float]] = None,
+                       legend_location: str = 'best') -> plt.Figure:
         """
         Plot mass flow rates for a single tank using the proven working pattern from multi_tank_analysis.
 
@@ -776,6 +814,9 @@ class DelftColourPlotter:
             include_venting_flow: Whether to show venting flow curve
             include_coupling_flows: Whether to show coupling flows (for multi-tank systems)
             save_path: Optional path to save the plot
+            xlim: Optional tuple (xmin, xmax) for x-axis range [hours]
+            ylim: Optional tuple (ymin, ymax) for y-axis range [g/s]
+            legend_location: Location string for legend (e.g., 'best', 'upper left')
 
         Returns:
             matplotlib Figure object
@@ -847,15 +888,15 @@ class DelftColourPlotter:
         # ax.set_title(f'Tank {tank_index + 1} Flow Rates')
         ax.grid(True, alpha=0.3)
 
-        # Add vertical event lines if provided (to show valve events on flow plots)
-        if event_lines:
-            event_line_color = '#606060'
-            for event in event_lines:
-                event_time = event.get('time', 0.0)  # hours
-                ax.axvline(x=event_time, color=event_line_color, linestyle='--', linewidth=1.2, alpha=0.8, zorder=0.5)
+        # Apply custom axis limits if provided
+        if xlim is not None:
+            ax.set_xlim(xlim)
+
+        if ylim is not None:
+            ax.set_ylim(ylim)
 
         # Add legend with 3D shadow effect (same styling as other plots)
-        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location, frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect to match tank evolution plots
         legend.get_frame().set_facecolor('white')
@@ -875,7 +916,10 @@ class DelftColourPlotter:
                                        tank_index: int = 0,
                                        include_ohex: bool = True,
                                        include_total: bool = True,
-                                       save_path: Optional[str] = None) -> plt.Figure:
+                                       save_path: Optional[str] = None,
+                                       xlim: Optional[Tuple[float, float]] = None,
+                                       ylim: Optional[Tuple[float, float]] = None,
+                                       legend_location: str = 'best') -> plt.Figure:
         """
         Plot heat exchanger requirements for a single tank.
 
@@ -891,6 +935,9 @@ class DelftColourPlotter:
             include_ohex: Whether to show oHEX curve
             include_total: Whether to show total (iHEX + oHEX) curve
             save_path: Optional path to save the plot
+            xlim: Optional tuple (xmin, xmax) for x-axis range [hours]
+            ylim: Optional tuple (ymin, ymax) for y-axis range [kW]
+            legend_location: Location string for legend (e.g., 'best', 'upper left')
 
         Returns:
             matplotlib Figure object
@@ -969,8 +1016,15 @@ class DelftColourPlotter:
         # ax.set_title('Heat Exchanger Requirements vs Time')
         ax.grid(True, alpha=0.3)
 
+        # Apply custom axis limits if provided
+        if xlim is not None:
+            ax.set_xlim(xlim)
+
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
         # Add legend with 3D shadow effect (same as other plots)
-        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True, fancybox=True,
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location, frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
         # Additional styling for 3D effect
         legend.get_frame().set_facecolor('white')

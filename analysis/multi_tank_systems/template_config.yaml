@@ -353,6 +353,12 @@ output:
   # --------------------------------------------------------------------------
   plots:
     # ------------------------------------------------------------------------
+    # Figure Prefix (OPTIONAL - for custom output filenames)
+    # ------------------------------------------------------------------------
+    figure_prefix: template_analysis             # Base prefix for all plot filenames
+                                                  # If not provided, uses output.identifier
+
+    # ------------------------------------------------------------------------
     # Global Plot Style
     # ------------------------------------------------------------------------
     style:
@@ -384,10 +390,19 @@ output:
     tank_states:
       enabled: true                               # REQUIRED: Enable this plot
       figsize: [12, 10]                           # [width, height] in inches
-      filename: tank_states                       # Output filename (no extension)
+      filename: evolution                         # Output filename (no extension)
       event_lines:                                # Optional: Mark specific events
       - time: 0.0                                 # [hrs] Time of event
         label: Simulation start                   # Label for event marker
+        y_position: 0.75                          # [0-1] Vertical position (0=bottom, 1=top)
+      xlim: null                                  # [min, max] or null for autofit
+      ylim_pressure: null                         # [min, max] or null for autofit
+      ylim_temperature: null                      # [min, max] or null for autofit
+      ylim_density: null                          # [min, max] or null for autofit
+      legend_locations:                           # Legend position per subplot
+        pressure: best                            # Options: best, upper right, lower left, etc.
+        temperature: best                         # Use matplotlib location strings
+        density: best
 
     # Fuel Flow Profile: Mass flow rate delivered to mission
     fuel_flow_profile:
@@ -407,6 +422,7 @@ output:
       arrow_position: 0.98                        # Position of trajectory arrows [0-1]
       arrow_size: 1.0                             # Arrow size multiplier
       valve_marker_size: 8.0                      # Size of valve event markers
+      legend_location: upper right                # Legend position for phase diagram
 
     # Mass Flows: All mass flow rates (venting, coupling, mission)
     mass_flows:
@@ -415,17 +431,23 @@ output:
       filename: mass_flows
       include_venting_flow: true                  # Show venting flow rate
       include_coupling_flows: true                # Show inter-tank flows (multi-tank only)
+      xlim: null                                  # [min, max] or null for autofit
+      ylim: null                                  # [min, max] or null for autofit
+      legend_location: best                       # Legend position
 
     # Heat Exchanger Requirements: iHEX and oHEX power requirements
     heat_exchanger_requirements:
       enabled: true
       figsize: [12, 6]
-      filename: heat_exchanger_requirements
+      filename: hex                               # Output filename (no extension)
       include_ihex: true                          # Internal heat exchanger
       include_ohex: true                          # Orthogonal heat exchanger
       ohex_target_temperature: 200.0              # [K] Target outlet temperature
       ohex_target_pressure: 20e5                  # [Pa] Target outlet pressure
       include_total: true                         # Show total HEX power
+      xlim: null                                  # [min, max] or null for autofit
+      ylim: null                                  # [min, max] or null for autofit
+      legend_location: best                       # Legend position
 
     # Pressure Requirements: For feedforward controllers (multi-tank only)
     pressure_requirements:

@@ -59,6 +59,7 @@ output:
   results_directory: output/results
   plots_directory: output/plots
   plots:
+    figure_prefix: single_tank_cch2
     style:
       use_greyscale: true
       font:
@@ -78,10 +79,19 @@ output:
       figsize:
       - 12
       - 10
-      filename: tank_states
+      filename: evolution
       event_lines:
       - time: 0.185
         label: IHEX activation
+        y_position: 0.75
+      xlim: null
+      ylim_pressure: null
+      ylim_temperature: null
+      ylim_density: null
+      legend_locations:
+        pressure: best
+        temperature: best
+        density: best
     fuel_flow_profile:
       enabled: true
       figsize:
@@ -105,6 +115,7 @@ output:
       arrow_position: 0.0
       arrow_size: 1.0
       valve_marker_size: 8.0
+      legend_location: center right
     mass_flows:
       enabled: true
       figsize:
@@ -112,14 +123,20 @@ output:
       - 6
       filename: mass_flows
       include_venting_flow: true
+      xlim: null
+      ylim: null
+      legend_location: best
     heat_exchanger_requirements:
       enabled: true
       figsize:
       - 12
       - 6
-      filename: heat_exchanger_requirements
+      filename: hex
       include_ihex: true
       include_ohex: true
       ohex_target_temperature: 200.0
       ohex_target_pressure: 20e5
       include_total: true
+      xlim: null
+      ylim: null
+      legend_location: best

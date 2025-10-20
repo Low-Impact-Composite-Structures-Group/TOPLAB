@@ -153,6 +153,7 @@ output:
   results_directory: output/results
   plots_directory: output/plots
   plots:
+    figure_prefix: coupled_ch2_lh2
     style:
       use_greyscale: true
       enable_multi_tank_overlay: false
@@ -171,11 +172,31 @@ output:
     tank_states:
       enabled: true
       figsize: [12, 10]
-      filename: tank_states
+      filename: evolution
+      xlim: null
+      ylim_pressure: null
+      ylim_temperature: null
+      ylim_density: null
+      legend_locations:
+        pressure: best
+        temperature: best
+        density: best
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
       filename: fuel_flow_profile
+    density_temperature:
+      enabled: true
+      figsize: [12, 8]
+      filename: density_temperature
+      isobar_pressures: [700, 500, 300, 100, 20]
+      show_reference_pressures: false
+      include_saturation_line: true
+      include_isobars: true
+      arrow_position: 0.98
+      arrow_size: 1.0
+      valve_marker_size: 8.0
+      legend_location: upper right
     pressure_requirements:
       enabled: true
       figsize: [14, 10]
@@ -185,3 +206,18 @@ output:
       filename: mass_flows
       include_venting_flow: true
       include_coupling_flows: true
+      xlim: null
+      ylim: null
+      legend_location: best
+    heat_exchanger_requirements:
+      enabled: true
+      figsize: [12, 6]
+      filename: hex
+      include_ihex: true
+      include_ohex: true
+      ohex_target_temperature: 200.0
+      ohex_target_pressure: 20e5
+      include_total: true
+      xlim: null
+      ylim: null
+      legend_location: best
