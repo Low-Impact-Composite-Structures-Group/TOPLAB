@@ -6,15 +6,16 @@ Supports various coupling mechanisms and tank configurations with unified physic
 """
 
 from .coupling.inter_tank_coupling import InterTankCoupling, PressureTriggeredValve
-from .system.multi_tank_system import MultiTankSystem, MultiTankConfig
+from .system.tank_system import TankSystem, TankSystemConfig, TankConfig
 from .system.state_management import MultiTankState, MultiTankResults
 from .utilities.tank_geometry import create_tank_from_fuel_mass, create_tank_from_mission
 
 __all__ = [
     'InterTankCoupling',
     'PressureTriggeredValve',
-    'MultiTankSystem',
-    'MultiTankConfig',
+    'TankSystem',
+    'TankSystemConfig',
+    'TankConfig',
     'MultiTankState',
     'MultiTankResults',
     'create_tank_from_fuel_mass',

@@ -142,11 +142,17 @@ def main():
         print(f"     Initial T: {initial_temperature:.1f} K")
 
     # Show coupling rules details
-    if hasattr(orchestrator, 'coupling_rules'):
+    if hasattr(orchestrator, 'coupling_rules') and orchestrator.coupling_rules:
         print(f"\n🔗 Active Coupling Rules:")
-        for rule in orchestrator.coupling_rules:
-            print(f"   {rule.coupling_id}: {type(rule).__name__}")
-            print(f"     Participants: Tank {rule.source_tank} → Tank {rule.target_tank}")
+        for rule_config in orchestrator.coupling_rules:
+            # coupling_rules are now raw dict configs, not objects
+            coupling_id = rule_config.get('coupling_id', 'unknown')
+            coupling_type = rule_config.get('coupling_type', 'unknown')
+            participants = rule_config.get('participants', {})
+            source = participants.get('source', '?')
+            target = participants.get('target', '?')
+            print(f"   {coupling_id}: {coupling_type}")
+            print(f"     Participants: Tank {source} → Tank {target}")
 
     # Show TankSystem coupling valves
     if hasattr(orchestrator.tank_system, 'coupling_valves'):

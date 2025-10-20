@@ -2,7 +2,7 @@
 System package for multi-tank systems.
 """
 
-from .multi_tank_system import MultiTankSystem, MultiTankConfig
+from .tank_system import TankSystem, TankSystemConfig, TankConfig
 from .state_management import MultiTankState, MultiTankResults
 
-__all__ = ['MultiTankSystem', 'MultiTankConfig', 'MultiTankState', 'MultiTankResults']
+__all__ = ['TankSystem', 'TankSystemConfig', 'TankConfig', 'MultiTankState', 'MultiTankResults']
