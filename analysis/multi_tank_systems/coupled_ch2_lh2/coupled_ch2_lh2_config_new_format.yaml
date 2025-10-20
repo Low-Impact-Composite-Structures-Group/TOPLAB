@@ -2,8 +2,6 @@ analysis:
   name: Coupled CH2-LH2 Multi-Tank System
   description: 'Two-tank coupled system: CH2 (700 bar, 330K) pressurizes LH2 (3-15 bar, 20K) for mission discharge with mission-adaptive pressure control'
   version: '1.0'
-stopping_criteria:
-  minimum_density: 5.0    # kg/m^3; global threshold to avoid premature LH2 stop
 network:
   nodes:
   - node_id: 1
@@ -14,12 +12,12 @@ network:
       phi: 3.0
       radius: 0.8
     initial_conditions:
-      pressure: 100000000
+      pressure: 100000000.0
       temperature: 288.15
       density: 60.0
     operating_limits:
-      minimum_pressure: 100000
-      venting_pressure: 110000000
+      minimum_pressure: 100000.0
+      venting_pressure: 110000000.0
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -29,7 +27,7 @@ network:
         winding_angle: 54.7
       insulation:
         thickness: 0.05
-        heat_transfer_coefficient: 50
+        heat_transfer_coefficient: 50.0
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.0
@@ -44,12 +42,12 @@ network:
       phi: 3.0
       mission_based_sizing: true
     initial_conditions:
-      pressure: 1000000
+      pressure: 200000.0
       temperature: 25.0
       density: 68.0
     operating_limits:
-      minimum_pressure: 200000
-      venting_pressure: 1500000
+      minimum_pressure: 200000.0
+      venting_pressure: 1500000.0
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -66,28 +64,49 @@ network:
       use_density_stopping_events: true
       use_duration_stopping: true
     plotting: {}
+  edges: []
 coupling_rules:
 - coupling_id: ch2_lh2_pressurization
-  coupling_type: mission_adaptive_pressurization
-  description: 'Mission-adaptive pressure control: CH2 maintains LH2 pressure at level needed for mission discharge'
+  coupling_type: pressure_governor
+  description: 'Margin-free pressure governor: CH2 tracks LH2 required pressure for mission discharge with first-order response'
   participants:
-    source: 1  # CH2 tank
-    target: 2  # LH2 tank
-  mission_parameters:
-    mission_profile:
-      time_s: [0, 30, 64, 970, 2576, 2608, 2974, 2983, 3111, 3271, 3300, 3688]
-      flow_rate_kg_s: [0.000, 0.098, 0.098, 0.098, 0.098, 0.091, 0.087, 0.079, 0.075, 0.069, 0.015, 0.000]
+    source: 1
+    target: 2
   control_parameters:
-    pressure_margin_bar: 0.5
-    max_pressurization_rate_kg_s: 0.02
+    # Governor cadence and smoothing
+    control_interval_s: 0.5
+    target_pressure_filter_tau_s: 0.15
+    # Smooth mission flow (EMA) to desensitize required-pressure to jagged profile
+    mission_flow_filter_tau_s: 2.5
+    setpoint_bias_bar: 0.8
+    # Measurement filtering and soft-start
+    measured_pressure_filter_tau_s: 0.10
+    startup_delay_s: 1.0
+    startup_ramp_duration_s: 6.0
+    startup_flow_cap_kg_s: 0.08
+    # Bypass cap when deficit is large to avoid undertracking at startup
+    disable_startup_cap_when_deficit: true
+    deficit_threshold_bar: 0.5
+    # Source constraints
     min_source_pressure_bar: 15.0
-    activation_delay_seconds: 120.0  # Wait 2 minutes for initial transients to settle
-    pid_kp: 0.02
-    pid_ki: 0.01
-    pid_kd: 0.005
-    # Actuator dynamics (optional)
-    valve_response_time_s: 2.0        # first-order valve time constant (s)
-    max_valve_rate_per_s: 0.5         # max fractional change per second
+    # Pressure tracking gain (kg/s per bar of deficit)
+    pressure_gain_kg_s_per_bar: 0.45
+    # Actuator dynamics
+    valve_response_time_s: 0.6
+    max_valve_rate_per_s: 2.0
+    startup_max_valve_rate_per_s: 0.3
+    # Asymmetric rate limits: allow faster closing to kill spikes
+    max_valve_open_rate_per_s: 1.2
+    max_valve_close_rate_per_s: 3.0
+    # Limit how fast the target pressure can change (bar/s)
+    max_target_rise_bar_per_s: 1.4
+    max_target_fall_bar_per_s: 0.8
+    # Adaptive bias integrator to eliminate residual deficit
+    bias_integrator_enabled: true
+    bias_gain_bar_per_s: 0.08
+    bias_max_bar: 1.5
+    bias_decay_bar_per_s: 0.01
+    overpressure_margin_bar: 1.0
   flow_parameters:
     max_flow_rate_kg_s: 0.5
     orifice_diameter_m: 0.003
@@ -137,10 +156,10 @@ physics:
     property_update_frequency: 1
 solver:
   method: LSODA
-  rtol: 1e-4
-  atol: 1e-6
-  time_step: 1.0
-  max_step: 20.0
+  rtol: 5e-5
+  atol: 5e-7
+  time_step: 0.5
+  max_step: 5.0
   custom_config: true
 output:
   identifier: coupled_ch2_lh2_pressurization

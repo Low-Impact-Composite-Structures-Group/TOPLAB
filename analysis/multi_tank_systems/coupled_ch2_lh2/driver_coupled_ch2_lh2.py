@@ -44,7 +44,7 @@ def main():
     print("=" * 80)
 
     # Load configuration
-    config_path = current_dir / "coupled_ch2_lh2_config_new_format.yaml"
+    config_path = current_dir / "coupled_ch2_lh2_feedforward.yaml"
 
     if not config_path.exists():
         print(f"❌ Configuration file not found: {config_path}")
@@ -175,12 +175,25 @@ def main():
                 print(f"     Opens when target < {valve.p_open/1e5:.1f} bar")
                 print(f"     Closes when target > {valve.p_close/1e5:.1f} bar")
                 print(f"     Max flow rate: {valve.max_flow_rate*1000:.0f} g/s")
+            elif type(valve).__name__ == 'PressureGovernorValve' or hasattr(valve, 'pressure_gain_kg_s_per_bar'):
+                # Margin-free pressure governor (Option A)
+                print(f"   Valve {i}: Tank{valve.source_idx+1} → Tank{valve.target_idx+1} (Pressure Governor)")
+                if hasattr(valve, 'pipe_diameter') and hasattr(valve, 'pipe_length'):
+                    print(f"     Discharge piping: {valve.pipe_diameter*1000:.0f}mm × {valve.pipe_length:.1f}m")
+                if hasattr(valve, 'pressure_gain_kg_s_per_bar'):
+                    print(f"     Pressure gain: {valve.pressure_gain_kg_s_per_bar:.3f} kg/s/bar")
+                if hasattr(valve, 'control_interval_s'):
+                    print(f"     Control cadence: {valve.control_interval_s:.2f} s")
+                if hasattr(valve, 'target_filter_tau_s'):
+                    print(f"     Target LPF tau: {valve.target_filter_tau_s:.2f} s")
+                if hasattr(valve, 'max_flow_rate'):
+                    print(f"     Max flow rate: {valve.max_flow_rate*1000:.0f} g/s")
             else:
                 # Mission-adaptive pressure valve
                 print(f"   Valve {i}: Tank{valve.source_idx+1} → Tank{valve.target_idx+1} (Mission-Adaptive)")
                 print(f"     Dynamic thresholds based on real-time mission flow")
                 print(f"     Discharge piping: {valve.pipe_diameter*1000:.0f}mm × {valve.pipe_length:.1f}m")
-                print(f"     Pressure margin: {valve.pressure_margin_bar:.1f} bar")
+                # print(f"     Pressure margin: {valve.pressure_margin_bar:.1f} bar")
                 print(f"     Max flow rate: {valve.max_flow_rate*1000:.0f} g/s")
 
     print(f"\n   Mission Assignment: ATR72 discharge from LH2 Tank {mission.assigned_to}")

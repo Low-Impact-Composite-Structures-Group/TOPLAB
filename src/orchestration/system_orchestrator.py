@@ -162,14 +162,14 @@ class SystemOrchestrator:
                 participants = rule_config.get('participants', {})
                 flow_params = rule_config.get('flow_parameters', {})
                 control_params = rule_config.get('control_parameters', {})
-                mission_params = rule_config.get('mission_parameters', {})
                 discharge_piping = rule_config.get('discharge_piping', {})
 
                 tank_system_rule = {
                     'type': 'mission_adaptive_pressure_valve',
                     'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
                     'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
-                    'mission_profile': mission_params.get('mission_profile', {}),
+                    # Let TankSystem inject mission from orchestrator profile to avoid hardcoded lists
+                    'mission_profile': {},
                     'discharge_piping': discharge_piping,
                     'control_params': control_params,
                     'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.005),
@@ -179,6 +179,58 @@ class SystemOrchestrator:
 
                 print(f"   ✓ Mission-adaptive pressurization → MissionAdaptivePressureValve")
                 print(f"     Dynamic thresholds based on mission flow requirements")
+                print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
+                print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'pressure_governor':
+                # New simplified margin-free pressure tracking
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                control_params = rule_config.get('control_parameters', {})
+                discharge_piping = rule_config.get('discharge_piping', {})
+
+                tank_system_rule = {
+                    'type': 'pressure_governor',
+                    'source_tank': participants.get('source', 1) - 1,
+                    'target_tank': participants.get('target', 2) - 1,
+                    # No hardcoded mission arrays; tank system will inject from orchestrator
+                    'mission_profile': {},
+                    'discharge_piping': discharge_piping,
+                    'control_params': control_params,
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.005),
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.001),
+                    'coupling_id': rule_config.get('coupling_id', 'pressure_governor')
+                }
+
+                print(f"   ✓ Pressure governor → PressureGovernorValve (margin-free)")
+                print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
+                print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
+
+                tank_system_coupling_rules.append(tank_system_rule)
+
+            elif coupling_type == 'feedforward_pressure_enforcer':
+                # Convert feedforward pressure enforcement to FeedforwardPressureEnforcer
+                participants = rule_config.get('participants', {})
+                flow_params = rule_config.get('flow_parameters', {})
+                control_params = rule_config.get('control_parameters', {})
+                discharge_piping = rule_config.get('discharge_piping', {})
+
+                tank_system_rule = {
+                    'type': 'feedforward_pressure_enforcer',
+                    'source_tank': participants.get('source', 1) - 1,
+                    'target_tank': participants.get('target', 2) - 1,
+                    # No hardcoded arrays; TankSystem will inject orchestrator mission
+                    'mission_profile': {},
+                    'discharge_piping': discharge_piping,
+                    'control_params': control_params,
+                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.005),
+                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.001),
+                    'coupling_id': rule_config.get('coupling_id', 'feedforward_pressure_enforcer')
+                }
+
+                print(f"   ✓ Feedforward pressure enforcement → FeedforwardPressureEnforcer")
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 

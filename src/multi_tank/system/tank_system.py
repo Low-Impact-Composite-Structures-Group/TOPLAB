@@ -25,6 +25,7 @@ from src.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 
 from .state_management import MultiTankState, MultiTankResults
 from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
+from src.multi_tank.coupling.inter_tank_coupling import PressureGovernorValve
 from src.fluids.flow_physics import FlowPhysics
 
 
@@ -286,6 +287,103 @@ class TankSystem:
                 print(f"      Orifice diameter: {orifice_d*1000:.1f} mm")
                 print(f"   Control system: Time-based ({control_interval:.1f}s intervals)")
                 print(f"   Target tank minimum pressure: {target_min_pressure:.1f} bar")
+
+            elif rule_type == 'pressure_governor':
+                # New margin-free governor mode
+                from src.multi_tank.coupling.inter_tank_coupling import PressureGovernorValve
+
+                source_idx = rule.get('source_tank', 0)
+                target_idx = rule.get('target_tank', 1)
+
+                # Target tank config for minimum pressure (diagnostics)
+                target_tank_config = {}
+                if target_idx < len(self.config.tanks):
+                    target_tank_config = {
+                        'minimum_pressure': self.config.tanks[target_idx].P_MIN
+                    }
+
+                valve = PressureGovernorValve(
+                    source_idx=source_idx,
+                    target_idx=target_idx,
+                    mission_profile=rule.get('mission_profile', {}),
+                    discharge_piping=rule.get('piping', rule.get('discharge_piping', {})),
+                    control_params=rule.get('control_parameters', rule.get('control_params', {})),
+                    max_flow_rate=rule.get('flow_physics', {}).get('safety_limits', {}).get('max_flow_rate_kg_s', rule.get('max_flow_rate', 0.005)),
+                    orifice_diameter=rule.get('flow_physics', {}).get('orifice_flow', {}).get('orifice_diameter_m', rule.get('orifice_diameter', 0.001)),
+                    coupling_id=rule.get('coupling_id', 'pressure_governor'),
+                    flow_physics=self.flow_physics,
+                    target_tank_config=target_tank_config
+                )
+
+                valve.source_tank = source_idx
+                valve.target_tank = target_idx
+
+                # Inject mission from system if not hardcoded in rule
+                if not rule.get('mission_profile', {}) and self.config.mission_profile:
+                    mission_data = self._extract_mission_profile_data()
+                    if mission_data:
+                        valve.set_mission_profile(mission_data)
+
+                self.coupling_valves.append(valve)
+
+                piping_params = rule.get('piping', rule.get('discharge_piping', {}))
+                pipe_d = piping_params.get('diameter_m', 0.01)
+                pipe_l = piping_params.get('length_m', 2.0)
+                control_params = rule.get('control_parameters', rule.get('control_params', {}))
+                control_interval = control_params.get('control_interval_s', 1.0)
+                gain = control_params.get('pressure_gain_kg_s_per_bar', 0.05)
+                print(f"   🔗 Pressure Governor: Tank{source_idx+1} → Tank{target_idx+1} (margin-free)")
+                print(f"      Discharge piping: {pipe_d*1000:.0f}mm × {pipe_l:.1f}m")
+                print(f"      Control cadence: {control_interval:.1f}s, gain: {gain:.3f} kg/s/bar")
+
+            elif rule_type == 'feedforward_pressure_enforcer':
+                # Create feedforward pressure enforcer (per-derivative-eval algebraic control)
+                from src.multi_tank.coupling.inter_tank_coupling import FeedforwardPressureEnforcer
+
+                source_idx = rule.get('source_tank', 0)
+                target_idx = rule.get('target_tank', 1)
+
+                # Get target tank configuration for minimum pressure (if available)
+                target_tank_config = {}
+                if target_idx < len(self.config.tanks):
+                    target_tank_config = {
+                        'minimum_pressure': self.config.tanks[target_idx].P_MIN
+                    }
+
+                valve = FeedforwardPressureEnforcer(
+                    source_idx=source_idx,
+                    target_idx=target_idx,
+                    mission_profile=rule.get('mission_profile', {}),
+                    discharge_piping=rule.get('discharge_piping', {}),
+                    control_params=rule.get('control_parameters', rule.get('control_params', {})),
+                    max_flow_rate=rule.get('flow_physics', {}).get('safety_limits', {}).get('max_flow_rate_kg_s', rule.get('max_flow_rate', 0.005)),
+                    orifice_diameter=rule.get('flow_physics', {}).get('orifice_flow', {}).get('orifice_diameter_m', rule.get('orifice_diameter', 0.001)),
+                    coupling_id=rule.get('coupling_id', 'feedforward_pressure_enforcer'),
+                    flow_physics=self.flow_physics,
+                    target_tank_config=target_tank_config
+                )
+
+                valve.source_tank = source_idx
+                valve.target_tank = target_idx
+
+                # Inject mission from system if not hardcoded in rule
+                if not rule.get('mission_profile', {}) and self.config.mission_profile:
+                    mission_data = self._extract_mission_profile_data()
+                    if mission_data:
+                        valve.set_mission_profile(mission_data)
+
+                self.coupling_valves.append(valve)
+
+                piping_params = rule.get('piping', rule.get('discharge_piping', {}))
+                pipe_d = piping_params.get('diameter_m', 0.01)
+                pipe_l = piping_params.get('length_m', 2.0)
+                control_params = rule.get('control_parameters', rule.get('control_params', {}))
+                bracket_margin = control_params.get('bracket_margin', 1.2)
+                tol_bar = control_params.get('tol_pressure_bar', 0.02)
+                max_iters = control_params.get('max_bisection_iters', 10)
+                print(f"   🔗 Feedforward Enforcer: Tank{source_idx+1} → Tank{target_idx+1} (algebraic per-step)")
+                print(f"      Discharge piping: {pipe_d*1000:.0f}mm × {pipe_l:.1f}m")
+                print(f"      Bisection: margin×{bracket_margin:.2f}, tol {tol_bar:.3f} bar, iters {max_iters}")
 
             elif rule_type == 'mass_flow_pid_valve':
                 # Create mass flow PID controlled valve with direct flow-to-flow control
@@ -617,6 +715,51 @@ class TankSystem:
         State vector y = [m1, T1, Ts1, m2, T2, Ts2, ..., mN, TN, TsN]
         Each tank has 3 state variables: mass, temperature, solid temperature
         """
+        # --- Debug heartbeat and stuck-step detection ---
+        try:
+            import os
+            debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
+        except Exception:
+            debug_enabled = False
+
+        # Detect potential stuck integration (solver calling RHS without advancing time)
+        if not hasattr(self, '_last_ode_t'):
+            self._last_ode_t = t
+            self._ode_stuck_count = 0
+            self._ode_heartbeat_last_t = -1e9
+        dt_sim = t - getattr(self, '_last_ode_t', t)
+        if dt_sim <= 1e-12:
+            self._ode_stuck_count = getattr(self, '_ode_stuck_count', 0) + 1
+            if debug_enabled and self._ode_stuck_count in (100, 1000, 5000):
+                print(f"[ODE DEBUG] Potential stuck integration near t={t:.6f}s (no progress for {self._ode_stuck_count} calls)")
+        else:
+            self._ode_stuck_count = 0
+        self._last_ode_t = t
+
+        # Heartbeat: print state summary at start, then every 60s of simulated time or when debug enabled
+        if debug_enabled or (t - getattr(self, '_ode_heartbeat_last_t', -1e9) >= 60.0) or (t <= 1.0):
+            try:
+                tank_summaries = []
+                for i in range(len(self.tanks)):
+                    idx = i * 3
+                    m_i = float(y[idx])
+                    T_i = float(y[idx + 1])
+                    vol = getattr(self.tanks[i], 'volume', 1.0)
+                    density = m_i / max(vol, 1e-9)
+                    # Quick pressure estimate
+                    try:
+                        from CoolProp.CoolProp import PropsSI
+                        P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
+                    except Exception:
+                        R = 4124.0
+                        P_i = density * R * max(T_i, 1.0)
+                    tank_summaries.append((P_i / 1e5, m_i))
+                press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
+                mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
+                print(f"[ODE HB] t={t:.1f}s | {press_str} | {mass_str}")
+            except Exception:
+                pass
+            self._ode_heartbeat_last_t = t
         try:
             # Check if we've already flagged stopping
             if hasattr(self, '_stop_requested') and self._stop_requested:
@@ -742,7 +885,12 @@ class TankSystem:
         # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
         coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
 
-        # Removed debug output - coupling system working correctly
+        # Debug gating
+        try:
+            import os
+            debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
+        except Exception:
+            debug_enabled = False
 
         for valve in self.coupling_valves:
             source_state = multi_state.tank_states[valve.source_tank]            # Handle different coupling types
@@ -755,7 +903,7 @@ class TankSystem:
                     coupling_flows[valve.source_tank] -= flow_rate
 
                     # Debug output for active coupling (throttled to avoid spam)
-                    if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
+                    if debug_enabled and flow_rate > 1e-6 and int(t) % 30 == 0:
                         p1 = source_state.pressure / 1e5 if source_state.pressure else 0
                         print(f"  OHEX extraction T{valve.source_tank+1}→OHEX: {flow_rate*1000:.2f} g/s (P={p1:.1f}bar)")
             else:
@@ -771,10 +919,19 @@ class TankSystem:
                     coupling_flows[valve.target_tank] += flow_rate
 
                     # Debug output for active coupling (throttled to avoid spam)
-                    if flow_rate > 1e-6 and int(t) % 100 == 0:  # Log flows > 1 mg/s every 100s
+                    if debug_enabled and flow_rate > 1e-6 and int(t) % 30 == 0:
                         p1 = source_state.pressure / 1e5 if source_state.pressure else 0
                         p2 = target_state.pressure / 1e5 if target_state.pressure else 0
-                        print(f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)")
+                        msg = f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)"
+                        # If feedforward enforcer, attach diagnostics
+                        try:
+                            from src.multi_tank.coupling.inter_tank_coupling import FeedforwardPressureEnforcer
+                            if isinstance(valve, FeedforwardPressureEnforcer):
+                                extra = f", P_req={getattr(valve, '_last_required_pressure', 0.0)/1e5:.2f}bar, cap={getattr(valve, '_last_capacity_kg_s', 0.0)*1000:.1f}g/s, mdot={getattr(valve, '_last_mdot_in', 0.0)*1000:.1f}g/s, deficit={getattr(valve, '_last_deficit_bar', 0.0):.3f}bar"
+                                msg += extra
+                        except Exception:
+                            pass
+                        print(msg)
 
         # Store coupling flows for post-processing
         if any(abs(flow) > 1e-9 for flow in coupling_flows.values()):

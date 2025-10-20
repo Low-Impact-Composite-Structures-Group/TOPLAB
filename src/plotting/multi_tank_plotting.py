@@ -1469,12 +1469,44 @@ class DelftColourPlotter:
         required_pressures = np.array(diag_data['required_pressure_history']) / 1e5  # Convert to bar
         activation_thresholds = np.array(diag_data.get('activation_threshold_history', [])) / 1e5  # Convert to bar
 
+        # Ensure diagnostic series are time-sorted to avoid visual artifacts and warnings
+        if len(times) > 1:
+            order = np.argsort(times)
+            if not np.all(order == np.arange(len(times))):
+                times = times[order]
+                required_pressures = required_pressures[order]
+                if len(activation_thresholds) == len(order):
+                    activation_thresholds = activation_thresholds[order]
+                print("   ℹ️ Sorted diagnostic pressure series by time for plotting")
+
+            # Optionally drop exact-duplicate time samples (keep last)
+            # This reduces over-plotting at t≈0 and prevents dense clumps from looking like lines
+            unique_times, first_idx = np.unique(times, return_index=True)
+            if len(unique_times) != len(times):
+                # Keep the last occurrence for each time by reversing first
+                rev_times = times[::-1]
+                rev_req = required_pressures[::-1]
+                if len(activation_thresholds) == len(times):
+                    rev_act = activation_thresholds[::-1]
+                else:
+                    rev_act = None
+                unique_rev_times, last_rev_idx = np.unique(rev_times, return_index=True)
+                # Recover forward order of last occurrences
+                keep_mask_rev = np.zeros_like(rev_times, dtype=bool)
+                keep_mask_rev[last_rev_idx] = True
+                keep_mask = keep_mask_rev[::-1]
+                times = times[keep_mask]
+                required_pressures = required_pressures[keep_mask]
+                if rev_act is not None:
+                    activation_thresholds = activation_thresholds[keep_mask]
+                print(f"   ℹ️ Deduplicated diagnostic times: {len(unique_times)} unique of {len(order)} samples")
+
         # Get actual tank pressure from results for comparison
         combined_data = orchestrator.results.get_combined_data()
         tank_pressures = combined_data['pressures'][tank_index]  # Already in bar
         result_times = combined_data['times'] / 3600.0  # Result times in hours
 
-        # Create the plot with proper styling
+    # Create the plot with proper styling
         fig, ax = plt.subplots(figsize=(12, 8))
 
         # Use greyscale colors if specified
@@ -1554,7 +1586,7 @@ class DelftColourPlotter:
 
             return lines
 
-        # Plot pressure requirements - identify continuous segments to avoid connecting discontinuous data
+    # Plot pressure requirements - identify continuous segments to avoid connecting discontinuous data
         # The valve switches between different operational states, creating disconnected segments
 
         def plot_continuous_segments(ax, times, pressures, min_threshold=2.1, **plot_kwargs):
@@ -1591,38 +1623,81 @@ class DelftColourPlotter:
                     plot_kwargs_copy['label'] = label
                     ax.plot(segment_times, segment_pressures, **plot_kwargs_copy)
 
-        # Debug: Check for time ordering issues
+        # Debug: Check for time ordering issues (post-sort this should be zero)
         if len(times) > 1:
             time_diffs = np.diff(times)
             negative_diffs = np.sum(time_diffs < 0)
             if negative_diffs > 0:
                 print(f"   ⚠️ Found {negative_diffs} negative time differences in pressure data")
 
-        # Use scatter plots to avoid line connection artifacts from non-monotonic data
-        # This prevents the dashed lines from appearing solid due to overlapping segments
-
-        # Plot minimum required pressure as scatter points
+        # Render required pressure and activation threshold as continuous solid lines
+        # Filter out flat baseline points at 2.0 bar to focus on active control periods
         if len(required_pressures) > 0:
-            # Filter out points at minimum threshold to show only active valve states
-            active_mask = required_pressures > 2.1
-            if np.any(active_mask):
-                ax.scatter(times[active_mask], required_pressures[active_mask],
-                          color=required_color, marker='o', s=8, alpha=0.7,
-                          label='Minimum required pressure to supply mission')
+            req_mask = required_pressures > 2.1
+            if np.any(req_mask):
+                ax.plot(times[req_mask], required_pressures[req_mask],
+                        color=required_color, linestyle='-', linewidth=1.5, alpha=0.9,
+                        label='Minimum required pressure to supply mission')
 
-        # Plot activation thresholds as scatter points
         if len(activation_thresholds) > 0:
-            # Filter out points at minimum threshold to show only active valve states
-            active_mask = activation_thresholds > 2.1
-            if np.any(active_mask):
-                ax.scatter(times[active_mask], activation_thresholds[active_mask],
-                          color=activation_color, marker='s', s=8, alpha=0.7,
-                          label='Activation threshold (required + margin)')
+            act_mask = activation_thresholds > 2.1
+            if np.any(act_mask):
+                ax.plot(times[act_mask], activation_thresholds[act_mask],
+                        color=activation_color, linestyle='-', linewidth=1.5, alpha=0.9,
+                        label='Activation threshold (required + margin)')
 
         # Plot actual tank pressure (continuous data, no filtering needed)
         ax.plot(result_times, tank_pressures,
                color=actual_color, linestyle=actual_style, linewidth=2.0, alpha=0.8,
                label=f'Actual tank {tank_index + 1} pressure')
+
+        # =========================
+        # Quantitative tracking audit
+        # =========================
+        try:
+            # Interpolate required pressures to the results timeline (hours) without extrapolation
+            if len(times) > 1 and len(result_times) > 1 and len(required_pressures) == len(times):
+                # Only evaluate within the diagnostic time bounds
+                within = (result_times >= np.nanmin(times)) & (result_times <= np.nanmax(times))
+                required_interp = np.full_like(result_times, np.nan, dtype=float)
+
+                # Use numpy.interp for the overlapping window; avoid extrapolation by slicing
+                if np.any(within):
+                    required_interp[within] = np.interp(result_times[within], times, required_pressures)
+
+                # Active segments only (ignore flat 2.0 bar baseline)
+                active_mask = np.isfinite(required_interp) & (required_interp > 2.1)
+
+                if np.any(active_mask):
+                    delta = tank_pressures[active_mask] - required_interp[active_mask]
+
+                    # Stats over active segments
+                    min_delta = float(np.nanmin(delta))
+                    mean_delta = float(np.nanmean(delta))
+                    frac_below = float(np.mean(delta < 0.0))
+
+                    # Early-time audit (0–0.1 h)
+                    early_mask = active_mask & (result_times <= 0.1)
+                    if np.any(early_mask):
+                        early_delta = tank_pressures[early_mask] - required_interp[early_mask]
+                        early_min = float(np.nanmin(early_delta))
+                        early_frac_below = float(np.mean(early_delta < 0.0))
+                    else:
+                        early_min = float('nan')
+                        early_frac_below = float('nan')
+
+                    print("   📈 Tracking audit (active segments):")
+                    print(f"      min(P_actual - P_required) = {min_delta:.3f} bar, mean = {mean_delta:.3f} bar, fraction below = {frac_below:.3%}")
+                    if np.isfinite(early_min):
+                        print(f"      Early [0–0.1 h]: min Δ = {early_min:.3f} bar, fraction below = {early_frac_below:.3%}")
+
+                    # CSV export intentionally disabled to keep output clean
+                else:
+                    print("   ℹ️ Tracking audit skipped: no active segments detected in required pressure.")
+            else:
+                print("   ℹ️ Tracking audit skipped: insufficient diagnostic or results data.")
+        except Exception as e:
+            print(f"   ⚠️ Tracking audit failed: {e}")
 
         # Add reference lines
         ax.axhline(y=2.0, color=min_color, linestyle=min_style, alpha=0.7,
