@@ -1,7 +1,6 @@
 analysis:
-  name: Coupled CH2-CCH2 Multi-Tank System
-  description: 'Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K)
-    with pressure compensation coupling and ATR72 mission profile'
+  name: Coupled CH2-LH2 Multi-Tank System (Feedforward)
+  description: 'CH2→LH2 feedforward pressure enforcement: per-step algebraic flow to match required pressure'
   version: '1.0'
 network:
   nodes:
@@ -11,14 +10,14 @@ network:
     fluid: CH2
     geometry:
       phi: 3.0
-      radius: 0.7
+      radius: 0.8
     initial_conditions:
-      pressure: 70000000
-      temperature: 330.0
-      density: 42.0
+      pressure: 100000000.0
+      temperature: 288.15
+      density: 60.0
     operating_limits:
-      minimum_pressure: 1500000
-      venting_pressure: 80000000
+      minimum_pressure: 100000.0
+      venting_pressure: 110000000.0
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -27,29 +26,28 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
+        heat_transfer_coefficient: 50.0
       safety_margin: 1.25
     stopping_criteria:
-      minimum_density: 5.8
+      minimum_density: 5.0
       use_density_stopping_events: true
       use_duration_stopping: true
     plotting: {}
   - node_id: 2
     type: tank
     description: Tank 2
-    fluid: CcH2
+    fluid: LH2
     geometry:
       phi: 3.0
       mission_based_sizing: true
     initial_conditions:
-      pressure: 40000000
-      temperature: 53.25
-      density: 80.0
+      pressure: 200000.0
+      temperature: 25.0
+      density: 68.0
     operating_limits:
-      minimum_pressure: 1500000
-      venting_pressure: 45000000
+      minimum_pressure: 200000.0
+      venting_pressure: 1500000.0
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -58,33 +56,55 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
+        heat_transfer_coefficient: 0.025
       safety_margin: 1.25
     stopping_criteria:
-      minimum_density: 5.8
+      minimum_density: 5.0
       use_density_stopping_events: true
       use_duration_stopping: true
     plotting: {}
-  edges:
-  - edge_id: ch2_cch2_pressure_compensation
-    connection_type: pressure_compensation
-    from_node: 1
-    to_node: 2
-    activation_conditions:
-      pressure_open_bar: 20.0
-      pressure_close_bar: 40.0
-    flow_physics:
-      orifice_flow:
-        orifice_diameter_m: 0.002
-      safety_limits:
-        max_flow_rate_kg_s: 0.1
+  edges: []
+
+coupling_rules:
+- coupling_id: ch2_lh2_feedforward
+  coupling_type: feedforward_pressure_enforcer
+  description: 'Per-derivative feedforward: invert mdot_in to match required LH2 pressure'
+  participants:
+    source: 1
+    target: 2
+  control_parameters:
+    # Source constraints
+    min_source_pressure_bar: 15.0
+    safety_mass_fraction_per_s: 0.10
+    # Bisection/search
+    bracket_margin: 1.15         # narrower bracket reduces overshoot at saturation
+    max_bisection_iters: 14
+    tol_pressure_bar: 0.01       # tighter target tracking
+    # Branch-free feedforward tuning
+    enforcement_horizon_s: 0.30  # shorter horizon for gentler corrections
+    overpressure_margin_bar: 0.5 # slight bias above requirement to avoid chatter
+    mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
+    soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
+    # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
+    min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
+    min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
+  flow_parameters:
+    max_flow_rate_kg_s: 0.6       # slightly higher capacity to address early deficit
+    orifice_diameter_m: 0.0035    # +0.5 mm to increase hydraulic capacity
+  discharge_piping:
+    diameter_m: 0.005
+    length_m: 1.0
+    roughness_m: 1.5e-06
+    loss_coefficient: 1.0
+    choked_flow_enabled: true
+
 mission:
   type: discharge
   profile: atr72
   ambient_temperature: 288.15
   assigned_to_node: 2
+
 physics:
   fluid_properties:
     use_coolprop: true
@@ -92,16 +112,16 @@ physics:
     backup_properties:
       specific_gas_constant: 4124.0
       heat_capacity_ratio: 1.4
-      kinematic_viscosity: 1.55e-06
-      speed_of_sound: 1354.0
+      kinematic_viscosity: 1e-7
+      speed_of_sound: 1000.0
   orifice_flow:
     discharge_coefficient: 0.6
     flow_coefficient_units: dimensionless
   choked_flow:
     enable_choked_flow: true
-    critical_pressure_ratio_override: null
     sonic_velocity_factor: 1.0
     choked_flow_pressure_factor: 2.0
+    velocity_choked_fraction: 0.5
   pipe_flow:
     atmospheric_pressure: 101325.0
     reynolds_transition: 2300.0
@@ -111,28 +131,26 @@ physics:
       turbulent_factor: 0.316
       turbulent_exponent: 0.25
     default_roughness: 1.5e-06
-    velocity_choked_fraction: 0.5
   safety_limits:
-    max_mass_transfer_fraction: 0.1
     minimum_pressure_pa: 1000.0
     maximum_velocity_ms: 2000.0
   numerical:
-    pressure_tolerance_pa: 100.0
-    flow_rate_tolerance_kg_s: 1e-8
+    pressure_tolerance_pa: 1000.0
+    flow_rate_tolerance_kg_s: 1e-5
     property_update_frequency: 1
+
 solver:
   method: LSODA
-  rtol: 1e-4
-  atol: 1e-7
-  time_step: 5.0
-  max_step: 10.0
+  rtol: 5e-5
+  atol: 5e-7
+  time_step: 0.5
+  max_step: 5.0
   custom_config: true
+
 output:
-  identifier: coupled_ch2_cch2_multi_tank
+  identifier: coupled_ch2_lh2_feedforward
   save_plots: true
-  plot_formats:
-  - png
-  - pdf
+  plot_formats: [png, pdf]
   save_data: true
   data_format: csv
   results_directory: output/results
@@ -155,50 +173,18 @@ output:
         show_stopping_density: false
     tank_states:
       enabled: true
-      figsize:
-      - 12
-      - 10
+      figsize: [12, 10]
       filename: tank_states
-      event_lines:
-      - time: 0.195
-        label: First valve opening event
     fuel_flow_profile:
       enabled: true
-      figsize:
-      - 14
-      - 10
+      figsize: [14, 10]
       filename: fuel_flow_profile
-    density_temperature:
+    pressure_requirements:
       enabled: true
-      figsize:
-      - 12
-      - 8
-      filename: density_temperature
-      isobar_pressures:
-      - 700
-      - 500
-      show_reference_pressures: false
-      include_saturation_line: false
-      include_isobars: true
-      arrow_position: 0.98
-      arrow_size: 1.0
-      valve_marker_size: 8.0
+      figsize: [14, 10]
+      filename: pressure_requirements
     mass_flows:
       enabled: true
-      figsize:
-      - 12
-      - 6
       filename: mass_flows
       include_venting_flow: true
       include_coupling_flows: true
-    heat_exchanger_requirements:
-      enabled: false
-      figsize:
-      - 12
-      - 6
-      filename: heat_exchanger_requirements
-      include_ihex: true
-      include_ohex: true
-      ohex_target_temperature: 200.0
-      ohex_target_pressure: 20e5
-      include_total: true

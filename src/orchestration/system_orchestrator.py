@@ -111,11 +111,19 @@ class SystemOrchestrator:
 
         # Parse coupling rules from configuration
         coupling_rules_config = self.scenario_config.config_dict.get('coupling_rules', [])
-        self.coupling_rules = parse_coupling_rules(coupling_rules_config)
-        if coupling_rules_config:
-            print(f"   ✓ Parsed {len(self.coupling_rules)} coupling rules")
-            for rule in self.coupling_rules:
-                print(f"     - {rule.coupling_id}: {rule.coupling_type}")
+        # NOTE: parse_coupling_rules() creates CouplingRule dataclass instances but is currently vestigial
+        # The real coupling rule parsing happens below in the tank_system_coupling_rules loop
+        # We keep this for backward compatibility but don't fail if it errors
+        try:
+            self.coupling_rules = parse_coupling_rules(coupling_rules_config)
+            if coupling_rules_config and self.coupling_rules:
+                print(f"   ✓ Parsed {len(self.coupling_rules)} coupling rules")
+                for rule in self.coupling_rules:
+                    print(f"     - {rule.coupling_id}: {rule.coupling_type}")
+        except Exception as e:
+            print(f"   ⚠️ Legacy coupling rule parsing failed (expected for new format): {e}")
+            print(f"   ℹ️  Proceeding with direct TankSystem coupling configuration...")
+            self.coupling_rules = []
 
         # Convert coupling rules to TankSystem expected format
         tank_system_coupling_rules = []
@@ -265,12 +273,43 @@ class SystemOrchestrator:
             elif coupling_type == 'pressure_compensation':
                 # Convert pressure compensation to PressureTriggeredValve
                 participants = rule_config.get('participants', {})
-                flow_params = rule_config.get('flow_parameters', {})
-                hysteresis = rule_config.get('hysteresis', {})
 
-                # Map our config format to TankSystem expected format
-                activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when target ≤ this pressure
-                deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when target ≥ this pressure
+                # Accept both new and legacy key shapes
+                # 1) Thresholds: prefer explicit 'activation_conditions' {pressure_open_bar, pressure_close_bar}
+                #    then fallback to 'hysteresis' {activation_threshold_bar, deactivation_threshold_bar}
+                thresholds = rule_config.get('activation_conditions', {})
+                if thresholds:
+                    activation_threshold = float(thresholds.get('pressure_open_bar', 20.0))
+                    deactivation_threshold = float(thresholds.get('pressure_close_bar', 21.0))
+                else:
+                    hysteresis = rule_config.get('hysteresis', {})
+                    activation_threshold = float(hysteresis.get('activation_threshold_bar', 20.0))
+                    deactivation_threshold = float(hysteresis.get('deactivation_threshold_bar', 21.0))
+
+                # Ensure proper ordering (close > open); if not, auto-correct with +1 bar gap
+                if deactivation_threshold <= activation_threshold:
+                    print(f"⚠️  Adjusting deactivation threshold for pressure_compensation: {deactivation_threshold} ≤ {activation_threshold} bar → enforcing +1 bar gap")
+                    deactivation_threshold = activation_threshold + 1.0
+
+                # 2) Flow parameters: support either consolidated 'flow_parameters' or nested 'flow_physics'
+                flow_params = rule_config.get('flow_parameters', {})
+                if not flow_params:
+                    flow_physics = rule_config.get('flow_physics', {})
+                    # Map nested physics to flat parameters
+                    orifice_d = None
+                    max_flow = None
+                    if isinstance(flow_physics, dict):
+                        orifice_cfg = flow_physics.get('orifice_flow', {})
+                        safety_cfg = flow_physics.get('safety_limits', {})
+                        orifice_d = orifice_cfg.get('orifice_diameter_m', None)
+                        max_flow = safety_cfg.get('max_flow_rate_kg_s', None)
+                    flow_params = {
+                        'orifice_diameter_m': orifice_d if orifice_d is not None else 0.002,
+                        'max_flow_rate_kg_s': max_flow if max_flow is not None else 0.10,
+                    }
+                # Fallback defaults if still missing
+                orifice_diameter_m = float(flow_params.get('orifice_diameter_m', flow_params.get('orifice_diameter', 0.002)))
+                max_flow_rate_kg_s = float(flow_params.get('max_flow_rate_kg_s', flow_params.get('max_flow_rate', 0.10)))
 
                 tank_system_rule = {
                     'type': 'pressure_triggered_valve',
@@ -278,8 +317,8 @@ class SystemOrchestrator:
                     'target_tank': participants.get('target', 2) - 1,  # Convert 1-based to 0-based index
                     'opening_pressure': activation_threshold * 1e5,    # p_open: valve opens when target ≤ this
                     'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
-                    'max_flow_rate': flow_params.get('max_flow_rate_kg_s', 0.10),  # kg/s
-                    'orifice_diameter': flow_params.get('orifice_diameter_m', 0.002),  # m
+                    'max_flow_rate': max_flow_rate_kg_s,               # kg/s
+                    'orifice_diameter': orifice_diameter_m,            # m
                     'coupling_id': rule_config.get('coupling_id', 'pressure_compensation')
                 }
 
@@ -1371,12 +1410,22 @@ class SystemOrchestrator:
             tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
             event_lines = tank_states_config.get('event_lines', [])
 
+            # Extract valve events (if any) for vertical markers
+            valve_events = None
+            try:
+                valve_events = plotter._extract_valve_events(self.results)
+            except Exception as e:
+                print(f"   ⚠️ Valve event extraction failed (overlay): {e}")
+
             fig = plotter.plot_tank_evolution(
                 results=self.results,
                 tank_index=0,  # Not used in overlay mode
                 reference_lines=reference_lines,
                 reference_lines_config=ref_line_config,
-                event_lines=event_lines,
+                event_lines=(event_lines or []) + [
+                    {"time": ev.get("time", 0.0) / 3600.0, "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank', '?')+1})"}
+                    for ev in (valve_events or [])
+                ],
                 save_path=str(overlay_save_path) if overlay_save_path else None,
                 overlay_all_tanks=True
             )
@@ -1410,12 +1459,22 @@ class SystemOrchestrator:
                 tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
                 event_lines = tank_states_config.get('event_lines', [])
 
+                # Extract valve events for vertical markers on per-tank plots
+                valve_events = None
+                try:
+                    valve_events = plotter._extract_valve_events(self.results)
+                except Exception as e:
+                    print(f"   ⚠️ Valve event extraction failed (tank {tank_idx+1}): {e}")
+
                 fig = plotter.plot_tank_evolution(
                     results=self.results,
                     tank_index=tank_idx,
                     reference_lines=reference_lines,
                     reference_lines_config=ref_line_config,
-                    event_lines=event_lines,
+                    event_lines=(event_lines or []) + [
+                        {"time": ev.get("time", 0.0) / 3600.0, "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank', '?')+1})"}
+                        for ev in (valve_events or [])
+                    ],
                     save_path=str(tank_save_path) if tank_save_path else None
                 )
                 figures.append(fig)
@@ -1496,11 +1555,26 @@ class SystemOrchestrator:
                 include_venting_flow = mf_config.get('include_venting_flow', True)
                 include_coupling_flows = mf_config.get('include_coupling_flows', True)
 
+                # Extract valve events for this tank to add vertical markers on flow plots
+                mf_event_lines = []
+                try:
+                    valve_events = plotter._extract_valve_events(self.results)
+                    # Only include events relevant to this tank (target/source both show activity via combined flow)
+                    for ev in (valve_events or []):
+                        # Show events for any tank since flows are shown per tank; annotate which tank the event came from
+                        mf_event_lines.append({
+                            "time": ev.get("time", 0.0) / 3600.0,
+                            "label": f"Valve {ev.get('type','event')} (tank {ev.get('tank','?')+1})"
+                        })
+                except Exception as e:
+                    print(f"   ⚠️ Valve event extraction failed for mass flow plot (tank {tank_idx+1}): {e}")
+
                 mf_fig = plotter.plot_mass_flows(
                     results=self.results,
                     tank_index=tank_idx,
                     include_venting_flow=include_venting_flow,
                     include_coupling_flows=include_coupling_flows,
+                    event_lines=mf_event_lines,
                     save_path=str(mf_save_path) if mf_save_path else None
                 )
                 figures.append(mf_fig)

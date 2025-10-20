@@ -443,7 +443,9 @@ class DelftColourPlotter:
 
                 # Detect valve opening/closing events
                 valve_active = False
-                flow_threshold = 0.001  # kg/s threshold for valve activity
+                # Note: flows in tank_data are in g/s (see MultiTankResults._extract_tank_arrays)
+                # Set a sensible threshold in g/s to avoid false positives from tiny numerical noise
+                flow_threshold = 1.0  # g/s threshold for valve activity
 
                 for i, flow in enumerate(total_coupling_flow):
                     current_active = flow > flow_threshold
@@ -763,6 +765,7 @@ class DelftColourPlotter:
                        tank_index: int = 0,
                        include_venting_flow: bool = True,
                        include_coupling_flows: bool = True,
+                       event_lines: Optional[List[Dict[str, any]]] = None,
                        save_path: Optional[str] = None) -> plt.Figure:
         """
         Plot mass flow rates for a single tank using the proven working pattern from multi_tank_analysis.
@@ -843,6 +846,13 @@ class DelftColourPlotter:
         ax.set_ylabel('Flow Rate [g/s]')
         # ax.set_title(f'Tank {tank_index + 1} Flow Rates')
         ax.grid(True, alpha=0.3)
+
+        # Add vertical event lines if provided (to show valve events on flow plots)
+        if event_lines:
+            event_line_color = '#606060'
+            for event in event_lines:
+                event_time = event.get('time', 0.0)  # hours
+                ax.axvline(x=event_time, color=event_line_color, linestyle='--', linewidth=1.2, alpha=0.8, zorder=0.5)
 
         # Add legend with 3D shadow effect (same styling as other plots)
         legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best', frameon=True, fancybox=True,

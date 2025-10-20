@@ -178,39 +178,25 @@ class PressureTriggeredValve(InterTankCoupling):
 
     def calculate_flow(self, source_state, target_state, t):
         """Interface method expected by TankSystem._calculate_coupling_flows"""
-        # Update valve state based on current pressures
+        # Ensure pressures are up to date before evaluating
         if hasattr(source_state, 'compute_pressure'):
             source_state.compute_pressure()
         if hasattr(target_state, 'compute_pressure'):
             target_state.compute_pressure()
 
-        # For post-processing scenarios where valve state isn't preserved,
-        # evaluate flow possibility directly based on current pressure conditions
-        target_pressure = target_state.pressure
-        source_pressure = source_state.pressure
-
-        # Check if flow should occur based on activation criteria
-        # (target pressure low enough AND source pressure higher than target)
-        should_flow = (target_pressure <= self.activation_threshold and
-                      source_pressure > target_pressure)
-
-        if not should_flow:
-            # Also update valve state for runtime consistency
-            self.update_valve_state(target_pressure, t)
-            if not self.is_active:
-                return 0.0
-        else:
-            # Force valve active for flow calculation if conditions are met
-            # This handles post-processing where valve state isn't persistent
-            if not self.is_active:
-                self.is_active = True
-
-        # Create mock tank_states list for compatibility with calculate_flow_rate
+        # Build a temporary tank_states list so we can reuse evaluate()/calculate_flow_rate
         tank_states = [None] * max(self.source_idx + 1, self.target_idx + 1)
         tank_states[self.source_idx] = source_state
         tank_states[self.target_idx] = target_state
 
-        # Call existing calculate_flow_rate method
+        # Always drive the hysteresis state machine explicitly
+        self.evaluate(t, tank_states)
+
+        # If closed, no flow
+        if not self.is_active:
+            return 0.0
+
+        # Otherwise, compute flow with the selected physics and capacity limits
         return self.calculate_flow_rate(t, tank_states)
 
 

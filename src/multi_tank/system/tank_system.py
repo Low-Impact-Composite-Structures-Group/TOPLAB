@@ -810,12 +810,6 @@ class TankSystem:
                 # Get coupling contribution for this tank (simplified pattern)
                 net_coupling_flow = coupling_flows[i]
 
-                # Store coupling flow rates on tank state for plotting
-                coupling_inflow = max(0.0, net_coupling_flow)  # Positive coupling = inflow
-                coupling_outflow = max(0.0, -net_coupling_flow)  # Negative coupling = outflow
-                tank_state.coupling_inflow_rate = coupling_inflow
-                tank_state.coupling_outflow_rate = coupling_outflow
-
                 # Calculate coupling enthalpy (hydrogen coming from other tanks)
                 coupling_enthalpy = 0.0
                 if net_coupling_flow > 0:  # Receiving hydrogen from other tanks
@@ -832,10 +826,12 @@ class TankSystem:
                 # Create flow functions that include both mission and coupling flows
                 def fuel_flow_func(time):
                     mission_inflow = self._get_inflow_rate(time, i)  # Mission-based inflow (refuel)
+                    coupling_inflow = max(0.0, net_coupling_flow)  # Positive coupling = inflow
                     return mission_inflow + coupling_inflow
 
                 def discharge_flow_func(time):
                     mission_outflow = self._get_outflow_rate(time, i)  # Mission-based outflow (discharge)
+                    coupling_outflow = max(0.0, -net_coupling_flow)  # Negative coupling = outflow
                     return mission_outflow + coupling_outflow
 
                 # Get thermal derivatives from thermal model using correct interface
@@ -881,57 +877,31 @@ class TankSystem:
             return np.zeros(len(y))
 
     def _calculate_coupling_flows(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
-        """Calculate net mass flow rate for each tank due to coupling (simplified like MultiTankSystem)."""
+        """
+        Calculate net mass flow rate for each tank due to coupling.
+
+        Clean simple implementation - ALL coupling valves use same interface:
+        flow_rate = valve.calculate_flow(source_state, target_state, t)
+        """
         # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
         coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
 
-        # Debug gating
-        try:
-            import os
-            debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
-        except Exception:
-            debug_enabled = False
-
         for valve in self.coupling_valves:
-            source_state = multi_state.tank_states[valve.source_tank]            # Handle different coupling types
+            source_state = multi_state.tank_states[valve.source_tank]
+
+            # Handle OHEX extraction (no target tank)
             if valve.target_tank == -1:
-                # OHEX extraction - no target tank, just extract from source
                 flow_rate = valve.calculate_flow(source_state, None, t)
-
                 if flow_rate > 0:
-                    # Source tank loses mass (negative) to OHEX
                     coupling_flows[valve.source_tank] -= flow_rate
-
-                    # Debug output for active coupling (throttled to avoid spam)
-                    if debug_enabled and flow_rate > 1e-6 and int(t) % 30 == 0:
-                        p1 = source_state.pressure / 1e5 if source_state.pressure else 0
-                        print(f"  OHEX extraction T{valve.source_tank+1}→OHEX: {flow_rate*1000:.2f} g/s (P={p1:.1f}bar)")
             else:
                 # Standard inter-tank coupling
                 target_state = multi_state.tank_states[valve.target_tank]
-
-                # Calculate valve flow rate
                 flow_rate = valve.calculate_flow(source_state, target_state, t)
 
                 if flow_rate > 0:
-                    # Source tank loses mass (negative), target tank gains mass (positive)
                     coupling_flows[valve.source_tank] -= flow_rate
                     coupling_flows[valve.target_tank] += flow_rate
-
-                    # Debug output for active coupling (throttled to avoid spam)
-                    if debug_enabled and flow_rate > 1e-6 and int(t) % 30 == 0:
-                        p1 = source_state.pressure / 1e5 if source_state.pressure else 0
-                        p2 = target_state.pressure / 1e5 if target_state.pressure else 0
-                        msg = f"  Coupling flow T{valve.source_tank+1}→T{valve.target_tank+1}: {flow_rate*1000:.2f} g/s (P1={p1:.1f}→P2={p2:.1f}bar)"
-                        # If feedforward enforcer, attach diagnostics
-                        try:
-                            from src.multi_tank.coupling.inter_tank_coupling import FeedforwardPressureEnforcer
-                            if isinstance(valve, FeedforwardPressureEnforcer):
-                                extra = f", P_req={getattr(valve, '_last_required_pressure', 0.0)/1e5:.2f}bar, cap={getattr(valve, '_last_capacity_kg_s', 0.0)*1000:.1f}g/s, mdot={getattr(valve, '_last_mdot_in', 0.0)*1000:.1f}g/s, deficit={getattr(valve, '_last_deficit_bar', 0.0):.3f}bar"
-                                msg += extra
-                        except Exception:
-                            pass
-                        print(msg)
 
         # Store coupling flows for post-processing
         if any(abs(flow) > 1e-9 for flow in coupling_flows.values()):
