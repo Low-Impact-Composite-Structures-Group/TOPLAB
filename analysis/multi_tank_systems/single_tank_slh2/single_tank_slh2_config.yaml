@@ -1,131 +1,121 @@
-# Single Tank SLH2 Benchmark Configuration
-analysis_name: "Single Tank SLH2 Benchmark"
-description: "Subcooled liquid hydrogen single tank validation case using orchestrated framework"
-version: "1.0"
-
-# Network topology definition
+analysis:
+  name: Single Tank SLH2 Benchmark
+  description: Subcooled liquid hydrogen single tank validation case using orchestrated
+    framework
+  version: '1.0'
 network:
-  number_of_tanks: 1
-  external_source: false
-  external_sink: true
-  tanks:
-    - tank_id: 1
-      tank_type: "SLH2"
-
-# Tank geometry and initial conditions
-geometry:
-  1:
-    phi: 3.0                             # Length/radius ratio (L/R)
-    initial_pressure: 16e5               # Pa (16 bar - subcooled liquid storage)
-    initial_density: 62.07               # kg/m³ (subcooled liquid hydrogen density)
-    venting_pressure: 20e5               # Pa (20 bar - venting pressure)
-    minimum_pressure: 6e5                # Pa (6 bar - minimum allowable pressure)
-
-# Material specifications with NIST temperature-dependent properties
-# Per-tank materials configuration
-tank_materials:
-  1:
-    liner:
-      nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-      thickness: 0.001                     # m (1mm aluminum liner)
-    composite:
-      nist_path: "carbon_epoxy_nist"       # Path to NIST materials library
-      winding_angle: 54.7                  # degrees (optimal winding angle)
-      thickness: "calculated"              # Calculated from pressure requirements
-    insulation:
-      thickness: 0.050                     # m (50mm insulation layer)
-      heat_transfer_coefficient: 0.005     # W/m²K (vacuum insulation)
-    safety_margin: 1.25                    # Structural design safety factor
-
-# Mission profile configuration
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: SLH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 1600000.0
+      density: 62.07
+      temperature: 25.0
+    operating_limits:
+      minimum_pressure: 600000.0
+      venting_pressure: 2000000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+        thickness: calculated
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 0.005
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: false
+    plotting: {}
+  edges: []
 mission:
-  type: "discharge"                      # Mission type: discharge | refuel | dormancy
-  profile: "atr72"                       # Profile: atr72 | constant_flow | custom
-  ambient_temperature: 288.15            # K (ambient conditions)
-  # No additional parameters needed for atr72 profile
-  # For constant_flow: add flow_rate (kg/s), duration (s)
-  # For custom: add sections (list of {duration, flow_rate})
-
-# Stopping criteria
-stopping_criteria:
-  minimum_density: 5.8                  # kg/m³ (SLH2 minimum density requirement)
-  use_density_stopping_events: false    # Use pressure-based stopping instead
-
-# Coupling rules (empty for single tank, but structure ready for multi-tank)
-coupling_rules: []
-
-# Solver configuration
+  type: discharge
+  profile: atr72
+  ambient_temperature: 288.15
+  assigned_to_node: 1
 solver:
-  method: "LSODA"                        # Primary integration method
-  rtol: 1e-6                            # Relative tolerance
-  atol: 1e-9                            # Absolute tolerance
-  time_step: 1.0                        # Base time step [s]
-  max_step: 10.0                        # Maximum step size [s]
-  custom_config: false                   # true if custom solver precision needed (handled in driver)
-
-# Output settings
+  method: LSODA
+  rtol: 1e-6
+  atol: 1e-9
+  time_step: 1.0
+  max_step: 10.0
+  custom_config: false
 output:
-  identifier: "single_tank_slh2"         # Identifier string appended to file names
+  identifier: single_tank_slh2
   save_plots: true
-  plot_formats: ["png", "pdf"]
+  plot_formats:
+  - png
+  - pdf
   save_data: true
-  data_format: "csv"
-  results_directory: "output/results"
-  plots_directory: "output/plots"
-
-  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
-
-  # Plot configurations
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
   plots:
-    # Plotting style configuration
     style:
-      use_greyscale: true           # Enable greyscale plotting mode
-      # Font configuration
+      use_greyscale: true
       font:
-        master_size: 16                # Master font size for axis labels, titles, etc.
-        legend_size: 16                # Font size for legends and isobar callouts
-        font_name: "Cambria"           # Font family name
-
+        master_size: 16
+        legend_size: 16
+        font_name: Cambria
     tank_states:
       enabled: true
-      figsize: [12, 10]
-      filename: "tank_states"
+      figsize:
+      - 12
+      - 10
+      filename: tank_states
       event_lines:
-        - time: 0.016              # Time in hours
-          label: "IHEX activation"
+      - time: 0.016
+        label: IHEX activation
     fuel_flow_profile:
       enabled: true
-      figsize: [14, 10]
-      filename: "fuel_flow_profile"
+      figsize:
+      - 14
+      - 10
+      filename: fuel_flow_profile
     density_temperature:
       enabled: true
-      figsize: [12, 8]
-      filename: "density_temperature"
-      isobar_pressures: [6, 16, 20]    # Custom isobars to show [bar] - adjusted for SLH2
-      show_reference_pressures: true  # Show venting and minimum pressure isobars highlighted
-      include_saturation_line: true   # Show liquid/vapor saturation lines
-      include_isobars: true           # Show isobar lines
+      figsize:
+      - 12
+      - 8
+      filename: density_temperature
+      isobar_pressures:
+      - 6
+      - 16
+      - 20
+      show_reference_pressures: true
+      include_saturation_line: true
+      include_isobars: true
     mass_flows:
       enabled: true
-      figsize: [12, 6]
-      filename: "mass_flows"
-      include_venting_flow: true      # Show venting flow curve (true/false)
+      figsize:
+      - 12
+      - 6
+      filename: mass_flows
+      include_venting_flow: true
     heat_exchanger_requirements:
       enabled: true
-      figsize: [12, 6]
-      filename: "heat_exchanger_requirements"
-      include_ihex: true             # Calculate and show iHEX requirements (true/false)
-      include_ohex: true             # Calculate and show oHEX requirements (true/false)
-      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
-      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations
-      include_total: true            # Show total (iHEX + oHEX) curve (true/false)
-      ohex_target_temperature: 200.0 # K - Target temperature for oHEX calculation
-      ohex_target_pressure: 20e5     # Pa - Target pressure for oHEX calculation (20 bar)
+      figsize:
+      - 12
+      - 6
+      filename: heat_exchanger_requirements
+      include_ihex: true
+      include_ohex: true
+      ohex_target_temperature: 200.0
+      ohex_target_pressure: 20e5
+      include_total: true
     reference_lines:
       pressure:
-        show_p_min: true           # Show minimum allowable pressure line
-        show_p_vent: true          # Show maximum allowable / venting pressure line
+        show_p_min: true
+        show_p_vent: true
       temperature:
-        show_t_ambient: false       # Show ambient temperature line
+        show_t_ambient: false
       density:
-        show_stopping_density: false # Show stopping density line
+        show_stopping_density: false

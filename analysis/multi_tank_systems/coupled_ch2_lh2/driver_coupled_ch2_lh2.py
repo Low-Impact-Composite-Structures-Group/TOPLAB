@@ -44,7 +44,7 @@ def main():
     print("=" * 80)
 
     # Load configuration
-    config_path = current_dir / "coupled_ch2_lh2_feedforward.yaml"
+    config_path = current_dir / "coupled_ch2_lh2_config.yaml"
 
     if not config_path.exists():
         print(f"❌ Configuration file not found: {config_path}")

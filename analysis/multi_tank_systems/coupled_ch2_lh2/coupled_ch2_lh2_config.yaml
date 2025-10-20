@@ -1,251 +1,190 @@
-# Coupled CH2-LH2 Multi-Tank System Configuration
-analysis_name: "Coupled CH2-LH2 Multi-Tank System"
-description: "Two-tank coupled system: CH2 (700 bar, 330K) pressurizes LH2 (3-15 bar, 20K) for mission discharge with flow-controlled coupling"
-version: "1.0"
-
-# Network topology definition
+analysis:
+  name: Coupled CH2-LH2 Multi-Tank System (Feedforward)
+  description: 'CH2→LH2 feedforward pressure enforcement: per-step algebraic flow to match required pressure'
+  version: '1.0'
 network:
-  number_of_tanks: 2
-  external_source: false
-  external_sink: true
-  tanks:
-    - tank_id: 1
-      tank_type: "CH2"     # Compressed hydrogen tank (high pressure, room temperature)
-    - tank_id: 2
-      tank_type: "LH2"     # Low-pressure liquid hydrogen tank (mission fuel)
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: CH2
+    geometry:
+      phi: 3.0
+      radius: 0.8
+    initial_conditions:
+      pressure: 100000000.0
+      temperature: 288.15
+      density: 60.0
+    operating_limits:
+      minimum_pressure: 100000.0
+      venting_pressure: 110000000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 50.0
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+  - node_id: 2
+    type: tank
+    description: Tank 2
+    fluid: LH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 200000.0
+      temperature: 25.0
+      density: 68.0
+    operating_limits:
+      minimum_pressure: 200000.0
+      venting_pressure: 1500000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 0.025
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+  edges: []
 
-# Tank geometry and initial conditions
-geometry:
-  # Tank 1: CH2 - High pressure compressed hydrogen (user-defined sizing)
-  1:
-    phi: 3.0                             # Length/radius ratio (L/R)
-    radius: 0.8                   # m (increased from 0.6m for extended mission capability)
-    initial_pressure: 100000000           # Pa (700 bar - high pressure gaseous storage)
-    initial_temperature: 288.15           # K (room temperature - ensure proper initialization)
-    initial_density: 60.0                # kg/m³ (calculated for 700 bar at 288K)
-    venting_pressure: 110000000           # Pa (1100 bar - venting pressure)
-    minimum_pressure: 100000             # Pa (1 bar - minimum allowable pressure)
-
-  # Tank 2: LH2 - Moderate pressure requiring CH2 assistance during high flow periods
-  2:
-    phi: 3.0                             # Length/radius ratio (L/R)
-    initial_pressure: 1000000             # Pa (8 bar - requires pressurization during high flow)
-    initial_temperature: 23.5            # K (saturated liquid at 8 bar)
-    initial_density: 68.0                # kg/m³ (liquid hydrogen density at 8 bar)
-    venting_pressure: 1500000            # Pa (15 bar - venting pressure)
-    minimum_pressure: 200000             # Pa (3 bar - minimum to avoid excessive two-phase)
-    mission_based_sizing: true           # Size based on ATR72 mission requirements
-
-# Per-tank material specifications with NIST temperature-dependent properties
-tank_materials:
-  # Tank 1: CH2 - Same materials as Tank 2 for now
-  1:
-    liner:
-      nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-      thickness: 0.001                     # m (1mm aluminum liner)
-    composite:
-      nist_path: "carbon_epoxy_nist"       # Path to NIST materials library
-      winding_angle: 54.7                  # degrees (optimal winding angle)
-    insulation:
-      thickness: 0.050                     # m (50mm insulation layer)
-      heat_transfer_coefficient: 50      # W/m²K (vacuum insulation)
-    safety_margin: 1.25                    # Structural design safety factor
-
-  # Tank 2: LH2 - Same materials as Tank 1 for now
-  2:
-    liner:
-      nist_path: "aluminum_6061T6_nist"    # Path to NIST materials library
-      thickness: 0.001                     # m (1mm aluminum liner)
-    composite:
-      nist_path: "carbon_epoxy_nist"       # Path to NIST materials library
-      winding_angle: 54.7                  # degrees (optimal winding angle)
-    insulation:
-      thickness: 0.050                     # m (50mm insulation layer)
-      heat_transfer_coefficient: 0.025      # W/m²K (vacuum insulation)
-    safety_margin: 1.25                    # Structural design safety factor
-
-
-# Mission profile configuration - import ATR72 like CH2-CCH2 system
-mission:
-  type: "discharge"                      # Mission type: discharge
-  profile: "atr72"                       # Profile: ATR72 turboprop aircraft (imported from Mission.atr72())
-  ambient_temperature: 288.15            # K (ambient conditions)
-  assigned_to: 2                        # Mission assigned to Tank 2 (LH2) for fuel extraction
-
-# Stopping criteria
-stopping_criteria:
-  minimum_density: 5.0                  # kg/m³ (LH2 minimum density - lower than sLH2)
-  use_density_stopping_events: true     # Use density-based stopping events
-  use_duration_stopping: true           # Stop when mission duration is reached
-
-# Flow physics configuration - all flow calculation parameters
-flow_physics:
-  # Fluid properties calculation method
-  fluid_properties:
-    use_coolprop: true                   # Use CoolProp for temperature/pressure-dependent properties
-    coolprop_fluid: "H2"                 # CoolProp fluid identifier for hydrogen
-
-    # Backup/override values (only used if CoolProp fails or use_coolprop=false)
-    backup_properties:
-      specific_gas_constant: 4124.0     # J/(kg·K) - R_specific for H2
-      heat_capacity_ratio: 1.4          # γ (gamma) - dimensionless
-      kinematic_viscosity: 1e-7         # m²/s - for LH2 (used in discharge piping calculations)
-      speed_of_sound: 1000.0            # m/s - for LH2 (used in choked flow detection)
-
-  # Orifice/valve flow characteristics (for CH2 pressurization valve)
-  orifice_flow:
-    discharge_coefficient: 0.6           # Cd - sharp-edged orifice (dimensionless)
-    flow_coefficient_units: "dimensionless"  # Cd is dimensionless, orifice area handled separately
-
-  # Choked flow parameters
-  choked_flow:
-    enable_choked_flow: true            # Disable choked flow calculations for performance
-    # critical_pressure_ratio_override: 0.528  # Fixed value to avoid calculations
-    sonic_velocity_factor: 1.0           # Multiplier for CoolProp sonic velocity
-    choked_flow_pressure_factor: 2.0     # Pressure increase factor for choked conditions
-    velocity_choked_fraction: 0.5        # Fraction of sonic velocity for choked flow detection
-
-  # Pipe flow parameters (for LH2 discharge piping calculations)
-  pipe_flow:
-    atmospheric_pressure: 101325.0       # Pa - standard atmospheric pressure
-
-    # Flow regime parameters
-    reynolds_transition: 2300.0          # Laminar to turbulent transition
-
-    # Friction factor correlations
-    friction_correlations:
-      laminar_factor: 64.0              # f = 64/Re for laminar flow
-      turbulent_correlation: "blasius"   # "blasius", "colebrook", or "explicit"
-      turbulent_factor: 0.316           # Blasius: f = 0.316/Re^0.25
-      turbulent_exponent: 0.25          # Blasius exponent
-
-    # Pipe roughness (if not specified in coupling rule)
-    default_roughness: 1.5e-6           # m - drawn tubing roughness (stainless steel)
-
-  # Safety and limiting parameters
-  safety_limits:
-    # max_mass_transfer_fraction: 0.1      # Maximum fraction of tank mass per timestep
-    minimum_pressure_pa: 1000.0          # Pa - minimum absolute pressure for flow
-    maximum_velocity_ms: 2000.0          # m/s - maximum allowable flow velocity
-
-  # Numerical parameters
-  numerical:
-    pressure_tolerance_pa: 1000.0        # Pa - further relaxed pressure tolerance for performance
-    flow_rate_tolerance_kg_s: 1e-5      # kg/s - relaxed minimum flow rate threshold
-    property_update_frequency: 1        # Update fluid properties every 1 timesteps (much less frequent)
-
-# Simple mission-adaptive coupling with 30% margin and 5mm×1m piping
 coupling_rules:
-  - coupling_id: "ch2_lh2_simple_mission_adaptive"
-    coupling_type: "mission_adaptive_pressurization"
-    description: "PID-controlled variable flow coupling: Continuous CH2 flow modulation based on LH2 pressure requirements for mission discharge"
-    participants:
-      source: 1                          # CH2 tank (pressurization gas source)
-      target: 2                          # LH2 tank (mission fuel tank)
+- coupling_id: ch2_lh2_feedforward
+  coupling_type: feedforward_pressure_enforcer
+  description: 'Per-derivative feedforward: invert mdot_in to match required LH2 pressure'
+  participants:
+    source: 1
+    target: 2
+  control_parameters:
+    # Source constraints
+    min_source_pressure_bar: 15.0
+    safety_mass_fraction_per_s: 0.10
+    # Bisection/search
+    bracket_margin: 1.15         # narrower bracket reduces overshoot at saturation
+    max_bisection_iters: 14
+    tol_pressure_bar: 0.01       # tighter target tracking
+    # Branch-free feedforward tuning
+    enforcement_horizon_s: 0.30  # shorter horizon for gentler corrections
+    overpressure_margin_bar: 0.5 # slight bias above requirement to avoid chatter
+    mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
+    soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
+    # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
+    min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
+    min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
+  flow_parameters:
+    max_flow_rate_kg_s: 0.6       # slightly higher capacity to address early deficit
+    orifice_diameter_m: 0.0035    # +0.5 mm to increase hydraulic capacity
+  discharge_piping:
+    diameter_m: 0.005
+    length_m: 1.0
+    roughness_m: 1.5e-06
+    loss_coefficient: 1.0
+    choked_flow_enabled: true
 
-    # Mission profile loaded from system (ATR72)
+mission:
+  type: discharge
+  profile: atr72
+  ambient_temperature: 288.15
+  assigned_to_node: 2
 
-    # Simple discharge piping - your specifications
-    discharge_piping:
-      diameter_m: 0.005                  # 5mm discharge pipe diameter (as requested)
-      length_m: 1.0                      # 1m pipe length (as requested)
-      roughness_m: 1.5e-6                # Standard stainless steel roughness
-      loss_coefficient: 1.0              # Minimal minor losses
-      choked_flow_enabled: true         # Disable for performance
+physics:
+  fluid_properties:
+    use_coolprop: true
+    coolprop_fluid: H2
+    backup_properties:
+      specific_gas_constant: 4124.0
+      heat_capacity_ratio: 1.4
+      kinematic_viscosity: 1e-7
+      speed_of_sound: 1000.0
+  orifice_flow:
+    discharge_coefficient: 0.6
+    flow_coefficient_units: dimensionless
+  choked_flow:
+    enable_choked_flow: true
+    sonic_velocity_factor: 1.0
+    choked_flow_pressure_factor: 2.0
+    velocity_choked_fraction: 0.5
+  pipe_flow:
+    atmospheric_pressure: 101325.0
+    reynolds_transition: 2300.0
+    friction_correlations:
+      laminar_factor: 64.0
+      turbulent_correlation: blasius
+      turbulent_factor: 0.316
+      turbulent_exponent: 0.25
+    default_roughness: 1.5e-06
+  safety_limits:
+    minimum_pressure_pa: 1000.0
+    maximum_velocity_ms: 2000.0
+  numerical:
+    pressure_tolerance_pa: 1000.0
+    flow_rate_tolerance_kg_s: 1e-5
+    property_update_frequency: 1
 
-    # PID-controlled variable flow pressurization
-    control_parameters:
-      pressure_margin_bar: 0.5           # Reduced pressure margin for better responsiveness
-      max_pressurization_rate_kg_s: 0.08 # 80 g/s max flow rate
-      min_source_pressure_bar: 15.0      # Minimum CH2 pressure for operation
-      # minimum_safety_pressure_bar: 3.5   # Safety floor above tank minimum
-
-      # PID Controller parameters - OPTIMIZED for better tracking
-      pid_kp: 0.8                        # Proportional gain (4x increase for better response)
-      pid_ki: 0.08                       # Integral gain (4x increase for better steady-state)
-      pid_kd: 0.1                        # Derivative gain (2x increase for better stability)
-
-    # Variable flow valve parameters
-    flow_parameters:
-      max_flow_rate_kg_s: 0.11          # 110 g/s maximum flow rate
-      orifice_diameter_m: 0.008         # 8mm orifice diameter
-
-# Solver configuration - fast and accurate
 solver:
-  method: "LSODA"                         # Adaptive method good for coupling dynamics
-  rtol: 1e-6                            # Relaxed relative tolerance for performance
-  atol: 1e-8                             # Relaxed absolute tolerance for performance
-  time_step: 1.0                       # Larger time step for performance [s]
-  max_step: 20.0                        # Larger maximum step size [s]
-  custom_config: true                   # Use custom solver precision for performance
+  method: LSODA
+  rtol: 5e-5
+  atol: 5e-7
+  time_step: 0.5
+  max_step: 5.0
+  custom_config: true
 
-# Output settings
 output:
-  identifier: "coupled_ch2_lh2_pressurization"  # Identifier string appended to file names
+  identifier: coupled_ch2_lh2_feedforward
   save_plots: true
-  plot_formats: ["png", "pdf"]
+  plot_formats: [png, pdf]
   save_data: true
-  data_format: "csv"
-  results_directory: "output/results"
-  plots_directory: "output/plots"
-
-  # Plotting handled by DelftColourPlotter in SystemOrchestrator.generate_plots()
-
-  # Plot configurations
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
   plots:
-    # Plotting style options
     style:
-      use_greyscale: true              # Set to true for greyscale plots with markers
-      enable_multi_tank_overlay: false   # Overlay multiple tanks on same evolution plot
-      # Font configuration
+      use_greyscale: true
+      enable_multi_tank_overlay: false
       font:
-        master_size: 16                # Master font size for axis labels, titles, etc.
-        legend_size: 16                # Font size for legends and isobar callouts
-        font_name: "Cambria"           # Font family name
-
-    # Reference lines configuration
+        master_size: 16
+        legend_size: 16
+        font_name: Cambria
     reference_lines:
       pressure:
-        show_p_min: true           # Show minimum allowable pressure line
-        show_p_vent: false          # Show maximum allowable / venting pressure line
+        show_p_min: true
+        show_p_vent: false
       temperature:
-        show_t_ambient: false       # Show ambient temperature line
+        show_t_ambient: false
       density:
-        show_stopping_density: false # Show stopping density line
-
-    # Individual plot configurations
+        show_stopping_density: false
     tank_states:
       enabled: true
       figsize: [12, 10]
-      filename: "tank_states"
+      filename: tank_states
     fuel_flow_profile:
       enabled: true
       figsize: [14, 10]
-      filename: "fuel_flow_profile"
+      filename: fuel_flow_profile
     pressure_requirements:
       enabled: true
       figsize: [14, 10]
-      filename: "pressure_requirements"
-    density_temperature:
-      enabled: true
-      figsize: [12, 8]
-      filename: "density_temperature"
-      isobar_pressures: [5, 15, 100, 400]  # LH2 pressure range
-      show_reference_pressures: false
-      include_saturation_line: true
-      include_isobars: true
-      arrow_position: 0.03            # Position along path for direction arrow (0.0-1.0)
-      arrow_size: 1.0                # Size multiplier for the direction arrow
+      filename: pressure_requirements
     mass_flows:
       enabled: true
-      filename: "mass_flows"
+      filename: mass_flows
       include_venting_flow: true
       include_coupling_flows: true
-    heat_exchanger_requirements:
-      enabled: false  # Optional - enable for heat exchanger analysis
-      filename: "heat_exchanger_requirements"
-      include_ohex: true
-      include_ihex: true
-      include_total: true
-      ohex_target_temperature: 200.0 # K - target temperature for oHEX calculations
-      ohex_target_pressure: 2000000  # Pa (20 bar) - target pressure for oHEX calculations
