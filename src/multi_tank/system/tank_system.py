@@ -25,7 +25,6 @@ from src.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 
 from .state_management import MultiTankState, MultiTankResults
 from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
-from src.multi_tank.coupling.inter_tank_coupling import PressureGovernorValve
 from src.fluids.flow_physics import FlowPhysics
 
 
