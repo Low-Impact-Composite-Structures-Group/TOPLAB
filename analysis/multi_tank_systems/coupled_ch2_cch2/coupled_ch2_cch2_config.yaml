@@ -102,16 +102,6 @@ physics:
     critical_pressure_ratio_override: null
     sonic_velocity_factor: 1.0
     choked_flow_pressure_factor: 2.0
-  pipe_flow:
-    atmospheric_pressure: 101325.0
-    reynolds_transition: 2300.0
-    friction_correlations:
-      laminar_factor: 64.0
-      turbulent_correlation: blasius
-      turbulent_factor: 0.316
-      turbulent_exponent: 0.25
-    default_roughness: 1.5e-06
-    velocity_choked_fraction: 0.5
   safety_limits:
     max_mass_transfer_fraction: 0.1
     minimum_pressure_pa: 1000.0

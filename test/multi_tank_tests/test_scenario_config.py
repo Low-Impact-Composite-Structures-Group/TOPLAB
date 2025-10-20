@@ -20,7 +20,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.append(str(project_root / "src"))
 
-from src.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
 
 
 class TestScenarioConfig:

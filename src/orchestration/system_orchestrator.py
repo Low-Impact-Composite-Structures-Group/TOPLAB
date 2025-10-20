@@ -26,7 +26,7 @@ from CoolProp.CoolProp import PropsSI
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Configuration system - enhanced version with migration support
-from src.configuration.enhanced_scenario_configuration import ScenarioConfig
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
 
 # Multi-tank DAE physics engine
 from src.multi_tank.system.tank_system import TankSystem, TankSystemConfig, TankConfig
@@ -2636,7 +2636,7 @@ def main():
     try:
         # Load ScenarioConfig first
         print(f"📋 Loading configuration: {test_config_path}")
-        from src.configuration.scenario_configuration import ScenarioConfig
+        from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
         scenario_config = ScenarioConfig.from_yaml(str(test_config_path))
 
         # Create orchestrator with ScenarioConfig object

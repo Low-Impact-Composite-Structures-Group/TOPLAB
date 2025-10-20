@@ -77,7 +77,7 @@ All drivers follow this structure:
 import sys, time, Path
 
 # Framework imports
-from src.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
 from src.orchestration.system_orchestrator import SystemOrchestrator
 
 def main():
