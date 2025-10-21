@@ -74,12 +74,12 @@ network:
     to_node: 2
     activation_conditions:
       pressure_open_bar: 16.0
-      pressure_close_bar: 17.0
+      pressure_close_bar: 30.0
     flow_physics:
       orifice_flow:
         orifice_diameter_m: 0.002
       safety_limits:
-        max_flow_rate_kg_s: 0.025
+        max_flow_rate_kg_s: 0.1
 mission:
   type: discharge
   profile: atr72
