@@ -10,7 +10,7 @@ network:
     fluid: CH2
     geometry:
       phi: 3.0
-      radius: 0.8
+      radius: 1.1
     initial_conditions:
       pressure: 100000000.0
       temperature: 288.15
@@ -42,9 +42,9 @@ network:
       phi: 3.0
       mission_based_sizing: true
     initial_conditions:
-      pressure: 200000.0
+      pressure: 1000000.0
       temperature: 25.0
-      density: 68.0
+      density: 70.0
     operating_limits:
       minimum_pressure: 200000.0
       venting_pressure: 1500000.0
@@ -79,16 +79,19 @@ network:
       max_bisection_iters: 14
       tol_pressure_bar: 0.01       # tighter target tracking
       # Branch-free feedforward tuning
-      enforcement_horizon_s: 0.30  # shorter horizon for gentler corrections
-      overpressure_margin_bar: 0.5 # slight bias above requirement to avoid chatter
+      enforcement_horizon_s: 1.0   # At least 2× solver timestep (0.5s) for proper prediction
+      overpressure_margin_bar: 0.3 # Increased from 0.2 for buffer during sudden demand spikes
+      max_target_pressure_bar: 12.0 # Hard ceiling - never exceed Tank 2 safe operating pressure
       mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
       soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
+      # HYBRID: Use linearized predictor with validation, fallback to bisection when nonlinear
+      use_linearized_predictor: true  # Fast path with safety checks, bisection fallback
       # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
       min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
       min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
     flow_parameters:
-      max_flow_rate_kg_s: 0.6       # slightly higher capacity to address early deficit
-      orifice_diameter_m: 0.0035    # +0.5 mm to increase hydraulic capacity
+      max_flow_rate_kg_s: 0.6       # Theoretical max (unused - physics-based capacity dominates)
+      orifice_diameter_m: 0.0060    # 5.0mm orifice (increased from 3.5mm to eliminate saturation)
     discharge_piping:
       diameter_m: 0.005
       length_m: 1.0

@@ -741,19 +741,18 @@ class IsochoricTankState:
     def compute_pressure(self):
         """Compute pressure from equation of state"""
         if self.pressure is None:
-            from CoolProp.CoolProp import PropsSI
+            # Use safe wrapper to avoid near-saturation warnings
             try:
-                # Check for valid temperature range
+                from src.fluids.coolprop_safe import safe_pressure_from_T_rho
                 if self.temperature <= 0:
                     print(f"⚠️ Invalid temperature {self.temperature:.2f} K detected - using fallback pressure")
-                    self.pressure = 1e5  # Default to 1 bar
+                    self.pressure = 1e5
                     return
-
-                self.pressure = PropsSI("P", "T", self.temperature, "Dmass", self.density, "hydrogen")
+                self.pressure = safe_pressure_from_T_rho(self.temperature, self.density, "hydrogen")
             except Exception as e:
-                # Fallback for extreme conditions
-                print(f"⚠️ CoolProp error for T={self.temperature:.2f}K, ρ={self.density:.2f}kg/m³: {e}")
-                self.pressure = 1e5  # Default to 1 bar
+                # Final fallback for extreme conditions
+                print(f"⚠️ Pressure computation fallback for T={self.temperature:.2f}K, ρ={self.density:.2f}kg/m³: {e}")
+                self.pressure = 1e5
 
     def _needs_hydrogen_update(self) -> bool:
         """Check if hydrogen properties need to be updated"""

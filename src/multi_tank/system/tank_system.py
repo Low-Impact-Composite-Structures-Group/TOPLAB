@@ -8,7 +8,7 @@ This module provides the main TankSystem class that can manage any number of tan
 import math
 import time
 import numpy as np
-import matplotlib.pyplot as plt
+# Matplotlib is not required for core simulation; avoid hard dependency at import time
 from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
@@ -770,9 +770,13 @@ class TankSystem:
                 T_i = float(y[idx + 1])
                 vol = getattr(self.tanks[i], 'volume', 1.0)
                 density = m_i / max(vol, 1e-9)
-                # Quick pressure estimate using CoolProp (required)
-                from CoolProp.CoolProp import PropsSI
-                P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
+                # Quick pressure estimate using saturation-aware helper to avoid warnings
+                try:
+                    from src.fluids.coolprop_safe import safe_pressure_from_T_rho
+                    P_i = safe_pressure_from_T_rho(max(T_i, 1.0), max(density, 1e-9), "hydrogen")
+                except Exception:
+                    from CoolProp.CoolProp import PropsSI
+                    P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
                 tank_summaries.append((P_i / 1e5, m_i))
             press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
             mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
@@ -841,15 +845,28 @@ class TankSystem:
                         except:
                             coupling_enthalpy = 0.0  # Fallback
 
+                # Helper to ensure scalar float from any flow source
+                def _as_float(val: Any) -> float:
+                    try:
+                        # Handle list/tuple/ndarray by taking the first element
+                        if isinstance(val, (list, tuple)):
+                            return float(val[0])
+                        import numpy as _np
+                        if isinstance(val, _np.ndarray):
+                            return float(val.flat[0])
+                        return float(val)
+                    except Exception:
+                        return 0.0
+
                 # Create flow functions that include both mission and coupling flows
                 def fuel_flow_func(time):
-                    mission_inflow = self._get_inflow_rate(time, i)  # Mission-based inflow (refuel)
-                    coupling_inflow = max(0.0, net_coupling_flow)  # Positive coupling = inflow
+                    mission_inflow = _as_float(self._get_inflow_rate(time, i))  # Mission-based inflow (refuel)
+                    coupling_inflow = max(0.0, _as_float(net_coupling_flow))  # Positive coupling = inflow
                     return mission_inflow + coupling_inflow
 
                 def discharge_flow_func(time):
-                    mission_outflow = self._get_outflow_rate(time, i)  # Mission-based outflow (discharge)
-                    coupling_outflow = max(0.0, -net_coupling_flow)  # Negative coupling = outflow
+                    mission_outflow = _as_float(self._get_outflow_rate(time, i))  # Mission-based outflow (discharge)
+                    coupling_outflow = max(0.0, _as_float(-net_coupling_flow))  # Negative coupling = outflow
                     return mission_outflow + coupling_outflow
 
                 # Get thermal derivatives from thermal model using correct interface
@@ -890,7 +907,10 @@ class TankSystem:
             return dydt
 
         except Exception as e:
-            print(f"❌ Failed to create tank system state at t={t:.1f}s: {e}")
+            # Print richer diagnostics to locate type/units issues without crashing the solver
+            import traceback
+            print(f"❌ Failed to create tank system state at t={t:.6f}s: {e}")
+            traceback.print_exc()
             # Return zero derivatives to prevent integration failure
             return np.zeros(len(y))
 
@@ -1455,10 +1475,10 @@ class TankSystem:
                     'coupling_outflow_rate': 0.0
                 })
 
-                # Set basic flow attributes on tank state (coupling flows set later)
-                tank_state.inflow_rate = inflow_rate / 1000.0  # Convert g/s to kg/s for storage
-                tank_state.outflow_rate = outflow_rate / 1000.0
-                tank_state.vent_rate = vent_rate / 1000.0
+                # Set basic flow attributes on tank state (kg/s)
+                tank_state.inflow_rate = inflow_rate
+                tank_state.outflow_rate = outflow_rate
+                tank_state.vent_rate = vent_rate
                 tank_state.coupling_inflow_rate = 0.0
                 tank_state.coupling_outflow_rate = 0.0
 

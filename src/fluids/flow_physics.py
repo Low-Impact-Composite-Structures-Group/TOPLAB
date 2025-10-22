@@ -116,28 +116,69 @@ class FlowPhysics:
 
         if self.use_coolprop:
             try:
-                # Get properties from CoolProp
+                # Always available and stable
                 properties['specific_gas_constant'] = (
                     CP.PropsSI('GAS_CONSTANT', self.coolprop_fluid) /
                     CP.PropsSI('MOLAR_MASS', self.coolprop_fluid)
                 )
-                properties['heat_capacity_ratio'] = (
-                    CP.PropsSI('CPMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid) /
-                    CP.PropsSI('CVMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid)
-                )
-                properties['speed_of_sound'] = (
-                    CP.PropsSI('SPEED_OF_SOUND', 'P', pressure, 'T', temperature, self.coolprop_fluid) *
-                    self.sonic_velocity_factor
-                )
 
-                # Calculate kinematic viscosity
-                dynamic_viscosity = CP.PropsSI('VISCOSITY', 'P', pressure, 'T', temperature, self.coolprop_fluid)
-                density = CP.PropsSI('DMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid)
-                properties['kinematic_viscosity'] = dynamic_viscosity / density
-                properties['density'] = density
+                # Prefer P,T; if near-saturation errors occur, fall back to saturated vapor at T
+                try:
+                    cp = CP.PropsSI('CPMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid)
+                    cv = CP.PropsSI('CVMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid)
+                except Exception:
+                    # Try saturated vapor side at given temperature (avoids two-phase ambiguity)
+                    try:
+                        cp = CP.PropsSI('Cpmass', 'T', max(temperature, 1.0), 'Q', 1, self.coolprop_fluid)
+                        cv = CP.PropsSI('Cvmass', 'T', max(temperature, 1.0), 'Q', 1, self.coolprop_fluid)
+                    except Exception:
+                        cp = None
+                        cv = None
+
+                if cp is not None and cv is not None and cv > 0:
+                    properties['heat_capacity_ratio'] = cp / cv
+                else:
+                    # Final fallback: use configured backup gamma
+                    properties['heat_capacity_ratio'] = self.backup_gamma
+
+                # Speed of sound: P,T first; then saturated vapor at T; finally backup
+                try:
+                    sos = CP.PropsSI('SPEED_OF_SOUND', 'P', pressure, 'T', temperature, self.coolprop_fluid)
+                except Exception:
+                    try:
+                        sos = CP.PropsSI('SPEED_OF_SOUND', 'T', max(temperature, 1.0), 'Q', 1, self.coolprop_fluid)
+                    except Exception:
+                        sos = self.backup_speed_of_sound
+                properties['speed_of_sound'] = sos * self.sonic_velocity_factor
+
+                # Dynamic viscosity and density for kinematic viscosity
+                # Use P,T first; if that fails near saturation, try saturated vapor at T
+                try:
+                    dynamic_viscosity = CP.PropsSI('VISCOSITY', 'P', pressure, 'T', temperature, self.coolprop_fluid)
+                except Exception:
+                    try:
+                        dynamic_viscosity = CP.PropsSI('VISCOSITY', 'T', max(temperature, 1.0), 'Q', 1, self.coolprop_fluid)
+                    except Exception:
+                        dynamic_viscosity = None
+
+                try:
+                    density = CP.PropsSI('DMASS', 'P', pressure, 'T', temperature, self.coolprop_fluid)
+                except Exception:
+                    try:
+                        density = CP.PropsSI('Dmass', 'T', max(temperature, 1.0), 'Q', 1, self.coolprop_fluid)
+                    except Exception:
+                        density = None
+
+                if dynamic_viscosity is not None and density is not None and density > 0:
+                    properties['kinematic_viscosity'] = dynamic_viscosity / density
+                    properties['density'] = density
+                else:
+                    # Fall back partially: provide backup kinematic viscosity; density left as None
+                    properties['kinematic_viscosity'] = self.backup_kinematic_viscosity
+                    properties['density'] = None
 
             except Exception as e:
-                print(f"⚠️  CoolProp error: {e}. Using backup properties.")
+                # As a last resort, use full backup set; avoid spamming logs on near-saturation
                 properties = self._get_backup_properties()
         else:
             properties = self._get_backup_properties()

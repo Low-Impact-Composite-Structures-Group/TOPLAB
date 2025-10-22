@@ -1074,9 +1074,16 @@ class SystemOrchestrator:
                 mass_rate = abs(state.outflow_rate)
 
                 if T_current > 0 and rho_current > 0 and mass_rate > 0:
-                    # Calculate current pressure and enthalpy
-                    p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "hydrogen")
-                    h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "hydrogen")
+                    # Calculate current pressure and enthalpy with saturation-aware helpers
+                    try:
+                        from src.fluids.coolprop_safe import safe_pressure_from_T_rho, safe_enthalpy
+                        p_current = safe_pressure_from_T_rho(T_current, rho_current, "hydrogen")
+                        # Assume gas enthalpy for outlet stream when in two-phase
+                        h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="hydrogen")
+                    except Exception:
+                        # Fallback to direct CoolProp calls
+                        p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "hydrogen")
+                        h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "hydrogen")
 
                     # Calculate OHEX heat requirement
                     q_ohex = mass_rate * (h_target - h_current)  # [W]
