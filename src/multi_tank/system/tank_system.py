@@ -13,8 +13,6 @@ from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
-from CoolProp.CoolProp import PropsSI
-
 from src.tank_design.tank_shapes import SphericalTank
 from src.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
 from ..solver import (
@@ -839,11 +837,11 @@ class TankSystem:
                     source_tank_idx = 0 if i == 1 else 1  # Simple 2-tank case
                     if source_tank_idx < len(multi_state.tank_states):
                         source_state = multi_state.tank_states[source_tank_idx]
-                        try:
-                            coupling_enthalpy = PropsSI("Hmass", "T", source_state.temperature,
-                                                       "Dmass", source_state.density, "hydrogen")
-                        except:
-                            coupling_enthalpy = 0.0  # Fallback
+                        from CoolProp.CoolProp import PropsSI
+                        coupling_enthalpy = PropsSI("Hmass", "T", source_state.temperature,
+                                                    "Dmass", source_state.density, "hydrogen")
+                        # print(f"coupling enthalpy for Tank {i+1} from Tank {source_tank_idx+1}: {coupling_enthalpy:.1f} J/kg")
+
 
                 # Helper to ensure scalar float from any flow source
                 def _as_float(val: Any) -> float:
