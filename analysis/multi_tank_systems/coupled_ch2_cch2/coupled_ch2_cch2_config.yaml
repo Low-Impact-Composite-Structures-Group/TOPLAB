@@ -11,7 +11,7 @@ network:
     fluid: CH2
     geometry:
       phi: 3.0
-      radius: 1.05
+      radius: 0.5
     initial_conditions:
       pressure: 80000000
       temperature: 288.0
@@ -73,8 +73,8 @@ network:
     from_node: 1
     to_node: 2
     activation_conditions:
-      pressure_open_bar: 70.0
-      pressure_close_bar: 90.0
+      pressure_open_bar: 16.0
+      pressure_close_bar: 30.0
     flow_physics:
       orifice_flow:
         orifice_diameter_m: 0.005
