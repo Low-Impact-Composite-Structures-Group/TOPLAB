@@ -74,6 +74,7 @@ class FlowPhysics:
         pipe_config = self.config.get('pipe_flow', {})
         self.atmospheric_pressure = pipe_config.get('atmospheric_pressure', 101325.0)
         self.reynolds_transition = pipe_config.get('reynolds_transition', 2300.0)
+        self.reynolds_blend_width = pipe_config.get('reynolds_blend_width', 400.0)
 
         friction_config = pipe_config.get('friction_correlations', {})
         self.laminar_factor = friction_config.get('laminar_factor', 64.0)
@@ -83,6 +84,8 @@ class FlowPhysics:
 
         self.default_roughness = pipe_config.get('default_roughness', 1.5e-6)
         self.velocity_choked_fraction = pipe_config.get('velocity_choked_fraction', 0.5)
+        # Treat pipe-flow choked effects only for gas-like densities; LH2 discharge should not trigger this
+        self.gas_density_threshold = pipe_config.get('gas_density_threshold', 10.0)  # kg/m³
 
         # Safety limits
         safety_config = self.config.get('safety_limits', {})
@@ -331,19 +334,19 @@ class FlowPhysics:
         Returns:
             Darcy friction factor
         """
-        if reynolds_number <= self.reynolds_transition:
-            # Laminar flow
-            return self.laminar_factor / reynolds_number
+        # Compute both branches then blend smoothly across transition to avoid discontinuities
+        re = max(1e-6, reynolds_number)
+        f_lam = self.laminar_factor / re
+        if self.turbulent_correlation == 'blasius':
+            f_turb = self.turbulent_factor / (re ** self.turbulent_exponent)
+        elif self.turbulent_correlation == 'colebrook':
+            f_turb = self._colebrook_friction_factor(re, relative_roughness)
         else:
-            # Turbulent flow
-            if self.turbulent_correlation == 'blasius':
-                return self.turbulent_factor / (reynolds_number ** self.turbulent_exponent)
-            elif self.turbulent_correlation == 'colebrook':
-                # Colebrook-White equation (iterative)
-                return self._colebrook_friction_factor(reynolds_number, relative_roughness)
-            else:
-                # Default to Blasius
-                return self.turbulent_factor / (reynolds_number ** self.turbulent_exponent)
+            f_turb = self.turbulent_factor / (re ** self.turbulent_exponent)
+
+        # Smooth blend centered at reynolds_transition over a configurable width
+        w = 0.5 * (1.0 + math.tanh((re - self.reynolds_transition) / max(1e-6, self.reynolds_blend_width)))
+        return (1.0 - w) * f_lam + w * f_turb
 
     def _colebrook_friction_factor(self, reynolds_number: float,
                                  relative_roughness: float) -> float:
@@ -416,14 +419,17 @@ class FlowPhysics:
 
         total_pressure_drop = friction_loss + minor_loss
 
-        # Check for choked flow in pipe
-        if self.enable_choked_flow:
-            props = self.get_fluid_properties(density * 287 * 288, 288)  # Approximate conditions
-            sonic_velocity = props['speed_of_sound']
-
-            if velocity > self.velocity_choked_fraction * sonic_velocity:
-                # Apply choked flow factor
-                total_pressure_drop *= self.choked_flow_pressure_factor
+        # Check for choked-like effects in pipe (gas only) with smooth transition to avoid oscillations
+        if self.enable_choked_flow and density <= self.gas_density_threshold:
+            # Use ambient reference for speed of sound if precise P,T unknown
+            props = self.get_fluid_properties(self.atmospheric_pressure, 288.0)
+            sonic_velocity = max(1e-6, props['speed_of_sound'])
+            mach = velocity / sonic_velocity
+            # Smooth blend from 1.0 to choked_flow_pressure_factor around configured fraction
+            # softness controls steepness of transition in Mach units
+            softness = 0.05
+            s = 0.5 * (1.0 + math.tanh((mach - self.velocity_choked_fraction) / max(1e-6, softness)))
+            total_pressure_drop *= (1.0 + (self.choked_flow_pressure_factor - 1.0) * s)
 
         return total_pressure_drop
 

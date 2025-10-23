@@ -1681,6 +1681,9 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
         # Branch-free enforcement horizon (fixed, independent of solver dt)
         self.enforcement_horizon_s = float(control_params.get('enforcement_horizon_s', 0.5))
+        # Command update cadence (zero-order hold between updates).
+        # Increase from 0.05s to 0.15s to reduce ZOH step artifacts
+        self.control_interval_s = float(control_params.get('control_interval_s', 0.15))
 
         # Overpressure margin: bias target upward slightly to avoid chatter at equality
         self.overpressure_margin_bar = float(control_params.get('overpressure_margin_bar', 0.5))
@@ -1699,6 +1702,27 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self.min_flow_floor_kg_s = float(control_params.get('min_flow_floor_kg_s', 0.0))
         self.min_flow_floor_rel_cap = float(control_params.get('min_flow_floor_rel_cap', 0.0))
 
+        # Physical actuator dynamics (to reduce chatter without hiding physics):
+        # - First-order valve response with time constant tau (faster for responsiveness)
+        # - Optional absolute slew-rate limit |dmdot/dt| <= max_mdot_slew_kg_s2
+        self.valve_time_constant_s = float(control_params.get('valve_time_constant_s', 0.5))
+        self.max_mdot_slew_kg_s2 = float(control_params.get('max_mdot_slew_kg_s2', 0.0))  # 0 disables slew limiting
+        # Optional coefficient-rate limiter when modulating opening instead of flow directly (disable by default)
+        self.max_coeff_rate_per_s = float(control_params.get('max_coeff_rate_per_s', 0.0))
+        # Optional command-level slew to prevent mdot_cmd jumps at update cadence (moderate default)
+        self.max_mdot_cmd_slew_kg_s2 = float(control_params.get('max_mdot_cmd_slew_kg_s2', 0.1))
+        # Smooth activation curve around the target to prevent on/off behavior
+        self.activation_softness_bar = float(control_params.get('activation_softness_bar', 0.2))
+
+        # Simplified startup logic: single unified ramp that modulates coefficient directly
+        self.startup_ramp_duration_s = float(control_params.get('startup_ramp_duration_s', 60.0))
+        # Optional startup flow cap to prevent early-time spikes (0 = disabled)
+        self.startup_flow_cap_kg_s = float(control_params.get('startup_flow_cap_kg_s', 0.0))
+        # No measured-pressure LPF by default (introduces too much phase lag)
+        self.measured_pressure_filter_tau_s = float(control_params.get('measured_pressure_filter_tau_s', 0.0))
+        # No command LPF by default (adds more phase lag)
+        self.mdot_command_filter_tau_s = float(control_params.get('mdot_command_filter_tau_s', 0.0))
+
         # Diagnostics
         self._last_required_pressure = 0.0
         self._last_deficit_bar = 0.0
@@ -1714,6 +1738,28 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
         # Internal state (kept minimal to stay memoryless across solver retries)
         self._last_time = None
+        # Zero-order hold state for commanded inflow
+        self._last_update_time = None
+        self._held_mdot_cmd = 0.0
+        # Valve coefficient state for smooth modulation against changing capacity
+        self._coeff = 0.0
+        self._last_coeff = 0.0
+        self._last_coeff_time = None
+        # Filter state for measured pressure
+        self._filtered_measured_pressure = None
+        self._last_meas_update_time = None
+        # Filter state for mdot command
+        self._filtered_mdot_cmd = None
+        self._last_mdot_cmd_time = None
+
+    def _startup_factor(self, t: float) -> float:
+        """Smooth 0→1 ramp using sigmoid for gentle transitions at endpoints."""
+        if self.startup_ramp_duration_s <= 1e-9:
+            return 1.0
+        # Sigmoid ramp: smoother than linear at endpoints
+        x = max(0.0, min(1.0, t / self.startup_ramp_duration_s))
+        # S-curve: x^2 * (3 - 2x) for smooth acceleration/deceleration
+        return x * x * (3.0 - 2.0 * x)
 
     def set_mission_profile(self, mission_profile: dict):
         if 'time_s' in mission_profile and 'flow_rate_kg_s' in mission_profile:
@@ -1744,36 +1790,60 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
     def _required_pressure_pa(self, flow_rate_kg_s: float, lh2_density: float, temperature_K: float, pressure_Pa: float) -> float:
         """Calculate required LH2 pressure for given mission flow rate.
 
+        Conservative assumption: discharge is always saturated liquid at current tank temperature.
+        This is reasonable because:
+        - Tank outlets are designed to draw liquid (baffles, bottom positioning)
+        - Saturated liquid gives minimum pressure drop (highest density)
+        - Eliminates oscillations from phase transition predictions
+
         Args:
             flow_rate_kg_s: Mission outflow rate [kg/s]
-            lh2_density: LH2 density [kg/m³]
+            lh2_density: LH2 density [kg/m³] (not used - we use saturated liquid)
             temperature_K: LH2 temperature [K]
-            pressure_Pa: Current LH2 pressure [Pa]
+            pressure_Pa: Current LH2 pressure [Pa] (not used)
 
         Returns:
             Required pressure [Pa] including atmospheric and piping losses
         """
+        import os
+        from CoolProp.CoolProp import PropsSI
+        debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
+
         if flow_rate_kg_s <= 0:
             return 1e5
 
         if self.flow_physics:
-            # Get fluid properties at current state
-            props = self.flow_physics.get_fluid_properties(pressure_Pa, temperature_K)
-            kinematic_viscosity = _as_float(props.get('kinematic_viscosity'))
-            density_scalar = _as_float(lh2_density)
+            # Always use saturated liquid properties at current tank temperature
+
+            rho_sat_liq = PropsSI("D", "T", temperature_K, "Q", 0, "hydrogen")
+            mu_sat_liq = PropsSI("V", "T", temperature_K, "Q", 0, "hydrogen") * rho_sat_liq
+
+
+            # Calculate pressure drop using saturated liquid properties
             pressure_drop = self.flow_physics.calculate_pipe_pressure_drop(
                 flow_rate=_as_float(flow_rate_kg_s),
-                density=density_scalar,
-                viscosity=kinematic_viscosity * density_scalar,
+                density=rho_sat_liq,
+                viscosity=mu_sat_liq,
                 pipe_diameter=self.pipe_diameter,
                 pipe_length=self.pipe_length,
                 pipe_roughness=self.pipe_roughness,
                 loss_coefficient=self.loss_coefficient
             )
-            atm = self.flow_physics.atmospheric_pressure
-            return atm + pressure_drop
 
-        # Fallback simplified calculation
+            atm = self.flow_physics.atmospheric_pressure
+
+            # DIAGNOSTICS: Log pressure drop calculation when flow changes significantly
+            if debug_enabled and hasattr(self, '_last_logged_flow_rate'):
+                flow_change_pct = abs(flow_rate_kg_s - self._last_logged_flow_rate) / max(self._last_logged_flow_rate, 1e-6) * 100
+                if flow_change_pct > 10.0:
+                    print(f"[REQ_P] flow={flow_rate_kg_s*1000:.1f} g/s | T={temperature_K:.1f}K | "
+                          f"sat_liq: rho={rho_sat_liq:.1f} kg/m³, mu={mu_sat_liq:.2e} Pa·s | "
+                          f"ΔP={pressure_drop/1e5:.3f} bar → P_req={(atm+pressure_drop)/1e5:.3f} bar")
+                    self._last_logged_flow_rate = flow_rate_kg_s
+            elif debug_enabled and not hasattr(self, '_last_logged_flow_rate'):
+                self._last_logged_flow_rate = flow_rate_kg_s
+
+            return atm + pressure_drop        # Fallback simplified calculation
         volumetric_flow = flow_rate_kg_s / max(lh2_density, 1e-9)
         area = math.pi * (self.pipe_diameter/2)**2
         velocity = volumetric_flow / max(area, 1e-12)
@@ -1782,7 +1852,8 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         dp = f * (self.pipe_length/self.pipe_diameter) * (lh2_density * velocity**2 / 2) + self.loss_coefficient * (lh2_density * velocity**2 / 2)
         if self.choked_flow_enabled and velocity > 500:
             dp *= 2.0
-        return 1.01325e5 + dp
+
+        return self.target_minimum_pressure_pa  + dp
 
     def _capacity_kg_s(self, source_state, target_state) -> float:
         """Calculate fully-open valve capacity at current conditions.
@@ -1861,6 +1932,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         mission_outflow = self._get_mission_outflow(t)
         self._last_mission_outflow = mission_outflow
 
+        # Use measured pressure directly (no LPF by default to avoid phase lag)
         P_now = target_state.pressure
         T = target_state.temperature
         P_req_raw = self._required_pressure_pa(mission_outflow, lh2_density, T, P_now)
@@ -1871,6 +1943,13 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         # Apply maximum pressure ceiling to prevent overshoot during mission transitions
         P_target_ctrl = min(P_req_eff, self.max_target_pressure_bar * 1e5)
         self._last_required_pressure = P_target_ctrl
+
+        # EARLY DIAGNOSTICS: Track required pressure fluctuations in first 15 minutes
+        if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:  # Every 5s for first 15 min
+            print(f"[EARLY REQ_P] t={t:.1f}s | mission_out={mission_outflow*1000:.1f} g/s | "
+                  f"rho_LH2={lh2_density:.1f} kg/m³ | T_LH2={T:.1f} K | "
+                  f"P_req_raw={P_req_raw/1e5:.3f} bar | P_target={P_target_ctrl/1e5:.3f} bar | "
+                  f"P_now={P_now/1e5:.3f} bar | deficit={(P_target_ctrl-P_now)/1e5:.3f} bar")
 
         # DEBUG: Log pressure calculation details during overshoot period
         # Log at problem areas: 0.8 hrs (2880s) and 1.0 hrs (3500-3700s)
@@ -1893,6 +1972,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self.mission_flow_history.append(mission_outflow)
 
         # Step 2: Invert mdot_in so that P_predicted ≈ P_req_eff over a fixed horizon
+        # Update mdot command only on a fixed cadence and hold between updates to eliminate chatter
         dt_ctrl = max(1e-6, self.enforcement_horizon_s)
 
         m = target_state.fuel_mass
@@ -1900,10 +1980,35 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         T = target_state.temperature
 
         # Helper to compute predicted pressure for a candidate mdot_in
+        # CRITICAL: Must account for temperature change due to warm CH2 injection
         def pred_p(mdot_in: float) -> float:
             m_next = m + (mdot_in - mission_outflow) * dt_ctrl
             m_next = max(1e-9, m_next)
-            return self._predict_pressure_pa(m_next, T, V)
+
+            # Predict temperature change from energy balance
+            # Q_in = mdot_in * (h_source - h_target) * dt
+            # T_next = T + Q_in / (m * c_v)
+            if mdot_in > 1e-6:
+                from CoolProp.CoolProp import PropsSI
+                # Source enthalpy (warm CH2 at ~288K)
+                h_source = PropsSI("Hmass", "T", source_state.temperature,
+                                  "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
+                # Target enthalpy (current state)
+                h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
+                # Specific heat at constant volume
+                c_v = PropsSI("Cvmass", "T", T, "Dmass", m / V, "hydrogen")
+
+                # Energy added over dt_ctrl
+                delta_h = h_source - h_target
+                Q_in = mdot_in * delta_h * dt_ctrl
+
+                # Predicted temperature rise
+                delta_T = Q_in / (m * c_v) if m * c_v > 0 else 0.0
+                T_next = T + delta_T
+            else:
+                T_next = T
+
+            return self._predict_pressure_pa(m_next, T_next, V)
 
         # Bisection bounds: [0, capacity×margin]
         capacity = self._capacity_kg_s(source_state, target_state)
@@ -1914,96 +2019,184 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         # Current pressure (for linearization)
         err_bar = (P_target_ctrl - P_now) / 1e5
 
-        # Always compute mdot_star by solving the algebraic equation (branch-free)
-        if upper <= 1e-12:
-            mdot_star = 0.0
-        else:
-            used_linear = False
-            # HYBRID APPROACH: Try linearized predictor first (fast), validate, fallback to bisection if needed
-            if self.use_linearized_predictor:
-                # Estimate dP/drho at current state via finite difference (isochoric, T-frozen)
-                rho = target_state.fuel_mass / max(V, 1e-12)
-                delta_rho = max(1e-6 * rho, 1e-7)
-                P_plus = float(PropsSI("P", "T", T, "Dmass", rho + delta_rho, "hydrogen"))
-                dP_drho = (P_plus - P_now) / delta_rho
-                dP_dm = dP_drho / max(V, 1e-12)
-                if dP_dm > 1e-9:
-                    deltaP = P_target_ctrl - P_now
-                    mdot_linear = mission_outflow + (deltaP / dP_dm) / dt_ctrl
+        compute_new_command = (self._last_update_time is None) or ((t - self._last_update_time) >= max(1e-3, self.control_interval_s))
 
-                    # VALIDATION: Check if linearized result is physically reasonable
-                    # Accept if: (1) within bounds [0, capacity*margin], (2) predicts pressure within 20% of target
-                    if 0.0 <= mdot_linear <= upper:
-                        # Quick sanity check: does this flow roughly achieve target?
-                        P_check = pred_p(mdot_linear)
-                        error_frac = abs(P_check - P_target_ctrl) / max(P_target_ctrl, 1e5)
-                        if error_frac < 0.20:  # Within 20% is good enough for linearization
-                            mdot_star = mdot_linear
-                            used_linear = True
-                    # If validation fails, fall through to bisection
+        # EARLY DIAGNOSTICS: Flag ZOH update events
+        if debug_enabled and t <= 900.0 and compute_new_command:
+            print(f"\n{'='*80}\n[ZOH UPDATE] t={t:.1f}s | NEW COMMAND COMPUTATION\n{'='*80}")
 
-            if not used_linear:
-                # Bisection for mdot_in where pred_p(mdot) ≈ P_target_ctrl
-                mdot_lo, mdot_hi = lower, upper
-                # Debug only every 10s to avoid flooding output
-                show_bisect_debug = debug_enabled and 100.0 <= t <= 150.0 and t % 10.0 < 0.6
-                if show_bisect_debug:
-                    print(f"[BISECTION START] t={t:.1f}s | bounds=[{mdot_lo*1000:.1f}, {mdot_hi*1000:.1f}] g/s | P_target={P_target_ctrl/1e5:.2f} bar")
+        if compute_new_command:
+            # Always compute mdot_star by solving the algebraic equation at update times
+            if upper <= 1e-12:
+                mdot_star = 0.0
+            else:
+                used_linear = False
+                # HYBRID APPROACH: Try linearized predictor first (fast), validate, fallback to bisection if needed
+                if self.use_linearized_predictor:
+                    # Temperature-aware linearized predictor WITH TWO-PHASE HEAT CAPACITY
+                    # Estimate dP/dm accounting for both density and temperature changes
+                    # P = P(m, T(m)) where T changes due to heating from warm CH2
 
-                for iter_num in range(max(5, self.max_bisection_iters)):
-                    mid = 0.5 * (mdot_lo + mdot_hi)
-                    P_mid = pred_p(mid)
+                    # Get source properties
+                    h_source = PropsSI("Hmass", "T", source_state.temperature,
+                                      "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
+                    h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
+                    delta_h = h_source - h_target
 
-                    if show_bisect_debug and iter_num < 3:
-                        print(f"  [BISECT iter={iter_num}] mid={mid*1000:.1f} g/s → P_mid={P_mid/1e5:.2f} bar (target={P_target_ctrl/1e5:.2f})")
+                    # Use two-phase isochoric heat capacity for more accurate thermal prediction
+                    rho = m / V
+                    # Check if we're in two-phase region by comparing to saturation density
+                    try:
+                        rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
+                        rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
+                        in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
+                    except:
+                        in_two_phase = False
 
-                    if P_mid < P_target_ctrl:
-                        mdot_lo = mid
+                    if in_two_phase:
+                        # Two-phase region: use cv2p for accurate latent heat effects
+                        # Compute vapor mass fraction
+                        total_mass = m
+                        alpha = (1.0/rho - 1.0/rho_sat_liq) / (1.0/rho_sat_vap - 1.0/rho_sat_liq)
+                        alpha = max(0.0, min(1.0, alpha))  # Clamp to [0, 1]
+
+                        # Single-phase cv at saturation states
+                        cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "hydrogen")
+                        cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "hydrogen")
+
+                        # Saturated enthalpies
+                        h_g = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
+                        h_l = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
+
+                        # Derivatives of saturation densities wrt T (finite difference)
+                        dT = 0.1  # Small temperature perturbation
+                        try:
+                            rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "hydrogen")
+                            rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
+                            drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
+                            drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
+                        except:
+                            # Fallback if saturation curve derivative fails
+                            drho_g_dT = 0.0
+                            drho_l_dT = 0.0
+
+                        # Two-phase correction term
+                        denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
+                        if abs(denom) > 1e-10 and abs(drho_g_dT) > 1e-10 and abs(drho_l_dT) > 1e-10:
+                            dvg_dT = -drho_g_dT / (rho_sat_vap**2)
+                            dvl_dT = -drho_l_dT / (rho_sat_liq**2)
+                            correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
+                        else:
+                            correction = 0.0
+
+                        c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
                     else:
-                        mdot_hi = mid
-                    if abs((P_mid - P_target_ctrl)/1e5) <= self.tol_pressure_bar:
-                        if show_bisect_debug:
-                            print(f"  [BISECT CONVERGED] after {iter_num+1} iters at mdot={(mdot_lo+mdot_hi)/2*1000:.1f} g/s")
-                        break
-                mdot_star = 0.5 * (mdot_lo + mdot_hi)
+                        # Single-phase: use standard cv
+                        c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
 
-                if show_bisect_debug:
-                    print(f"[BISECTION END] t={t:.1f}s | mdot_star={mdot_star*1000:.1f} g/s")
+                    # Compute dP/dm with thermal effects using cv2p:
+                    dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')
+                    dP_dT = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
 
-        # CRITICAL FIX: Enforce mass balance floor ONLY when building pressure
-        # When P_now < P_target: prevent drainage by ensuring mdot_in >= mission_outflow
-        # When P_now >= P_target: allow drainage to reduce excess pressure
-        # EXCEPTION: Skip mass balance floor when mission flow is negligible (landing phase)
-        mdot_star_before_floor = mdot_star
-        # Debug only every 10s to avoid flooding
-        show_balance_debug = debug_enabled and (3500.0 <= t <= 3700.0)
-        if show_balance_debug:
-            print(f"[MASS BALANCE] t={t:.1f}s | P_now={P_now/1e5:.2f} bar, P_target={P_target_ctrl/1e5:.2f} bar | "
-                  f"mdot_star_raw={mdot_star_before_floor*1000:.1f} g/s, mission_out={mission_outflow*1000:.1f} g/s")
+                    # Total derivative: dP/dm_net considering both density and thermal effects
+                    dP_dm_net = dP_drho / V + dP_dT * delta_h / c_v
 
-        # ZERO-FLOW CUTOFF: Stop adding mass when mission flow is negligible (landing phase)
-        # This prevents overshoot spikes at mission end by bypassing mass balance floor
-        if mission_outflow < 0.005:  # Below 5 g/s
-            mdot_star = 0.0
-            if show_balance_debug:
-                print(f"  [ZERO-FLOW CUTOFF] mission_out < 5 g/s → mdot_star=0.0 (skip mass balance floor)")
-        elif P_now < P_target_ctrl:
-            mdot_star = max(mdot_star, mission_outflow)
-            if show_balance_debug:
-                print(f"  [FLOOR APPLIED] P < target → mdot_star={mdot_star*1000:.1f} g/s")
+                    if abs(dP_dm_net) > 1e-9:
+                        deltaP = P_target_ctrl - P_now
+                        # Solve: deltaP = dP/dm_net * (mdot_in - mission_outflow) * dt
+                        mdot_linear = mission_outflow + (deltaP / dP_dm_net) / dt_ctrl
+
+                        # Validation: within bounds and predicts reasonable pressure
+                        if 0.0 <= mdot_linear <= upper:
+                            P_check = pred_p(mdot_linear)
+                            error_frac = abs(P_check - P_target_ctrl) / max(P_target_ctrl, 1e5)
+                            if error_frac < 0.10:  # Tighter tolerance for linearization
+                                mdot_star = mdot_linear
+                                used_linear = True
+                                if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
+                                    print(f"[LINEAR SUCCESS] t={t:.1f}s | mdot={mdot_linear*1000:.1f} g/s | "
+                                          f"cv2p={'YES' if in_two_phase else 'NO'} | error={error_frac*100:.1f}%")
+                            elif debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
+                                print(f"[LINEAR REJECT] t={t:.1f}s | mdot={mdot_linear*1000:.1f} g/s | "
+                                      f"error={error_frac*100:.1f}% > 10% | fallback to bisection")
+                        # If validation fails, fall through to bisection
+
+                # TEMPORARILY DISABLE BISECTION TO TEST LINEARIZED PREDICTOR
+                if not used_linear:
+                    # Force use of linearized result even if validation failed (for testing)
+                    if self.use_linearized_predictor and 0.0 <= mdot_linear <= upper:
+                        mdot_star = mdot_linear
+                        if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
+                            print(f"[LINEAR FORCED] t={t:.1f}s | mdot={mdot_star*1000:.1f} g/s | "
+                                  f"(bisection disabled for testing)")
+                    else:
+                        # Safety fallback if linearization completely fails
+                        mdot_star = 0.5 * upper
+                        if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
+                            print(f"[LINEAR FAILED] t={t:.1f}s | using 50% capacity = {mdot_star*1000:.1f} g/s")
+
+                # Original bisection code (commented out for testing)
+                # if not used_linear:
+                #     # Bisection for mdot_in where pred_p(mdot) ≈ P_target_ctrl
+                #     mdot_lo, mdot_hi = lower, upper
+                #     # Debug only every 10s to avoid flooding output
+                #     show_bisect_debug = debug_enabled and 100.0 <= t <= 150.0 and t % 10.0 < 0.6
+                #     if show_bisect_debug:
+                #         print(f"[BISECTION START] t={t:.1f}s | bounds=[{mdot_lo*1000:.1f}, {mdot_hi*1000:.1f}] g/s | P_target={P_target_ctrl/1e5:.2f} bar")
+                #
+                #     for iter_num in range(max(5, self.max_bisection_iters)):
+                #         mid = 0.5 * (mdot_lo + mdot_hi)
+                #         P_mid = pred_p(mid)
+                #
+                #         if show_bisect_debug and iter_num < 3:
+                #             print(f"  [BISECT iter={iter_num}] mid={mid*1000:.1f} g/s → P_mid={P_mid/1e5:.2f} bar (target={P_target_ctrl/1e5:.2f})")
+                #
+                #         if P_mid < P_target_ctrl:
+                #             mdot_lo = mid
+                #         else:
+                #             mdot_hi = mid
+                #         if abs((P_mid - P_target_ctrl)/1e5) <= self.tol_pressure_bar:
+                #             if show_bisect_debug:
+                #                 print(f"  [BISECT CONVERGED] after {iter_num+1} iters at mdot={(mdot_lo+mdot_hi)/2*1000:.1f} g/s")
+                #             break
+                #     mdot_star = 0.5 * (mdot_lo + mdot_hi)
+                #
+                #     if show_bisect_debug:
+                #         print(f"[BISECTION END] t={t:.1f}s | mdot_star={mdot_star*1000:.1f} g/s")
+
+            # Landing zero-flow rule
+            if mission_outflow < 0.005:  # Below 5 g/s
+                mdot_star = 0.0
+
+            # Command-level slew limiting to prevent large jumps at update cadence (single limiter)
+            if self._last_update_time is not None:
+                dt_upd = max(1e-6, t - self._last_update_time)
+                if self.max_mdot_cmd_slew_kg_s2 > 0.0:
+                    max_change_cmd = self.max_mdot_cmd_slew_kg_s2 * dt_upd
+                    mdot_star = min(max(mdot_star, self._held_mdot_cmd - max_change_cmd), self._held_mdot_cmd + max_change_cmd)
+
+            # Commit to held command and timestamp
+            self._held_mdot_cmd = mdot_star
+            self._last_update_time = t
+
+            # EARLY DIAGNOSTICS: Log command computation details
+            if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:
+                linear_flag = "LINEAR" if used_linear else "BISECT"
+                print(f"[EARLY CMD_CALC] t={t:.1f}s | method={linear_flag} | "
+                      f"mdot_star={mdot_star*1000:.1f} g/s | capacity={capacity*1000:.1f} g/s | "
+                      f"slew_applied={self.max_mdot_cmd_slew_kg_s2 > 0.0}")
         else:
-            if show_balance_debug:
-                print(f"  [FLOOR SKIPPED] P >= target → mdot_star={mdot_star*1000:.1f} g/s (allow drainage)")
+            # Use previously computed command and hold between updates
+            mdot_star = self._held_mdot_cmd
 
-        # DEBUG: Log when mass balance floor is active during overshoot
-        if debug_enabled and 600.0 <= t <= 1000.0 and t % 30.0 < 0.6:
-            print(f"[FLOW COMMAND] t={t:.1f}s | "
-                  f"mdot_star_raw={mdot_star_before_floor*1000:.1f} g/s, "
-                  f"mission_out={mission_outflow*1000:.1f} g/s, "
-                  f"mdot_star_floored={mdot_star*1000:.1f} g/s, "
-                  f"floor_active={'YES' if mdot_star_before_floor < mission_outflow and P_now < P_target_ctrl else 'NO'}")
+        # The bisection already accounts for mission_outflow in the mass balance:
+        # m_next = m + (mdot_star - mission_outflow) * dt
+        # So mdot_star is the optimal inflow to achieve target pressure.
+        # No additional floor constraint needed - the predictor handles thermal effects correctly.
 
-            # Discretize via simple explicit integration (sufficient under solver small dt)
+        # ZERO-FLOW CUTOFF also enforced on held command at update time above
+
+
         # Step 3: Apply capacity/safety limits with optional soft saturation and a tiny bias
         def _softplus(x: float, k: float) -> float:
             # Numerically stable softplus
@@ -2022,30 +2215,67 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             y = lo + _softplus(x - lo, softness)
             return hi - _softplus(hi - y, softness)
 
-        mdot_cmd = mdot_star + max(0.0, self.mdot_bias_kg_s)
+        # Smoothly gate the command based on pressure deficit to avoid on/off around the target
+        deficit_pa = P_target_ctrl - P_now
+        if self.activation_softness_bar > 1e-9:
+            # Symmetric smooth gate centered at zero deficit; 0.5 at equality, →1 for positive deficit, →0 for negative
+            k_pa = max(1e2, self.activation_softness_bar * 1e5)
+            gate = 0.5 * (1.0 + math.tanh(deficit_pa / k_pa))
+        else:
+            gate = 1.0 if deficit_pa >= 0.0 else 0.0
+
+        mdot_cmd = gate * mdot_star + max(0.0, self.mdot_bias_kg_s)
 
         cap = min(self.max_flow_rate, max(0.0, capacity))
 
-        # Compute a soft, physics-consistent lower bound: don't exceed capacity,
-        # and scale floor with capacity to avoid demanding unattainable flow at tiny caps
-        # BUT: disable min_flow_floor AND soft_clamp when pressure is above target (drainage mode)
-        if cap > 0.0 and P_now < P_target_ctrl:
-            # Normal pressurization mode: use soft saturation and flow floor
-            softness = self.soft_saturation_rel * max(cap, 1e-9)
-            floor_cap_scaled = self.min_flow_floor_rel_cap * cap if self.min_flow_floor_rel_cap > 0.0 else 0.0
-            lo_bound = max(0.0, min(self.min_flow_floor_kg_s, floor_cap_scaled))
+        # Translate desired mass flow into a target opening coefficient
+        if cap > 1e-12:
+            target_coeff = max(0.0, min(1.0, mdot_cmd / cap))
+            # Only enforce a nonzero floor when actively pressurizing
+            if P_now < P_target_ctrl:
+                floor_cap_scaled = self.min_flow_floor_rel_cap * cap if self.min_flow_floor_rel_cap > 0.0 else 0.0
+                coeff_floor = max(0.0, min(self.min_flow_floor_kg_s, floor_cap_scaled)) / cap
+                target_coeff = max(target_coeff, coeff_floor)
         else:
-            # Drainage mode: hard clamp with no floor, no soft saturation
-            softness = 0.0  # Disable soft saturation
-            lo_bound = 0.0  # No floor when draining or when no capacity
+            target_coeff = 0.0
 
-        mdot_applied = _soft_clamp(mdot_cmd, lo_bound, cap, softness)
+        # Apply unified startup ramp as a multiplier on the coefficient (single point of control)
+        startup_multiplier = self._startup_factor(t)
+        target_coeff = target_coeff * startup_multiplier
+
+        # Smooth coefficient with first-order lag and optional rate limiting
+        dt_act = max(0.0, t - (self._last_coeff_time or t))
+        coeff_prev = self._coeff if (self._last_coeff_time is not None) else target_coeff
+        coeff_alpha = 0.0
+        if self.valve_time_constant_s > 1e-9 and dt_act > 0.0:
+            coeff_alpha = max(0.0, min(1.0, dt_act / max(self.valve_time_constant_s, 1e-9)))
+        coeff_smooth = coeff_prev + coeff_alpha * (target_coeff - coeff_prev)
+
+        if self.max_coeff_rate_per_s > 0.0 and dt_act > 0.0:
+            max_dcoeff = self.max_coeff_rate_per_s * dt_act
+            delta_c = coeff_smooth - coeff_prev
+            if abs(delta_c) > max_dcoeff:
+                coeff_smooth = coeff_prev + math.copysign(max_dcoeff, delta_c)
+
+        # Clamp and compute final flow
+        self._coeff = max(0.0, min(1.0, coeff_smooth))
+        self._last_coeff = self._coeff
+        self._last_coeff_time = t
+        mdot_final = self._coeff * cap
+
+        # EARLY DIAGNOSTICS: Track response instability mechanisms
+        if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:
+            print(f"[EARLY RESPONSE] t={t:.1f}s | gate={gate:.3f} | "
+                  f"mdot_cmd={mdot_cmd*1000:.1f} g/s | target_coeff={target_coeff:.3f} | "
+                  f"startup_mult={startup_multiplier:.3f} | coeff_smooth={coeff_smooth:.3f} | "
+                  f"coeff_final={self._coeff:.3f} | mdot_final={mdot_final*1000:.1f} g/s | "
+                  f"deficit={(P_target_ctrl-P_now)/1e5:.3f} bar")
 
         # DEBUG: Log clamping details during end-of-mission
         if debug_enabled and 3500.0 <= t <= 3700.0:
             print(f"[CLAMP DEBUG] t={t:.1f}s | mdot_star={mdot_star*1000:.1f} g/s, bias={self.mdot_bias_kg_s*1000:.1f} g/s, "
-                  f"mdot_cmd={mdot_cmd*1000:.1f} g/s, lo_bound={lo_bound*1000:.1f} g/s, cap={cap*1000:.1f} g/s, "
-                  f"mdot_applied={mdot_applied*1000:.1f} g/s | P_now={P_now/1e5:.2f} > P_target={P_target_ctrl/1e5:.2f}?")
+                  f"mdot_cmd={mdot_cmd*1000:.1f} g/s, cap={cap*1000:.1f} g/s, "
+                  f"target_coeff={target_coeff:.3f}, coeff={self._coeff:.3f}, mdot_final={mdot_final*1000:.1f} g/s | P_now={P_now/1e5:.2f} > P_target={P_target_ctrl/1e5:.2f}?")
 
         # DEBUG LOGGING for saturation period (0.2-0.4 hrs = 720-1440s)
         # AND for Section 5 low-demand period (2850-3000s ≈ 0.8 hrs)
@@ -2053,20 +2283,19 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             print(f"[FEEDFORWARD DEBUG] t={t:.1f}s | "
                   f"P_now={P_now/1e5:.2f} bar, P_target={P_target_ctrl/1e5:.2f} bar | "
                   f"mission_out={mission_outflow*1000:.1f} g/s, "
-                  f"mdot_star_raw={mdot_star_before_floor*1000:.1f} g/s, "
-                  f"mdot_star_floor={mdot_star*1000:.1f} g/s, "
+                  f"mdot_star={mdot_star*1000:.1f} g/s, "
                   f"capacity={capacity*1000:.1f} g/s, "
-                  f"mdot_applied={mdot_applied*1000:.1f} g/s | "
+                  f"target_coeff={target_coeff:.3f}, coeff={self._coeff:.3f}, mdot_final={mdot_final*1000:.1f} g/s | "
                   f"P1={source_state.pressure/1e5:.1f} bar, P2={target_state.pressure/1e5:.2f} bar")
 
         # Record deficit relative to target if saturated
-        P_pred_cap = pred_p(mdot_applied)
+        P_pred_cap = pred_p(mdot_final)
         self._last_deficit_bar = max(0.0, (P_target_ctrl - P_pred_cap) / 1e5)
-        self._last_mdot_in = mdot_applied
+        self._last_mdot_in = mdot_final
         # Track last time for optional filtering/slew in future steps
         self._last_time = t
 
-        return mdot_applied
+        return mdot_final
 
     def get_diagnostic_data(self) -> dict:
         """Expose histories so the pressure requirements overlay plot can use them."""
