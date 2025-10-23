@@ -1650,21 +1650,49 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self.target_tank_config = target_tank_config or {}
         self.target_minimum_pressure_pa = self.target_tank_config.get('minimum_pressure', None)
 
-    # Control tunables
-        self.min_source_pressure_bar = float(control_params.get('min_source_pressure_bar', None))
-        self.safety_mass_fraction_per_s = float(control_params.get('safety_mass_fraction_per_s', None))
+        # FAIL-FAST VALIDATION: Required parameters must be present
+        if self.target_minimum_pressure_pa is None:
+            raise ValueError(
+                "FeedforwardPressureEnforcer requires target tank 'minimum_pressure' "
+                "in operating_limits. This is needed to compute required pressure for mission flow."
+            )
+
+    # Control tunables - REQUIRED parameters (no defaults, fail-fast)
+        if 'min_source_pressure_bar' not in control_params:
+            raise ValueError(
+                "FeedforwardPressureEnforcer requires 'min_source_pressure_bar' in control_parameters. "
+                "This sets the minimum source tank pressure required for flow."
+            )
+        self.min_source_pressure_bar = float(control_params['min_source_pressure_bar'])
+
+        if 'safety_mass_fraction_per_s' not in control_params:
+            raise ValueError(
+                "FeedforwardPressureEnforcer requires 'safety_mass_fraction_per_s' in control_parameters. "
+                "This sets the maximum fraction of source tank mass that can flow per second."
+            )
+        self.safety_mass_fraction_per_s = float(control_params['safety_mass_fraction_per_s'])
+
+        if 'enforcement_horizon_s' not in control_params:
+            raise ValueError(
+                "FeedforwardPressureEnforcer requires 'enforcement_horizon_s' in control_parameters. "
+                "This sets the prediction horizon for pressure enforcement (typically 2× solver timestep)."
+            )
+        self.enforcement_horizon_s = float(control_params['enforcement_horizon_s'])
+
+        if 'control_interval_s' not in control_params:
+            raise ValueError(
+                "FeedforwardPressureEnforcer requires 'control_interval_s' in control_parameters. "
+                "This sets the zero-order hold update cadence for command updates."
+            )
+        self.control_interval_s = float(control_params['control_interval_s'])
+
+        # Optional parameters with reasonable defaults
         self.bracket_margin = float(control_params.get('bracket_margin', 1.2))  # capacity × margin as upper bisection bound
         self.max_bisection_iters = int(control_params.get('max_bisection_iters', 10))
         self.tol_pressure_bar = float(control_params.get('tol_pressure_bar', 0.02))  # 0.02 bar
 
         # Linearized predictor for mdot (faster than repeated EOS in bisection)
         self.use_linearized_predictor = bool(control_params.get('use_linearized_predictor', True))
-
-        # Branch-free enforcement horizon (fixed, independent of solver dt)
-        self.enforcement_horizon_s = float(control_params.get('enforcement_horizon_s', 0.5))
-        # Command update cadence (zero-order hold between updates).
-        # Increase from 0.05s to 0.15s to reduce ZOH step artifacts
-        self.control_interval_s = float(control_params.get('control_interval_s', 0.15))
 
         # Overpressure margin: bias target upward slightly to avoid chatter at equality
         self.overpressure_margin_bar = float(control_params.get('overpressure_margin_bar', 0.5))
@@ -1779,51 +1807,55 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         from CoolProp.CoolProp import PropsSI
         debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
 
+        import os
+        from CoolProp.CoolProp import PropsSI
+        debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
+
         if flow_rate_kg_s <= 0:
-            return 1e5
+            # Zero flow requires only atmospheric pressure - use from flow_physics
+            if self.flow_physics:
+                return self.flow_physics.atmospheric_pressure
+            else:
+                raise RuntimeError(
+                    "FeedforwardPressureEnforcer requires flow_physics to be configured. "
+                    "Cannot compute required pressure without atmospheric_pressure."
+                )
 
-        if self.flow_physics:
-            # Always use saturated liquid properties at current tank temperature
-
-            rho_sat_liq = PropsSI("D", "T", temperature_K, "Q", 0, "hydrogen")
-            mu_sat_liq = PropsSI("V", "T", temperature_K, "Q", 0, "hydrogen") * rho_sat_liq
-
-
-            # Calculate pressure drop using saturated liquid properties
-            pressure_drop = self.flow_physics.calculate_pipe_pressure_drop(
-                flow_rate=_as_float(flow_rate_kg_s),
-                density=rho_sat_liq,
-                viscosity=mu_sat_liq,
-                pipe_diameter=self.pipe_diameter,
-                pipe_length=self.pipe_length,
-                pipe_roughness=self.pipe_roughness,
-                loss_coefficient=self.loss_coefficient
+        if not self.flow_physics:
+            raise RuntimeError(
+                "FeedforwardPressureEnforcer requires flow_physics to be configured. "
+                "Cannot compute pipe pressure drop without flow physics."
             )
 
-            atm = self.flow_physics.atmospheric_pressure
+        # Always use saturated liquid properties at current tank temperature
+        rho_sat_liq = PropsSI("D", "T", temperature_K, "Q", 0, "hydrogen")
+        mu_sat_liq = PropsSI("V", "T", temperature_K, "Q", 0, "hydrogen") * rho_sat_liq
 
-            # DIAGNOSTICS: Log pressure drop calculation when flow changes significantly
-            if debug_enabled and hasattr(self, '_last_logged_flow_rate'):
-                flow_change_pct = abs(flow_rate_kg_s - self._last_logged_flow_rate) / max(self._last_logged_flow_rate, 1e-6) * 100
-                if flow_change_pct > 10.0:
-                    print(f"[REQ_P] flow={flow_rate_kg_s*1000:.1f} g/s | T={temperature_K:.1f}K | "
-                          f"sat_liq: rho={rho_sat_liq:.1f} kg/m³, mu={mu_sat_liq:.2e} Pa·s | "
-                          f"ΔP={pressure_drop/1e5:.3f} bar → P_req={(atm+pressure_drop)/1e5:.3f} bar")
-                    self._last_logged_flow_rate = flow_rate_kg_s
-            elif debug_enabled and not hasattr(self, '_last_logged_flow_rate'):
+        # Calculate pressure drop using saturated liquid properties
+        pressure_drop = self.flow_physics.calculate_pipe_pressure_drop(
+            flow_rate=_as_float(flow_rate_kg_s),
+            density=rho_sat_liq,
+            viscosity=mu_sat_liq,
+            pipe_diameter=self.pipe_diameter,
+            pipe_length=self.pipe_length,
+            pipe_roughness=self.pipe_roughness,
+            loss_coefficient=self.loss_coefficient
+        )
+
+        atm = self.flow_physics.atmospheric_pressure
+
+        # DIAGNOSTICS: Log pressure drop calculation when flow changes significantly
+        if debug_enabled and hasattr(self, '_last_logged_flow_rate'):
+            flow_change_pct = abs(flow_rate_kg_s - self._last_logged_flow_rate) / max(self._last_logged_flow_rate, 1e-6) * 100
+            if flow_change_pct > 10.0:
+                print(f"[REQ_P] flow={flow_rate_kg_s*1000:.1f} g/s | T={temperature_K:.1f}K | "
+                      f"sat_liq: rho={rho_sat_liq:.1f} kg/m³, mu={mu_sat_liq:.2e} Pa·s | "
+                      f"ΔP={pressure_drop/1e5:.3f} bar → P_req={(atm+pressure_drop)/1e5:.3f} bar")
                 self._last_logged_flow_rate = flow_rate_kg_s
+        elif debug_enabled and not hasattr(self, '_last_logged_flow_rate'):
+            self._last_logged_flow_rate = flow_rate_kg_s
 
-            return atm + pressure_drop        # Fallback simplified calculation
-        volumetric_flow = flow_rate_kg_s / max(lh2_density, 1e-9)
-        area = math.pi * (self.pipe_diameter/2)**2
-        velocity = volumetric_flow / max(area, 1e-12)
-        reynolds = velocity * self.pipe_diameter / 1e-7
-        f = 0.316 / (reynolds**0.25) if reynolds > 2300 else 64/max(reynolds, 1e-6)
-        dp = f * (self.pipe_length/self.pipe_diameter) * (lh2_density * velocity**2 / 2) + self.loss_coefficient * (lh2_density * velocity**2 / 2)
-        if self.choked_flow_enabled and velocity > 500:
-            dp *= 2.0
-
-        return self.target_minimum_pressure_pa  + dp
+        return atm + pressure_drop
 
     def _capacity_kg_s(self, source_state, target_state) -> float:
         """Calculate fully-open valve capacity at current conditions.
@@ -2016,8 +2048,12 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                     rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
                     rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
                     in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
-                except:
-                    in_two_phase = False
+                except Exception as e:
+                    # FAIL-FAST: Don't silently assume single-phase if CoolProp fails
+                    raise RuntimeError(
+                        f"CoolProp saturation property query failed at T={T:.2f}K, rho={rho:.2f} kg/m³. "
+                        f"Cannot determine two-phase region. Error: {e}"
+                    )
 
                 if in_two_phase:
                     # Two-phase region: use cv2p for accurate latent heat effects
@@ -2039,9 +2075,12 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                         rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
                         drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
                         drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
-                    except:
-                        drho_g_dT = 0.0
-                        drho_l_dT = 0.0
+                    except Exception as e:
+                        # FAIL-FAST: Derivative calculation is critical for two-phase cv
+                        raise RuntimeError(
+                            f"CoolProp saturation density derivative failed at T={T:.2f}K. "
+                            f"Cannot compute two-phase heat capacity correction. Error: {e}"
+                        )
 
                     # Two-phase correction term
                     denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
@@ -2082,11 +2121,6 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             # Commit to held command and timestamp
             self._held_mdot_cmd = mdot_star
             self._last_update_time = t
-
-            # EARLY DIAGNOSTICS: Log command computation details
-            if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:
-                print(f"[EARLY CMD_CALC] t={t:.1f}s | "
-                      f"mdot_star={mdot_star*1000:.1f} g/s | capacity={capacity*1000:.1f} g/s")
         else:
             # Use previously computed command and hold between updates
             mdot_star = self._held_mdot_cmd
@@ -2153,30 +2187,23 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self._last_coeff_time = t
         mdot_final = self._coeff * cap
 
-        # EARLY DIAGNOSTICS: Track response instability mechanisms
-        if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:
-            print(f"[EARLY RESPONSE] t={t:.1f}s | gate={gate:.3f} | "
-                  f"mdot_cmd={mdot_cmd*1000:.1f} g/s | target_coeff={target_coeff:.3f} | "
-                  f"startup_mult={startup_multiplier:.3f} | coeff_smooth={coeff_smooth:.3f} | "
-                  f"coeff_final={self._coeff:.3f} | mdot_final={mdot_final*1000:.1f} g/s | "
-                  f"deficit={(P_target_ctrl-P_now)/1e5:.3f} bar")
+        # CONSOLIDATED DEBUG LOGGING: Single comprehensive diagnostic message
+        if debug_enabled:
+            # Early dynamics (0-15 min): Track controller behavior during warmup
+            if t <= 900.0 and t % 5.0 < 0.1:
+                print(f"[FF_EARLY] t={t:.1f}s | P_now={P_now/1e5:.2f} bar, P_target={P_target_ctrl/1e5:.2f} bar | "
+                      f"mdot_star={mdot_star*1000:.1f} g/s, gate={gate:.3f}, coeff={self._coeff:.3f} | "
+                      f"mdot_final={mdot_final*1000:.1f} g/s, capacity={capacity*1000:.1f} g/s")
+            # Saturation period (0.2-0.4 hrs = 720-1440s) and low-demand (2850-3000s)
+            elif (720.0 <= t <= 1440.0 and t % 30.0 < 0.6) or (2850.0 <= t <= 3000.0 and t % 10.0 < 0.6):
+                print(f"[FF_SAT] t={t:.1f}s | P_now={P_now/1e5:.2f} bar, P_target={P_target_ctrl/1e5:.2f} bar | "
+                      f"mission_out={mission_outflow*1000:.1f} g/s, mdot_final={mdot_final*1000:.1f} g/s | "
+                      f"P1={source_state.pressure/1e5:.1f} bar, P2={target_state.pressure/1e5:.2f} bar")
+            # End-of-mission (3500-3700s): Track controller shutdown behavior
+            elif 3500.0 <= t <= 3700.0 and t % 5.0 < 0.1:
+                print(f"[FF_END] t={t:.1f}s | mdot_cmd={mdot_cmd*1000:.1f} g/s, mdot_final={mdot_final*1000:.1f} g/s | "
+                      f"P_now={P_now/1e5:.2f} bar vs P_target={P_target_ctrl/1e5:.2f} bar")
 
-        # DEBUG: Log clamping details during end-of-mission
-        if debug_enabled and 3500.0 <= t <= 3700.0:
-            print(f"[CLAMP DEBUG] t={t:.1f}s | mdot_star={mdot_star*1000:.1f} g/s, bias={self.mdot_bias_kg_s*1000:.1f} g/s, "
-                  f"mdot_cmd={mdot_cmd*1000:.1f} g/s, cap={cap*1000:.1f} g/s, "
-                  f"target_coeff={target_coeff:.3f}, coeff={self._coeff:.3f}, mdot_final={mdot_final*1000:.1f} g/s | P_now={P_now/1e5:.2f} > P_target={P_target_ctrl/1e5:.2f}?")
-
-        # DEBUG LOGGING for saturation period (0.2-0.4 hrs = 720-1440s)
-        # AND for Section 5 low-demand period (2850-3000s ≈ 0.8 hrs)
-        if debug_enabled and ((720.0 <= t <= 1440.0 and t % 30.0 < 0.6) or (2850.0 <= t <= 3000.0 and t % 10.0 < 0.6)):
-            print(f"[FEEDFORWARD DEBUG] t={t:.1f}s | "
-                  f"P_now={P_now/1e5:.2f} bar, P_target={P_target_ctrl/1e5:.2f} bar | "
-                  f"mission_out={mission_outflow*1000:.1f} g/s, "
-                  f"mdot_star={mdot_star*1000:.1f} g/s, "
-                  f"capacity={capacity*1000:.1f} g/s, "
-                  f"target_coeff={target_coeff:.3f}, coeff={self._coeff:.3f}, mdot_final={mdot_final*1000:.1f} g/s | "
-                  f"P1={source_state.pressure/1e5:.1f} bar, P2={target_state.pressure/1e5:.2f} bar")
 
         # Record deficit relative to target if saturated
         P_pred_cap = pred_p(mdot_final)
