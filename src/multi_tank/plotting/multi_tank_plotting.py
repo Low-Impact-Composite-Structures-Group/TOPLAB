@@ -1570,27 +1570,26 @@ class DelftColourPlotter:
         tank_pressures = combined_data['pressures'][tank_index]  # Already in bar
         result_times = combined_data['times'] / 3600.0  # Result times in hours
 
+        # Get minimum pressure from tank configuration
+        minimum_pressure_bar = orchestrator.tank_system.config.tanks[tank_index].P_MIN / 1e5  # Convert Pa to bar
+
     # Create the plot with proper styling
         fig, ax = plt.subplots(figsize=(12, 8))
 
         # Use greyscale colors if specified
         if self.use_greyscale:
-            required_color = 'lightgrey'                # Light grey dashed
-            activation_color = '#555555'                # Darker grey dashed
+            activation_color = 'lightgrey'              # Light grey for better contrast
             actual_color = 'black'                      # Black solid
-            min_color = 'lightgrey'                     # Light grey dotted
+            min_color = 'darkgrey'                      # Dark grey dotted
 
-            required_style = '--'                       # Light grey dashed
-            activation_style = '--'                     # Darker grey dashed
+            activation_style = '-'                      # Light grey solid
             actual_style = '-'                          # Black solid
-            min_style = ':'                             # Light grey dotted
+            min_style = ':'                             # Dark grey dotted
         else:
-            required_color = self.color_palette[0]      # Delft blue
             activation_color = self.color_palette[1]    # Delft red
             actual_color = self.color_palette[2]        # Delft green
             min_color = self.color_palette[3]           # Delft orange
 
-            required_style = '-'
             activation_style = '--'
             actual_style = '-'
             min_style = ':'
@@ -1694,21 +1693,11 @@ class DelftColourPlotter:
             if negative_diffs > 0:
                 print(f"   ⚠️ Found {negative_diffs} negative time differences in pressure data")
 
-        # Render required pressure and activation threshold as continuous solid lines
-        # Filter out flat baseline points at 2.0 bar to focus on active control periods
-        if len(required_pressures) > 0:
-            req_mask = required_pressures > 2.1
-            if np.any(req_mask):
-                ax.plot(times[req_mask], required_pressures[req_mask],
-                        color=required_color, linestyle='-', linewidth=1.5, alpha=0.9,
-                        label='Minimum required pressure to supply mission')
-
+        # Plot activation threshold (required + margin) - only this, not raw required
         if len(activation_thresholds) > 0:
-            act_mask = activation_thresholds > 2.1
-            if np.any(act_mask):
-                ax.plot(times[act_mask], activation_thresholds[act_mask],
-                        color=activation_color, linestyle='-', linewidth=1.5, alpha=0.9,
-                        label='Activation threshold (required + margin)')
+            ax.plot(times, activation_thresholds,
+                    color=activation_color, linestyle=activation_style, linewidth=1.5, alpha=0.9,
+                    label='Activation threshold (required + margin)')
 
         # Plot actual tank pressure (continuous data, no filtering needed)
         ax.plot(result_times, tank_pressures,
@@ -1729,8 +1718,8 @@ class DelftColourPlotter:
                 if np.any(within):
                     required_interp[within] = np.interp(result_times[within], times, required_pressures)
 
-                # Active segments only (ignore flat 2.0 bar baseline)
-                active_mask = np.isfinite(required_interp) & (required_interp > 2.1)
+                # Active segments only (use all finite values)
+                active_mask = np.isfinite(required_interp)
 
                 if np.any(active_mask):
                     delta = tank_pressures[active_mask] - required_interp[active_mask]
@@ -1763,8 +1752,8 @@ class DelftColourPlotter:
         except Exception as e:
             print(f"   ⚠️ Tracking audit failed: {e}")
 
-        # Add reference lines
-        ax.axhline(y=2.0, color=min_color, linestyle=min_style, alpha=0.7,
+        # Add reference line for minimum tank pressure from configuration
+        ax.axhline(y=minimum_pressure_bar, color=min_color, linestyle=min_style, alpha=0.7,
                   label='Absolute minimum tank pressure')
 
         # Formatting with consistent style

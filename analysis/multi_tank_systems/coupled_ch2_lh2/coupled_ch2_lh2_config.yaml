@@ -46,7 +46,7 @@ network:
       temperature: 25.0
       density: 70.0
     operating_limits:
-      minimum_pressure: 200000.0
+      minimum_pressure: 100000.0
       venting_pressure: 1500000.0
     materials:
       liner:
@@ -80,7 +80,7 @@ network:
       tol_pressure_bar: 0.01       # tighter target tracking
       # Branch-free feedforward tuning
       enforcement_horizon_s: 1.0   # At least 2× solver timestep (0.5s) for proper prediction
-      overpressure_margin_bar: 0.3 # Increased from 0.2 for buffer during sudden demand spikes
+      overpressure_margin_bar: 1.0 # Increased from 0.2 for buffer during sudden demand spikes
       max_target_pressure_bar: 20.0 # Hard ceiling - never exceed Tank 2 safe operating pressure
       mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
       soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
@@ -93,8 +93,8 @@ network:
       max_flow_rate_kg_s: 0.6       # Theoretical max (unused - physics-based capacity dominates)
       orifice_diameter_m: 0.003
     discharge_piping:
-      diameter_m: 0.025
-      length_m: 1.0
+      diameter_m: 0.01
+      length_m: 10.0
       roughness_m: 1.5e-06
       loss_coefficient: 1.0
       choked_flow_enabled: true
