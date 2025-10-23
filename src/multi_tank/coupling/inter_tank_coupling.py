@@ -2026,143 +2026,80 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             print(f"\n{'='*80}\n[ZOH UPDATE] t={t:.1f}s | NEW COMMAND COMPUTATION\n{'='*80}")
 
         if compute_new_command:
-            # Always compute mdot_star by solving the algebraic equation at update times
+            # Compute mdot_star by solving the algebraic equation at update times
             if upper <= 1e-12:
                 mdot_star = 0.0
             else:
-                used_linear = False
-                # HYBRID APPROACH: Try linearized predictor first (fast), validate, fallback to bisection if needed
-                if self.use_linearized_predictor:
-                    # Temperature-aware linearized predictor WITH TWO-PHASE HEAT CAPACITY
-                    # Estimate dP/dm accounting for both density and temperature changes
-                    # P = P(m, T(m)) where T changes due to heating from warm CH2
+                # Temperature-aware linearized predictor with two-phase heat capacity
+                # Estimate dP/dm accounting for both density and temperature changes
 
-                    # Get source properties
-                    h_source = PropsSI("Hmass", "T", source_state.temperature,
-                                      "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
-                    h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
-                    delta_h = h_source - h_target
+                # Get source and target enthalpies
+                h_source = PropsSI("Hmass", "T", source_state.temperature,
+                                  "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
+                h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
+                delta_h = h_source - h_target
 
-                    # Use two-phase isochoric heat capacity for more accurate thermal prediction
-                    rho = m / V
-                    # Check if we're in two-phase region by comparing to saturation density
+                # Use two-phase isochoric heat capacity for accurate thermal prediction
+                rho = m / V
+                # Check if we're in two-phase region
+                try:
+                    rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
+                    rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
+                    in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
+                except:
+                    in_two_phase = False
+
+                if in_two_phase:
+                    # Two-phase region: use cv2p for accurate latent heat effects
+                    alpha = (1.0/rho - 1.0/rho_sat_liq) / (1.0/rho_sat_vap - 1.0/rho_sat_liq)
+                    alpha = max(0.0, min(1.0, alpha))
+
+                    # Single-phase cv at saturation states
+                    cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "hydrogen")
+                    cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "hydrogen")
+
+                    # Saturated enthalpies
+                    h_g = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
+                    h_l = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
+
+                    # Derivatives of saturation densities wrt T
+                    dT = 0.1
                     try:
-                        rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
-                        rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
-                        in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
+                        rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "hydrogen")
+                        rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
+                        drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
+                        drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
                     except:
-                        in_two_phase = False
+                        drho_g_dT = 0.0
+                        drho_l_dT = 0.0
 
-                    if in_two_phase:
-                        # Two-phase region: use cv2p for accurate latent heat effects
-                        # Compute vapor mass fraction
-                        total_mass = m
-                        alpha = (1.0/rho - 1.0/rho_sat_liq) / (1.0/rho_sat_vap - 1.0/rho_sat_liq)
-                        alpha = max(0.0, min(1.0, alpha))  # Clamp to [0, 1]
-
-                        # Single-phase cv at saturation states
-                        cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "hydrogen")
-                        cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "hydrogen")
-
-                        # Saturated enthalpies
-                        h_g = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
-                        h_l = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
-
-                        # Derivatives of saturation densities wrt T (finite difference)
-                        dT = 0.1  # Small temperature perturbation
-                        try:
-                            rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "hydrogen")
-                            rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
-                            drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
-                            drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
-                        except:
-                            # Fallback if saturation curve derivative fails
-                            drho_g_dT = 0.0
-                            drho_l_dT = 0.0
-
-                        # Two-phase correction term
-                        denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
-                        if abs(denom) > 1e-10 and abs(drho_g_dT) > 1e-10 and abs(drho_l_dT) > 1e-10:
-                            dvg_dT = -drho_g_dT / (rho_sat_vap**2)
-                            dvl_dT = -drho_l_dT / (rho_sat_liq**2)
-                            correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
-                        else:
-                            correction = 0.0
-
-                        c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
+                    # Two-phase correction term
+                    denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
+                    if abs(denom) > 1e-10 and abs(drho_g_dT) > 1e-10 and abs(drho_l_dT) > 1e-10:
+                        dvg_dT = -drho_g_dT / (rho_sat_vap**2)
+                        dvl_dT = -drho_l_dT / (rho_sat_liq**2)
+                        correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
                     else:
-                        # Single-phase: use standard cv
-                        c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
+                        correction = 0.0
 
-                    # Compute dP/dm with thermal effects using cv2p:
-                    dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')
-                    dP_dT = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
+                    c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
+                else:
+                    # Single-phase: use standard cv
+                    c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
 
-                    # Total derivative: dP/dm_net considering both density and thermal effects
-                    dP_dm_net = dP_drho / V + dP_dT * delta_h / c_v
+                # Compute dP/dm with thermal effects
+                dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')
+                dP_dT = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
+                dP_dm_net = dP_drho / V + dP_dT * delta_h / c_v
 
-                    if abs(dP_dm_net) > 1e-9:
-                        deltaP = P_target_ctrl - P_now
-                        # Solve: deltaP = dP/dm_net * (mdot_in - mission_outflow) * dt
-                        mdot_linear = mission_outflow + (deltaP / dP_dm_net) / dt_ctrl
-
-                        # Validation: within bounds and predicts reasonable pressure
-                        if 0.0 <= mdot_linear <= upper:
-                            P_check = pred_p(mdot_linear)
-                            error_frac = abs(P_check - P_target_ctrl) / max(P_target_ctrl, 1e5)
-                            if error_frac < 0.10:  # Tighter tolerance for linearization
-                                mdot_star = mdot_linear
-                                used_linear = True
-                                if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
-                                    print(f"[LINEAR SUCCESS] t={t:.1f}s | mdot={mdot_linear*1000:.1f} g/s | "
-                                          f"cv2p={'YES' if in_two_phase else 'NO'} | error={error_frac*100:.1f}%")
-                            elif debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
-                                print(f"[LINEAR REJECT] t={t:.1f}s | mdot={mdot_linear*1000:.1f} g/s | "
-                                      f"error={error_frac*100:.1f}% > 10% | fallback to bisection")
-                        # If validation fails, fall through to bisection
-
-                # TEMPORARILY DISABLE BISECTION TO TEST LINEARIZED PREDICTOR
-                if not used_linear:
-                    # Force use of linearized result even if validation failed (for testing)
-                    if self.use_linearized_predictor and 0.0 <= mdot_linear <= upper:
-                        mdot_star = mdot_linear
-                        if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
-                            print(f"[LINEAR FORCED] t={t:.1f}s | mdot={mdot_star*1000:.1f} g/s | "
-                                  f"(bisection disabled for testing)")
-                    else:
-                        # Safety fallback if linearization completely fails
-                        mdot_star = 0.5 * upper
-                        if debug_enabled and t <= 900.0 and t % 10.0 < 0.6:
-                            print(f"[LINEAR FAILED] t={t:.1f}s | using 50% capacity = {mdot_star*1000:.1f} g/s")
-
-                # Original bisection code (commented out for testing)
-                # if not used_linear:
-                #     # Bisection for mdot_in where pred_p(mdot) ≈ P_target_ctrl
-                #     mdot_lo, mdot_hi = lower, upper
-                #     # Debug only every 10s to avoid flooding output
-                #     show_bisect_debug = debug_enabled and 100.0 <= t <= 150.0 and t % 10.0 < 0.6
-                #     if show_bisect_debug:
-                #         print(f"[BISECTION START] t={t:.1f}s | bounds=[{mdot_lo*1000:.1f}, {mdot_hi*1000:.1f}] g/s | P_target={P_target_ctrl/1e5:.2f} bar")
-                #
-                #     for iter_num in range(max(5, self.max_bisection_iters)):
-                #         mid = 0.5 * (mdot_lo + mdot_hi)
-                #         P_mid = pred_p(mid)
-                #
-                #         if show_bisect_debug and iter_num < 3:
-                #             print(f"  [BISECT iter={iter_num}] mid={mid*1000:.1f} g/s → P_mid={P_mid/1e5:.2f} bar (target={P_target_ctrl/1e5:.2f})")
-                #
-                #         if P_mid < P_target_ctrl:
-                #             mdot_lo = mid
-                #         else:
-                #             mdot_hi = mid
-                #         if abs((P_mid - P_target_ctrl)/1e5) <= self.tol_pressure_bar:
-                #             if show_bisect_debug:
-                #                 print(f"  [BISECT CONVERGED] after {iter_num+1} iters at mdot={(mdot_lo+mdot_hi)/2*1000:.1f} g/s")
-                #             break
-                #     mdot_star = 0.5 * (mdot_lo + mdot_hi)
-                #
-                #     if show_bisect_debug:
-                #         print(f"[BISECTION END] t={t:.1f}s | mdot_star={mdot_star*1000:.1f} g/s")
+                if abs(dP_dm_net) > 1e-9:
+                    deltaP = P_target_ctrl - P_now
+                    mdot_star = mission_outflow + (deltaP / dP_dm_net) / dt_ctrl
+                    # Clamp to valid bounds
+                    mdot_star = max(0.0, min(mdot_star, upper))
+                else:
+                    # Fallback if derivative is too small
+                    mdot_star = 0.5 * upper
 
             # Landing zero-flow rule
             if mission_outflow < 0.005:  # Below 5 g/s
@@ -2181,20 +2118,11 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
             # EARLY DIAGNOSTICS: Log command computation details
             if debug_enabled and t <= 900.0 and t % 5.0 < 0.1:
-                linear_flag = "LINEAR" if used_linear else "BISECT"
-                print(f"[EARLY CMD_CALC] t={t:.1f}s | method={linear_flag} | "
-                      f"mdot_star={mdot_star*1000:.1f} g/s | capacity={capacity*1000:.1f} g/s | "
-                      f"slew_applied={self.max_mdot_cmd_slew_kg_s2 > 0.0}")
+                print(f"[EARLY CMD_CALC] t={t:.1f}s | "
+                      f"mdot_star={mdot_star*1000:.1f} g/s | capacity={capacity*1000:.1f} g/s")
         else:
             # Use previously computed command and hold between updates
             mdot_star = self._held_mdot_cmd
-
-        # The bisection already accounts for mission_outflow in the mass balance:
-        # m_next = m + (mdot_star - mission_outflow) * dt
-        # So mdot_star is the optimal inflow to achieve target pressure.
-        # No additional floor constraint needed - the predictor handles thermal effects correctly.
-
-        # ZERO-FLOW CUTOFF also enforced on held command at update time above
 
 
         # Step 3: Apply capacity/safety limits with optional soft saturation and a tiny bias
