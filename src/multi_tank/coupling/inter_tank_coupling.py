@@ -1138,8 +1138,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self.target_filter_tau_s = float(control_params.get('target_pressure_filter_tau_s', 1.0))
         self.setpoint_bias_bar = float(control_params.get('setpoint_bias_bar', 0.0))
         self.min_source_pressure_bar = float(control_params.get('min_source_pressure_bar', 15.0))
-        # New: measured pressure filter and soft-start controls
-        self.measured_pressure_filter_tau_s = float(control_params.get('measured_pressure_filter_tau_s', 0.0))
+
         self.startup_delay_s = float(control_params.get('startup_delay_s', 0.0))
         self.startup_ramp_duration_s = float(control_params.get('startup_ramp_duration_s', 0.0))
         # New: explicit startup flow cap to limit delivered mass flow during ramp
@@ -1199,9 +1198,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self._last_control_time = 0.0
         self._filtered_target_pressure = None
         self._last_target_update_time = None
-        # Measurement filter state
-        self._filtered_measured_pressure = None
-        self._last_meas_update_time = None
+
         # Mission flow EMA state
         self._filtered_mission_flow = None
         self._last_flow_update_time = None
@@ -1209,7 +1206,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self._slew_limited_target = None
         self._last_slew_time = None
         # Track last effective signals and deficit for cap bypass
-        self._last_effective_measured_pressure = None
+        self._last_target_state.pressure_pressure = None
         self._last_effective_target_pressure = None
         self._last_deficit_bar = 0.0
         self._last_cap_bypass = False
@@ -1373,27 +1370,11 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self.current_mission_flow_rate = smoothed_mission_flow
         required_pressure_pa = self.calculate_minimum_discharge_pressure(smoothed_mission_flow, lh2_density)
 
-        # Optional LPF on measured pressure to reduce initial jitter (moved earlier for bias integration)
-        measured_pressure = target_state.pressure
-        if self.measured_pressure_filter_tau_s and self.measured_pressure_filter_tau_s > 1e-6:
-            if self._filtered_measured_pressure is None:
-                self._filtered_measured_pressure = measured_pressure
-                self._last_meas_update_time = t
-            else:
-                dtm = max(0.0, t - (self._last_meas_update_time or t))
-                alpha_m = dtm / max(1e-6, float(self.measured_pressure_filter_tau_s))
-                alpha_m = max(0.0, min(1.0, alpha_m))
-                self._filtered_measured_pressure = self._filtered_measured_pressure + alpha_m * (measured_pressure - self._filtered_measured_pressure)
-                self._last_meas_update_time = t
-            effective_measured = self._filtered_measured_pressure
-        else:
-            effective_measured = measured_pressure
-
         # Adaptive bias integration: integrate residual deficit to push target slightly above requirement
         if self.bias_integrator_enabled:
             dtb = max(0.0, t - (self._last_bias_update_time or t))
             self._last_bias_update_time = t
-            deficit_bar_for_bias = max(0.0, (required_pressure_pa - effective_measured) / 1e5)
+            deficit_bar_for_bias = max(0.0, (required_pressure_pa - target_state.pressure) / 1e5)
             if self.bias_gain_bar_per_s > 0.0:
                 self._adaptive_bias_bar += self.bias_gain_bar_per_s * deficit_bar_for_bias * dtb
             # Decay when not needed
@@ -1448,7 +1429,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
             effective_target = self._slew_limited_target
 
         # Store effective pressures for later logic
-        self._last_effective_measured_pressure = effective_measured
+        self._last_target_state.pressure_pressure = target_state.pressure
         self._last_effective_target_pressure = effective_target
 
         # Diagnostics history (store in Pa)
@@ -1466,7 +1447,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
                 desired_flow_rate = 0.0
             else:
                 # Margin-free error (bar) using filtered measurement if enabled
-                error_bar = max(0.0, (effective_target - effective_measured) / 1e5)
+                error_bar = max(0.0, (effective_target - target_state.pressure) / 1e5)
                 # Save deficit for downstream cap bypass logic
                 self._last_deficit_bar = error_bar
                 desired_flow_rate = self.pressure_gain_kg_s_per_bar * error_bar
@@ -1704,13 +1685,11 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
         # Physical actuator dynamics (to reduce chatter without hiding physics):
         # - First-order valve response with time constant tau (faster for responsiveness)
-        # - Optional absolute slew-rate limit |dmdot/dt| <= max_mdot_slew_kg_s2
         self.valve_time_constant_s = float(control_params.get('valve_time_constant_s', 0.5))
-        self.max_mdot_slew_kg_s2 = float(control_params.get('max_mdot_slew_kg_s2', 0.0))  # 0 disables slew limiting
+
         # Optional coefficient-rate limiter when modulating opening instead of flow directly (disable by default)
-        self.max_coeff_rate_per_s = float(control_params.get('max_coeff_rate_per_s', 0.0))
-        # Optional command-level slew to prevent mdot_cmd jumps at update cadence (moderate default)
-        self.max_mdot_cmd_slew_kg_s2 = float(control_params.get('max_mdot_cmd_slew_kg_s2', 0.1))
+
+
         # Smooth activation curve around the target to prevent on/off behavior
         self.activation_softness_bar = float(control_params.get('activation_softness_bar', 0.2))
 
@@ -1718,10 +1697,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self.startup_ramp_duration_s = float(control_params.get('startup_ramp_duration_s', 60.0))
         # Optional startup flow cap to prevent early-time spikes (0 = disabled)
         self.startup_flow_cap_kg_s = float(control_params.get('startup_flow_cap_kg_s', 0.0))
-        # No measured-pressure LPF by default (introduces too much phase lag)
-        self.measured_pressure_filter_tau_s = float(control_params.get('measured_pressure_filter_tau_s', 0.0))
-        # No command LPF by default (adds more phase lag)
-        self.mdot_command_filter_tau_s = float(control_params.get('mdot_command_filter_tau_s', 0.0))
+
 
         # Diagnostics
         self._last_required_pressure = 0.0
@@ -1745,12 +1721,6 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self._coeff = 0.0
         self._last_coeff = 0.0
         self._last_coeff_time = None
-        # Filter state for measured pressure
-        self._filtered_measured_pressure = None
-        self._last_meas_update_time = None
-        # Filter state for mdot command
-        self._filtered_mdot_cmd = None
-        self._last_mdot_cmd_time = None
 
     def _startup_factor(self, t: float) -> float:
         """Smooth 0→1 ramp using sigmoid for gentle transitions at endpoints."""
@@ -2108,9 +2078,6 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             # Command-level slew limiting to prevent large jumps at update cadence (single limiter)
             if self._last_update_time is not None:
                 dt_upd = max(1e-6, t - self._last_update_time)
-                if self.max_mdot_cmd_slew_kg_s2 > 0.0:
-                    max_change_cmd = self.max_mdot_cmd_slew_kg_s2 * dt_upd
-                    mdot_star = min(max(mdot_star, self._held_mdot_cmd - max_change_cmd), self._held_mdot_cmd + max_change_cmd)
 
             # Commit to held command and timestamp
             self._held_mdot_cmd = mdot_star
@@ -2179,11 +2146,6 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             coeff_alpha = max(0.0, min(1.0, dt_act / max(self.valve_time_constant_s, 1e-9)))
         coeff_smooth = coeff_prev + coeff_alpha * (target_coeff - coeff_prev)
 
-        if self.max_coeff_rate_per_s > 0.0 and dt_act > 0.0:
-            max_dcoeff = self.max_coeff_rate_per_s * dt_act
-            delta_c = coeff_smooth - coeff_prev
-            if abs(delta_c) > max_dcoeff:
-                coeff_smooth = coeff_prev + math.copysign(max_dcoeff, delta_c)
 
         # Clamp and compute final flow
         self._coeff = max(0.0, min(1.0, coeff_smooth))
