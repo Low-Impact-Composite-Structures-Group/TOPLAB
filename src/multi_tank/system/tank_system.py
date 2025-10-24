@@ -227,7 +227,8 @@ class TankSystem:
                     p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
                     max_flow_rate=rule.get('max_flow_rate', 0.005),       # 5 g/s default (realistic for pressurization)
                     orifice_diameter=rule.get('orifice_diameter', 0.001),  # 1 mm default (realistic for pressurization)
-                    flow_physics=self.flow_physics  # Pass configuration-driven flow physics
+                    flow_physics=self.flow_physics,  # Pass configuration-driven flow physics
+                    valve_time_constant_s=rule.get('valve_time_constant_s', 0.5)  # First-order dynamics time constant
                 )
 
                 # Add tank name attributes expected by _calculate_coupling_flows

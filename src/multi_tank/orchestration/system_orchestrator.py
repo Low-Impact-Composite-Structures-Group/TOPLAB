@@ -305,6 +305,9 @@ class SystemOrchestrator:
                 orifice_diameter_m = float(flow_params.get('orifice_diameter_m', flow_params.get('orifice_diameter', 0.002)))
                 max_flow_rate_kg_s = float(flow_params.get('max_flow_rate_kg_s', flow_params.get('max_flow_rate', 0.10)))
 
+                # 3) Valve dynamics: extract valve_time_constant_s from activation_conditions
+                valve_time_constant_s = float(thresholds.get('valve_time_constant_s', 0.5))  # Default 0.5s
+
                 tank_system_rule = {
                     'type': 'pressure_triggered_valve',
                     'source_tank': participants.get('source', 1) - 1,  # Convert 1-based to 0-based index
@@ -313,6 +316,7 @@ class SystemOrchestrator:
                     'closing_pressure': deactivation_threshold * 1e5,  # p_close: valve closes when target ≥ this
                     'max_flow_rate': max_flow_rate_kg_s,               # kg/s
                     'orifice_diameter': orifice_diameter_m,            # m
+                    'valve_time_constant_s': valve_time_constant_s,    # First-order dynamics time constant [s]
                     'coupling_id': rule_config.get('coupling_id', 'pressure_compensation')
                 }
 
