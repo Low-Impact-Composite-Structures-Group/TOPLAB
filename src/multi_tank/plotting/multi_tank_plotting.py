@@ -1537,8 +1537,8 @@ class DelftColourPlotter:
 
         # Convert to numpy arrays for plotting
         times = np.array(diag_data['time_history']) / 3600.0  # Convert to hours
-        required_pressures = np.array(diag_data['required_pressure_history']) / 1e5  # Convert to bar
-        activation_thresholds = np.array(diag_data.get('activation_threshold_history', [])) / 1e5  # Convert to bar
+        required_pressures = np.array(diag_data['required_pressure_history']) / 1e5  # Convert to bar (no margin)
+        activation_thresholds = np.array(diag_data.get('activation_threshold_history', [])) / 1e5  # Convert to bar (with margin)
 
         # Ensure diagnostic series are time-sorted to avoid visual artifacts and warnings
         if len(times) > 1:
@@ -1585,19 +1585,23 @@ class DelftColourPlotter:
 
         # Use greyscale colors if specified
         if self.use_greyscale:
-            activation_color = 'lightgrey'              # Light grey for better contrast
-            actual_color = 'black'                      # Black solid
-            min_color = 'darkgrey'                      # Dark grey dotted
+            required_color = 'darkgrey'                 # Dark grey for required (no margin)
+            activation_color = 'lightgrey'              # Light grey for activation (with margin)
+            actual_color = 'black'                      # Black solid for actual
+            min_color = 'darkgrey'                      # Dark grey dotted for minimum
 
+            required_style = '--'                       # Dark grey dashed
             activation_style = '-'                      # Light grey solid
             actual_style = '-'                          # Black solid
             min_style = ':'                             # Dark grey dotted
         else:
-            activation_color = self.color_palette[1]    # Delft red
-            actual_color = self.color_palette[2]        # Delft green
-            min_color = self.color_palette[3]           # Delft orange
+            required_color = self.color_palette[3]      # Delft orange for required (no margin)
+            activation_color = self.color_palette[1]    # Delft red for activation (with margin)
+            actual_color = self.color_palette[2]        # Delft green for actual
+            min_color = self.color_palette[4]           # Delft purple for minimum
 
-            activation_style = '--'
+            required_style = '--'
+            activation_style = '-.'
             actual_style = '-'
             min_style = ':'
 
@@ -1700,11 +1704,17 @@ class DelftColourPlotter:
             if negative_diffs > 0:
                 print(f"   ⚠️ Found {negative_diffs} negative time differences in pressure data")
 
-        # Plot activation threshold (required + margin) - only this, not raw required
+        # Plot required pressure (no margin) - shows minimum pressure needed for mission discharge
+        if len(required_pressures) > 0:
+            ax.plot(times, required_pressures,
+                    color=required_color, linestyle=required_style, linewidth=1.5, alpha=0.8,
+                    label='Required pressure (mission discharge)')
+
+        # Plot activation threshold (required + margin) - conservative target with safety buffer
         if len(activation_thresholds) > 0:
             ax.plot(times, activation_thresholds,
                     color=activation_color, linestyle=activation_style, linewidth=1.5, alpha=0.9,
-                    label='Activation threshold (required + margin)')
+                    label='Target pressure (required + margin)')
 
         # Plot actual tank pressure (continuous data, no filtering needed)
         ax.plot(result_times, tank_pressures,
