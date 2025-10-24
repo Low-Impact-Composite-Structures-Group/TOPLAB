@@ -362,6 +362,13 @@ class TankSystem:
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
 
+                # Get source tank configuration for minimum pressure (if available)
+                source_tank_config = {}
+                if source_idx < len(self.config.tanks):
+                    source_tank_config = {
+                        'minimum_pressure': self.config.tanks[source_idx].P_MIN
+                    }
+
                 # Get target tank configuration for minimum pressure (if available)
                 target_tank_config = {}
                 if target_idx < len(self.config.tanks):
@@ -379,6 +386,7 @@ class TankSystem:
                     orifice_diameter=rule.get('flow_physics', {}).get('orifice_flow', {}).get('orifice_diameter_m', rule.get('orifice_diameter', 0.001)),
                     coupling_id=rule.get('coupling_id', 'feedforward_pressure_enforcer'),
                     flow_physics=self.flow_physics,
+                    source_tank_config=source_tank_config,
                     target_tank_config=target_tank_config
                 )
 

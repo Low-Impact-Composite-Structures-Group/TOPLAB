@@ -71,8 +71,6 @@ network:
     from_node: 1
     to_node: 2
     control_parameters:
-      # REQUIRED: Source constraints
-      min_source_pressure_bar: 15.0
       safety_mass_fraction_per_s: 0.10
       # REQUIRED: Control timing
       enforcement_horizon_s: 1.0   # Prediction horizon - should be at least 2× solver timestep

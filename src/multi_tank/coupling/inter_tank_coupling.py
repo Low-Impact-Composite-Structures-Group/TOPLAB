@@ -50,14 +50,15 @@ def _as_float(x: Any) -> float:
 
 
 class PressureTriggeredValve(InterTankCoupling):
-    """Pressure-triggered valve with choked flow physics and hysteresis control."""
+    """Pressure-triggered valve with choked flow physics, hysteresis control, and first-order dynamics."""
 
     def __init__(self, source_idx: int, target_idx: int,
                  p_open: float, p_close: float,
                  max_flow_rate: float = 0.005,
                  orifice_diameter: float = 0.002,
                  coupling_id: str = None,
-                 flow_physics: Optional[FlowPhysics] = None):
+                 flow_physics: Optional[FlowPhysics] = None,
+                 valve_time_constant_s: float = 0.5):
         super().__init__(source_idx, target_idx, coupling_id)
         # Correct pressure logic: p_open is activation threshold, p_close is deactivation threshold
         self.p_open = p_open     # Valve opens when target pressure <= p_open
@@ -68,6 +69,11 @@ class PressureTriggeredValve(InterTankCoupling):
         # Hysteresis thresholds for clear logic
         self.activation_threshold = p_open    # Open valve when P_target ≤ this
         self.deactivation_threshold = p_close # Close valve when P_target ≥ this
+
+        # First-order valve dynamics
+        self.valve_time_constant_s = valve_time_constant_s  # Time constant for opening/closing
+        self._valve_coefficient = 0.0  # Current valve opening (0 = closed, 1 = fully open)
+        self._last_coeff_time = None  # Last time coefficient was updated
 
         # Flow physics calculator (configuration-driven)
         # IMPORTANT: flow_physics should be provided for accurate flow calculations
@@ -92,10 +98,11 @@ class PressureTriggeredValve(InterTankCoupling):
             raise ValueError(f"deactivation_threshold ({p_close/1e5:.1f} bar) must be > activation_threshold ({p_open/1e5:.1f} bar)")
 
     def evaluate(self, t: float, tank_states: List) -> bool:
-        """Evaluate valve state with hysteresis logic.
+        """Evaluate valve state with hysteresis logic and update opening coefficient.
 
         Valve opens when target pressure ≤ activation_threshold
         Valve closes when target pressure ≥ deactivation_threshold
+        Valve opening follows first-order dynamics: τ dα/dt = α_target - α
         """
         target_state = tank_states[self.target_idx]
 
@@ -104,25 +111,46 @@ class PressureTriggeredValve(InterTankCoupling):
 
         target_pressure = target_state.pressure
 
-        # Valve opens when target pressure drops to or below activation threshold
+        # Determine target valve state (fully open or fully closed)
         if not self.is_active and target_pressure <= self.activation_threshold:
             self.is_active = True
-            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} OPENED (P={target_pressure/1e5:.1f} bar ≤ {self.activation_threshold/1e5:.1f} bar)")
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} OPENING (P={target_pressure/1e5:.1f} bar ≤ {self.activation_threshold/1e5:.1f} bar)")
 
-        # Valve closes when target pressure rises to or above deactivation threshold
         elif self.is_active and target_pressure >= self.deactivation_threshold:
             self.is_active = False
-            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSED (P={target_pressure/1e5:.1f} bar ≥ {self.deactivation_threshold/1e5:.1f} bar)")
+            print(f"t={t/3600:.2f}h: Valve {self.source_idx}→{self.target_idx} CLOSING (P={target_pressure/1e5:.1f} bar ≥ {self.deactivation_threshold/1e5:.1f} bar)")
 
-        # Debug: Show valve state periodically when active
-        if self.is_active and int(t*10) % 50 == 0:  # Every 5 seconds
-            print(f"  Valve ACTIVE at t={t/3600:.3f}h: P_target={target_pressure/1e5:.1f}bar")
+        # Update valve coefficient with first-order lag
+        target_coeff = 1.0 if self.is_active else 0.0
 
-        return self.is_active
+        if self._last_coeff_time is None:
+            # First call - initialize
+            self._valve_coefficient = target_coeff
+            self._last_coeff_time = t
+        else:
+            # Apply first-order dynamics: α(t) = α(t-Δt) + (Δt/τ)(α_target - α(t-Δt))
+            dt = max(0.0, t - self._last_coeff_time)
+            if self.valve_time_constant_s > 1e-9 and dt > 0.0:
+                alpha = min(1.0, dt / self.valve_time_constant_s)
+                self._valve_coefficient += alpha * (target_coeff - self._valve_coefficient)
+            else:
+                # Instantaneous response if tau = 0
+                self._valve_coefficient = target_coeff
+            self._last_coeff_time = t
+
+        # Clamp coefficient to valid range
+        self._valve_coefficient = max(0.0, min(1.0, self._valve_coefficient))
+
+        # Debug: Show valve state periodically
+        if abs(t % 60) < 0.1:  # Every 60 seconds
+            print(f"  Valve state at t={t/3600:.3f}h: coeff={self._valve_coefficient:.3f}, P_target={target_pressure/1e5:.1f}bar")
+
+        return self._valve_coefficient > 1e-6  # Active if any opening
 
     def calculate_flow_rate(self, t: float, tank_states: List) -> float:
-        """Calculate flow rate using configuration-driven flow physics."""
-        if not self.is_active:
+        """Calculate flow rate using configuration-driven flow physics and valve coefficient."""
+        # If valve is fully closed, no flow
+        if self._valve_coefficient <= 1e-6:
             return 0.0
 
         source_state = tank_states[self.source_idx]
@@ -144,14 +172,17 @@ class PressureTriggeredValve(InterTankCoupling):
         T1 = source_state.temperature
         rho1 = source_state.fuel_mass / source_state.tank.volume
 
-        # Use configuration-driven flow physics (required - no fallback)
-        flow_rate = self.flow_physics.calculate_orifice_flow_rate(
+        # Calculate fully-open flow rate using configuration-driven flow physics
+        base_flow_rate = self.flow_physics.calculate_orifice_flow_rate(
             upstream_pressure=P1,
             downstream_pressure=P2,
             upstream_temperature=T1,
             upstream_density=rho1,
             orifice_diameter=self.orifice_diameter
         )
+
+        # Apply valve coefficient (modulates flow based on opening)
+        flow_rate = base_flow_rate * self._valve_coefficient
 
         # Apply valve capacity limit
         flow_rate = min(flow_rate, self.max_flow_rate)
@@ -1629,6 +1660,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                  orifice_diameter: float = 0.003,
                  coupling_id: str = None,
                  flow_physics: Optional[FlowPhysics] = None,
+                 source_tank_config: dict = None,
                  target_tank_config: dict = None):
         super().__init__(source_idx, target_idx, coupling_id)
         self.mission_profile = mission_profile or {}
@@ -1646,6 +1678,10 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         self.orifice_diameter = orifice_diameter
         self.flow_physics = flow_physics
 
+        # Source tank configuration (for minimum operating pressure)
+        self.source_tank_config = source_tank_config or {}
+        source_min_pressure_pa = self.source_tank_config.get('minimum_pressure', None)
+
         # Target tank configuration (for minimum pressure)
         self.target_tank_config = target_tank_config or {}
         self.target_minimum_pressure_pa = self.target_tank_config.get('minimum_pressure', None)
@@ -1657,13 +1693,18 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                 "in operating_limits. This is needed to compute required pressure for mission flow."
             )
 
-    # Control tunables - REQUIRED parameters (no defaults, fail-fast)
-        if 'min_source_pressure_bar' not in control_params:
+    # Control tunables - Pull min_source_pressure from tank config if not in control_params
+        if 'min_source_pressure_bar' in control_params:
+            # Explicit override in control_params takes precedence
+            self.min_source_pressure_bar = float(control_params['min_source_pressure_bar'])
+        elif source_min_pressure_pa is not None:
+            # Use source tank's minimum_pressure from operating_limits
+            self.min_source_pressure_bar = source_min_pressure_pa / 1e5
+        else:
             raise ValueError(
-                "FeedforwardPressureEnforcer requires 'min_source_pressure_bar' in control_parameters. "
-                "This sets the minimum source tank pressure required for flow."
+                "FeedforwardPressureEnforcer requires either 'min_source_pressure_bar' in control_parameters "
+                "or source tank 'minimum_pressure' in operating_limits."
             )
-        self.min_source_pressure_bar = float(control_params['min_source_pressure_bar'])
 
         if 'safety_mass_fraction_per_s' not in control_params:
             raise ValueError(
