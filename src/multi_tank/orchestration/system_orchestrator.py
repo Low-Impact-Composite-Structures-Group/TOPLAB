@@ -1542,6 +1542,8 @@ class SystemOrchestrator:
             arrow_size = dt_config.get('arrow_size', 1.0)
             valve_marker_size = dt_config.get('valve_marker_size', 8.0)
             legend_location = dt_config.get('legend_location', 'upper right')
+            xlim = dt_config.get('xlim', None)
+            ylim = dt_config.get('ylim', None)
 
             dt_fig = plotter.plot_density_temperature(
                 results=self.results,
@@ -1554,6 +1556,8 @@ class SystemOrchestrator:
                 arrow_position=arrow_position,
                 arrow_size=arrow_size,
                 valve_marker_size=valve_marker_size,
+                xlim=xlim,
+                ylim=ylim,
                 save_path=str(dt_save_path) if dt_save_path else None,
                 legend_location=legend_location
             )

@@ -508,8 +508,8 @@ class DelftColourPlotter:
                                include_isobars: bool = True,
                                isobar_pressures: List[float] = None,
                                reference_pressures: Optional[Dict[str, float]] = None,
-                               temperature_range: Optional[Tuple[float, float]] = None,
-                               density_range: Tuple[float, float] = (0, 85),
+                               xlim: Optional[Tuple[float, float]] = None,
+                               ylim: Optional[Tuple[float, float]] = None,
                                arrow_position: float = 0.25,
                                arrow_size: float = 1.0,
                                valve_events: Optional[List[Dict[str, Any]]] = None,
@@ -529,8 +529,8 @@ class DelftColourPlotter:
             include_isobars: Whether to include isobar lines
             isobar_pressures: List of pressures [bar] for isobars. If None, uses default [450, 400, 100, 15, 5]
             reference_pressures: Dict with 'P_vent' and 'P_min' [bar] for highlighting special isobars
-            temperature_range: Min/max temperature range for the plot [K]. If None, auto-computed from data ± 10K
-            density_range: Min/max density range for the plot [kg/m³]
+            xlim: Optional tuple (xmin, xmax) for x-axis (temperature) range [K]. If None, auto-computed from data
+            ylim: Optional tuple (ymin, ymax) for y-axis (density) range [kg/m³]. If None, uses default (0, 85)
             arrow_position: Position along path for direction arrow (0.0-1.0, where 0=start, 1=end)
             arrow_size: Size multiplier for the direction arrow
             valve_events: List of valve events with 'time' and 'type' ('open'/'close') for multi-tank systems
@@ -558,11 +558,15 @@ class DelftColourPlotter:
         # Extract tank data arrays
         tank_data = results._extract_tank_arrays(tank_index)
 
-        # Auto-compute temperature range based on actual data if not provided
-        if temperature_range is None:
+        # Auto-compute temperature range (xlim) based on actual data if not provided
+        if xlim is None:
             temp_min = min(tank_data['temperatures']) - 4
             temp_max = max(tank_data['temperatures']) + 15
-            temperature_range = (temp_min, temp_max)
+            xlim = (temp_min, temp_max)
+
+        # Set default density range (ylim) if not provided
+        if ylim is None:
+            ylim = (0, 85)
 
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -677,8 +681,8 @@ class DelftColourPlotter:
                 from CoolProp.CoolProp import PropsSI
                 fluid = 'hydrogen'
 
-                # Create temperature range for isobars
-                temps = np.linspace(temperature_range[0], temperature_range[1], 100)
+                # Create temperature range for isobars (use xlim if available)
+                temps = np.linspace(xlim[0], xlim[1], 100)
 
                 # Define colors for different isobar types
                 p_vent_bar = reference_pressures.get('P_vent', None)
@@ -736,7 +740,7 @@ class DelftColourPlotter:
                             right_density = valid_densities[right_idx]
 
                             # Position label at right edge with 1K spacing from right edge
-                            label_x = temperature_range[1] - 1.0  # 1K from right edge
+                            label_x = xlim[1] - 1.0  # 1K from right edge
 
                             ax.annotate(f"{pressure} bar",
                                       xy=(right_temp, right_density),
@@ -755,9 +759,12 @@ class DelftColourPlotter:
         # ax.set_title(f'Density-Temperature Diagram - Tank {tank_index + 1}')
         ax.grid(True, alpha=0.3)
 
-        # Set axis limits to match reference image style using provided temperature and density ranges
-        ax.set_xlim(temperature_range)
-        ax.set_ylim(density_range)
+        # Apply custom axis limits if provided
+        if xlim is not None:
+            ax.set_xlim(xlim)
+
+        if ylim is not None:
+            ax.set_ylim(ylim)
 
         # Only show legend if there are multiple curves (tank data + reference lines)
         lines = ax.get_lines()

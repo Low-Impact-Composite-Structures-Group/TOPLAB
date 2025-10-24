@@ -149,12 +149,12 @@ output:
       - 10
       filename: evolution
       event_lines:
-      - time: 0.132
-        label: Valve opening event
-        y_position: 0.132
-      - time: 0.91
-        label: Valve closing event
-        y_position: 0.5
+      - time: 0.19
+        label: First valve opening event
+        y_position: 0.15
+      - time: 0.845
+        label: Last valve closing event
+        y_position: 0.65
       xlim: null  # [0, 1.2] or null for autofit
       ylim_pressure: null  # [0, 800] or null for autofit
       ylim_temperature: null  # [200, 300] or null for autofit
@@ -176,15 +176,18 @@ output:
       - 8
       filename: density_temperature
       isobar_pressures:
+      - 200
+      - 800
       - 500
-      - 700
       show_reference_pressures: false
       include_saturation_line: true
       include_isobars: true
-      arrow_position: 0.1
+      arrow_position: 0.95
       arrow_size: 1.0
       valve_marker_size: 8.0
-      legend_location: upper right
+      legend_location: upper left
+      xlim: null  # [280, 330] or null for autofit
+      ylim: [10, 60]  # [min_density, max_density] or null for default (0, 85)
     mass_flows:
       enabled: true
       figsize:
