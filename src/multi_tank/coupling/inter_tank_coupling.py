@@ -1679,20 +1679,8 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             )
         self.enforcement_horizon_s = float(control_params['enforcement_horizon_s'])
 
-        if 'control_interval_s' not in control_params:
-            raise ValueError(
-                "FeedforwardPressureEnforcer requires 'control_interval_s' in control_parameters. "
-                "This sets the zero-order hold update cadence for command updates."
-            )
-        self.control_interval_s = float(control_params['control_interval_s'])
-
         # Optional parameters with reasonable defaults
         self.bracket_margin = float(control_params.get('bracket_margin', 1.2))  # capacity × margin as upper bisection bound
-        self.max_bisection_iters = int(control_params.get('max_bisection_iters', 10))
-        self.tol_pressure_bar = float(control_params.get('tol_pressure_bar', 0.02))  # 0.02 bar
-
-        # Linearized predictor for mdot (faster than repeated EOS in bisection)
-        self.use_linearized_predictor = bool(control_params.get('use_linearized_predictor', True))
 
         # Overpressure margin: bias target upward slightly to avoid chatter at equality
         self.overpressure_margin_bar = float(control_params.get('overpressure_margin_bar', 0.5))
@@ -1700,32 +1688,13 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         # Maximum target pressure ceiling to prevent overshoot during mission transitions
         self.max_target_pressure_bar = float(control_params.get('max_target_pressure_bar', float('inf')))
 
-        # Smooth, always-open bias added algebraically (no branching)
-        self.mdot_bias_kg_s = float(control_params.get('mdot_bias_kg_s', 0.0))
-
-        # Optional soft saturation smoothness (fraction of capacity). If 0, use hard clamp.
-        self.soft_saturation_rel = float(control_params.get('soft_saturation_rel', 0.0))
-
-        # New: nonzero low-flow floor to prevent apparent valve "closures" from exact zeros
-        # Kept branch-free by using it as the soft-clamp lower bound (scaled by capacity)
-        self.min_flow_floor_kg_s = float(control_params.get('min_flow_floor_kg_s', 0.0))
-        self.min_flow_floor_rel_cap = float(control_params.get('min_flow_floor_rel_cap', 0.0))
-
         # Physical actuator dynamics (to reduce chatter without hiding physics):
         # - First-order valve response with time constant tau (faster for responsiveness)
         self.valve_time_constant_s = float(control_params.get('valve_time_constant_s', 0.5))
 
-        # Optional coefficient-rate limiter when modulating opening instead of flow directly (disable by default)
-
 
         # Smooth activation curve around the target to prevent on/off behavior
         self.activation_softness_bar = float(control_params.get('activation_softness_bar', 0.2))
-
-        # Simplified startup logic: single unified ramp that modulates coefficient directly
-        self.startup_ramp_duration_s = float(control_params.get('startup_ramp_duration_s', 60.0))
-        # Optional startup flow cap to prevent early-time spikes (0 = disabled)
-        self.startup_flow_cap_kg_s = float(control_params.get('startup_flow_cap_kg_s', 0.0))
-
 
         # Diagnostics
         self._last_required_pressure = 0.0
@@ -1742,22 +1711,10 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
         # Internal state (kept minimal to stay memoryless across solver retries)
         self._last_time = None
-        # Zero-order hold state for commanded inflow
-        self._last_update_time = None
-        self._held_mdot_cmd = 0.0
         # Valve coefficient state for smooth modulation against changing capacity
         self._coeff = 0.0
         self._last_coeff = 0.0
         self._last_coeff_time = None
-
-    def _startup_factor(self, t: float) -> float:
-        """Smooth 0→1 ramp using sigmoid for gentle transitions at endpoints."""
-        if self.startup_ramp_duration_s <= 1e-9:
-            return 1.0
-        # Sigmoid ramp: smoother than linear at endpoints
-        x = max(0.0, min(1.0, t / self.startup_ramp_duration_s))
-        # S-curve: x^2 * (3 - 2x) for smooth acceleration/deceleration
-        return x * x * (3.0 - 2.0 * x)
 
     def set_mission_profile(self, mission_profile: dict):
         if 'time_s' in mission_profile and 'flow_rate_kg_s' in mission_profile:
@@ -2021,109 +1978,91 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         # Current pressure (for linearization)
         err_bar = (P_target_ctrl - P_now) / 1e5
 
-        compute_new_command = (self._last_update_time is None) or ((t - self._last_update_time) >= max(1e-3, self.control_interval_s))
+        # Compute mdot_star by solving the algebraic equation
+        if upper <= 1e-12:
+            mdot_star = 0.0
+        else:
+            # Temperature-aware linearized predictor with two-phase heat capacity
+            # Estimate dP/dm accounting for both density and temperature changes
 
-        # EARLY DIAGNOSTICS: Flag ZOH update events
-        if debug_enabled and t <= 900.0 and compute_new_command:
-            print(f"\n{'='*80}\n[ZOH UPDATE] t={t:.1f}s | NEW COMMAND COMPUTATION\n{'='*80}")
+            # Get source and target enthalpies
+            h_source = PropsSI("Hmass", "T", source_state.temperature,
+                              "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
+            h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
+            delta_h = h_source - h_target
 
-        if compute_new_command:
-            # Compute mdot_star by solving the algebraic equation at update times
-            if upper <= 1e-12:
-                mdot_star = 0.0
-            else:
-                # Temperature-aware linearized predictor with two-phase heat capacity
-                # Estimate dP/dm accounting for both density and temperature changes
+            # Use two-phase isochoric heat capacity for accurate thermal prediction
+            rho = m / V
+            # Check if we're in two-phase region
+            try:
+                rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
+                rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
+                in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
+            except Exception as e:
+                # FAIL-FAST: Don't silently assume single-phase if CoolProp fails
+                raise RuntimeError(
+                    f"CoolProp saturation property query failed at T={T:.2f}K, rho={rho:.2f} kg/m³. "
+                    f"Cannot determine two-phase region. Error: {e}"
+                )
 
-                # Get source and target enthalpies
-                h_source = PropsSI("Hmass", "T", source_state.temperature,
-                                  "Dmass", source_state.fuel_mass / source_state.tank.volume, "hydrogen")
-                h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "hydrogen")
-                delta_h = h_source - h_target
+            if in_two_phase:
+                # Two-phase region: use cv2p for accurate latent heat effects
+                alpha = (1.0/rho - 1.0/rho_sat_liq) / (1.0/rho_sat_vap - 1.0/rho_sat_liq)
+                alpha = max(0.0, min(1.0, alpha))
 
-                # Use two-phase isochoric heat capacity for accurate thermal prediction
-                rho = m / V
-                # Check if we're in two-phase region
+                # Single-phase cv at saturation states
+                cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "hydrogen")
+                cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "hydrogen")
+
+                # Saturated enthalpies
+                h_g = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
+                h_l = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
+
+                # Derivatives of saturation densities wrt T
+                dT = 0.1
                 try:
-                    rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "hydrogen")
-                    rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "hydrogen")
-                    in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
+                    rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "hydrogen")
+                    rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
+                    drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
+                    drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
                 except Exception as e:
-                    # FAIL-FAST: Don't silently assume single-phase if CoolProp fails
+                    # FAIL-FAST: Derivative calculation is critical for two-phase cv
                     raise RuntimeError(
-                        f"CoolProp saturation property query failed at T={T:.2f}K, rho={rho:.2f} kg/m³. "
-                        f"Cannot determine two-phase region. Error: {e}"
+                        f"CoolProp saturation density derivative failed at T={T:.2f}K. "
+                        f"Cannot compute two-phase heat capacity correction. Error: {e}"
                     )
 
-                if in_two_phase:
-                    # Two-phase region: use cv2p for accurate latent heat effects
-                    alpha = (1.0/rho - 1.0/rho_sat_liq) / (1.0/rho_sat_vap - 1.0/rho_sat_liq)
-                    alpha = max(0.0, min(1.0, alpha))
-
-                    # Single-phase cv at saturation states
-                    cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "hydrogen")
-                    cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "hydrogen")
-
-                    # Saturated enthalpies
-                    h_g = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
-                    h_l = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
-
-                    # Derivatives of saturation densities wrt T
-                    dT = 0.1
-                    try:
-                        rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "hydrogen")
-                        rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "hydrogen")
-                        drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
-                        drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
-                    except Exception as e:
-                        # FAIL-FAST: Derivative calculation is critical for two-phase cv
-                        raise RuntimeError(
-                            f"CoolProp saturation density derivative failed at T={T:.2f}K. "
-                            f"Cannot compute two-phase heat capacity correction. Error: {e}"
-                        )
-
-                    # Two-phase correction term
-                    denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
-                    if abs(denom) > 1e-10 and abs(drho_g_dT) > 1e-10 and abs(drho_l_dT) > 1e-10:
-                        dvg_dT = -drho_g_dT / (rho_sat_vap**2)
-                        dvl_dT = -drho_l_dT / (rho_sat_liq**2)
-                        correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
-                    else:
-                        correction = 0.0
-
-                    c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
+                # Two-phase correction term
+                denom = (1.0 / rho_sat_vap - 1.0 / rho_sat_liq)
+                if abs(denom) > 1e-10 and abs(drho_g_dT) > 1e-10 and abs(drho_l_dT) > 1e-10:
+                    dvg_dT = -drho_g_dT / (rho_sat_vap**2)
+                    dvl_dT = -drho_l_dT / (rho_sat_liq**2)
+                    correction = (h_g - h_l) / denom * (dvg_dT - dvl_dT)
                 else:
-                    # Single-phase: use standard cv
-                    c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
+                    correction = 0.0
 
-                # Compute dP/dm with thermal effects
-                dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')
-                dP_dT = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
-                dP_dm_net = dP_drho / V + dP_dT * delta_h / c_v
+                c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
+            else:
+                # Single-phase: use standard cv
+                c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
 
-                if abs(dP_dm_net) > 1e-9:
-                    deltaP = P_target_ctrl - P_now
-                    mdot_star = mission_outflow + (deltaP / dP_dm_net) / dt_ctrl
-                    # Clamp to valid bounds
-                    mdot_star = max(0.0, min(mdot_star, upper))
-                else:
-                    # Fallback if derivative is too small
-                    mdot_star = 0.5 * upper
+            # Compute dP/dm with thermal effects
+            dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')
+            dP_dT = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
+            dP_dm_net = dP_drho / V + dP_dT * delta_h / c_v
 
-            # Landing zero-flow rule
-            if mission_outflow < 0.005:  # Below 5 g/s
-                mdot_star = 0.0
+            if abs(dP_dm_net) > 1e-9:
+                deltaP = P_target_ctrl - P_now
+                mdot_star = mission_outflow + (deltaP / dP_dm_net) / dt_ctrl
+                # Clamp to valid bounds
+                mdot_star = max(0.0, min(mdot_star, upper))
+            else:
+                # Fallback if derivative is too small
+                mdot_star = 0.5 * upper
 
-            # Command-level slew limiting to prevent large jumps at update cadence (single limiter)
-            if self._last_update_time is not None:
-                dt_upd = max(1e-6, t - self._last_update_time)
-
-            # Commit to held command and timestamp
-            self._held_mdot_cmd = mdot_star
-            self._last_update_time = t
-        else:
-            # Use previously computed command and hold between updates
-            mdot_star = self._held_mdot_cmd
+        # Landing zero-flow rule
+        if mission_outflow < 0.005:  # Below 5 g/s
+            mdot_star = 0.0
 
 
         # Step 3: Apply capacity/safety limits with optional soft saturation and a tiny bias
@@ -2153,26 +2092,17 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         else:
             gate = 1.0 if deficit_pa >= 0.0 else 0.0
 
-        mdot_cmd = gate * mdot_star + max(0.0, self.mdot_bias_kg_s)
+        mdot_cmd = gate * mdot_star
 
         cap = min(self.max_flow_rate, max(0.0, capacity))
 
         # Translate desired mass flow into a target opening coefficient
         if cap > 1e-12:
             target_coeff = max(0.0, min(1.0, mdot_cmd / cap))
-            # Only enforce a nonzero floor when actively pressurizing
-            if P_now < P_target_ctrl:
-                floor_cap_scaled = self.min_flow_floor_rel_cap * cap if self.min_flow_floor_rel_cap > 0.0 else 0.0
-                coeff_floor = max(0.0, min(self.min_flow_floor_kg_s, floor_cap_scaled)) / cap
-                target_coeff = max(target_coeff, coeff_floor)
         else:
             target_coeff = 0.0
 
-        # Apply unified startup ramp as a multiplier on the coefficient (single point of control)
-        startup_multiplier = self._startup_factor(t)
-        target_coeff = target_coeff * startup_multiplier
-
-        # Smooth coefficient with first-order lag and optional rate limiting
+        # Smooth coefficient with first-order lag
         dt_act = max(0.0, t - (self._last_coeff_time or t))
         coeff_prev = self._coeff if (self._last_coeff_time is not None) else target_coeff
         coeff_alpha = 0.0

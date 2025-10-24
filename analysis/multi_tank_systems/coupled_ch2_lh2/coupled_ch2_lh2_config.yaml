@@ -74,23 +74,16 @@ network:
       # REQUIRED: Source constraints
       min_source_pressure_bar: 15.0
       safety_mass_fraction_per_s: 0.10
-      # REQUIRED: Control timing parameters
+      # REQUIRED: Control timing
       enforcement_horizon_s: 1.0   # Prediction horizon - should be at least 2× solver timestep
-      control_interval_s: 0.15     # Zero-order hold update cadence for commands
-      # OPTIONAL: Bisection/search parameters (legacy - not used with linearized predictor)
+      # OPTIONAL: Legacy parameter (used only for bisection upper bound)
       bracket_margin: 1.15         # narrower bracket reduces overshoot at saturation
-      max_bisection_iters: 14
-      tol_pressure_bar: 0.01       # tighter target tracking
-      # Branch-free feedforward tuning
-      overpressure_margin_bar: 1.0 # Increased from 0.2 for buffer during sudden demand spikes
+      # Pressure targeting
+      overpressure_margin_bar: 1.0 # Buffer above required pressure to avoid undershoot
       max_target_pressure_bar: 20.0 # Hard ceiling - never exceed Tank 2 safe operating pressure
-      mdot_bias_kg_s: 0.0006       # keep valve slightly open (~0.6 g/s) near zero
-      soft_saturation_rel: 0.10    # smooth clamp near 0 and capacity (10% of cap)
-      # Linearized predictor (fast analytical solution)
-      use_linearized_predictor: true  # Enable temperature-aware linearization with cv2p
-      # Low-flow floor to eliminate near-zero dropouts (kept branch-free via soft clamp)
-      min_flow_floor_kg_s: 0.002   # ~2 g/s absolute floor when capacity allows
-      min_flow_floor_rel_cap: 0.05 # additionally require at least 5% of current capacity
+      # Actuator dynamics
+      valve_time_constant_s: 0.2   # First-order valve response time constant
+      activation_softness_bar: 0.5 # Smooth gate transition width around target pressure (0 = hard switch)
     flow_parameters:
       max_flow_rate_kg_s: 0.6       # Theoretical max (unused - physics-based capacity dominates)
       orifice_diameter_m: 0.003
