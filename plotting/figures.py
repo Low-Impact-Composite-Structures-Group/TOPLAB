@@ -92,6 +92,9 @@ class SingleFigure(GeneralFigure):
         labs = [l.get_label() for l in self.plots]
         self.ax1.legend(self.plots, labs, loc=0)
 
+    def save(self, file_path: str):
+        self.fig.savefig(file_path)
+
 
 @dataclass
 class TwinXFigure(GeneralFigure):
@@ -105,7 +108,7 @@ class TwinXFigure(GeneralFigure):
         self.fig = plt.figure()
         self.ax1 = self.fig.add_subplot(111)
         self.ax2 = self.ax1.twinx()
-        self.ax2._get_lines.prop_cycler = self.ax1._get_lines.prop_cycler
+        self.ax2.set_prop_cycle(plt.rcParams['axes.prop_cycle'])
         self.ax = [self.ax1, self.ax2]
         return self.fig, self.ax
 
