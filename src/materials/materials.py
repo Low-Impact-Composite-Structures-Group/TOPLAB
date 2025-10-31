@@ -104,9 +104,13 @@ class Metal(Material):
 @dataclass
 class Composite(Material):
     winding_angle: float
+    degrees: bool = False
 
     def __post_init__(self):
         self.type = "composite"
+
+        if self.degrees:
+            self.winding_angle = math.radians(self.winding_angle)
 
     @classmethod
     def carbon(cls, winding_angle: float):
@@ -123,6 +127,26 @@ class Composite(Material):
             winding_angle
         )
 
+class MaterialFactory:
+
+    _materials = {
+        "metal": Metal,
+        "composite": Composite,
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._materials.keys())
+
+    def create_material(self, type: str, args: list) -> Material:
+        initialiser = self._materials.get(type)
+
+        if initialiser is None: raise ValueError(
+            f"'{type}' is an invalid material type.\n"
+            f"Supported types are: {self._available}."
+        )
+
+        return initialiser(**args)
 
 
 def main():
