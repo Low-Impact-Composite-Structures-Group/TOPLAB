@@ -82,11 +82,12 @@ class AnalysisFacade(Protocol):
         tank_dimensions: TankDimensions,
         material: Material,
         target_state: OperatingEnvelope,
-        initial_state: InitialState
+        initial_state: InitialState,
+        tank_type: str = "cylindrical_spherical_end_caps",
     ) -> Tank:
         return TankFactory.create_tank(
-            tank_dimensions.radius,
-            tank_dimensions.body_length,
+            tank_type,
+            tank_dimensions,
             material,
             cls._define_operating_pressure(target_state, initial_state)
         )

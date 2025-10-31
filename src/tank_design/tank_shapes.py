@@ -17,9 +17,13 @@ from typing import Protocol
 
 import numpy as np
 
+from scipy.optimize import brentq
+
 from src.tank_design.structural_models import StructuralModelFactory
 
+
 STRUCTURAL_MODEL_FACTORY = StructuralModelFactory()
+FUEL_HEIGHT_TOLERANCE = 1e-3
 
 
 class Material(Protocol):
@@ -28,6 +32,10 @@ class Material(Protocol):
     @abstractmethod
     def determine_specific_heat(self, temperature: float) -> float:
         ...
+
+
+def radius_from_volume_sphere(volume: float) -> float:
+    return (3 * volume / (4 * math.pi)) ** (1/3)
 
 
 class TankSection(ABC):
@@ -348,6 +356,13 @@ class CylindricalTankSphericalCaps(Tank):
         self.create_end_cap()
         self.create_sections()
 
+    def __str__(self):
+        return f"Cylindrical Tank Spherical End Caps (Radius: {self.radius}, Body: {self.body_length})"
+
+    @property
+    def thickness(self):
+        return self.body.thickness
+
     @property
     def body_length(self):
         return self.total_length - 2 * self.radius
@@ -412,8 +427,14 @@ class CylindricalTankSphericalCaps(Tank):
         return self.sections
 
     def compute_fuel_height(self, fuel_volume: float) -> float:
-        return bisection_method(
-            self.radius * 2, 0, fuel_volume, self.compute_fuel_volume
+        if abs(fuel_volume - self.volume) / self.volume <= FUEL_HEIGHT_TOLERANCE:
+            return 2 * self.radius
+        return brentq(
+            lambda h: self.compute_fuel_volume(h) - fuel_volume,
+            a=0,
+            b=2*self.radius,
+            xtol=FUEL_HEIGHT_TOLERANCE,
+            maxiter=100
         )
     
     def compute_fuel_area_zones(self, fuel_height: float) -> list[float]:
@@ -640,6 +661,7 @@ class CylindricalTankSphericalCaps(Tank):
         radius: float, volume: float
     ) -> float:
         num = volume - 4 / 3 * math.pi * radius ** 3
+        if num < 0: return None
         den = math.pi * radius ** 2
         return num / den
         
@@ -660,13 +682,13 @@ class SphericalTank(Tank):
 
     @property
     def characteristic_length(self):
-        return self.diameter
+        return 0
 
     @property
     def exposed_surface(self):
         # It should be null; however to avoid zero division it is set
         # really small
-        return 1e-13
+        return 0
 
     @property
     def body_length(self):
@@ -687,8 +709,12 @@ class SphericalTank(Tank):
         return self.sections
 
     def compute_fuel_height(self, fuel_volume: float) -> float:
-        return bisection_method(
-            self.radius * 2, 0, fuel_volume, self.compute_fuel_volume
+        return brentq(
+            lambda h: self.compute_fuel_volume(h) - fuel_volume,
+            a=0,
+            b=2*self.radius,
+            xtol=FUEL_HEIGHT_TOLERANCE,
+            maxiter=100
         )
 
     @classmethod
@@ -707,60 +733,33 @@ class SphericalTank(Tank):
         )
 
 
+@dataclass
+class TankDimensions:
+    radius: float = None
+    body_length: float = None
+
+    @property
+    def total_tank_length(self):
+        return self.body_length + 2 * self.radius
+
+
 class TankFactory():
 
     @staticmethod
     def create_tank(
-        radius: float,
-        body_length: float,
+        type: str,
+        tank_dimensions: TankDimensions,
         material: Material,
         operating_pressure: float
     ) -> Tank:
-        if body_length == 0:
-            return SphericalTank(radius, material, operating_pressure)
-        total_length = 2 * radius + body_length
+        if type != "cylindrical_spherical_end_caps":
+            raise ValueError(f"'{type}' not supported tank type")
+        if tank_dimensions.body_length is None:
+            return SphericalTank(tank_dimensions.radius, material, operating_pressure)
+        total_length = tank_dimensions.body_length + 2 * tank_dimensions.radius
         return CylindricalTankSphericalCaps(
-            radius, total_length, material, operating_pressure
+            tank_dimensions.radius, total_length, material, operating_pressure
         )
-
-
-def bisection_method(
-    high: float, low: float, target: float, function
-) -> float:
-    """Bisection method to find the inputs required to obtain the target 
-    value of the given function. In this module it is used to compute
-    the height of the fuel in the tank, for a given fuel volume.
-
-    Args:
-        high (float): High value for the input interval.
-        low (float): Low value for the input interval.
-        target (float): Target value of the function.
-        function (_type_): Function to be used to compute the new value.
-
-    Raises:
-        ValueError: When the maximum amount of iterations (100) is 
-        reached, a ValueError is risen.
-
-    Returns:
-        float: Input value for the function required to obtain the
-        target value.
-    """
-
-    # Define max iterations and desired accuracy
-    max_iterations = 100
-    accuracy = 1e-5
-
-    for _ in range(max_iterations):
-        mid = (high + low) / 2
-        mid_value = function(mid)
-        if abs(target - mid_value) < accuracy:
-            return mid
-        if mid_value > target:
-            high = mid
-        else:
-            low = mid
-    
-    raise StopIteration("Exceeded max iterations.")
 
 
 def main():
