@@ -229,15 +229,22 @@ class PhaseRequester():
         if (
             temperature <= PropsSI("Tcrit", "", 0, "", 0, self.fluid)
             and pressure <= PropsSI("Pcrit", "", 0, "", 0, self.fluid) 
-        ):
-            ref_temperature = PropsSI(
-                "T", "P", pressure, "Q", 0, self.fluid
-            )
+        ):  
+            # When this throws a value error, means that the pressure value is
+            # outside of the valid bounds thus is not two-phase
+            try:
+                ref_temperature = PropsSI(
+                    "T", "P", pressure, "Q", 0, self.fluid
+                )
+            except ValueError:
+                ref_temperature = False
             if (
+                ref_temperature and 
                 abs(ref_temperature - temperature) / temperature
                 < two_phase_temperature_limit
             ):
                 return "twophase"
+
         phase: str = PhaseSI(
             'P',pressure,
             'T',temperature,
