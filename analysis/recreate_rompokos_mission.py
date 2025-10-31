@@ -23,15 +23,15 @@ def perform_analysis():
         pressure, temperature, fill
     )
 
-    # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.rompokos(None, None)
-    tank_dimensions = TankDimensions(
-        tank.radius, tank.body_length
-    )
-
     # Define the tank material
     winding_angle = 55
     material = Composite.carbon(winding_angle)
+
+    # Define the fuel tank
+    tank = CylindricalTankSphericalCaps.rompokos(material, pressure)
+    tank_dimensions = TankDimensions(
+        tank.radius, tank.body_length
+    )
 
     # Define the target conditions
     operating_envelope = OperatingEnvelope(None, None, None)

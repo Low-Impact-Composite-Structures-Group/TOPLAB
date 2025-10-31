@@ -35,6 +35,8 @@ def perform_analysis():
     # Define the levels for the contour plot
     levels = [i / 100 for i in range(26, 35, 1)]
 
+    directory = "data_gas_phase_tank"
+
     analyse_tank(
         initial_state,
         insulation,
@@ -42,7 +44,8 @@ def perform_analysis():
         min_pressure,
         fuel_flow.mass_flow,
         fuel_flow.phase,
-        levels
+        levels,
+        directory,
     )
 
 

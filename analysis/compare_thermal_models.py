@@ -4,7 +4,7 @@ from typing import Protocol
 
 from plotting.plot_tank_states import plot_tank_loads
 from src.dynamics.dynamic_analysis import MissionAnalysis
-from src.dynamics.dynamic_models import DynamicModelFactory
+from src.dynamics.dynamic_model_factories import DynamicModelFactory
 from src.dynamics.stopping_criteria import TankIsEmpty
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Metal
