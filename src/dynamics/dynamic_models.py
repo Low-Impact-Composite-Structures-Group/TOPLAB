@@ -586,8 +586,9 @@ class LinModel(DynamicModel):
         )
         factor1 = energy_derivative / tank_state.volume
         term2 = sum([
-            fuel_flow.mass_flow * fuel_flow.hydrogen.enthalpy
+            fuel_flow.mass_flow * fuel_flow.hydrogen.enthalpy 
             for fuel_flow in fuel_flows
+            if fuel_flow.mass_flow != 0
         ])
         factor2 = (
             tank_state.heat_flux
