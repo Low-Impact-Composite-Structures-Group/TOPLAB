@@ -170,12 +170,22 @@ class EulerMethod(MultistepMethod):
         derivatives: Union[float, list[float]],
         current_value: float
     ) -> float:
-        if not isinstance(derivatives, list):
-            return euler_method(
-                derivatives, current_value, self.timestep
-            )
         return euler_method(
             derivatives[-1], current_value, self.timestep
+        )
+
+
+@dataclass
+class AdamBashforthMethod(MultistepMethod):
+    timestep: float
+
+    def compute_new_value(
+        self,
+        derivatives: Union[float, list[float]],
+        current_value: float
+    ) -> float:
+        return adam_bashforth(
+            derivatives, current_value, self.timestep
         )
 
 
