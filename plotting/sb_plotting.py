@@ -2211,8 +2211,8 @@ Converged: {sum(converged)}/{len(converged)} solutions"""
 
         # Greyscale colors for each scenario
         discharge_color = self.palette[0]  # Black
-        refuel_color = self.palette[1]     # Dark grey
-        dormancy_color = self.palette[2]   # Medium grey
+        refuel_color = self.palette[2]     # Dark grey
+        dormancy_color = self.palette[4]   # light grey
 
         # Discharge (black solid line, no markers)
         discharge_line, = ax.plot(scenario_data['discharge']['temperatures'],
