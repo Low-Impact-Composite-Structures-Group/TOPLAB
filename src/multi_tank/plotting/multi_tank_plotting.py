@@ -456,7 +456,11 @@ class DelftColourPlotter:
                           ylim_pressure: Optional[Tuple[float, float]] = None,
                           ylim_temperature: Optional[Tuple[float, float]] = None,
                           ylim_density: Optional[Tuple[float, float]] = None,
-                          legend_locations: Optional[Dict[str, str]] = None) -> plt.Figure:
+                          legend_locations: Optional[Dict[str, str]] = None,
+                          separate_figures: bool = False,
+                          save_dir: Optional[str] = None,
+                          filename_prefix: Optional[str] = None,
+                          dpi: int = 900) -> Any:
         """
         Plot tank evolution with 3 vertical subplots: pressure, temperature, and density vs time.
 
@@ -503,6 +507,172 @@ class DelftColourPlotter:
         # Validate inputs
         if tank_index >= results.n_tanks:
             raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
+
+        # If separate_figures is requested, generate three standalone figures instead of a 3x1 grid
+        if separate_figures:
+            figs: Dict[str, plt.Figure] = {}
+
+            # Helper to decide save location and name
+            def _compute_save_file(metric: str) -> Optional[Path]:
+                base_dir: Optional[Path] = None
+                if save_dir:
+                    base_dir = Path(save_dir)
+                elif save_path:
+                    base_dir = Path(save_path).parent
+                # Default to current working directory if no path given
+                if base_dir is None:
+                    return None
+                base_dir.mkdir(parents=True, exist_ok=True)
+
+                # Build filename
+                if save_path:
+                    ext = Path(save_path).suffix or '.png'
+                    base_stem = Path(save_path).stem
+                else:
+                    ext = '.png'
+                    base_stem = filename_prefix or f"tank{tank_index + 1}"
+
+                filename = f"{base_stem}_{metric}{ext}"
+                return base_dir / filename
+
+            # Extract tank data once
+            tank_data = results._extract_tank_arrays(tank_index)
+            times_hours = results.times / 3600.0
+
+            # Colors
+            primary_color = self.color_palette[0]
+            line_style = self.line_styles[0] if self.use_greyscale else '-'
+
+            # Per-plot common function
+            def _format_axes(ax, xlabel: Optional[str], ylabel: str, ylim: Optional[Tuple[float, float]]):
+                if xlabel:
+                    ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+                ax.grid(True, alpha=0.3)
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+                if xlim is not None:
+                    ax.set_xlim(xlim)
+
+            # Pressure plot (match combined plot dimensions)
+            fig_p, ax_p = plt.subplots(1, 1, figsize=(12, 10))
+            ax_p.plot(times_hours, tank_data['pressures'], color=primary_color, linewidth=2, linestyle=line_style,
+                      label='Pressure')
+            _format_axes(ax_p, None, 'Pressure [bar]', ylim_pressure)
+
+            # Add pressure references if configured
+            if reference_lines:
+                pmin = reference_lines.get('P_min')
+                pvent = reference_lines.get('P_vent')
+                if pmin is not None:
+                    ax_p.axhline(y=pmin, color=('#000000' if self.use_greyscale else self.color_palette[2]),
+                                 linestyle='--', alpha=0.7, linewidth=1.5, label='Minimum allowable pressure')
+                if pvent is not None:
+                    ax_p.axhline(y=pvent, color=('#404040' if self.use_greyscale else self.color_palette[6]),
+                                 linestyle=':', alpha=0.7, linewidth=1.5, label='Maximum allowable / venting pressure')
+            # Add event lines and labels only on pressure plot when separate_figures is True
+            if event_lines:
+                event_line_color = '#606060'  # Medium gray for events
+                # Draw vertical lines
+                for i, event in enumerate(event_lines):
+                    event_time = event.get('time', 0.0)
+                    ax_p.axvline(x=event_time, color=event_line_color, linestyle='-',
+                                 linewidth=1.5, alpha=0.8, zorder=0.5)
+
+                # Add annotations on pressure axis
+                y_min, y_max = ax_p.get_ylim()
+                y_range = y_max - y_min
+                for i, event in enumerate(event_lines):
+                    event_time = event.get('time', 0.0)
+                    event_label = event.get('label', 'Event')
+                    y_position_norm = max(0.0, min(1.0, event.get('y_position', 0.75)))
+                    y_pos = y_min + y_range * y_position_norm
+
+                    x_offset = 30 if i % 2 == 0 else -30
+                    y_offset = 15 if i % 2 == 0 else -15
+                    ha = 'left' if x_offset > 0 else 'right'
+
+                    ax_p.annotate(
+                        event_label,
+                        xy=(event_time, y_pos),
+                        xytext=(x_offset, y_offset),
+                        textcoords='offset points',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=event_line_color,
+                                  alpha=1.0, linewidth=1.2),
+                        arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0',
+                                        color=event_line_color, linewidth=1.2),
+                        fontsize=plot_style.LEGEND_FONT_SIZE,
+                        fontweight='bold',
+                        color=event_line_color,
+                        ha=ha
+                    )
+            # Legend if needed
+            lines = ax_p.get_lines()
+            labeled_lines = [l for l in lines if l.get_label() and not l.get_label().startswith('_')]
+            if len(labeled_lines) > 1:
+                leg = ax_p.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
+                                  shadow=True, framealpha=0.9, edgecolor='black')
+                leg.get_frame().set_facecolor('white')
+                leg.get_frame().set_linewidth(1.2)
+            figs['pressure'] = fig_p
+
+            # Temperature plot (match combined plot dimensions)
+            fig_t, ax_t = plt.subplots(1, 1, figsize=(12, 10))
+            ax_t.plot(times_hours, tank_data['temperatures'], color=primary_color, linewidth=2, linestyle=line_style,
+                      label='Temperature')
+            _format_axes(ax_t, None, 'Temperature [K]', ylim_temperature)
+            if reference_lines and 'T_ambient' in reference_lines:
+                ax_t.axhline(y=reference_lines['T_ambient'], color=('#404040' if self.use_greyscale else self.color_palette[2]),
+                             linestyle='--', alpha=0.7, linewidth=1.5, label='Ambient temperature')
+            # Add event lines (no labels) to temperature plot
+            if event_lines:
+                event_line_color = '#606060'
+                for event in event_lines:
+                    event_time = event.get('time', 0.0)
+                    ax_t.axvline(x=event_time, color=event_line_color, linestyle='-',
+                                 linewidth=1.5, alpha=0.8, zorder=0.5)
+            lines = ax_t.get_lines()
+            labeled_lines = [l for l in lines if l.get_label() and not l.get_label().startswith('_')]
+            if len(labeled_lines) > 1:
+                leg = ax_t.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
+                                  shadow=True, framealpha=0.9, edgecolor='black')
+                leg.get_frame().set_facecolor('white')
+                leg.get_frame().set_linewidth(1.2)
+            figs['temperature'] = fig_t
+
+            # Density plot (match combined plot dimensions)
+            fig_d, ax_d = plt.subplots(1, 1, figsize=(12, 10))
+            ax_d.plot(times_hours, tank_data['densities'], color=primary_color, linewidth=2, linestyle=line_style,
+                      label='Density')
+            _format_axes(ax_d, 'Time [hours]', 'Density [kg/m³]', ylim_density)
+            if reference_lines and 'rho_stop' in reference_lines:
+                ax_d.axhline(y=reference_lines['rho_stop'], color=('#404040' if self.use_greyscale else self.color_palette[2]),
+                             linestyle='--', alpha=0.7, linewidth=1.5, label='Stopping density')
+            # Add event lines (no labels) to density plot
+            if event_lines:
+                event_line_color = '#606060'
+                for event in event_lines:
+                    event_time = event.get('time', 0.0)
+                    ax_d.axvline(x=event_time, color=event_line_color, linestyle='-',
+                                 linewidth=1.5, alpha=0.8, zorder=0.5)
+            lines = ax_d.get_lines()
+            labeled_lines = [l for l in lines if l.get_label() and not l.get_label().startswith('_')]
+            if len(labeled_lines) > 1:
+                leg = ax_d.legend(fontsize=plot_style.LEGEND_FONT_SIZE, frameon=True, fancybox=True,
+                                  shadow=True, framealpha=0.9, edgecolor='black')
+                leg.get_frame().set_facecolor('white')
+                leg.get_frame().set_linewidth(1.2)
+            figs['density'] = fig_d
+
+            # Save if requested
+            for metric, fig in figs.items():
+                out_file = _compute_save_file(metric)
+                if out_file is not None:
+                    fig.savefig(str(out_file), dpi=dpi, bbox_inches='tight', facecolor='white')
+                    print(f"   💾 Saved {metric} evolution to: {out_file}")
+
+            print(f"   ✅ Separate tank evolution plots completed for Tank {tank_index + 1}")
+            return figs
 
         # Create 3x1 vertical subplot grid with shared x-axis
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
@@ -718,7 +888,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Tank evolution plot completed")
@@ -728,7 +898,8 @@ class DelftColourPlotter:
                           results: MultiTankResults,
                           tank_index: int = 0,
                           save_path: Optional[str] = None,
-                          overlay_all_tanks: bool = None) -> plt.Figure:
+                          overlay_all_tanks: bool = None,
+                          dpi: int = 900) -> plt.Figure:
         """
         Plot mass evolution as a separate figure for the new 2-plot system.
 
@@ -793,7 +964,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
+            fig.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
             print(f"   💾 Saved to: {save_path}")
 
         print(f"   ✅ Mass evolution plot completed")

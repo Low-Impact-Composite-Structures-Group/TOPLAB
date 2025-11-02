@@ -1467,40 +1467,59 @@ class SystemOrchestrator:
             if not use_overlay:
                 print(f"   🎨 Plotting Tank {tank_idx + 1} evolution...")
 
-                tank_save_path = None
-                if save_path:
-                    # Create tank-specific save path
-                    from pathlib import Path
-                    save_dir = Path(save_path).parent
-                    save_ext = Path(save_path).suffix or '.png'
-                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
-                    tank_save_path = save_dir / f"{base_name}_evolution_tank{tank_idx + 1}{save_ext}"
-
-                # Get event lines configuration from tank_states config
+                # Read tank state plotting configuration
                 tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
                 event_lines = tank_states_config.get('event_lines', [])
 
-                # Get axis limits and legend locations from config
+                # Axis limits and legend locations
                 xlim = tank_states_config.get('xlim', None)
                 ylim_pressure = tank_states_config.get('ylim_pressure', None)
                 ylim_temperature = tank_states_config.get('ylim_temperature', None)
                 ylim_density = tank_states_config.get('ylim_density', None)
                 legend_locations = tank_states_config.get('legend_locations', None)
 
-                fig = plotter.plot_tank_evolution(
+                # Separate figures config and dpi
+                separate_figures = tank_states_config.get('separate_figures', False)
+                dpi = tank_states_config.get('dpi', 900)
+
+                # File/dir naming
+                tank_save_path = None
+                save_dir = None
+                filename_prefix = None
+                if save_path:
+                    from pathlib import Path
+                    save_dir = Path(save_path).parent
+                    save_ext = Path(save_path).suffix or '.png'
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                    ts_filename = tank_states_config.get('filename', 'evolution')
+
+                    if separate_figures:
+                        # Provide a prefix; function will append _pressure/_temperature/_density and keep extension from save_path
+                        filename_prefix = f"{base_name}_{ts_filename}_tank{tank_idx + 1}"
+                    else:
+                        tank_save_path = save_dir / f"{base_name}_{ts_filename}_tank{tank_idx + 1}{save_ext}"
+                result_figs = plotter.plot_tank_evolution(
                     results=self.results,
                     tank_index=tank_idx,
                     reference_lines=reference_lines,
                     reference_lines_config=ref_line_config,
                     event_lines=event_lines,
-                    save_path=str(tank_save_path) if tank_save_path else None,
+                    save_path=str(tank_save_path) if (tank_save_path and not separate_figures) else None,
                     xlim=xlim,
                     ylim_pressure=ylim_pressure,
                     ylim_temperature=ylim_temperature,
                     ylim_density=ylim_density,
-                    legend_locations=legend_locations
+                    legend_locations=legend_locations,
+                    separate_figures=separate_figures,
+                    save_dir=str(save_dir) if (save_dir and separate_figures) else None,
+                    filename_prefix=filename_prefix,
+                    dpi=dpi
                 )
-                figures.append(fig)
+                # Handle return type (dict of figures when separate_figures=True)
+                if isinstance(result_figs, dict):
+                    figures.extend(result_figs.values())
+                else:
+                    figures.append(result_figs)
 
             # Generate density-temperature plot for this tank
             dt_save_path = None

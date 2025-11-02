@@ -148,6 +148,10 @@ output:
       - 12
       - 10
       filename: evolution
+      # When true, also produce three separate figures per tank (pressure, temperature, density)
+      separate_figures: false
+      # DPI to use when saving separate figures (and combined evolution if applicable)
+      dpi: 1000
       event_lines:
       - time: 0.19
         label: First valve opening event
