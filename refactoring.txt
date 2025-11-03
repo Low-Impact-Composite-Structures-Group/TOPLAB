@@ -1,5 +1,5 @@
 Refactoring To-Do:
-- [ ] src
+- [x] src
     - [x] Dynamics
     - [x] Efficiencies
     - [x] Fluids
@@ -12,8 +12,8 @@ Refactoring To-Do:
 
 
 - [ ] Facades
-- [ ] Analysis updated [analysis_updated]
-- [ ] Data updated [data_updated]
+- [x] Analysis updated [analysis_updated]
+- [x] Data updated [data_updated]
 - [ ] main [main_updated]
 - [ ] Examples [examples_updated]
 - [ ] Plotting

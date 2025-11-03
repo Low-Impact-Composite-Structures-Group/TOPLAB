@@ -1,6 +1,6 @@
 
 
-from analysis.study_tank_geometry import analyse_tank
+from analysis_deprecated.study_tank_geometry import analyse_tank
 from facades.analysis_facades import InitialConditions
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
