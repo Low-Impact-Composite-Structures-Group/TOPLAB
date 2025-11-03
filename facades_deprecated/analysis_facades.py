@@ -1,4 +1,6 @@
 
+import warnings
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -22,6 +24,8 @@ from src.thermodynamics.internal_models import SingleZoneModel
 from src.thermodynamics.tank_states import (InitialConditions, TankStates,
                                             OperationalEnvelope)
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
+
+warnings.warn("Facades are deprecated", DeprecationWarning)
 
 # The lower mass limit is to be used for draining analysis og gas tanks
 LOWER_MASS_LIMIT = 500

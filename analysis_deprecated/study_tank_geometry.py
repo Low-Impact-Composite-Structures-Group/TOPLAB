@@ -5,7 +5,7 @@ from typing import Protocol
 import matplotlib.pyplot as plt
 import numpy as np
 
-from facades.analysis_facades import (DrainingAnalysisFacade,
+from facades_deprecated.analysis_facades import (DrainingAnalysisFacade,
                                       OperationalEnvelope, TankDimensions)
 from plotting.plot_geometric_study import plot_geometric_study
 

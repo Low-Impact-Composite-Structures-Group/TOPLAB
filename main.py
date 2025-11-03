@@ -23,7 +23,7 @@ class AnalysisProtocol(Protocol):
         ...
 
 
-def run_analysis(module_name: str, config_file: str, data_dir: str = "data_updated"):
+def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
     # Load the analysis module dynamically
     analysis: AnalysisProtocol = import_module(module_name)
 
@@ -75,7 +75,8 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data_updat
     print("Plotting...")
     fig: Figure = analysis.plot_results(store_path, fig_path, config.get("plotting"))
     print("Plotting completed!")
-    fig.show()
+    if fig is not None:
+        fig.show()
 
 
 if __name__ == "__main__":

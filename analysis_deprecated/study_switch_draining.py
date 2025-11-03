@@ -1,6 +1,6 @@
 
 
-from facades.analysis_facades import (InitialConditions, OperationalEnvelope,
+from facades_deprecated.analysis_facades import (InitialConditions, OperationalEnvelope,
                                       SwitchPhaseDrainingAnalysis,
                                       TankDimensions)
 from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,

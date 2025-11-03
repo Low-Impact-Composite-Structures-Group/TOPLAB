@@ -3,7 +3,7 @@ from typing import Protocol
 
 import matplotlib.pyplot as plt
 
-from facades.analysis_facades import (InitialConditions, MissionAnalysisFacade,
+from facades_deprecated.analysis_facades import (InitialConditions, MissionAnalysisFacade,
                                       OperationalEnvelope, TankDimensions)
 from plotting.plot_tank_states import (plot_tank_fill,
                                        plot_thermo_mechanical_loading)

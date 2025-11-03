@@ -2,7 +2,7 @@
 
 import matplotlib.pyplot as plt
 
-from facades.analysis_facades import (FillingAnalysisFacade, InitialConditions,
+from facades_deprecated.analysis_facades import (FillingAnalysisFacade, InitialConditions,
                                       OperationalEnvelope, TankDimensions,
                                       OperationalEnvelope)
 from plotting.plot_tank_states import (plot_tank_fill,

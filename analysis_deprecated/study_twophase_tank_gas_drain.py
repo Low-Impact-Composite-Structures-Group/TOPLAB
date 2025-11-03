@@ -4,7 +4,7 @@ from analysis_deprecated.study_tank_geometry import analyse_tank
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission_sections import OutFlow
-from facades.analysis_facades import InitialConditions
+from facades_deprecated.analysis_facades import InitialConditions
 
 
 def perform_analysis():

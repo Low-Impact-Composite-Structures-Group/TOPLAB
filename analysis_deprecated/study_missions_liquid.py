@@ -1,7 +1,7 @@
 import math
 from plotting.plot_tank_states import (plot_required_flux, plot_tank_fill, plot_tank_loads,
                                        plot_tank_temperatures)
-from facades.analysis_facades import (MissionAnalysisFacade,
+from facades_deprecated.analysis_facades import (MissionAnalysisFacade,
                                           OperationalEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
