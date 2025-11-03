@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 from dataclasses import dataclass
 from typing import Protocol
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
@@ -30,6 +32,11 @@ class OutFlow(FuelFlow):
     def SMR_cruise(cls, phase: str):
         fuel_flow = -0.21
         return cls(fuel_flow, phase)
+    
+    @classmethod
+    def LPA_cruise(cls, phase: str):
+        fuel_flow = -0.654
+        return cls(fuel_flow, phase)
 
 
 
@@ -46,6 +53,7 @@ class MissionSection:
     mach_number: float
 
     ground_temperature: float = None
+    name: str = None
 
     def __post_init__(self) -> None:
         self.ambient = get_ISA_air_properties(
@@ -61,10 +69,12 @@ class MissionSection:
         return self.ambient.speed_of_sound * self.mach_number
     
     def number_of_timesteps(self, timestep: float) -> float:
-        if self.duration % timestep != 0:
-            raise ValueError(
-                "Invalid timestep and duration combination\n" \
-                "Ensure that the duration is a multiple of the step."
+        modulus = self.duration % timestep
+        if modulus != 0:
+            warnings.warn(
+                f"Selected timestep ({timestep}) leaves remainder in mission duration.\n"
+                + f"Remaining time is: {modulus}.\n"
+                + "It is up to the user to see if this is desired..."
             )
         return int(self.duration // timestep)
 

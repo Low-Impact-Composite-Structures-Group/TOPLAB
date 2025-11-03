@@ -1,14 +1,10 @@
-
-
-from typing import Protocol
-
 from plotting.plot_tank_states import plot_tank_loads
 from src.dynamics.dynamic_analysis import MissionAnalysis
 from src.dynamics.dynamic_model_factories import DynamicModelFactory
 from src.dynamics.stopping_criteria import TankIsEmpty
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Metal
-from src.mission.mission import Mission
+from src.mission.mission import MissionFactory
 from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 from src.thermodynamics.external_models import (ForcedConvectionModel,
@@ -79,7 +75,7 @@ def perform_analysis():
         )
     ]
 
-    mission = Mission.rompokos()
+    mission = MissionFactory().create_mission_from_file("rompokos", "liquid")
     data = [
         MissionAnalysis.perform_analysis(
             tank,

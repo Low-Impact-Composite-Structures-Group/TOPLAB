@@ -1,0 +1,88 @@
+mission:
+  - name: Hold
+    duration: 1200
+    fuel_flows:
+    - mass_flow: -0.0
+    altitude: 0
+    mach_number: 0.02
+    ground_temperature: 288.15
+  
+  - name: Take-Off
+    duration: 1200
+    fuel_flows:
+    - mass_flow: -0.1132
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Climb
+    duration: 300
+    fuel_flows:
+    - mass_flow: -0.0966
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Cruise
+    duration: 6600
+    fuel_flows:
+    - mass_flow: -0.0512
+    altitude: 5200
+    mach_number: 0.44
+    ground_temperature: 288.15
+  
+  - name: Descent
+    duration: 1200
+    fuel_flows:
+    - mass_flow: -0.004
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Alternate Climb
+    duration: 600
+    fuel_flows:
+    - mass_flow: -0.1102
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Alternate Cruise
+    duration: 1140
+    fuel_flows:
+    - mass_flow: -0.0724
+    altitude: 5200
+    mach_number: 0.44
+    ground_temperature: 288.15
+  
+  - name: Alternate Descent
+    duration: 300
+    fuel_flows:
+    - mass_flow: -0.004
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Loiter
+    duration: 1800
+    fuel_flows:
+    - mass_flow: -0.0286
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Descent 2
+    duration: 300
+    fuel_flows:
+    - mass_flow: -0.004
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
+  
+  - name: Landing
+    duration: 300
+    fuel_flows:
+    - mass_flow: -0.0818
+    altitude: 2600.0
+    mach_number: 0.22
+    ground_temperature: 288.15
