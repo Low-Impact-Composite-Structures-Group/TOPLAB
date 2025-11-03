@@ -1,21 +1,21 @@
 Refactoring To-Do:
 - [ ] src
-    - [ ] Dynamics
-    - [ ] Efficiencies
-    - [ ] Fluids
-    - [ ] Insulation
-    - [ ] Materials
-    - [ ] Mission
-    - [ ] Multistep-Methods
-    - [ ] Tank Design
-    - [ ] Thermodynamics
+    - [x] Dynamics
+    - [x] Efficiencies
+    - [x] Fluids
+    - [x] Insulation
+    - [x] Materials
+    - [x] Mission
+    - [x] Multistep-Methods
+    - [x] Tank Design
+    - [x] Thermodynamics
 
 
 - [ ] Facades
-- [ ] Analysis updated
-- [ ] Data updated
-- [ ] Data
-- [ ] Examples
+- [ ] Analysis updated [analysis_updated]
+- [ ] Data updated [data_updated]
+- [ ] main [main_updated]
+- [ ] Examples [examples_updated]
 - [ ] Plotting
 
 
@@ -23,9 +23,13 @@ Refactoring To-Do:
 # Possible sources for issues
 - Moved dynamic models: created separate directory, with modules each encompassing a single method of computation
 - Removed facades: remove the layer of abstraction
+- TargetState class was changed to OperationalEnvelope class
+- InitialState class was changed to InitialConditions class
+
 
 # Changes
 - Updated fuel phase retriever, should be more stable
 - Enable 'None' insulation, for when no insulation is used
 - Moved hydrogen models, current implementation should be more modular
 - Changed TankStates and OperationEnvelope data-classes
+- Change of InitialConditions and OperationalEnvelope, should be more clear, rather than over-using State based naming-convention
