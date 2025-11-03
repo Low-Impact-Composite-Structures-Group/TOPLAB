@@ -59,6 +59,11 @@ class ExternalModel(Protocol):
         ...
 
 
+class NoInsulation:
+    def compute_thermal_resistances(self, temperatures, tank) -> list[float]:
+        return []  # No insulation layers → no additional resistances
+
+
 @dataclass
 class ThermodynamicModel:
     internal_model: InternalModel
@@ -67,6 +72,11 @@ class ThermodynamicModel:
 
     insulation_layers: int = 12
     max_iterations: int = int(1e3)
+
+    def __post_init__(self):
+        if self.insulation is None:
+            self.insulation = NoInsulation()
+            self.insulation_layers = 0
 
     def compute_heat_flux(
         self,
@@ -83,7 +93,7 @@ class ThermodynamicModel:
             
             # Compute the thermal resistances that are in series in the 
             # fuel tank
-            thermal_resistances = self.compute_thermal_resistances(
+            series_resistances = self.compute_thermal_resistances(
                 tank, tank_state, mission_section, temperatures
             )
 
@@ -92,9 +102,13 @@ class ThermodynamicModel:
                 mission_section.temperature,
                 tank_state.temperature,
                 SeriesResistances().compute_equivalent_resistance(
-                    thermal_resistances
+                    series_resistances
                 )
             )
+
+            # If there is no insulation, the heat flux convergence iterations are not required
+            if isinstance(self.insulation, NoInsulation):
+                return heat_flux, temperatures
 
             # Compute new temperatures
             new_temperatures = self.compute_new_temperatures(
@@ -102,7 +116,7 @@ class ThermodynamicModel:
                     self.insulation_layers
                 ),
                 self.construct_y_vector(
-                    thermal_resistances,
+                    series_resistances,
                     tank_state.temperature,
                     mission_section.temperature,
                     heat_flux
@@ -124,24 +138,29 @@ class ThermodynamicModel:
         mission_section: MissionSection,
         temperatures
     ) -> list[float]:
-
-        thermal_resistances = [
-            self.internal_model.compute_equivalent_resistance(
-                tank, tank_state, temperatures[0]
-            ),
-            *self.insulation.compute_thermal_resistances(
-                temperatures, tank
-            ),
-            self.external_model.compute_equivalent_resistance(
-                tank, mission_section, temperatures[-1]
-            )
-        ]
         
-        return thermal_resistances
+        internal_resistance = self.internal_model.compute_equivalent_resistance(
+            tank, tank_state, temperatures[0]
+        )
+        insulation_resistances = self.insulation.compute_thermal_resistances(
+            temperatures, tank
+        )
+        external_resistance = self.external_model.compute_equivalent_resistance(
+            tank, mission_section, temperatures[-1]
+        )
+
+        return [
+            internal_resistance,
+            *insulation_resistances,
+            external_resistance,
+        ]
             
     def define_initial_temperatures(
         self, fuel_temperature: float, ambient_temperature: float
     ) -> list[float]:
+        if self.insulation_layers == 0:
+            return [fuel_temperature, ambient_temperature]
+        
         temp_difference = ambient_temperature - fuel_temperature
         temperature_step = temp_difference / self.insulation_layers
         return [
