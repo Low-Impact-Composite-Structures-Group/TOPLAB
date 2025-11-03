@@ -3,6 +3,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 import math
 import json
+import scipy
 from pathlib import Path
 from typing import Protocol
 
@@ -65,7 +66,6 @@ class Insulation(Protocol):
         ...
 
 
-@dataclass
 class FoamInsulation(Insulation):
     thickness: float
     density: float
@@ -115,6 +115,8 @@ class FoamInsulation(Insulation):
 
 @dataclass
 class ConstantFoamInsulation(FoamInsulation):
+    thickness: float
+    density: float
     thermal_conductivity: float
 
     def compute_thermal_conductivity(
@@ -162,10 +164,10 @@ class VariableFoamInsulation(FoamInsulation):
     name: str
 
     def __post_init__(self):
-        self.create_path()
+        self._create_path()
         self.load_foam_data()
 
-    def create_path(self) -> Path:
+    def _create_path(self) -> Path:
         self.path = (
             Path("src")
             / "insulation"
@@ -175,8 +177,12 @@ class VariableFoamInsulation(FoamInsulation):
 
     def load_foam_data(self):
         with self.path.open("r") as file:
-            self.thermal_conductivity_data = json.load(file)
-        return self.thermal_conductivity_data
+            self.data: dict = json.load(file)
+        return self.data
+    
+    def _extract_density(self):
+        self.density = self.data.get("density")
+        return self.density
 
     def compute_average_temperature(
         self, hot_temperature: float, cold_temperature: float
@@ -191,8 +197,8 @@ class VariableFoamInsulation(FoamInsulation):
         )
         first = True
         for temperature, conductivity in zip(
-            self.thermal_conductivity_data["temperature"],
-            self.thermal_conductivity_data["thermal_conductivity"]
+            self.data["temperature"],
+            self.data["thermal_conductivity"]
         ):
             if first:
                 if target_temperature < temperature:
@@ -213,6 +219,32 @@ class VariableFoamInsulation(FoamInsulation):
     def polyurethane(cls, thickness: float) -> VariableFoamInsulation:
         density = None
         return cls(thickness, density, "polyurethane")
+
+
+
+class VariableFoamInsulationLinearInterpolated(VariableFoamInsulation):
+    
+    def __init__(self, name: str, thickness: float) -> None:
+        self.name = name
+        self.thickness = thickness
+
+        self._create_path()
+        self.load_foam_data()
+        self._extract_density()
+        self._create_interpolation()
+
+    def _create_interpolation(self):
+        self.thermal_conductivity_interp = scipy.interpolate.make_interp_spline(
+            self.data["temperature"],
+            self.data["thermal_conductivity"],
+            k=1,
+        )
+
+        return self.thermal_conductivity_interp
+
+    def compute_thermal_conductivity(self, hot_temperature: float, cold_temperature: float) -> float:
+        temperature = self.compute_average_temperature(hot_temperature, cold_temperature)
+        return self.thermal_conductivity_interp(temperature)
 
 
 def main():
