@@ -73,12 +73,7 @@ class ParallelResistances(ResistanceCoupling):
     def compute_equivalent_resistance(
         self, resistances: list[float]
     ) -> float:
-        den = 0
-        for resistance in resistances:
-            if resistance == 0:
-                return 0
-            den += 1 / resistance
-        return 1 / den
+        return 1 / sum(1 / resistance for resistance in resistances)
 
 
 class SeriesResistances(ResistanceCoupling):
