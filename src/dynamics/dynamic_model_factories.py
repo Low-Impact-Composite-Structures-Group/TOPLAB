@@ -1,7 +1,6 @@
 
-
-from src.dynamics.dynamic_models import (DynamicModel,
-                                         SinglePhaseLimitLowerPressureModel,
+from src.dynamics.dynamic_models.protocols import DynamicModel
+from src.dynamics.dynamic_models.ahluwalia import (SinglePhaseLimitLowerPressureModel,
                                          SinglePhaseModel,
                                          TwoPhaseLimitLowerPressureModel,
                                          TwoPhaseModel)
@@ -38,15 +37,15 @@ class TwoPhaseFactory:
     def get_dynamic_model(
         self,
         tank_state: TankState,
-        target_conditions: OperatingEnvelope
+        operating_envelope: OperatingEnvelope
     ) -> DynamicModel:
         if (
-            target_conditions.min_pressure is None
-            and target_conditions.max_pressure is None
+            operating_envelope.min_pressure is None
+            and operating_envelope.max_pressure is None
         ):
             return TwoPhaseModel
-        if target_conditions.min_pressure is not None:
-            if tank_state.pressure <= target_conditions.min_pressure:
+        if operating_envelope.min_pressure is not None:
+            if tank_state.pressure <= operating_envelope.min_pressure:
                 return TwoPhaseLimitLowerPressureModel
         return TwoPhaseModel
 

@@ -3,15 +3,16 @@
 import matplotlib.pyplot as plt
 
 from facades.analysis_facades import (FillingAnalysisFacade, InitialConditions,
-                                      OperatingEnvelope, TankDimensions,
-                                      TargetConditions)
+                                      OperationalEnvelope, TankDimensions,
+                                      OperationalEnvelope)
 from plotting.plot_tank_states import (plot_tank_fill,
                                        plot_thermo_mechanical_loading)
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
-from src.mission.mission_sections import InFlow, MissionSection
+from src.mission.mission_sections import MissionSection
+from src.mission.fuel_flow import InFlow
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 
 
@@ -30,25 +31,20 @@ def perform_analysis():
     material = Composite.carbon(winding_angle)
 
     # Define the fuel tank
-    tank = CylindricalTankSphericalCaps.ahluwalia(material , pressure)
+    tank = CylindricalTankSphericalCaps.ahluwalia(material, pressure)
     tank_radius = tank.radius
     tank_body = tank.body_length
     tank_dimensions = TankDimensions(tank_radius, tank_body)
 
 
-
-    # Define the target conditions
-    target_conditions = TargetConditions(
-        fill=0.97,
-        fuel_mass=11.0
-    )
-
     # Define the operating envelope of the fuel tank
     max_pressure = 10e5
-    min_pressure = None
-    min_temperature = None
-    operating_envelope = OperatingEnvelope(
-        max_pressure, min_pressure, min_temperature
+    target_fill = 0.97
+    target_mass = 11.0
+    operating_envelope = OperationalEnvelope(
+        max_pressure=max_pressure,
+        target_fill=target_fill,
+        target_mass=target_mass
     )
 
     # Define insulation and thermodynamic model
@@ -83,7 +79,6 @@ def perform_analysis():
         mission,
         initial_conditions,
         operating_envelope,
-        target_conditions
     )
 
     tank_states = tank_performance.tank_states

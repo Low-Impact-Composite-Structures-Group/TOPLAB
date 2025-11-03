@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from facades.analysis_facades import (DrainingAnalysisFacade,
-                                      OperatingEnvelope, TankDimensions)
+                                      OperationalEnvelope, TankDimensions)
 from plotting.plot_geometric_study import plot_geometric_study
 
 
@@ -58,6 +58,9 @@ def analyse_tank(
     body_lengths = [i / 100 for i in range(0, 1001, 50)]
     radii = [i / 100 for i in range(25, 251, 25)]
 
+    minimum_mass = 5
+    minimum_fill = 0
+
     # Perform the analysis
     performances = [
         [
@@ -70,10 +73,10 @@ def analyse_tank(
                 fuel_mass_flow,
                 fuel_flow_phase,
                 initial_state,
-                OperatingEnvelope(
-                    None,
-                    min_pressure,
-                    None
+                OperationalEnvelope(
+                    min_pressure=min_pressure,
+                    min_mass=minimum_mass,
+                    min_fill=minimum_fill,
                 )
             )
             for body_length in body_lengths

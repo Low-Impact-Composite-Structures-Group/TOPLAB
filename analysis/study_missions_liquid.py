@@ -2,12 +2,12 @@ import math
 from plotting.plot_tank_states import (plot_required_flux, plot_tank_fill, plot_tank_loads,
                                        plot_tank_temperatures)
 from facades.analysis_facades import (MissionAnalysisFacade,
-                                          OperatingEnvelope, TankDimensions)
+                                          OperationalEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
 from src.mission.mission import Mission
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
-from src.thermodynamics.tank_states import InitialState
+from src.thermodynamics.tank_states import InitialConditions
 
 
 def perform_analysis():
@@ -27,13 +27,12 @@ def perform_analysis():
     pressure = 1.4e5
     temperature = None
     fill = 0.97
-    initial_state = InitialState(pressure, temperature, fill)
+    initial_state = InitialConditions(pressure, temperature, fill)
 
     # Define operating window of the pressure vessel
     min_pressure = 1.1e5
     min_temperature = None
-    operating_window = OperatingEnvelope(
-        max_pressure=None,
+    operating_window = OperationalEnvelope(
         min_pressure=min_pressure,
         min_temperature=min_temperature
     )

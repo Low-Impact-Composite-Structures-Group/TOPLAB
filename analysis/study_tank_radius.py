@@ -3,7 +3,7 @@
 from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
                                        plot_tank_loads, plot_tank_temperatures)
 from facades.analysis_facades import (DrainingAnalysisFacade, InitialConditions,
-                                          OperatingEnvelope, TankDimensions)
+                                          OperationalEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Metal
 from src.mission.mission_sections import OutFlow
@@ -48,7 +48,7 @@ def perform_analysis():
             fuel_flow.mass_flow,
             fuel_flow.phase,
             initial_state,
-            OperatingEnvelope(
+            OperationalEnvelope(
                 None,
                 min_pressure,
                 None

@@ -10,7 +10,7 @@ from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 from src.thermodynamics.external_models import (ForcedConvectionModel,
                                                 NaturalConvectionModel)
 from src.thermodynamics.internal_models import SingleZoneModel, ThreeZoneModel
-from src.thermodynamics.tank_states import InitialState, TargetState
+from src.thermodynamics.tank_states import InitialConditions, OperationalEnvelope
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 
@@ -20,7 +20,7 @@ def perform_analysis():
     pressure = 1.4e5
     temperature = None
     fill = 0.95
-    initial_conditions = InitialState(
+    initial_conditions = InitialConditions(
         pressure, temperature, fill
     )
 
@@ -32,13 +32,7 @@ def perform_analysis():
     stopping_criteria = [TankIsEmpty()]
 
     # Define the target conditions
-    target_conditions = TargetState(
-        max_pressure=None,
-        min_pressure=None,
-        min_temperature=None,
-        fill=0.0,
-        mass=None
-    )
+    target_conditions = OperationalEnvelope(target_fill=0.0, min_fill=0.0)
 
     # Define insulation and thermodynamic model
     insulation_thickens = 8e-2

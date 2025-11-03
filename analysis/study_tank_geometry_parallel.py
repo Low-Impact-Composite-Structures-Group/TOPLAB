@@ -8,7 +8,7 @@ import dask.array as da
 from dask.distributed import Client, LocalCluster
 
 from facades.analysis_facades import (DrainingAnalysisFacade,
-                                      OperatingEnvelope, ParallelDrainingAnalysis, TankDimensions)
+                                      OperationalEnvelope, ParallelDrainingAnalysis, TankDimensions)
 from plotting.plot_geometric_study import plot_geometric_study
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps, TankFactory, SphericalTank
 

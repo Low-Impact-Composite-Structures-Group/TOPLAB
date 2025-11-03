@@ -8,8 +8,10 @@ class TargetState(Protocol):
     max_pressure: float
     min_pressure: float
     min_temperature: float
-    fill: float
-    mass: float
+    min_fill: float
+    min_mass: float
+    target_fill: float
+    target_mass: float
 
 
 class FuelTankState(Protocol):
@@ -30,14 +32,6 @@ class StoppingCriterion(Protocol):
         ...
 
 
-class MaxPressure(StoppingCriterion):
-
-    def is_met(
-        self, fuel_tank_state: FuelTankState, target_state: TargetState
-    ) -> bool:
-        return fuel_tank_state.pressure >= target_state.max_pressure
-
-
 class TankIsEmpty(StoppingCriterion):
 
     def is_met(
@@ -45,7 +39,7 @@ class TankIsEmpty(StoppingCriterion):
     ) -> bool:
         
         return (
-            fuel_tank_state.fill <= EMPTY_LIMIT 
+            fuel_tank_state.fill <= target_state.min_fill 
             and fuel_tank_state.phase == "twophase"
         )
 
@@ -55,7 +49,7 @@ class NoFuelMass(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fuel_mass <= target_state.mass
+        return fuel_tank_state.fuel_mass <= target_state.min_mass
 
 
 class TankIsFull(StoppingCriterion):
@@ -71,7 +65,7 @@ class TargetFillReached(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fill >= target_state.fill
+        return fuel_tank_state.fill >= target_state.target_fill
 
 
 class TargetMassReached(StoppingCriterion):
@@ -79,7 +73,7 @@ class TargetMassReached(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fuel_mass >= target_state.mass
+        return fuel_tank_state.fuel_mass >= target_state.target_mass
 
 
 class LowerPressureReached(StoppingCriterion):
@@ -96,6 +90,34 @@ class MaxPressureReached(StoppingCriterion):
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
         return fuel_tank_state.pressure >= target_state.max_pressure
+
+
+class StoppingCriteriaFactory:
+
+    _criteria = {
+        "tank_is_empty": TankIsEmpty(),
+        "no_fuel_mass": NoFuelMass(),
+        "tank_is_full": TankIsFull(),
+        "target_fill_reached": TargetFillReached(),
+        "target_mass_reached": TargetMassReached(),
+        "lower_pressure_reached": LowerPressureReached(),
+        "upper_pressure_reached": MaxPressureReached(),
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._criteria.keys())
+
+    def create_criterion(self, type: str) -> StoppingCriterion:
+        criterion = self._criteria.get(type)
+
+        if criterion is not None:
+            return criterion
+        
+        raise ValueError(
+            f"'{type}' is not a valid stopping criterion.\n"
+            f"Available criteria are: {self._available}"
+        )
 
 
 def main():

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Protocol
 
 from src.dynamics.dynamic_analysis import (MissionAnalysis,
-                                           SwitchMissionAnalysis)
+                                           SwitchPhaseDrainingAnalysis)
 from src.dynamics.dynamic_model_factories import (DynamicModelFactory,
                                                   SwitchCaseFactory)
 from src.dynamics.stopping_criteria import (EMPTY_LIMIT, LowerPressureReached,
@@ -19,8 +19,8 @@ from src.multistep_methods.linear_multistep_methods import EulerMethod
 from src.tank_design.tank_shapes import Tank, TankFactory
 from src.thermodynamics.external_models import ForcedConvectionModel
 from src.thermodynamics.internal_models import SingleZoneModel
-from src.thermodynamics.tank_states import (InitialState, TankStates,
-                                            TargetState)
+from src.thermodynamics.tank_states import (InitialConditions, TankStates,
+                                            OperationalEnvelope)
 from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 
 # The lower mass limit is to be used for draining analysis og gas tanks
@@ -50,24 +50,24 @@ class TankDimensions:
     body_length: float
 
 
-@dataclass
-class OperatingEnvelope:
-    max_pressure: float
-    min_pressure: float
-    min_temperature: float
+# @dataclass
+# class OperationalEnvelope:
+#     max_pressure: float
+#     min_pressure: float
+#     min_temperature: float
 
 
-@dataclass
-class InitialConditions:
-    pressure: float
-    temperature: float
-    fill: float
+# @dataclass
+# class InitialConditions:
+#     pressure: float
+#     temperature: float
+#     fill: float
 
 
-@dataclass
-class TargetConditions:
-    fuel_mass: float
-    fill: float 
+# @dataclass
+# class OperationalEnvelope:
+#     fuel_mass: float
+#     fill: float 
 
 
 class AnalysisFacade(Protocol):
@@ -81,8 +81,8 @@ class AnalysisFacade(Protocol):
         cls,
         tank_dimensions: TankDimensions,
         material: Material,
-        target_state: OperatingEnvelope,
-        initial_state: InitialState,
+        target_state: OperationalEnvelope,
+        initial_state: InitialConditions,
         tank_type: str = "cylindrical_spherical_end_caps",
     ) -> Tank:
         return TankFactory.create_tank(
@@ -94,26 +94,26 @@ class AnalysisFacade(Protocol):
 
     @staticmethod
     def _define_operating_pressure(
-        target_state: TargetState,
-        initial_state: InitialState
+        target_state: OperationalEnvelope,
+        initial_state: InitialConditions
     ) -> float:
         if target_state.max_pressure is not None:
             return target_state.max_pressure
         return initial_state.pressure
 
-    @staticmethod
-    def _define_target_conditions(
-        operating_envelope: OperatingEnvelope
-    ) -> TargetState:
-        fill = None
-        target_conditions = TargetState(
-            operating_envelope.max_pressure,
-            operating_envelope.min_pressure,
-            operating_envelope.min_temperature,
-            fill,
-            LOWER_MASS_LIMIT
-        )
-        return target_conditions
+    # @staticmethod
+    # def _define_target_conditions(
+    #     operating_envelope: OperationalEnvelope
+    # ) -> OperationalEnvelope:
+    #     fill = None
+    #     target_conditions = OperationalEnvelope(
+    #         operating_envelope.max_pressure,
+    #         operating_envelope.min_pressure,
+    #         operating_envelope.min_temperature,
+    #         fill,
+    #         LOWER_MASS_LIMIT
+    #     )
+    #     return target_conditions
 
     @staticmethod
     def _define_thermal_model(
@@ -126,8 +126,8 @@ class AnalysisFacade(Protocol):
     @staticmethod
     def _define_initial_state(
         initial_conditions: InitialConditions
-    ) -> InitialState:
-        return InitialState(
+    ) -> InitialConditions:
+        return InitialConditions(
             initial_conditions.pressure,
             initial_conditions.temperature,
             initial_conditions.fill
@@ -145,7 +145,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
         fuel_mass_flow: float,
         fuel_flow_state: float,
         initial_conditions: InitialConditions,
-        operating_envelope: OperatingEnvelope
+        operating_envelope: OperationalEnvelope
     ) -> TankPerformance:
         print(tank_dimensions, datetime.now().strftime("%H:%M:%S"))
         initial_state = cls._define_initial_state(initial_conditions)
@@ -157,7 +157,7 @@ class DrainingAnalysisFacade(AnalysisFacade):
             initial_state,
             cls._define_mission(fuel_mass_flow, fuel_flow_state),
             cls._define_stopping_criteria(),
-            cls._define_target_conditions(operating_envelope),
+            operating_envelope,
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
             cls._define_thermal_model(insulation),
@@ -191,7 +191,7 @@ class ParallelDrainingAnalysis(AnalysisFacade):
     fuel_mass_flow: float
     fuel_phase_flow: str
     initial_state: InitialConditions
-    operating_envelope: OperatingEnvelope
+    operating_envelope: OperationalEnvelope
 
     def __post_init__(self):
         self.tank = self._define_tank(
@@ -210,7 +210,7 @@ class ParallelDrainingAnalysis(AnalysisFacade):
                 self.fuel_mass_flow, self.fuel_phase_flow
             ),
             self._define_stopping_criteria(),
-            self._define_target_conditions(self.operating_envelope),
+            self.operating_envelope,
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
             self._define_thermal_model(self.insulation),
@@ -246,7 +246,7 @@ class MissionAnalysisFacade(AnalysisFacade):
         insulation: Insulation,
         mission: Mission,
         initial_conditions: InitialConditions,
-        operating_envelope: OperatingEnvelope
+        operating_envelope: OperationalEnvelope
     ) -> TankPerformance:
         initial_state = cls._define_initial_state(initial_conditions)
         tank = cls._define_tank(
@@ -257,7 +257,7 @@ class MissionAnalysisFacade(AnalysisFacade):
             initial_state,
             mission,
             cls._define_stopping_criteria(),
-            cls._define_target_conditions(operating_envelope),
+            operating_envelope,
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
             cls._define_thermal_model(insulation),
@@ -280,8 +280,7 @@ class FillingAnalysisFacade(AnalysisFacade):
         insulation: Insulation,
         mission: Mission,
         initial_conditions: InitialConditions,
-        operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions,
+        operating_envelope: OperationalEnvelope,
     ) -> TankPerformance:
         print("Temporary fix, set timestep to 1")
         MULTISTEP_METHOD.timestep = 1
@@ -294,9 +293,7 @@ class FillingAnalysisFacade(AnalysisFacade):
             initial_state,
             mission,
             cls._define_stopping_criteria(),
-            cls._define_target_conditions(
-                operating_envelope, target_conditions
-            ),
+            operating_envelope,
             MULTISTEP_METHOD,
             DYNAMIC_MODEL_FACTORY,
             cls._define_thermal_model(insulation),
@@ -308,19 +305,19 @@ class FillingAnalysisFacade(AnalysisFacade):
     def _define_stopping_criteria(cls) -> list[StoppingCriterion]:
         return [TargetFillReached(), TargetMassReached()]
 
-    @staticmethod
-    def _define_target_conditions(
-        operating_envelope: OperatingEnvelope,
-        target_conditions: TargetConditions
-    ) -> TargetState:
-        target_conditions = TargetState(
-            operating_envelope.max_pressure,
-            operating_envelope.min_pressure,
-            operating_envelope.min_temperature,
-            target_conditions.fill,
-            target_conditions.fuel_mass
-        )
-        return target_conditions
+    # @staticmethod
+    # def _define_target_conditions(
+    #     operating_envelope: OperationalEnvelope,
+    #     target_conditions: OperationalEnvelope
+    # ) -> OperationalEnvelope:
+    #     target_conditions = OperationalEnvelope(
+    #         operating_envelope.max_pressure,
+    #         operating_envelope.min_pressure,
+    #         operating_envelope.min_temperature,
+    #         target_conditions.fill,
+    #         target_conditions.fuel_mass
+    #     )
+    #     return target_conditions
 
 
 class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
@@ -333,7 +330,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
         insulation: Insulation,
         fuel_mass_flow: float,
         initial_conditions: InitialConditions,
-        operating_envelope: OperatingEnvelope
+        operating_envelope: OperationalEnvelope
     ) -> TankPerformance:
 
         # Define the initial state and the fuel tank
@@ -348,7 +345,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
         for _ in range(max_changes):
             
             # Compute new tank states
-            tank_states += SwitchMissionAnalysis.perform_analysis(
+            tank_states += SwitchPhaseDrainingAnalysis.perform_analysis(
                 tank,
                 initial_state,
                 cls._define_mission(
@@ -358,7 +355,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
                     )
                 ),
                 cls._define_stopping_criteria(),
-                cls._define_target_conditions(operating_envelope),
+                operating_envelope,
                 MULTISTEP_METHOD,
                 SwitchCaseFactory(),
                 cls._define_thermal_model(insulation),
@@ -390,7 +387,7 @@ class SwitchPhaseDrainingAnalysis(DrainingAnalysisFacade):
     @classmethod
     def _define_flow_state(
         cls,
-        operating_envelope: OperatingEnvelope,
+        operating_envelope: OperationalEnvelope,
         tank_states: TankStates
     ) -> str:
         if len(tank_states.states) == 0:

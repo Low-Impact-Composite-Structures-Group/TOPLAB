@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import plotting.plot_style
-from src.dynamics.dynamic_models import DynamicModel, LinModel, TwoPhaseModel
+from src.dynamics.dynamic_models.protocols import DynamicModel
+from src.dynamics.dynamic_models.lin import LinModel
+from src.dynamics.dynamic_models.ahluwalia import TwoPhaseModel
 from src.fluids.hydrogen_retrievers import TwoPhaseRequester
 from src.materials.materials import Metal
 from src.tank_design.tank_shapes import SphericalTank

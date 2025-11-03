@@ -6,18 +6,18 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
+from src.dynamics.stopping_criteria import LowerPressureReached, MaxPressureReached, NoFuelMass, TankIsEmpty
 from src.mission.mission import Mission, MissionSection
-from src.thermodynamics.tank_states import (InitialState, TankState,
-                                            TankStates, TargetState)
+from src.mission.mission_sections import FuelFlow, OutFlow
+from src.thermodynamics.tank_states import (InitialConditions, TankState,
+                                            TankStates, OperationalEnvelope)
 
 # The thermal capacity of the tank depends on the mass of the tank, as
 # such this needs to be iterated as the operating pressure of the 
 # tank is refined. Here the maximum amount of iterations are defined
 # and the percentage change in capacity of the tank
-MAX_THERMAL_CAPACITY_ITERATIONS = 5
 THERMAL_CAPACITY_THRESHOLD = 1              # This is as a percentage
-LOWER_MASS_LIMIT = 500   
+# LOWER_MASS_LIMIT = 500   
 
 class FuelTank(Protocol):
     volume: float
@@ -79,13 +79,13 @@ class DynamicModelFactory(Protocol):
     def get_dynamic_model(
         self,
         tank_state: TankState,
-        target_conditions: TargetState
+        target_conditions: OperationalEnvelope
     ) -> DynamicModel:
         ...
 
 
-class ConvectiveMedium:
-    ...
+# class ConvectiveMedium:
+#     ...
 
 
 class StoppingCriterion(Protocol):
@@ -94,7 +94,7 @@ class StoppingCriterion(Protocol):
     def is_met(
         self,
         tank_state: TankState,
-        target_state: TargetState
+        target_state: OperationalEnvelope
     ) -> bool:
         ...
 
@@ -111,9 +111,9 @@ class ThermodynamicModel(Protocol):
         ...
 
 
-class OutFlow(Protocol):
-    mass_flow: float
-    phase: str
+# class OutFlow(Protocol):
+#     mass_flow: float
+#     phase: str
 
 @dataclass
 class FuelFlow:
@@ -126,7 +126,7 @@ class MissionSectionAnalysis:
     @classmethod
     def initialise_tank_states(
         cls,
-        initial_state: InitialState,
+        initial_state: InitialConditions,
         tank: FuelTank,
         timestep: float
     ) -> TankStates:
@@ -160,7 +160,7 @@ class MissionSectionAnalysis:
         tank_state: TankState,
         mission_section: MissionSection,
         dynamic_model_factory: DynamicModelFactory,
-        target_conditions: TargetState,
+        target_conditions: OperationalEnvelope,
         heat_flux_factor: float
     ) -> TankState:
         heat_flux, temperatures = thermal_model.compute_heat_flux(
@@ -184,7 +184,7 @@ class MissionSectionAnalysis:
     def stopping_criterion_is_met(
         stopping_criteria: list[StoppingCriterion],
         current_state: TankState,
-        target_state: TargetState
+        target_state: OperationalEnvelope
     ) -> bool:
         for criterion in stopping_criteria:
             if criterion.is_met(
@@ -238,10 +238,10 @@ class MissionSectionAnalysis:
     def analyse_section(
         cls,
         tank: FuelTank,
-        initial: InitialState,
+        initial: InitialConditions,
         mission_section: MissionSection,
         stopping_criteria: list[StoppingCriterion],
-        target_conditions: TargetState,
+        target_conditions: OperationalEnvelope,
         multistep_method: MultistepMethod,
         dynamic_model_factory: DynamicModelFactory,
         thermal_model: ThermodynamicModel,
@@ -269,20 +269,21 @@ class MissionSectionAnalysis:
                 target_conditions,
                 heat_flux_factor
             )
-
-            tank_states.add_tank_state(
-                TankState(
-                    tank,
-                    cls.compute_new_temperature(
-                        multistep_method, tank_states
-                    ),
-                    cls.compute_new_pressure(
-                        multistep_method, tank_states
-                    ),
-                    cls.compute_new_mass(
-                        multistep_method.timestep, tank_states
-                    )
+            new_values = (
+                cls.compute_new_temperature(
+                    multistep_method, tank_states
+                ),
+                cls.compute_new_pressure(
+                    multistep_method, tank_states
+                ),
+                cls.compute_new_mass(
+                    multistep_method.timestep, tank_states
                 )
+            )
+            if any(value < 0 for value in new_values):
+                return tank_states
+            tank_states.add_tank_state(
+                TankState(tank, *new_values)
             )
             if cls.stopping_criterion_is_met(
                 stopping_criteria,
@@ -300,21 +301,24 @@ class MissionAnalysis:
     def perform_analysis(
         cls,
         tank: FuelTank,
-        initial_state: InitialState,
+        initial_state: InitialConditions,
         mission: Mission,
         stopping_criteria: list[StoppingCriterion],
-        target_conditions: TargetState,
+        operational_envelope: OperationalEnvelope,
         multistep_method: MultistepMethod,
         dynamic_model_factory: DynamicModelFactory,
         thermal_model: ThermodynamicModel,
-        heat_flux_factor: float
+        heat_flux_factor: float,
+        thermal_capacity_convergence: bool = False,
+        max_thermal_capacity_iterations: int = 5,
+        user_update: bool = False,
     ) -> TankStates:
 
         # Iterate till the thermal capacity has converge
-        for i in range(MAX_THERMAL_CAPACITY_ITERATIONS):
+        for i in range(max_thermal_capacity_iterations):
 
             # Define initial state of the tank
-            initial = initial_state
+            initial = InitialConditions(initial_state.pressure, initial_state.temperature, initial_state.fill)
             tank_states = TankStates(list(), multistep_method.timestep)
 
             for mission_section in mission.sections:
@@ -324,21 +328,23 @@ class MissionAnalysis:
                     initial,
                     mission_section,
                     stopping_criteria,
-                    target_conditions,
+                    operational_envelope,
                     multistep_method,
                     dynamic_model_factory,
                     thermal_model,
                     heat_flux_factor
                 )
 
-                initial = InitialState(
+                initial = InitialConditions(
                     tank_states.last_pressure,
                     tank_states.last_temperature,
                     tank_states.last_fill
                 )
 
             # Check for convergence in the thermal capacity of the tank
-            if cls.thermal_capacity_has_converged(tank, tank_states):
+            if cls.thermal_capacity_has_converged(tank, tank_states) or not thermal_capacity_convergence:
+                if user_update:
+                    cls._update(tank, tank_states, i)
                 return tank_states
         raise ValueError("Thermal capacity has failed to converge")
 
@@ -363,100 +369,99 @@ class MissionAnalysis:
             return True
         return False
 
+    @classmethod
+    def _update(cls, tank: FuelTank, tank_states: TankStates, thermal_capacity_iterations: int):
+        print(
+            f"{tank} done with analysis.",
+            f"Max pressure: {tank_states.max_pressure}.",
+            f"Thermal capacity iterations: {thermal_capacity_iterations}",
+        )
 
-class SwitchMissionAnalysis:
+
+class SwitchPhaseDrainingAnalysis:
 
     @classmethod
     def perform_analysis(
         cls,
         tank: FuelTank,
-        initial_state: InitialState,
+        initial_state: InitialConditions,
         mission: Mission,
-        stopping_criteria: list[StoppingCriterion],
-        target_conditions: TargetState,
+        operational_envelope: OperationalEnvelope,
         multistep_method: MultistepMethod,
         dynamic_model_factory: DynamicModelFactory,
         thermal_model: ThermodynamicModel,
-        heat_flux_factor: float
+        heat_flux_factor: float,
+        max_changes: int = 1000,
     ) -> TankStates:
 
         # Define initial state of the tank
-        initial = initial_state
+        last_state = initial_state
         tank_states = TankStates(list(), multistep_method.timestep)
 
-        for mission_section in mission.sections:
+        mission_section = mission.sections[0]
 
+        # Define the stopping criteria
+        stopping_criteria = [
+            cls._empty_criterion(),
+            cls._max_pressure_criterion(),
+            cls._min_pressure_criterion(),
+        ]
+
+        
+        # Set up iterations
+        for _ in range(max_changes):
+            
             tank_states += MissionSectionAnalysis().analyse_section(
                 tank,
-                initial,
+                cls._define_initial_conditions(last_state),
                 mission_section,
                 stopping_criteria,
-                target_conditions,
+                operational_envelope,
                 multistep_method,
                 dynamic_model_factory,
                 thermal_model,
                 heat_flux_factor
             )
 
-            initial = InitialState(
-                tank_states.last_pressure,
-                tank_states.last_temperature,
-                tank_states.last_fill
+            if cls._empty_criterion().is_met(tank_states.last_state, operational_envelope):
+                return tank_states
+
+            mission_section.fuel_flows[0].phase = "gas" if mission_section.fuel_flows[0].phase == "liquid" else "liquid"
+            stopping_criteria = cls._get_stopping_criteria(
+                mission_section.fuel_flows[0].phase
             )
 
-        return tank_states
-
-
-class DrainingAnalysis:
-
+            last_state = tank_states.last_state
+        
+        raise ValueError(
+            "Exceeded maximum iterations is switch drain analysis..."
+        )
+    
+    @staticmethod
+    def _define_initial_conditions(tank_state: TankState) -> InitialConditions:
+        return InitialConditions(
+            tank_state.pressure, tank_state.temperature, tank_state.fill
+        )
+    
     @classmethod
-    def perform_analysis(
-        cls,
-        tank: FuelTank,
-        fuel_mass_flow: float,
-        fuel_flow_state: float,
-        initial_state: InitialState,
-        min_pressure: float,
-        multistep_method: MultistepMethod,
-        dynamic_model_factory: DynamicModelFactory,
-        thermal_model: ThermodynamicModel,
-        heat_flux_factor: float
-    ) -> TankStates:
+    def _get_stopping_criteria(cls, fuel_phase_flow) -> list[StoppingCriterion]:
+        if fuel_phase_flow == "liquid":
+            return [cls._empty_criterion(), cls._max_pressure_criterion()]
+        if fuel_phase_flow == "gas":
+            return [cls._empty_criterion(), cls._min_pressure_criterion()]
 
-        # Definition of the mission
-        mission_section = MissionSection.draining(
-            fuel_mass_flow, fuel_flow_state
-        )
-        mission = Mission([mission_section])
+    @staticmethod
+    def _empty_criterion() -> TankIsEmpty:
+        return TankIsEmpty()
 
-        # Definition of stopping criteria
-        stopping_criteria = [NoFuelMass(), TankIsEmpty()]
-
-        # Define the target sate
-        max_pressure = None
-        temperature = None
-        fill = None
-        mass = LOWER_MASS_LIMIT
-        target_conditions = TargetState(
-            max_pressure,
-            min_pressure,
-            temperature,
-            fill,
-            mass
-        )
-
-        return MissionAnalysis.perform_analysis(
-            tank,
-            initial_state,
-            mission,
-            stopping_criteria,
-            target_conditions,
-            multistep_method,
-            dynamic_model_factory,
-            thermal_model,
-            heat_flux_factor
-        )
-
+    @staticmethod
+    def _max_pressure_criterion():
+        return MaxPressureReached()
+    
+    @staticmethod
+    def _min_pressure_criterion():
+        return LowerPressureReached()
+    
     
 def main():
     pass

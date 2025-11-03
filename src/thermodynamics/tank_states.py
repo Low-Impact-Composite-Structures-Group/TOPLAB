@@ -49,19 +49,21 @@ class DynamicModel(Protocol):
 
 
 @dataclass
-class InitialState:
+class InitialConditions:
     pressure: float
     temperature: float
     fill: float
 
-    def __post_init__(self):
-        self.hydrogen = self.get_hydrogen_properties()
+    @property
+    def hydrogen(self):
+        if not hasattr(self, "_hydrogen"):
+            self._hydrogen = self._get_hydrogen_properties()
+        return self._hydrogen
 
-    def get_hydrogen_properties(self) -> Hydrogen:
-        self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
+    def _get_hydrogen_properties(self) -> Hydrogen:
+        return HydrogenRetriever().get_hydrogen_properties(
             self.pressure, self.temperature
         )
-        return self.hydrogen
 
     def compute_fuel_mass(self, tank_volume: float) -> float:
         if self.fill == 0.0 or self.fill == 1.0:
@@ -73,12 +75,14 @@ class InitialState:
 
 
 @dataclass
-class TargetState:
-    max_pressure: float
-    min_pressure: float
-    min_temperature: float
-    fill: float
-    mass: float
+class OperationalEnvelope:
+    max_pressure: float = None
+    min_pressure: float = None
+    min_temperature: float = None
+    min_fill: float = None
+    min_mass: float = None
+    target_fill: float = None
+    target_mass: float = None
 
 
 @dataclass
@@ -110,6 +114,8 @@ class TankState:
 
     @property
     def fill(self):
+        # if self.hydrogen is None:
+        #     return None
         if self.phase == "gas":
             return 0.0
         if self.phase == "liquid":
@@ -139,6 +145,8 @@ class TankState:
 
     @property
     def phase(self) -> str:
+        # if self.hydrogen is None:
+        #     return None
         hydrogen_state = self.hydrogen.phase
         if "liquid" in hydrogen_state:
             return "liquid"
@@ -152,9 +160,9 @@ class TankState:
 
     def complete_state_properties(self):
         if self.pressure is None:
-            self.pressure = self.hydrogen.pressure
+            self.pressure = self.hydrogen.pressure # if self.hydrogen is not None else None
         if self.temperature is None:
-            self.temperature = self.hydrogen.temperature
+            self.temperature = self.hydrogen.temperature # if self.hydrogen is not None else None
 
     def get_hydrogen_properties(self) -> Hydrogen:
         self.hydrogen = HydrogenRetriever().get_hydrogen_properties(
@@ -313,10 +321,15 @@ class TankStates:
 
     @property
     def required_fluxes(self):
-        return [
+        fluxes = [
             derivative.heat_flux
             for derivative in self.state_derivatives
         ]
+        return [0] + fluxes
+    
+    @property
+    def required_fluxes_in_MW(self):
+        return [flux * 1e-6 for flux in self.required_fluxes]
 
 
 def main():

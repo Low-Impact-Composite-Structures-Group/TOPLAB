@@ -1,6 +1,6 @@
 
 
-from facades.analysis_facades import (InitialConditions, OperatingEnvelope,
+from facades.analysis_facades import (InitialConditions, OperationalEnvelope,
                                       SwitchPhaseDrainingAnalysis,
                                       TankDimensions)
 from plotting.plot_tank_states import (plot_tank_efficiencies, plot_tank_fill,
@@ -49,7 +49,7 @@ def perform_analysis():
             insulation,
             fuel_flow.mass_flow,
             initial_state,
-            OperatingEnvelope(
+            OperationalEnvelope(
                 max_pressure,
                 min_pressure,
                 None

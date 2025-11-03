@@ -4,7 +4,7 @@ from typing import Protocol
 import matplotlib.pyplot as plt
 
 from facades.analysis_facades import (InitialConditions, MissionAnalysisFacade,
-                                      OperatingEnvelope, TankDimensions)
+                                      OperationalEnvelope, TankDimensions)
 from plotting.plot_tank_states import (plot_tank_fill,
                                        plot_thermo_mechanical_loading)
 from src.insulation.foam_insulations import ConstantFoamInsulation
@@ -34,7 +34,7 @@ def perform_analysis():
     )
 
     # Define the target conditions
-    operating_envelope = OperatingEnvelope(None, None, None)
+    operating_envelope = OperationalEnvelope(None, None, None)
 
     # Define insulation and thermodynamic model
     insulation_thickens = 8e-2
