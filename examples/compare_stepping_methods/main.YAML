@@ -7,7 +7,7 @@ operational_envelope:
   max_pressure: Null
   min_pressure: Null
   min_temperature: Null
-  min_fill: Null
+  min_fill: 0.0
   min_mass: 500
 
 tank:

@@ -4,6 +4,7 @@ initial_conditions:
   fill: 0.95
 
 operational_envelope:
+  min_fill: 0.0
   min_mass: 500
 
 tank:

@@ -7,7 +7,7 @@ from src.dynamics.dynamic_models.factory import FormulationModelSelector
 from src.dynamics.stopping_criteria import StoppingCriteriaFactory
 from src.insulation.factory import InsulationFactory
 from src.materials.materials import MaterialFactory
-from src.mission.mission import Mission
+from src.mission.mission import MissionFactory
 from src.multistep_methods.linear_multistep_methods import MultistepMethodFactory
 from src.tank_design.tank_shapes import TankFactory, TankDimensions
 from src.thermodynamics.external_models import ExternalModelFactory
@@ -16,16 +16,7 @@ from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 from src.thermodynamics.tank_states import OperationalEnvelope, InitialConditions
 
 
-def main():
-
-    dir = os.path.dirname(os.path.realpath(__file__))
-
-    file_name = "main.YAML"
-
-    file_path = os.path.join(dir, file_name)
-
-    with open(file_path, "r") as file:
-        config = yaml.safe_load(file)
+def perform_analysis(config: dict):
 
     # Define the state of the fuel tank
     initial_conditions = InitialConditions(**config["initial_conditions"])
@@ -46,7 +37,7 @@ def main():
     insulation = InsulationFactory().create_insulation(**config["insulation"])
 
     # Define the mission
-    mission = Mission.from_list(config["mission"])
+    mission = MissionFactory().create_mission_from_list(config["mission"])
 
     # Define timestep method
     multistep_method = MultistepMethodFactory().create_method(**config["multistep_method"])
@@ -105,10 +96,5 @@ def main():
 
     fig = SingleFigure(lines, "Time [hours]", "Pressure [bar]", x_ticks=xticks, y_ticks=y1ticks)
     fig.show()
-
-
-if __name__ == "__main__":
-    main()
-
 
 # End

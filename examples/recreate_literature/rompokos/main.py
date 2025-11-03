@@ -17,16 +17,7 @@ from src.thermodynamics.thermodynamic_models import ThermodynamicModel
 from src.thermodynamics.tank_states import OperationalEnvelope, InitialConditions
 
 
-def perform_analysis():
-
-    dir = os.path.dirname(os.path.realpath(__file__))
-
-    file_name = "main.YAML"
-
-    file_path = os.path.join(dir, file_name)
-
-    with open(file_path, "r") as file:
-        config = yaml.safe_load(file)
+def perform_analysis(config: dict):
 
     # Define the state of the fuel tank
     initial_conditions = InitialConditions(**config["initial_conditions"])

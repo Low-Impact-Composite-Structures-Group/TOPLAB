@@ -14,9 +14,9 @@ Refactoring To-Do:
 - [ ] Facades
 - [x] Analysis updated [analysis_updated]
 - [x] Data updated [data_updated]
-- [ ] main [main_updated]
-- [ ] Examples [examples_updated]
-- [ ] Plotting
+- [x] main [main_updated]
+- [x] Examples [examples_updated]
+- [x] Plotting
 
 
 
