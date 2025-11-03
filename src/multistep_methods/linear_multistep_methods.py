@@ -163,7 +163,6 @@ class MultistepMethod(Protocol):
 
 @dataclass
 class EulerMethod(MultistepMethod):
-    timestep: float
 
     def compute_new_value(
         self,
@@ -174,19 +173,39 @@ class EulerMethod(MultistepMethod):
             derivatives[-1], current_value, self.timestep
         )
 
-
 @dataclass
 class AdamBashforthMethod(MultistepMethod):
-    timestep: float
 
     def compute_new_value(
         self,
         derivatives: Union[float, list[float]],
         current_value: float
     ) -> float:
-        return adam_bashforth(
-            derivatives, current_value, self.timestep
-        )
+        return adam_bashforth(derivatives, current_value, self.timestep)
+
+        
+
+class MultistepMethodFactory:
+
+    _methods = {
+        "euler": EulerMethod,
+        "adam_bashforth": AdamBashforthMethod,
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._methods.keys())
+    
+    def create_method(self, type: str, timestep: float) -> MultistepMethod:
+        initialiser = self._methods.get(type)
+
+        if initialiser is None:
+            raise ValueError(
+                f"'{type}' is an invalid stepping method.\n"
+                f"Available methods are: {self._available}"
+            )
+        
+        return initialiser(timestep)
 
 
 def main():
