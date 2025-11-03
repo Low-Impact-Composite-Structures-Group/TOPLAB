@@ -56,7 +56,7 @@ def plot_required_flux(
 ):
     data = [
         Line(
-            row.timesteps_in_hours[:-1],
+            row.timesteps_in_hours,
             np.array(row.required_fluxes) * (-TO_MEGA),
             label
         )

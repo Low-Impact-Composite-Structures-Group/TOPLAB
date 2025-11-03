@@ -5,7 +5,7 @@ from facades.analysis_facades import (MissionAnalysisFacade,
                                           OperationalEnvelope, TankDimensions)
 from src.insulation.foam_insulations import ConstantFoamInsulation
 from src.materials.materials import Composite
-from src.mission.mission import Mission
+from src.mission.mission import Mission, MissionFactory
 from src.tank_design.tank_shapes import CylindricalTankSphericalCaps
 from src.thermodynamics.tank_states import InitialConditions
 
@@ -16,10 +16,11 @@ def perform_analysis():
     fuel_phase_flow = "gas"
 
     # Define the mission
+    mission_factory = MissionFactory()
     missions = [
-        Mission.regional(fuel_phase_flow),
-        Mission.small_medium_range(fuel_phase_flow),
-        Mission.large_passenger_aircraft(fuel_phase_flow)
+        mission_factory.create_mission_from_file("regional" ,fuel_phase_flow),
+        mission_factory.create_mission_from_file("small_medium_range" ,fuel_phase_flow),
+        mission_factory.create_mission_from_file("large_passenger_aircraft" ,fuel_phase_flow),
     ]
     labels = ["REG", "SMR", "LPA"]
 
@@ -39,7 +40,7 @@ def perform_analysis():
 
     # Define required fuel
     fuel_masses = [mission.required_fuel for mission in missions]
-    initial_fuel = initial_state.get_hydrogen_properties()
+    initial_fuel = initial_state._get_hydrogen_properties()
     fuel_volumes = [
         fuel_mass / initial_fuel.liquid.density
         for fuel_mass in fuel_masses

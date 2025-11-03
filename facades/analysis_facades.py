@@ -28,7 +28,7 @@ LOWER_MASS_LIMIT = 500
 
 
 # Factories and constants to be used in the analysis
-TIMESTEP = 1
+TIMESTEP = 60
 MULTISTEP_METHOD = EulerMethod(TIMESTEP)
 DYNAMIC_MODEL_FACTORY = DynamicModelFactory()
 INTERNAL_MODEL = SingleZoneModel()
