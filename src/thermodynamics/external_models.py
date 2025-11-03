@@ -145,6 +145,28 @@ class NaturalConvectionModel(ExternalModel):
         return [cylinder_convection, spheres_convection]
 
 
+class ExternalModelFactory:
+
+    _models = {
+        "forced_convection_model": ForcedConvectionModel(),
+        "natural_convection_model": NaturalConvectionModel(),
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._models.keys())
+    
+    def create_model(self, type: str):
+        model = self._models.get(type)
+
+        if model is not None: return model
+
+        raise ValueError(
+            f"'{type}' is an invalid internal thermal model.\n"
+            f"Available models are: {self._available}"
+        )
+
+
 def main():
     pass
 

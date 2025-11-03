@@ -224,6 +224,28 @@ class ThreeZoneModel(InternalModel):
         return convective_motions
 
 
+class InternalModelFactory:
+
+    _models = {
+        "single_zone_model": SingleZoneModel(),
+        "three_zone_model": ThreeZoneModel(),
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._models.keys())
+    
+    def create_model(self, type: str):
+        model = self._models.get(type)
+
+        if model is not None: return model
+
+        raise ValueError(
+            f"'{type}' is an invalid internal thermal model.\n"
+            f"Available models are: {self._available}"
+        )
+
+
 def main():
     pass
 
