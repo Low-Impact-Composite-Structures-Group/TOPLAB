@@ -22,7 +22,7 @@ Refactoring To-Do:
 
 # Possible sources for issues
 - Moved dynamic models: created separate directory, with modules each encompassing a single method of computation
-- Removed facades: remove the layer of abstraction
+- 'Removed' facades: remove the layer of abstraction
 - TargetState class was changed to OperationalEnvelope class
 - InitialState class was changed to InitialConditions class
 

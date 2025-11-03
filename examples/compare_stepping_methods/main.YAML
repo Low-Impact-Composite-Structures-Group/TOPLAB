@@ -1,0 +1,80 @@
+initial_conditions:
+  pressure: 1.4e+05
+  temperature: Null
+  fill: 0.95
+
+operational_envelope:
+  max_pressure: Null
+  min_pressure: Null
+  min_temperature: Null
+  min_fill: Null
+  min_mass: 500
+
+tank:
+  type: cylindrical_spherical_end_caps
+  dimensions:
+    radius: 1.17
+    body_length: 16.6
+
+mission:
+  - name: "Hold"
+    duration: 7200.0
+    fuel_flows:
+      - mass_flow: -0.0
+        phase: liquid
+    altitude: 0
+    mach_number: 0.02
+    ground_temperature: 303.15
+
+  - name: "Take-Off"
+    duration: 1080.0
+    fuel_flows:
+      - mass_flow: -0.34569409625
+        phase: liquid
+    altitude: 5.0e+03
+    mach_number: 0.5
+    ground_temperature: 303.15
+
+  - name: "Cruise"
+    duration: 52200.0
+    fuel_flows:
+      - mass_flow: -0.07297986476
+        phase: liquid
+    altitude: 8.0e+03
+    mach_number: 0.85
+    ground_temperature: 303.15
+
+material:
+  type: composite
+  args:
+    failure_stress: 2560.0e+06
+    density: 1580
+    characteristic_temperature: 1500
+    molecular_weight: 12.01
+    winding_angle: 55
+
+insulation:
+  type: "foam_constant"
+  args:
+    thickness: 0.08
+    density: Null
+    thermal_conductivity: 0.0046
+
+multistep_method:
+  - type: euler
+    timestep: 60
+
+  - type: adam_bashforth
+    timestep: 60
+
+stopping_criteria:
+  - no_fuel_mass
+  - tank_is_empty
+
+heat_flux_factor: 1.0
+
+dynamic_model_formulation: "ahluwalia"
+
+thermal_model_formulation:
+  internal: "single_zone_model"
+  external: "forced_convection_model"
