@@ -55,17 +55,18 @@ class GravimetricEfficiency(GravimetricEfficiencyComputer):
     ) -> float:
         fuel_mass = initial_state.fuel_mass
         system_mass = self.compute_system_mass(tank, insulation)
-        
         return fuel_mass / (fuel_mass + system_mass)
 
     def compute_system_mass(
         self, tank: FuelTank, insulation: Insulation
     ) -> float:
         
-        return (
-            tank.structural_mass
-            + insulation.compute_mass(tank.surface_area)
-        )
+        mass = tank.structural_mass
+
+        if insulation is not None:
+            mass += insulation.compute_mass(tank.surface_area)
+
+        return mass
 
 
 class VolumetricEfficiencyComputer(Protocol):
@@ -86,7 +87,6 @@ class VolumetricEfficiency(VolumetricEfficiencyComputer):
     ) -> float:
         fuel_volume = tank.volume
         system_volume = self.compute_system_volume(tank, insulation)
-        
         return fuel_volume / system_volume
     
     def compute_system_volume(
@@ -94,11 +94,12 @@ class VolumetricEfficiency(VolumetricEfficiencyComputer):
         tank: FuelTank,
         insulation: Insulation
     ):
-        return (
-            tank.volume
-            + tank.structural_volume
-            + insulation.compute_volume(tank.surface_area)
-        )
+        
+        volume = tank.volume + tank.structural_volume
+        if insulation is not None:
+            volume += insulation.compute_volume(tank.surface_area)
+
+        return volume
 
 
 class SquareVolumetricEfficiency(VolumetricEfficiency):
@@ -145,8 +146,53 @@ class HexagonVolumetricEfficiency(SquareVolumetricEfficiency):
         insulation: Insulation
     ):
         radius = self.compute_effective_radius(tank, insulation)
-        a = 2 * radius * math.tan(math.pi / 12)
-        return 3 * math.sqrt(3) * a ** 2 / 2
+        return 2 * math.sqrt(3) * radius ** 2
+    
+
+class GravimetricEfficiencyComputerFactory():
+
+    _computers = {
+        "basic": GravimetricEfficiency(),
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._computers.keys())
+
+    def create_efficiency_computer(self, computer: str) -> GravimetricEfficiencyComputer:
+        comp = self._computers.get(computer)
+
+        if comp is None:
+            raise ValueError(
+                f"{computer} is an invalid gravimetric efficiency computer.\n" 
+                f"Available computers are: {self._available}."
+            )
+    
+        return comp
+    
+
+class VolumetricEfficiencyComputerFactory():
+
+    _computers = {
+        "basic": VolumetricEfficiency(),
+        "square": SquareVolumetricEfficiency(),
+        "hexagon": HexagonVolumetricEfficiency()
+    }
+
+    @property
+    def _available(self):
+        return ", ".join(self._computers.keys())
+
+    def create_efficiency_computer(self, computer: str) -> VolumetricEfficiencyComputer:
+        comp = self._computers.get(computer)
+
+        if comp is None:
+            raise ValueError(
+                f"{computer} is an invalid volumetric efficiency computer.\n" 
+                f"Available computers are: {self._available}."
+            )
+    
+        return comp
 
 
 def main():
