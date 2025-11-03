@@ -1,0 +1,117 @@
+initial_conditions:
+  - pressure: 100.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 200.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 300.0e+05
+    temperature: 70
+    fill: 0
+  
+  - pressure: 400.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 500.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 600.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 700.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 800.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 900.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 1000.0e+05
+    temperature: 70
+    fill: 0
+
+  - pressure: 1100.0e+05
+    temperature: 70
+    fill: 0
+
+operational_envelope:
+  max_pressure: Null
+  min_pressure: 15.0e+05
+  min_temperature: 40.0
+  min_fill: 0
+  min_mass: 500
+
+tank:
+  type: cylindrical_spherical_end_caps
+
+fuel_volume_margin: 1.0
+
+mission:
+    file_name: small_medium_range
+    fuel_flow_phase: gas
+    fuselage_radius: 2.05
+
+
+material:
+  type: composite
+  name: IM7/8552
+  args:
+    failure_stress: 1260.0e+06        # 4K failure stress taken from Hohe et al.
+    density: 1580
+    characteristic_temperature: 1500
+    molecular_weight: 12.01
+    winding_angle: 55
+    degrees: True
+
+insulation:
+  type: Null
+  args: []
+
+
+multistep_method:
+  type: euler
+  timestep: 60
+
+stopping_criteria: []
+
+heat_flux_factor: 1.0
+
+dynamic_model_formulation: "ahluwalia"
+
+thermal_model_formulation:
+  internal: "single_zone_model"
+  external: "forced_convection_model"
+
+thermal_capacity_convergence: False
+
+efficiency_computers:
+  gravimetric: basic
+  volumetric: basic
+
+plotting:
+  time_label: "Time [hour]"
+  pressure_label: "Pressure [bar]"
+  temperature_label: "Temperature [K]"
+  flux_label: "Required Heat Flux [MW]"
+  x:
+    label: Pressure [bar]
+    ticks:
+      min: 0.0
+      max: 1200.0
+      step: 200.0
+  y:
+    label: Efficiency [-]
+    ticks:
+      min: 0.0
+      max: 1.2
+      step: 0.2
+
