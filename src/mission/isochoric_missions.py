@@ -16,7 +16,6 @@ Key Features:
 - Numerical stability with bounds checking
 - Full integration with HFT thermal and dynamic models
 
-Authors: Victor Kees Poorte, 2025
 """
 
 from __future__ import annotations

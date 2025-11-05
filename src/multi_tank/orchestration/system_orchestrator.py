@@ -542,12 +542,25 @@ class SystemOrchestrator:
         """Get mission profile object from profile name."""
         from src.mission.mission import Mission, MissionSection, OutFlow, InFlow
 
-        if profile_name.lower() == "atr72":
+        name = (profile_name or "").strip().lower()
+
+        # Named, built-in profiles from Mission
+        if name == "atr72":
             return Mission.atr72()
-        elif profile_name.lower() in ["constant_flow", "sequential_constant_flow"]:
+        if name == "triathlon":
+            return Mission.triathlon()
+        if name == "rompokos":
+            return Mission.rompokos()
+
+        # Generic constant/parametric profiles handled here
+        if name in ["constant_flow", "sequential_constant_flow"]:
             return self._create_constant_flow_mission()
-        else:
-            raise ValueError(f"Unknown mission profile: {profile_name}")
+
+        # Unknown profile: provide helpful error with available options
+        supported = ["atr72", "triathlon", "rompokos", "constant_flow"]
+        raise ValueError(
+            f"Unknown mission profile: '{profile_name}'. Supported profiles: {', '.join(supported)}."
+        )
 
     def _create_constant_flow_mission(self):
         """Create constant flow mission from scenario config parameters."""
