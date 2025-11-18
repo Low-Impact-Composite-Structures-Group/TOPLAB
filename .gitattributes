@@ -1,0 +1,2 @@
+# Encrypt mission CSV files
+src/multi_tank/missions/*_fuel_flows.csv filter=git-crypt diff=git-crypt
