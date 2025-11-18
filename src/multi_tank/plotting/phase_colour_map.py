@@ -23,27 +23,40 @@ sys.path.insert(0, str(PROJECT_ROOT))
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+import matplotlib
+matplotlib.use("pgf")  # Use PGF backend for LaTeX compatibility
+import matplotlib.pyplot as plt
+
 from src.multi_tank.plotting.multi_tank_plotting import DelftColourPlotter
+
+# Configure matplotlib for PGF output
+plt.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+    "font.family": "serif",
+    "text.usetex": True,
+    "pgf.rcfonts": False,
+    "pgf.preamble": r"\usepackage{graphicx}",
+})
 
 
 # ====== Configurable values ======
 # Appearance
 GREYSCALE: bool = False
-DPI: int = 900
+DPI: int = 300  # Lower DPI for PGF (vector format)
 
 # Save options
 SAVE: bool = True
 OUTDIR: str = "output/"
-FILENAME: Optional[str] = None  # e.g., "phase_map_custom.png" (if None, a default is used)
-FORMAT: str = "png"  # one of: "png", "pdf", "svg"
+FILENAME: Optional[str] = None  # e.g., "phase_map_custom.pgf" (if None, a default is used)
+FORMAT: str = "pgf"  # one of: "pgf", "png", "pdf", "svg"
 
 # Axes and resolution
 TMIN: float = 15.0
 TMAX: float = 300.0
 RHOMIN: float = 0.0
 RHOMAX: float = 90.0
-NX: int = 400
-NY: int = 400
+NX: int = 1000  # Reduced resolution for smaller PGF file
+NY: int = 1000  # Reduced resolution for smaller PGF file
 # ====== End config ======
 
 # Legend configuration
@@ -92,7 +105,7 @@ def _compute_save_path(use_greyscale: bool) -> Optional[Path]:
     default_name = f"phase_map_{'greyscale' if use_greyscale else 'colour'}.{FORMAT}"
     filename = FILENAME or default_name
     # Ensure extension matches requested format if user omitted it
-    if Path(filename).suffix.lower() not in (f".{FORMAT}", ".png", ".pdf", ".svg"):
+    if Path(filename).suffix.lower() not in (f".{FORMAT}", ".png", ".pdf", ".svg", ".pgf"):
         filename = f"{filename}.{FORMAT}"
     return outdir / filename
 
@@ -121,8 +134,10 @@ def main():
     )
 
     if save_path is None:
-        import matplotlib.pyplot as plt
         plt.show()
+    else:
+        print(f"PGF file saved to: {save_path}")
+        print(f"Include in LaTeX with: \\input{{{save_path}}}")
 
 
 if __name__ == "__main__":

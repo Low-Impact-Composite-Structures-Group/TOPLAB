@@ -44,7 +44,9 @@ class DelftColourPlotter:
 
     def __init__(self, analysis_name: str = "Multi-Tank Analysis",
                  use_greyscale: bool = False,
-                 enable_multi_tank_overlay: bool = False):
+                 enable_multi_tank_overlay: bool = False,
+                 output_formats: Optional[List[str]] = None,
+                 enable_pgf: bool = False):
         """
         Initialize plotter with seaborn styling.
 
@@ -52,10 +54,18 @@ class DelftColourPlotter:
             analysis_name: Name of the analysis (used in plot titles)
             use_greyscale: Whether to use greyscale styling instead of colors
             enable_multi_tank_overlay: Whether to overlay multiple tanks on same plots
+            output_formats: List of output formats (e.g., ['png', 'pdf', 'pgf']). If None, defaults to ['png']
+            enable_pgf: Whether to enable PGF backend for LaTeX compatibility
         """
         self.analysis_name = analysis_name
         self.use_greyscale = use_greyscale
         self.enable_multi_tank_overlay = enable_multi_tank_overlay
+        self.output_formats = output_formats if output_formats else ['png']
+        self.enable_pgf = enable_pgf or ('pgf' in self.output_formats)
+
+        # Configure matplotlib backend for PGF if needed
+        if self.enable_pgf:
+            self._configure_pgf_backend()
 
                 # Configure seaborn style
         if use_greyscale:
@@ -83,6 +93,74 @@ class DelftColourPlotter:
             )
             self.color_palette = DELFT_PALETTE
             print(f"🎨 DelftColourPlotter initialized for: {analysis_name}")
+
+        # Report output formats
+        if len(self.output_formats) > 1:
+            print(f"   📁 Output formats: {', '.join(self.output_formats)}")
+
+    def _configure_pgf_backend(self):
+        """Configure matplotlib for PGF output compatible with LaTeX."""
+        import matplotlib
+        # Note: Backend should be set before importing pyplot, but we work with current backend
+        plt.rcParams.update({
+            "pgf.texsystem": "pdflatex",
+            "font.family": "serif",
+            "text.usetex": True,
+            "pgf.rcfonts": False,
+            "pgf.preamble": r"\usepackage{graphicx}",
+        })
+        print(f"   🔧 PGF backend configured for LaTeX compatibility")
+
+    def _save_figure(self, fig, save_path: str, dpi: int = 900, formats: Optional[List[str]] = None):
+        """
+        Save figure in multiple formats.
+
+        Args:
+            fig: Matplotlib figure object
+            save_path: Base path for saving (without extension)
+            dpi: Resolution for raster formats
+            formats: List of formats to save. If None, uses self.output_formats
+        """
+        from pathlib import Path
+
+        if formats is None:
+            formats = self.output_formats
+
+        # Parse the save_path to extract directory and base name
+        save_path_obj = Path(save_path)
+        base_dir = save_path_obj.parent
+        base_name = save_path_obj.stem  # Name without extension
+
+        # Ensure directory exists
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save in each requested format
+        saved_files = []
+        for fmt in formats:
+            output_file = base_dir / f"{base_name}.{fmt}"
+
+            try:
+                if fmt == 'pgf':
+                    # For PGF, use lower DPI and ensure rasterization is set correctly
+                    fig.savefig(str(output_file), format='pgf', bbox_inches='tight')
+                elif fmt == 'pdf':
+                    fig.savefig(str(output_file), format='pdf', dpi=dpi, bbox_inches='tight')
+                elif fmt == 'svg':
+                    fig.savefig(str(output_file), format='svg', bbox_inches='tight')
+                else:  # png or other raster formats
+                    fig.savefig(str(output_file), dpi=dpi, bbox_inches='tight', facecolor='white')
+
+                saved_files.append(str(output_file))
+            except Exception as e:
+                print(f"   ⚠️ Failed to save {fmt} format: {e}")
+
+        if saved_files:
+            if len(saved_files) == 1:
+                print(f"   💾 Saved to: {saved_files[0]}")
+            else:
+                print(f"   💾 Saved {len(saved_files)} formats: {', '.join([Path(f).suffix for f in saved_files])}")
+
+        return saved_files
 
     def plot_phase_colour_map(self,
                               temperature_range: Tuple[float, float] = (15.0, 60.0),
@@ -234,15 +312,17 @@ class DelftColourPlotter:
                 except Exception:
                     pass
         else:
-            # Show the categorical grid with Delft colors
-            im = ax.imshow(
+            # Show the categorical grid with Delft colors using pcolormesh
+            # Rasterize the background to keep PGF file size manageable
+            Tm, Rhom = np.meshgrid(T_vals, rho_vals)
+            im = ax.pcolormesh(
+                Tm,
+                Rhom,
                 phase_grid,
-                origin='lower',
-                aspect='auto',
                 cmap=cmap,
-                extent=[T_min, T_max, rho_min, rho_max],
-                interpolation='nearest',
+                shading='nearest',
                 alpha=0.6,
+                rasterized=True,  # Rasterize background, keep lines/text as vectors
             )
 
         # Overlay saturation lines (only for T < Tcrit)
@@ -438,8 +518,7 @@ class DelftColourPlotter:
         plt.tight_layout()
 
         if save_path:
-            fig.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=dpi)
 
         print("   ✅ Phase colour map completed")
         return fig
@@ -1328,8 +1407,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Density-temperature plot completed")
         return fig
@@ -1443,8 +1521,7 @@ class DelftColourPlotter:
         plt.tight_layout()
 
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Mass flow plot completed")
         return fig
@@ -1573,8 +1650,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Heat exchanger requirements plot completed")
         return fig
@@ -1797,8 +1873,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Sequential tank evolution plot completed")
         return fig
@@ -1899,8 +1974,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Sequential density-temperature plot completed")
         return fig
@@ -2004,8 +2078,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Sequential mass flows plot completed")
         return fig
@@ -2328,8 +2401,7 @@ class DelftColourPlotter:
 
         # Save if requested
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
 
         print(f"   ✅ Pressure requirements plot completed")
         return fig
@@ -2501,8 +2573,7 @@ class DelftColourPlotter:
 
         # Save figure - either to provided path or default location
         if save_path:
-            fig.savefig(save_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            self._save_figure(fig, save_path, dpi=900)
         else:
             # Save in same directory as the calling script
             import inspect
