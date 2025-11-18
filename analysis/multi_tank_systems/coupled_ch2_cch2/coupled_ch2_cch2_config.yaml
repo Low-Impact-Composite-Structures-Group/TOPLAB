@@ -83,7 +83,13 @@ network:
         max_flow_rate_kg_s: 0.056
 mission:
   type: discharge
-  profile: triathlon
+  profile: csv
+  parameters:
+    csv_file: ../../../src/multi_tank/missions/atr72_fuel_flows.csv
+    cruise_altitude: 7010.0
+    standard_temperature: 273.15
+    mach_number: 0.0
+    phase: gas
   ambient_temperature: 288.15
   assigned_to_node: 2
 physics:
@@ -120,7 +126,7 @@ output:
   save_plots: true
   plot_formats:
   - png
-  - pdf
+  - pgf
   save_data: true
   data_format: csv
   results_directory: output/results
