@@ -552,12 +552,16 @@ class SystemOrchestrator:
         if name == "rompokos":
             return Mission.rompokos()
 
+        # CSV-based mission profile
+        if name == "csv":
+            return self._create_csv_mission()
+
         # Generic constant/parametric profiles handled here
         if name in ["constant_flow", "sequential_constant_flow"]:
             return self._create_constant_flow_mission()
 
         # Unknown profile: provide helpful error with available options
-        supported = ["atr72", "triathlon", "rompokos", "constant_flow"]
+        supported = ["atr72", "triathlon", "rompokos", "csv", "constant_flow"]
         raise ValueError(
             f"Unknown mission profile: '{profile_name}'. Supported profiles: {', '.join(supported)}."
         )
@@ -644,6 +648,60 @@ class SystemOrchestrator:
         )
 
         return Mission([mission_section])
+
+    def _create_csv_mission(self):
+        """Create mission from CSV file with parameters from config."""
+        from src.mission.mission import Mission
+        import yaml
+        from pathlib import Path
+
+        # Read mission parameters from config
+        try:
+            config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
+            with open(config_path, 'r') as f:
+                raw_config = yaml.safe_load(f)
+
+            mission_data = raw_config.get('mission', {})
+            parameters = mission_data.get('parameters', {})
+
+            # Extract required CSV path
+            csv_file = parameters.get('csv_file')
+            if not csv_file:
+                raise ValueError("CSV mission requires 'csv_file' parameter in mission.parameters")
+
+            # Convert relative paths to absolute (relative to config file location)
+            csv_path = Path(csv_file)
+            if not csv_path.is_absolute():
+                config_dir = Path(config_path).parent
+                csv_path = config_dir / csv_file
+
+            # Extract optional parameters with defaults
+            cruise_altitude = parameters.get('cruise_altitude', 7010.0)
+            standard_temperature = parameters.get('standard_temperature', 273.15)
+            mach_number = parameters.get('mach_number', 0.0)
+            phase = parameters.get('phase', 'gas')
+            ambient_temperature = mission_data.get('ambient_temperature', 288.15)
+
+            print(f"   📋 Loading CSV mission profile...")
+            print(f"      CSV file: {csv_path.name}")
+            print(f"      Cruise altitude: {cruise_altitude} m")
+            print(f"      Standard temperature: {standard_temperature} K")
+            print(f"      Mach number: {mach_number}")
+            print(f"      Phase: {phase}")
+
+            # Create mission from CSV
+            return Mission.from_csv(
+                csv_path=str(csv_path),
+                cruise_altitude=cruise_altitude,
+                standard_temperature=standard_temperature,
+                mach_number=mach_number,
+                phase=phase,
+                ambient_temperature=ambient_temperature
+            )
+
+        except Exception as e:
+            print(f"   ❌ CSV mission creation failed: {e}")
+            raise ValueError(f"Failed to create CSV mission: {e}")
 
     def _create_mission_sized_tank(self, geometry_data, material, operating_pressure):
         """
@@ -1227,6 +1285,14 @@ class SystemOrchestrator:
             plot_config = self.scenario_config.config_dict.get('output', {}).get('plots', {})
             style_config = plot_config.get('style', {})
 
+            # Get output formats from config (defaults to ['png'] if not specified)
+            output_config = self.scenario_config.config_dict.get('output', {})
+            output_formats = output_config.get('plot_formats', ['png'])
+            enable_pgf = 'pgf' in output_formats
+
+            if enable_pgf:
+                print(f"   🔧 PGF output enabled for LaTeX compatibility")
+
             # Load font configuration and update global font settings
             font_config = style_config.get('font', {})
             if font_config:
@@ -1249,7 +1315,9 @@ class SystemOrchestrator:
             plotter = DelftColourPlotter(
                 analysis_name=self.scenario_config.analysis_name,
                 use_greyscale=style_config.get('use_greyscale', False),
-                enable_multi_tank_overlay=style_config.get('enable_multi_tank_overlay', False)
+                enable_multi_tank_overlay=style_config.get('enable_multi_tank_overlay', False),
+                output_formats=output_formats,
+                enable_pgf=enable_pgf
             )
 
             # Get figure_prefix from config (if specified)

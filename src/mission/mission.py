@@ -368,6 +368,97 @@ class Mission:
             cruise_mach_number
         )
 
+    @classmethod
+    def from_csv(cls,
+                 csv_path: str,
+                 cruise_altitude: float = 7010.0,
+                 standard_temperature: float = 273.15,
+                 mach_number: float = 0.0,
+                 phase: str = "gas",
+                 ambient_temperature: float = 288.15):
+        """
+        Create a Mission from a CSV file containing time and mass flow rate data.
+
+        Args:
+            csv_path: Path to CSV file with 'Time [hr]' and 'Mass flow rate [kg/s]' columns
+            cruise_altitude: Constant altitude for all sections [m]
+            standard_temperature: Constant temperature for all sections [K]
+            mach_number: Constant Mach number for all sections [-]
+            phase: Phase identifier for OutFlow ('gas' or 'liquid')
+            ambient_temperature: Ambient/ground temperature [K]
+
+        Returns:
+            Mission object with sections derived from CSV data
+        """
+        import pandas as pd
+        import numpy as np
+        from pathlib import Path
+
+        # Read CSV file
+        csv_file = Path(csv_path)
+        if not csv_file.exists():
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        df = pd.read_csv(csv_file)
+
+        # Validate columns
+        expected_cols = ['Time [hr]', 'Mass flow rate [kg/s]']
+        if not all(col in df.columns for col in expected_cols):
+            raise ValueError(f"CSV must contain columns: {expected_cols}. Found: {df.columns.tolist()}")
+
+        # Extract time and flow rate data
+        times_hr = df['Time [hr]'].values
+        flow_rates = df['Mass flow rate [kg/s]'].values
+
+        # Convert time to seconds
+        times_s = times_hr * HOURS_TO_SECONDS
+
+        # Calculate section durations from time deltas
+        # Each consecutive pair of points defines a section
+        mission_sections = []
+
+        for i in range(len(times_s) - 1):
+            duration = times_s[i + 1] - times_s[i]
+
+            # Skip zero-duration sections
+            if duration <= 0:
+                continue
+
+            # Get flow rates at start and end of section
+            flow_start = flow_rates[i]
+            flow_end = flow_rates[i + 1]
+
+            # Determine if flow is constant or varying
+            flow_tolerance = 1e-9  # kg/s
+            is_constant_flow = abs(flow_end - flow_start) < flow_tolerance
+
+            # Create OutFlow object (negate flow for discharge convention)
+            if is_constant_flow:
+                # Constant flow
+                fuel_flow = OutFlow(-abs(flow_start), phase)
+            else:
+                # Linearly varying flow (list format)
+                fuel_flow = OutFlow([-abs(flow_start), -abs(flow_end)], phase)
+
+            # Create mission section
+            # Note: fuel_flow_key is set to None (no longer required)
+            section = MissionSection(
+                duration,
+                [fuel_flow],
+                cruise_altitude,
+                mach_number,
+                None,  # fuel_flow_key - not needed for CSV missions
+                standard_temperature
+            )
+
+            mission_sections.append(section)
+
+        print(f"📋 Loaded CSV mission from {csv_file.name}")
+        print(f"   Created {len(mission_sections)} mission sections")
+        print(f"   Total duration: {sum(s.duration for s in mission_sections) / HOURS_TO_SECONDS:.2f} hours")
+
+        return cls(mission_sections)
+
 
 def main():
     pass
