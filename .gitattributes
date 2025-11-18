@@ -1,2 +1,2 @@
-# Encrypt mission CSV files
-src/multi_tank/missions/*_fuel_flows.csv filter=git-crypt diff=git-crypt
+# Encrypt proprietary mission CSV files (only triathlon)
+src/multi_tank/missions/triathlon_fuel_flows.csv filter=git-crypt diff=git-crypt
