@@ -5,7 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
+
+# output files from plotting
 *.png
+*.pgf
+*.pdf
 
 # Distribution / packaging
 .Python
