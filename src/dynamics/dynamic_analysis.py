@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Union, List
 
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
 from src.mission.mission import Mission, MissionSection
@@ -117,7 +117,7 @@ class OutFlow(Protocol):
 
 @dataclass
 class FuelFlow:
-    mass_flow: float
+    mass_flow: Union[float, List[float]]
     hydrogen: Hydrogen
 
 
@@ -140,17 +140,22 @@ class MissionSectionAnalysis:
 
     @staticmethod
     def define_fuel_flows(
-        fuel_flows: list[FuelFlow | OutFlow], tank_state: TankState
-    ) -> list[FuelFlow]:
+        fuel_flows: List[Union[FuelFlow, OutFlow]], tank_state: TankState, section_iter: int, steps: int
+    ) -> List[FuelFlow]:
         return [
-            fuel_flow
-            if fuel_flow.mass_flow > 0
-            else FuelFlow(
-                fuel_flow.mass_flow,
+            FuelFlow(
+                MissionSectionAnalysis.interpolate_mass_flows(fuel_flow.mass_flow, section_iter, steps) if isinstance(fuel_flow.mass_flow, list) else fuel_flow.mass_flow,
                 tank_state.hydrogen.get_phase(fuel_flow.phase)
             )
             for fuel_flow in fuel_flows
         ]
+
+    @staticmethod
+    def interpolate_mass_flows(mass_flows: list[float], section_iter: int, steps: int) -> float:
+        if len(mass_flows) != 2:
+            raise ValueError("Only two mass flows are supported)") 
+        start, end = mass_flows
+        return start + (end - start) * section_iter / steps
 
     @classmethod
     def compute_state_derivatives(
@@ -161,7 +166,9 @@ class MissionSectionAnalysis:
         mission_section: MissionSection,
         dynamic_model_factory: DynamicModelFactory,
         target_conditions: TargetState,
-        heat_flux_factor: float
+        heat_flux_factor: float, 
+        section_iter: int = None, 
+        steps: int = None
     ) -> TankState:
         heat_flux, temperatures = thermal_model.compute_heat_flux(
             tank, tank_state, mission_section
@@ -173,7 +180,9 @@ class MissionSectionAnalysis:
             dynamic_model,
             cls.define_fuel_flows(
                 mission_section.fuel_flows,
-                tank_state
+                tank_state,
+                section_iter,
+                steps
             ),
             heat_flux * heat_flux_factor,
             tank.compute_thermal_capacity(temperatures[0])
@@ -257,9 +266,10 @@ class MissionSectionAnalysis:
         steps = mission_section.number_of_timesteps(
             multistep_method.timestep
         )
-
-        for _ in range(steps):
-
+        
+        for section_iter in range(steps):
+            
+            # print(f"Section iteration: {section_iter}") 
             cls.compute_state_derivatives(
                 tank,
                 thermal_model,
@@ -267,7 +277,9 @@ class MissionSectionAnalysis:
                 mission_section,
                 dynamic_model_factory,
                 target_conditions,
-                heat_flux_factor
+                heat_flux_factor, 
+                section_iter,
+                steps
             )
 
             tank_states.add_tank_state(

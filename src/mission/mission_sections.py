@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Union
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
 
 
@@ -12,7 +12,7 @@ class Hydrogen(Protocol):
 
 @dataclass
 class FuelFlow:
-    mass_flow: float
+    mass_flow:  Union[float, list[float]]
 
 
 @dataclass

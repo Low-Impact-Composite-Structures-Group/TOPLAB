@@ -32,13 +32,16 @@ class Mission:
 
     @property
     def required_fuel(self) -> float:
-        return sum([
-            sum([
-                abs(flow.mass_flow) * section.duration
-                for flow in section.fuel_flows
-            ])
-            for section in self.sections
-        ])
+        total_fuel = 0.0
+        for section in self.sections:
+            for flow in section.fuel_flows:
+                if isinstance(flow.mass_flow, list):
+                    height = abs(flow.mass_flow[-1] - flow.mass_flow[0])
+                    base = section.duration
+                    total_fuel += 0.5 * height * base
+                else:
+                    total_fuel += abs(flow.mass_flow) * section.duration
+        return total_fuel
 
     @classmethod
     def discharge_section(cls, duration: float, altitude: float, fuel_flow: float, throttle: float, phase: str, mach_number: float) -> MissionSection:
