@@ -8,9 +8,45 @@ Source: NIST Cryogenic Material Properties Database
 """
 
 import math
+import csv
+from pathlib import Path
+
+# Load table data (Temp K, Cp J/kg.K) for interpolation
+_TABLE_PATH = Path(__file__).resolve().parent.parent / "aluminum_6061T6_cps.csv"
+_table_T = []
+_table_cp = []
+if _TABLE_PATH.exists():
+    with _TABLE_PATH.open(newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        for row in reader:
+            try:
+                _table_T.append(float(row[0]))
+                _table_cp.append(float(row[1]))
+            except (ValueError, IndexError):
+                continue
+
+def _interp_cp(T: float) -> float:
+    """Linear interpolation on the loaded Cp table, with edge clamping."""
+    if not _table_T:
+        # Fallback to polynomial if table missing
+        return specific_heat_polynomial(T)
+    if T <= _table_T[0]:
+        return _table_cp[0]
+    if T >= _table_T[-1]:
+        return _table_cp[-1]
+    # Find interval via linear scan (table is small)
+    for i in range(1, len(_table_T)):
+        if T <= _table_T[i]:
+            T0, T1 = _table_T[i-1], _table_T[i]
+            cp0, cp1 = _table_cp[i-1], _table_cp[i]
+            # Linear interpolation
+            w = (T - T0) / (T1 - T0)
+            return cp0 + w * (cp1 - cp0)
+    return _table_cp[-1]
 
 
-def specific_heat(temperature):
+def specific_heat_polynomial(temperature):
     """
     Specific heat of aluminum 6061-T6 using NIST polynomial fit.
 
@@ -23,8 +59,8 @@ def specific_heat(temperature):
     Valid range: 4-300K (data), extended to 400K for hydrogen applications
     Curve fit error: 5% relative to data
     """
-    # Clamp temperature to valid range
-    T = max(10.0, min(400.0, temperature))
+    # Clamp temperature to valid range (NIST data ~4–300 K; extended to 400 K)
+    T = max(4.0, min(400.0, temperature))
 
     # NIST coefficients for aluminum 6061-T6 specific heat
     a = 46.6467
@@ -42,6 +78,12 @@ def specific_heat(temperature):
              f*log_T**5 + g*log_T**6 + h*log_T**7 + i*log_T**8)
 
     return 10**log_cp
+
+
+def specific_heat(temperature):
+    """Specific heat using CSV table interpolation (pref), fallback to polynomial."""
+    T = max(4.0, min(400.0, float(temperature)))
+    return _interp_cp(T)
 
 
 def thermal_conductivity(temperature):
