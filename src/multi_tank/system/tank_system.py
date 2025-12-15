@@ -14,16 +14,16 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
 from src.tank_design.tank_shapes import SphericalTank
-from src.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
+from src.multi_tank.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
 )
 from src.thermodynamics.tank_states import IsochoricTankState
-from src.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
+from src.multi_tank.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 
 from .state_management import MultiTankState, MultiTankResults
 from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
-from src.fluids.flow_physics import FlowPhysics
+from src.multi_tank.fluids.flow_physics import FlowPhysics
 
 
 @dataclass

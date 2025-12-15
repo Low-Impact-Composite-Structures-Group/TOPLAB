@@ -23,12 +23,12 @@ import seaborn as sns
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import seaborn styling
-from plotting.plot_style_sb import (
+from src.multi_tank.plotting.plot_style_sb import (
     set_seaborn_style, configure_plot_style, create_figure_with_ax,
     apply_custom_ticks, format_axis_labels, add_legend, DELFT_PALETTE,
     FONT_SIZE, FONT_NAME
 )
-import plotting.plot_style_sb as plot_style
+import src.multi_tank.plotting.plot_style_sb as plot_style
 
 # Multi-tank system data structures
 from src.multi_tank.system.state_management import MultiTankResults

@@ -32,10 +32,10 @@ from src.multi_tank.system.tank_system import TankSystem, TankSystemConfig, Tank
 from src.multi_tank.utilities.tank_geometry import create_tank_from_fuel_mass
 
 # Mission framework
-from src.mission.isochoric_missions import DischargeMission
+from src.multi_tank.missions.isochoric_missions import DischargeMission
 
 # Heat flow data collection for iHEX calculation
-from src.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
+from src.multi_tank.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
 
 # Utilities
 from CoolProp.CoolProp import PropsSI
@@ -1296,7 +1296,7 @@ class SystemOrchestrator:
             # Load font configuration and update global font settings
             font_config = style_config.get('font', {})
             if font_config:
-                from plotting.plot_style_sb import update_font_settings
+                from src.multi_tank.plotting.plot_style_sb import update_font_settings
 
                 master_size = font_config.get('master_size')
                 legend_size = font_config.get('legend_size')

@@ -7,7 +7,7 @@ between tanks in a multi-tank hydrogen storage system.
 
 import math
 from typing import List, Optional, Dict, Any
-from src.fluids.flow_physics import FlowPhysics
+from src.multi_tank.fluids.flow_physics import FlowPhysics
 from CoolProp.CoolProp import PropsSI
 
 

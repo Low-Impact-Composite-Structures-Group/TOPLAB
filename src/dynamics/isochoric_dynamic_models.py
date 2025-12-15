@@ -12,8 +12,7 @@ The models in this file do NOT inherit from the standard HFT DynamicModel
 classes because they have a fundamentally different state structure and
 ODE system.
 
-Integration with HFT Framework:
-Victor Kees Poorte, 2025
+Dante Raso, 2025
 """
 
 from abc import ABC, abstractmethod
