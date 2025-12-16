@@ -1,43 +1,37 @@
 #!/usr/bin/env python3
 """
-Single Tank SLH2 Benchmark - Orchestrated Analysis Driver
+Single Tank SLH2 Analysis Driver
 
-This driver demonstrates the new orchestrated multi-tank framework
-using a single subcooled liquid hydrogen tank with ATR72 mission profile.
+Subcooled liquid hydrogen storage analysis using orchestrated multi-tank framework.
 
-Key Features:
-- Configuration-driven parameter specification
-- Semi-exposed physics components for transparency
-- NIST materials with temperature-dependent properties
-- Direct access to all src/ components
-- Comprehensive results validation
-
-Author: Orchestrated Multi-Tank Framework
-Date: September 2025
+Author: Dante Raso
 """
 
 import sys
-import time
 from pathlib import Path
 
 # Add parent directories for imports
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent.parent))
 
-# Import orchestrated framework
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
-from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
+# Import common driver function
+from src.multi_tank.orchestration.run_analysis import run_analysis
 
 
 def main():
-    """Main execution function for single tank SLH2 analysis."""
+    """Execute single tank SLH2 analysis."""
+    config_path = current_dir / "single_tank_slh2_config.yaml"
+    result = run_analysis(
+        config_path=config_path,
+        analysis_name="Single Tank SLH2 Benchmark",
+        show_material_props=False,
+        verbose=False
+    )
+    return result
 
-    print("=" * 80)
-    print("SINGLE TANK SLH2 BENCHMARK - ORCHESTRATED FRAMEWORK")
-    print("=" * 80)
-    print("Configuration-driven subcooled liquid hydrogen analysis")
-    print("Using semi-exposed src/ components with NIST materials")
-    print("=" * 80)
+
+if __name__ == "__main__":
+    main()
 
     # Load configuration
     config_path = current_dir / "single_tank_slh2_config.yaml"

@@ -1,47 +1,38 @@
 #!/usr/bin/env python3
 """
-Coupled CH2-LH2 Multi-Tank System - Orchestrated Analysis Driver
+Coupled CH2-LH2 Multi-Tank Analysis Driver
 
-This driver demonstrates the multi-tank coupling framework using
-a coupled gaseous hydrogen (CH2) and liquid hydrogen (LH2) system
-with flow-controlled pressurization coupling and ATR72 mission profile.
+Coupled gaseous and liquid hydrogen storage system with flow-controlled
+pressurisation coupling.
 
-Key Features:
-- Multi-tank configuration with advanced coupling rules
-- Flow-controlled pressurization: CH2 (700 bar) → LH2 (3-15 bar)
-- Mission assignment to LH2 tank (ATR72 discharge from liquid fuel)
-- Two-phase behavior in LH2 tank during operation
-- Feedback control system for optimal pressurization
-- Comprehensive multi-tank state tracking with coupling analysis
-
-Author: Orchestrated Multi-Tank Framework
-Date: October 2025
+Author: Dante Raso
 """
 
 import sys
-import time
 from pathlib import Path
 
 # Add parent directories for imports
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent.parent))
 
-# Import orchestrated framework
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
-from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
-
+# Import common driver function
+from src.multi_tank.orchestration.run_analysis import run_analysis
 
 
 def main():
-    """Main execution function for coupled CH2-LH2 multi-tank analysis."""
+    """Execute coupled CH2-LH2 multi-tank analysis."""
+    config_path = current_dir / "coupled_ch2_lh2_config.yaml"
+    result = run_analysis(
+        config_path=config_path,
+        analysis_name="Coupled CH2-LH2 Multi-Tank System",
+        show_material_props=False,
+        verbose=False
+    )
+    return result
 
-    print("=" * 80)
-    print("COUPLED CH2-LH2 MULTI-TANK SYSTEM - ORCHESTRATED FRAMEWORK")
-    print("=" * 80)
-    print("Multi-tank configuration with flow-controlled pressurization coupling")
-    print("CH2 (700 bar) pressurizes LH2 (3-15 bar) for ATR72 mission discharge")
-    print("Two-phase behavior expected in LH2 tank during operation")
-    print("=" * 80)
+
+if __name__ == "__main__":
+    main()
 
     # Load configuration
     config_path = current_dir / "coupled_ch2_lh2_config.yaml"

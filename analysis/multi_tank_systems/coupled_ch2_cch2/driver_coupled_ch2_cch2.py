@@ -1,45 +1,38 @@
 #!/usr/bin/env python3
 """
-Coupled CH2-CCH2 Multi-Tank System - Orchestrated Analysis Driver
+Coupled CH2-CCH2 Multi-Tank Analysis Driver
 
-This driver demonstrates the multi-tank coupling framework using
-a coupled gaseous hydrogen (CH2) and cryo-compressed hydrogen (CCH2)
-system with pressure compensation coupling and ATR72 mission profile.
+Coupled gaseous and cryo-compressed hydrogen storage system with pressure
+compensation coupling.
 
-Key Features:
-- Multi-tank configuration with coupling rules
-- Pressure compensation between CH2 (700 bar) and CCH2 (400 bar) tanks
-- Mission assignment to specific tank (ATR72 discharge from CCH2 tank)
-- Tank-specific geometry (CH2: user-defined radius, CCH2: mission-based sizing)
-- Inter-tank coupling with hysteresis control
-- Comprehensive multi-tank state tracking
-
-Author: Orchestrated Multi-Tank Framework
-Date: September 2025
+Author: Dante Raso
 """
 
 import sys
-import time
 from pathlib import Path
 
 # Add parent directories for imports
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent.parent))
 
-# Import orchestrated framework
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
-from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
+# Import common driver function
+from src.multi_tank.orchestration.run_analysis import run_analysis
 
 
 def main():
-    """Main execution function for coupled CH2-CCH2 multi-tank analysis."""
+    """Execute coupled CH2-CCH2 multi-tank analysis."""
+    config_path = current_dir / "coupled_ch2_cch2_config.yaml"
+    result = run_analysis(
+        config_path=config_path,
+        analysis_name="Coupled CH2-CCH2 Multi-Tank System",
+        show_material_props=False,
+        verbose=False
+    )
+    return result
 
-    print("=" * 80)
-    print("COUPLED CH2-CCH2 MULTI-TANK SYSTEM - ORCHESTRATED FRAMEWORK")
-    print("=" * 80)
-    print("Multi-tank configuration with pressure compensation coupling")
-    print("CH2 (700 bar) + CCH2 (400 bar) with ATR72 mission on CCH2 tank")
-    print("=" * 80)
+
+if __name__ == "__main__":
+    main()
 
     # Load configuration
     config_path = current_dir / "coupled_ch2_cch2_config.yaml"
