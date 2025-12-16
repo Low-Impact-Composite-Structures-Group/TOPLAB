@@ -83,7 +83,7 @@ class DelftColourPlotter:
             # Define greyscale color scheme with better contrast
             self.color_palette = ['#000000', '#404040', '#808080', '#A0A0A0', '#C0C0C0']
             self.line_styles = ['-', '--', '-.', ':', '-']  # Different line styles for distinction
-            print(f"🎨 DelftColourPlotter initialized for: {analysis_name} (Greyscale Mode)")
+            print(f"DelftColourPlotter initialised for: {analysis_name} (Greyscale Mode)")
         else:
             configure_plot_style(
                 font=FONT_NAME,
@@ -94,11 +94,11 @@ class DelftColourPlotter:
                 dpi=100
             )
             self.color_palette = DELFT_PALETTE
-            print(f"🎨 DelftColourPlotter initialized for: {analysis_name}")
+            print(f"DelftColourPlotter initialised for: {analysis_name}")
 
         # Report output formats
         if len(self.output_formats) > 1:
-            print(f"   📁 Output formats: {', '.join(self.output_formats)}")
+            print(f"   Output formats: {', '.join(self.output_formats)}")
 
     def _configure_pgf_backend(self):
         """Configure matplotlib for PGF output compatible with LaTeX."""
@@ -111,7 +111,7 @@ class DelftColourPlotter:
             "pgf.rcfonts": False,
             "pgf.preamble": r"\usepackage{graphicx}",
         })
-        print(f"   🔧 PGF backend configured for LaTeX compatibility")
+        print(f"   PGF backend configured for LaTeX compatibility")
 
     def _save_figure(self, fig, save_path: str, dpi: int = 900, formats: Optional[List[str]] = None):
         """
@@ -154,13 +154,13 @@ class DelftColourPlotter:
 
                 saved_files.append(str(output_file))
             except Exception as e:
-                print(f"   ⚠️ Failed to save {fmt} format: {e}")
+                print(f"   WARNING: Failed to save {fmt} format: {e}")
 
         if saved_files:
             if len(saved_files) == 1:
-                print(f"   💾 Saved to: {saved_files[0]}")
+                print(f"   Saved to: {saved_files[0]}")
             else:
-                print(f"   💾 Saved {len(saved_files)} formats: {', '.join([Path(f).suffix for f in saved_files])}")
+                print(f"   Saved {len(saved_files)} formats: {', '.join([Path(f).suffix for f in saved_files])}")
 
         return saved_files
 
@@ -201,7 +201,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print("🔵 Plotting hydrogen phase colour map…")
+        print("Plotting hydrogen phase colour map...")
 
         # Late import to avoid hard dependency at module import-time
         try:
@@ -522,7 +522,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=dpi)
 
-        print("   ✅ Phase colour map completed")
+        print("   Phase colour map completed")
         return fig
 
     def plot_tank_evolution(self,
@@ -581,9 +581,9 @@ class DelftColourPlotter:
         should_overlay = overlay_all_tanks if overlay_all_tanks is not None else self.enable_multi_tank_overlay
 
         if should_overlay and results.n_tanks > 1:
-            print(f"🔵 Plotting tank evolution for all {results.n_tanks} tanks (overlay mode)...")
+            print(f"Plotting tank evolution for all {results.n_tanks} tanks (overlay mode)...")
         else:
-            print(f"🔵 Plotting tank evolution for Tank {tank_index + 1}...")
+            print(f"Plotting tank evolution for Tank {tank_index + 1}...")
 
         # Validate inputs
         if tank_index >= results.n_tanks:
@@ -750,9 +750,9 @@ class DelftColourPlotter:
                 out_file = _compute_save_file(metric)
                 if out_file is not None:
                     fig.savefig(str(out_file), dpi=dpi, bbox_inches='tight', facecolor='white')
-                    print(f"   💾 Saved {metric} evolution to: {out_file}")
+                    print(f"   Saved {metric} evolution to: {out_file}")
 
-            print(f"   ✅ Separate tank evolution plots completed for Tank {tank_index + 1}")
+            print(f"   Separate tank evolution plots completed for Tank {tank_index + 1}")
             return figs
 
         # Create 3x1 vertical subplot grid with shared x-axis
@@ -970,9 +970,9 @@ class DelftColourPlotter:
         # Save if requested
         if save_path:
             fig.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            print(f"   Saved to: {save_path}")
 
-        print(f"   ✅ Tank evolution plot completed")
+        print(f"   Tank evolution plot completed")
         return fig
 
     def plot_mass_evolution(self,
@@ -997,9 +997,9 @@ class DelftColourPlotter:
         should_overlay = overlay_all_tanks if overlay_all_tanks is not None else self.enable_multi_tank_overlay
 
         if should_overlay and results.n_tanks > 1:
-            print(f"🔵 Plotting mass evolution for all {results.n_tanks} tanks (overlay mode)...")
+            print(f"Plotting mass evolution for all {results.n_tanks} tanks (overlay mode)...")
         else:
-            print(f"🔵 Plotting mass evolution for Tank {tank_index + 1}...")
+            print(f"Plotting mass evolution for Tank {tank_index + 1}...")
 
         # Validate inputs
         if tank_index >= results.n_tanks:
@@ -1046,9 +1046,9 @@ class DelftColourPlotter:
         # Save if requested
         if save_path:
             fig.savefig(save_path, dpi=dpi, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {save_path}")
+            print(f"   Saved to: {save_path}")
 
-        print(f"   ✅ Mass evolution plot completed")
+        print(f"   Mass evolution plot completed")
         return fig
 
     def _extract_valve_events(self, results: MultiTankResults) -> List[Dict[str, Any]]:
@@ -1109,7 +1109,7 @@ class DelftColourPlotter:
                     valve_active = current_active
 
         except Exception as e:
-            print(f"   ⚠️  Could not extract valve events: {e}")
+            print(f"   WARNING: Could not extract valve events: {e}")
 
         return valve_events
 
@@ -1153,7 +1153,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting density-temperature diagram for Tank {tank_index + 1}...")
+        print(f"Plotting density-temperature diagram for Tank {tank_index + 1}...")
 
         # Validate inputs
         if tank_index >= results.n_tanks:
@@ -1285,7 +1285,7 @@ class DelftColourPlotter:
                        label=f'Critical point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
 
             except Exception as e:
-                print(f"   ⚠️  Could not add saturation line: {e}")
+                print(f"   WARNING: Could not add saturation line: {e}")
 
         # Optional: Add isobars
         if include_isobars:
@@ -1363,7 +1363,7 @@ class DelftColourPlotter:
                                       fontsize=9, ha='right', va='center')
 
             except Exception as e:
-                print(f"   ⚠️  Could not add isobars: {e}")
+                print(f"   WARNING: Could not add isobars: {e}")
 
         # Formatting to match reference image
         ax.set_xlabel('Temperature [K]')
@@ -1411,7 +1411,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Density-temperature plot completed")
+        print(f"   Density-temperature plot completed")
         return fig
 
     def plot_mass_flows(self,
@@ -1439,7 +1439,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting mass flows for Tank {tank_index + 1}...")
+        print(f"Plotting mass flows for Tank {tank_index + 1}...")
 
         # Validate inputs
         if tank_index >= results.n_tanks:
@@ -1525,7 +1525,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Mass flow plot completed")
+        print(f"   Mass flow plot completed")
         return fig
 
     def plot_heat_exchanger_requirements(self,
@@ -1559,7 +1559,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting heat exchanger requirements for Tank {tank_index + 1}...")
+        print(f"Plotting heat exchanger requirements for Tank {tank_index + 1}...")
 
         # Extract data
         times_hours = heat_exchanger_data.get('times', [])
@@ -1568,7 +1568,7 @@ class DelftColourPlotter:
 
         # Validate data
         if len(times_hours) == 0 or len(ihex_requirements) == 0:
-            print(f"   ⚠️  No heat exchanger data available for Tank {tank_index + 1}")
+            print(f"   WARNING: No heat exchanger data available for Tank {tank_index + 1}")
             # Create empty plot
             fig, ax = plt.subplots(figsize=(12, 6))
             ax.text(0.5, 0.5, 'No Heat Exchanger Data Available',
@@ -1622,7 +1622,7 @@ class DelftColourPlotter:
                 ax.plot(times_hours, total_requirements_kw, color=total_color, linewidth=2,
                         linestyle=total_linestyle, alpha=0.8, label='Total heat exchanger requirement')
             except Exception as e:
-                print(f"   ⚠️  Could not calculate total requirements: {e}")
+                print(f"   WARNING: Could not calculate total requirements: {e}")
 
         # Add zero reference line
         ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.8)
@@ -1654,7 +1654,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Heat exchanger requirements plot completed")
+        print(f"   Heat exchanger requirements plot completed")
         return fig
 
 
@@ -1732,7 +1732,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting sequential tank evolution for Tank {tank_index + 1}...")
+        print(f"Plotting sequential tank evolution for Tank {tank_index + 1}...")
 
         # Aggregate data from all missions
         combined_times = []
@@ -1877,7 +1877,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Sequential tank evolution plot completed")
+        print(f"   Sequential tank evolution plot completed")
         return fig
 
     def plot_sequential_density_temperature(self,
@@ -1910,7 +1910,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting sequential density-temperature for Tank {tank_index + 1}...")
+        print(f"Plotting sequential density-temperature for Tank {tank_index + 1}...")
 
         # Default isobar pressures if not provided
         if isobar_pressures is None:
@@ -1949,11 +1949,11 @@ class DelftColourPlotter:
 
         # Add isobars if requested (simplified for sequential plots)
         if include_isobars and isobar_pressures:
-            print(f"   📈 Isobar lines requested for pressures: {isobar_pressures} bar (skipped in sequential plot)")
+            print(f"   INFO: Isobar lines requested for pressures: {isobar_pressures} bar (skipped in sequential plot)")
 
         # Add saturation line if requested (simplified for sequential plots)
         if include_saturation_line:
-            print(f"   📈 Saturation line requested (skipped in sequential plot)")
+            print(f"   INFO: Saturation line requested (skipped in sequential plot)")
 
         # Set axis properties
         ax.set_xlabel('Temperature [K]')
@@ -1978,7 +1978,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Sequential density-temperature plot completed")
+        print(f"   Sequential density-temperature plot completed")
         return fig
 
     def plot_sequential_mass_flows(self,
@@ -1996,7 +1996,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting sequential mass flows for Tank {tank_index + 1}...")
+        print(f"Plotting sequential mass flows for Tank {tank_index + 1}...")
 
         # Aggregate flow data
         combined_times = []
@@ -2082,7 +2082,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Sequential mass flows plot completed")
+        print(f"   Sequential mass flows plot completed")
         return fig
 
     def plot_pressure_requirements(self,
@@ -2103,11 +2103,11 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print(f"🔵 Plotting pressure requirements for Tank {tank_index + 1}...")
+        print(f"Plotting pressure requirements for Tank {tank_index + 1}...")
 
         # Check if we have a mission-adaptive coupling valve
         if not hasattr(orchestrator.tank_system, 'coupling_valves'):
-            print("   ⚠️ No coupling valves found")
+            print("   WARNING: No coupling valves found")
             return self._create_empty_plot("No coupling valves found")
 
         # Find the mission-adaptive valve
@@ -2118,14 +2118,14 @@ class DelftColourPlotter:
                 break
 
         if adaptive_valve is None:
-            print("   ⚠️ No mission-adaptive valve found")
+            print("   WARNING: No mission-adaptive valve found")
             return self._create_empty_plot("No mission-adaptive valve found")
 
         # Get diagnostic data from the valve
         try:
             diag_data = adaptive_valve.get_diagnostic_data()
         except AttributeError as e:
-            print(f"   ⚠️ Cannot get diagnostic data: {e}")
+            print(f"   WARNING: Cannot get diagnostic data: {e}")
             # Try to access data directly
             if hasattr(adaptive_valve, 'time_history') and hasattr(adaptive_valve, 'required_pressure_history'):
                 diag_data = {
@@ -2134,11 +2134,11 @@ class DelftColourPlotter:
                     'activation_threshold_history': getattr(adaptive_valve, 'activation_threshold_history', [])
                 }
             else:
-                print("   ⚠️ No pressure history data available")
+                print("   WARNING: No pressure history data available")
                 return self._create_empty_plot("No pressure history data available")
 
         if not diag_data['time_history']:
-            print("   ⚠️ No pressure history data available")
+            print("   WARNING: No pressure history data available")
             return self._create_empty_plot("No pressure history data available")
 
         # Convert to numpy arrays for plotting
@@ -2154,7 +2154,7 @@ class DelftColourPlotter:
                 required_pressures = required_pressures[order]
                 if len(activation_thresholds) == len(order):
                     activation_thresholds = activation_thresholds[order]
-                print("   ℹ️ Sorted diagnostic pressure series by time for plotting")
+                print("   INFO: Sorted diagnostic pressure series by time for plotting")
 
             # Optionally drop exact-duplicate time samples (keep last)
             # This reduces over-plotting at t≈0 and prevents dense clumps from looking like lines
@@ -2176,7 +2176,7 @@ class DelftColourPlotter:
                 required_pressures = required_pressures[keep_mask]
                 if rev_act is not None:
                     activation_thresholds = activation_thresholds[keep_mask]
-                print(f"   ℹ️ Deduplicated diagnostic times: {len(unique_times)} unique of {len(order)} samples")
+                print(f"   INFO: Deduplicated diagnostic times: {len(unique_times)} unique of {len(order)} samples")
 
         # Get actual tank pressure from results for comparison
         combined_data = orchestrator.results.get_combined_data()
@@ -2308,7 +2308,7 @@ class DelftColourPlotter:
             time_diffs = np.diff(times)
             negative_diffs = np.sum(time_diffs < 0)
             if negative_diffs > 0:
-                print(f"   ⚠️ Found {negative_diffs} negative time differences in pressure data")
+                print(f"   WARNING: Found {negative_diffs} negative time differences in pressure data")
 
         # Plot required pressure (no margin) - shows minimum pressure needed for mission discharge
         if len(required_pressures) > 0:
@@ -2362,18 +2362,18 @@ class DelftColourPlotter:
                         early_min = float('nan')
                         early_frac_below = float('nan')
 
-                    print("   📈 Tracking audit (active segments):")
+                    print("   INFO: Tracking audit (active segments):")
                     print(f"      min(P_actual - P_required) = {min_delta:.3f} bar, mean = {mean_delta:.3f} bar, fraction below = {frac_below:.3%}")
                     if np.isfinite(early_min):
                         print(f"      Early [0–0.1 h]: min Δ = {early_min:.3f} bar, fraction below = {early_frac_below:.3%}")
 
                     # CSV export intentionally disabled to keep output clean
                 else:
-                    print("   ℹ️ Tracking audit skipped: no active segments detected in required pressure.")
+                    print("   INFO: Tracking audit skipped: no active segments detected in required pressure.")
             else:
-                print("   ℹ️ Tracking audit skipped: insufficient diagnostic or results data.")
+                print("   INFO: Tracking audit skipped: insufficient diagnostic or results data.")
         except Exception as e:
-            print(f"   ⚠️ Tracking audit failed: {e}")
+            print(f"   WARNING: Tracking audit failed: {e}")
 
         # Add reference line for minimum tank pressure from configuration
         ax.axhline(y=minimum_pressure_bar, color=min_color, linestyle=min_style, alpha=0.7,
@@ -2405,7 +2405,7 @@ class DelftColourPlotter:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   ✅ Pressure requirements plot completed")
+        print(f"   Pressure requirements plot completed")
         return fig
 
     def _create_empty_plot(self, message: str) -> plt.Figure:
@@ -2431,7 +2431,7 @@ class DelftColourPlotter:
         Returns:
             matplotlib Figure object
         """
-        print("🔵 Plotting ATR72 mission mass flow...")
+        print("Plotting ATR72 mission mass flow...")
 
         # Import mission here to avoid circular imports
         from src.mission.mission import Mission
@@ -2599,20 +2599,20 @@ class DelftColourPlotter:
 
             default_path = os.path.join(script_dir, 'atr72_mass_flow.png')
             fig.savefig(default_path, dpi=900, bbox_inches='tight', facecolor='white')
-            print(f"   💾 Saved to: {default_path}")
+            print(f"   Saved to: {default_path}")
 
-        print("   ✅ ATR72 mass flow plot completed")
+        print("   ATR72 mass flow plot completed")
         return fig
 
 
 def main():
     """Test the DelftColourPlotter with sample data."""
-    print("🧪 Testing DelftColourPlotter...")
+    print("Testing DelftColourPlotter...")
 
     # This would normally come from actual simulation results
     # For now, just demonstrate the plotter initialization
     plotter = DelftColourPlotter("Test Analysis")
-    print("✅ DelftColourPlotter test successful")
+    print("DelftColourPlotter test successful")
 
 
 if __name__ == "__main__":

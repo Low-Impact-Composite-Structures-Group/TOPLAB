@@ -205,7 +205,7 @@ class TestPlottingIntegration:
                     mission_sequence = config_dict['mission_sequence']
                     mission_count = len(mission_sequence['missions']) if 'missions' in mission_sequence else len(mission_sequence)
 
-                    print(f"   📋 {analysis_name}: {mission_count} missions in sequence")
+                    print(f"{analysis_name}: {mission_count} missions in sequence")
                     assert mission_count > 1, f"Sequential analysis should have >1 missions for {analysis_name}"
 
                     # Check plotting configuration for sequential data
@@ -218,9 +218,9 @@ class TestPlottingIntegration:
                             if param in plots_config:
                                 print(f"   ✓ Sequential plotting param {param}: {plots_config[param]}")
 
-                    print(f"✅ {analysis_name}: Sequential plotting configuration validated")
+                    print(f"{analysis_name}: Sequential plotting configuration validated")
                 else:
-                    print(f"ℹ️ {analysis_name}: No mission sequence found")
+                    print(f"{analysis_name}: No mission sequence found")
 
             except Exception as e:
                 print(f"⚠️ {analysis_name}: Sequential plotting test error - {str(e)[:100]}...")

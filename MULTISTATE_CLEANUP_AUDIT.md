@@ -266,13 +266,46 @@ Updated imports after deleting duplicates:
 - ✅ Fixed `test/multi_tank_tests/test_nist_materials.py` to use multi_tank material properties
 - ✅ Removed Liner import from `src/tank_design/__init__.py`
 
-### Phase 5: Documentation Updates 📝 IN PROGRESS
+### Phase 5: Terminal Output Cleanup 🔄 IN PROGRESS
+
+**Objective**: Clean up print statements, remove emojis, and unify terminal output across multi-tank analyses
+
+#### Completed ✅
+- ✅ Removed 97 emojis from `src/multi_tank/orchestration/system_orchestrator.py`
+  - Replaced ✅/❌ with clean text (ERROR, WARNING, SUCCESS)
+  - Removed decorative emojis (🔧🔵📋💾🚀) from initialization, simulation, validation, plotting, and summary sections
+- ✅ Removed 16 emojis from `src/multi_tank/system/tank_system.py`
+  - Cleaned up tank setup, coupling rules, density stopping, and simulation progress messages
+- ✅ Removed 30+ emojis from `src/multi_tank/plotting/multi_tank_plotting.py`
+  - Cleaned DelftColourPlotter initialization and all plotting function completion messages
+- ✅ Removed 3 emojis from `plotting/plot_style_sb.py`
+  - Cleaned font size update messages
+- ✅ **Commit**: "Remove emojis from multi-tank system output" (SHA: 470e27b)
+
+#### Remaining Tasks 🔄
+1. **Survey remaining files for emojis**:
+   - Check driver scripts in `analysis/multi_tank_systems/*/driver_*.py`
+   - Check configuration files (`src/multi_tank/configuration/`)
+   - Check coupling modules (`src/multi_tank/coupling/`)
+   - Check solver/utilities for any debug print statements
+
+2. **Unify terminal output formatting**:
+   - Standardize status message prefixes (ERROR, WARNING, INFO, SUCCESS)
+   - Ensure consistent indentation across modules
+   - Review logging levels and verbosity control
+
+3. **Clean up print statements**:
+   - Review excessive/redundant print statements
+   - Consider replacing some prints with proper logging
+   - Ensure output is publication-ready
+
+### Phase 6: Documentation Updates 📝 TODO
 1. Update README.md to document multi_tank structure
 2. Add docstring headers to all multi_tank files indicating authorship (Dante Raso)
 3. Document the API contract between original and multi_tank code
 4. Add architecture diagram showing separation
 
-### Phase 6: Testing (Deferred) 🧪
+### Phase 7: Testing (Deferred) 🧪
 - Verify Victor's original tests still pass
 - Update multi_tank tests (deferred to later)
 
@@ -400,15 +433,24 @@ analysis/multi_tank_systems/*/driver_*.py
 
 ## Next Steps
 
-1. **User Approval**: Confirm cleanup plan
-2. **Execute Phase 1**: Delete orphaned analysis files
-3. **Execute Phase 2**: Remove duplicate files
-4. **Execute Phase 3**: Check and relocate misplaced multi_tank files
-5. **Execute Phase 4**: Fix import references
-6. **Execute Phase 5**: Update documentation
-7. **Validation**: Run Victor's tests to ensure nothing broken
-8. **Final Review**: Code review before merge
+1. ✅ ~~**Execute Phase 1**: Delete orphaned analysis files~~
+2. ✅ ~~**Execute Phase 2**: Remove duplicate files~~
+3. ✅ ~~**Execute Phase 3**: Check and relocate misplaced multi_tank files~~
+4. ✅ ~~**Execute Phase 4**: Fix import references~~
+5. 🔄 **Phase 5 (In Progress)**: Terminal output cleanup
+   - ✅ Removed emojis from core modules (committed: 470e27b)
+   - 🔄 Survey remaining files for emojis
+   - ⏸️ Unify terminal output formatting
+   - ⏸️ Clean up excessive print statements
+6. ⏸️ **Phase 6**: Documentation updates (README, docstrings, API contract)
+7. ⏸️ **Phase 7**: Testing and validation
+8. ⏸️ **Final Review**: Code review before merge to main
 
 ---
 
-**Status**: ✅ **Phase 1-4 Complete** - Awaiting documentation updates and final validation
+**Current Status**: 🔄 **Phase 5 (Terminal Output Cleanup) - 40% Complete**
+
+**Recent Progress**:
+- Removed 146+ emojis from 4 core modules
+- Committed emoji removal changes (SHA: 470e27b)
+- Next: Survey remaining files and unify output formatting

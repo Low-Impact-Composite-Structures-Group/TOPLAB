@@ -227,4 +227,4 @@ if __name__ == "__main__":
     print(f"From path: {g10_from_path.name}")
     print(f"From path: {carbon_from_path.name}")
 
-    print(f"\n✅ NIST Materials Framework Ready!")
+    print(f"\nNIST Materials Framework Ready!")

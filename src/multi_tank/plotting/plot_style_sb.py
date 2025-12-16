@@ -140,16 +140,15 @@ def update_font_settings(master_size=None, legend_size=None, font_name=None):
 	if master_size is not None:
 		FONT_SIZE = master_size
 		plt.rcParams['font.size'] = FONT_SIZE
-		print(f"   🔧 Updated FONT_SIZE to {FONT_SIZE}")
+		print(f"	Updated FONT_SIZE to {FONT_SIZE}")
 	if legend_size is not None:
 		LEGEND_FONT_SIZE = legend_size
 		plt.rcParams['legend.fontsize'] = LEGEND_FONT_SIZE
-		print(f"   🔧 Updated LEGEND_FONT_SIZE to {LEGEND_FONT_SIZE}")
+		print(f"	Updated LEGEND_FONT_SIZE to {LEGEND_FONT_SIZE}")
 	if font_name is not None:
 		FONT_NAME = font_name
 		plt.rcParams['font.family'] = FONT_NAME
-		print(f"   🔧 Updated FONT_NAME to '{FONT_NAME}'")
-
+		print(f"   Updated FONT_NAME to '{FONT_NAME}'")
 def configure_plot_style(font="Cambria", palette="delft", bbox_to_anchor_key=None, legend_position=None,
 						style="white", context="paper", figure_size=None, dpi=None, **kwargs):
 	"""Configure the global plot style settings."""

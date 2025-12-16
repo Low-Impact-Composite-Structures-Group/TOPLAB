@@ -46,7 +46,7 @@ class CarbonEpoxyProperties:
                     self._specific_heats.append(cp)
 
             self._data_loaded = True
-            print(f"✅ Loaded {len(self._temperatures)} data points for carbon-epoxy specific heat")
+            print(f" Loaded {len(self._temperatures)} data points for carbon-epoxy specific heat")
             print(f"   Temperature range: {min(self._temperatures):.1f} - {max(self._temperatures):.1f} K")
 
         except FileNotFoundError:
@@ -154,4 +154,4 @@ if __name__ == "__main__":
         k = thermal_conductivity(T)
         print(f"{T:<10.0f} {cp:<12.1f} {k:<12.1f}")
 
-    print(f"\n✅ Carbon-epoxy properties test complete!")
+    print(f"\nCarbon-epoxy properties test complete!")

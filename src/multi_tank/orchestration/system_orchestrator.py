@@ -66,7 +66,7 @@ class SystemOrchestrator:
             try:
                 self.scenario_config = ScenarioConfig.from_yaml(config_path)
             except Exception as e:
-                print(f"   ❌ Failed to load ScenarioConfig: {e}")
+                print(f"   ERROR: Failed to load ScenarioConfig: {e}")
                 raise e
         else:
             raise ValueError("Must provide either scenario_config or config_path")
@@ -85,27 +85,27 @@ class SystemOrchestrator:
             if 'mission' in raw_config and 'profile' in raw_config['mission']:
                 # Use the profile specified in the mission section
                 mission_profile = raw_config['mission']['profile']
-                print(f"   📋 Using mission section profile: {mission_profile}")
+                print(f"   Using mission section profile: {mission_profile}")
             else:
                 # Fallback to mission_sequence
                 mission = self.scenario_config.mission_sequence.missions[0]
                 mission_profile = mission.profile
-                print(f"   📋 Using mission_sequence profile: {mission_profile}")
+                print(f"   Using mission_sequence profile: {mission_profile}")
         except Exception as e:
             # Ultimate fallback
             mission_profile = "atr72"  # Default to atr72 instead of constant flow
-            print(f"   ⚠️  Using fallback profile: {mission_profile} (error: {e})")
+            print(f"   WARNING: Using fallback profile: {mission_profile} (error: {e})")
 
         self.mission_profile = self._get_mission_profile(mission_profile)
-        print(f"   ✓ Mission profile loaded: {mission_profile}")
+        print(f"   Mission profile loaded: {mission_profile}")
 
         # Create tank geometries from scenario configuration (now with mission profile available)
         self.tank_geometries = self._create_tank_geometries()
-        print(f"   ✓ Created {len(self.tank_geometries)} tank geometries")
+        print(f"   Created {len(self.tank_geometries)} tank geometries")
 
         # Create TankSystem configuration from ScenarioConfig
         self.tank_system_config = self._create_tank_system_config()
-        print(f"   ✓ Tank system configuration created")
+        print(f"   Tank system configuration created")
 
         # Parse coupling rules from configuration
         coupling_rules_config = self.scenario_config.config_dict.get('coupling_rules', [])
@@ -114,7 +114,7 @@ class SystemOrchestrator:
         # No need for intermediate abstraction layer
         self.coupling_rules = coupling_rules_config
         if coupling_rules_config:
-            print(f"   ✓ Found {len(coupling_rules_config)} coupling rules in configuration")
+            print(f"   Found {len(coupling_rules_config)} coupling rules in configuration")
             for rule_config in coupling_rules_config:
                 coupling_id = rule_config.get('coupling_id', 'unknown')
                 coupling_type = rule_config.get('coupling_type', 'unknown')
@@ -138,9 +138,9 @@ class SystemOrchestrator:
 
                 # Log fallback usage for transparency
                 if 'activation_threshold_bar' not in hysteresis:
-                    print(f"⚠️  Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
                 if 'deactivation_threshold_bar' not in hysteresis:
-                    print(f"⚠️  Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
 
                 tank_system_rule = {
                     'type': 'pressure_triggered_valve',
@@ -154,9 +154,9 @@ class SystemOrchestrator:
 
                 # Log fallback usage for critical coupling parameters
                 if 'max_flow_rate_kg_s' not in flow_params:
-                    print(f"⚠️  Using fallback: max_flow_rate_kg_s = {tank_system_rule['max_flow_rate']} kg/s (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: max_flow_rate_kg_s = {tank_system_rule['max_flow_rate']} kg/s (consider adding to YAML config)")
                 if 'orifice_diameter_m' not in flow_params:
-                    print(f"⚠️  Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
 
                 tank_system_coupling_rules.append(tank_system_rule)
 
@@ -181,7 +181,7 @@ class SystemOrchestrator:
                     'coupling_id': rule_config.get('coupling_id', 'mission_adaptive_pressurization')
                 }
 
-                print(f"   ✓ Mission-adaptive pressurization → MissionAdaptivePressureValve")
+                print(f"   Mission-adaptive pressurization → MissionAdaptivePressureValve")
                 print(f"     Dynamic thresholds based on mission flow requirements")
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
@@ -208,7 +208,7 @@ class SystemOrchestrator:
                     'coupling_id': rule_config.get('coupling_id', 'pressure_governor')
                 }
 
-                print(f"   ✓ Pressure governor → PressureGovernorValve (margin-free)")
+                print(f"   Pressure governor → PressureGovernorValve (margin-free)")
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
@@ -234,7 +234,7 @@ class SystemOrchestrator:
                     'coupling_id': rule_config.get('coupling_id', 'feedforward_pressure_enforcer')
                 }
 
-                print(f"   ✓ Feedforward pressure enforcement → FeedforwardPressureEnforcer")
+                print(f"   Feedforward pressure enforcement → FeedforwardPressureEnforcer")
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
@@ -260,7 +260,7 @@ class SystemOrchestrator:
                     'coupling_id': rule_config.get('coupling_id', 'flow_matching_pressurization')
                 }
 
-                print(f"   ✓ Flow-matching pressurization → MassFlowPIDControlledValve")
+                print(f"   Flow-matching pressurization → MassFlowPIDControlledValve")
                 print(f"     Direct flow-to-flow PID control")
                 print(f"     PID gains: kp={control_params.get('pid_kp', 1.0)}, ki={control_params.get('pid_ki', 0.1)}, kd={control_params.get('pid_kd', 0.01)}")
 
@@ -284,7 +284,7 @@ class SystemOrchestrator:
 
                 # Ensure proper ordering (close > open); if not, auto-correct with +1 bar gap
                 if deactivation_threshold <= activation_threshold:
-                    print(f"⚠️  Adjusting deactivation threshold for pressure_compensation: {deactivation_threshold} ≤ {activation_threshold} bar → enforcing +1 bar gap")
+                    print(f"WARNING: Adjusting deactivation threshold for pressure_compensation: {deactivation_threshold} ≤ {activation_threshold} bar → enforcing +1 bar gap")
                     deactivation_threshold = activation_threshold + 1.0
 
                 # 2) Flow parameters: support either consolidated 'flow_parameters' or nested 'flow_physics'
@@ -345,7 +345,7 @@ class SystemOrchestrator:
                 tank_system_coupling_rules.append(tank_system_rule)
 
             else:
-                print(f"⚠️  Unsupported coupling type '{coupling_type}' - skipping")
+                print(f"WARNING: Unsupported coupling type '{coupling_type}' - skipping")
                 continue
 
         # Initialize TankSystem with all components
@@ -355,11 +355,11 @@ class SystemOrchestrator:
             coupling_rules=tank_system_coupling_rules,  # Pass converted config
             scenario_config=self.scenario_config  # Pass full scenario config for materials
         )
-        print(f"   ✓ TankSystem DAE engine initialized")
+        print(f"   TankSystem DAE engine initialised")
 
         # Setup mission-specific flow rates if needed
         self._setup_mission_sequences()
-        print(f"   ✓ Mission sequences configured")
+        print(f"   Mission sequences configured")
 
         # Results storage
         # Store results after simulation
@@ -376,7 +376,7 @@ class SystemOrchestrator:
         }
         self.validation_results = None
 
-        print("✅ System Orchestrator ready for mission execution!")
+        print("System Orchestrator ready for mission execution!")
         print(f"   Tanks: {len(self.tank_geometries)}")
         print(f"   Missions: {self.scenario_config.get_mission_count()}")
         print(f"   Materials: {list(self.scenario_config.materials.keys())}")
@@ -434,7 +434,7 @@ class SystemOrchestrator:
                 material = NISTMaterial.aluminum_6061T6_nist()
                 operating_pressure = geometry_data.get('venting_pressure', 450e5)  # Default 450 bar
                 if 'venting_pressure' not in geometry_data:
-                    print(f"⚠️  Using fallback: venting_pressure = {operating_pressure/1e5:.0f} bar for Tank {tank_id} (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: venting_pressure = {operating_pressure/1e5:.0f} bar for Tank {tank_id} (consider adding to YAML config)")
 
                 # Calculate tank geometry from mission requirements
                 tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure)
@@ -457,7 +457,7 @@ class SystemOrchestrator:
             venting_pressure = float(geometry_data.get('venting_pressure', initial_pressure * 1.125))
             minimum_pressure = float(geometry_data.get('minimum_pressure', min(15e5, initial_pressure * 0.1)))
             if 'minimum_pressure' not in geometry_data:
-                print(f"⚠️  Using fallback: minimum_pressure = {minimum_pressure/1e5:.1f} bar for Tank {tank_id} (calculated from initial_pressure)")
+                print(f"WARNING: Using fallback: minimum_pressure = {minimum_pressure/1e5:.1f} bar for Tank {tank_id} (calculated from initial_pressure)")
 
             # Use calculated temperature from mission sizing if available
             if 'calculated_initial_temperature' in geometry_data:
@@ -504,7 +504,7 @@ class SystemOrchestrator:
             first_tank_data = list(self.scenario_config.tank_geometries.values())[0]
             minimum_density = float(first_tank_data.get('minimum_density', 5.8))  # Default 5.8 kg/m³
             if 'minimum_density' not in first_tank_data:
-                print(f"⚠️  Using fallback: minimum_density = {minimum_density} kg/m³ for stopping criteria (consider adding to YAML config)")
+                print(f"WARNING: Using fallback: minimum_density = {minimum_density} kg/m³ for stopping criteria (consider adding to YAML config)")
 
         # Get target density from stopping criteria configuration
         target_density = None
@@ -588,14 +588,14 @@ class SystemOrchestrator:
 
                 # Log fallback usage for mission parameters
                 if 'flow_rate' not in mission_data:
-                    print(f"⚠️  Using fallback: flow_rate = {flow_rate} kg/s (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: flow_rate = {flow_rate} kg/s (consider adding to YAML config)")
                 if 'duration' not in mission_data:
-                    print(f"⚠️  Using fallback: duration = {duration} s ({duration/3600:.1f} hours) (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: duration = {duration} s ({duration/3600:.1f} hours) (consider adding to YAML config)")
                 mission_type = mission_data.get('type', 'discharge')
                 mission_key = mission_data.get('key', mission_type)
                 ambient_temp = mission_data.get('ambient_temperature', 288.15)
                 if 'ambient_temperature' not in mission_data:
-                    print(f"⚠️  Using fallback: ambient_temperature = {ambient_temp} K (consider adding to YAML config)")
+                    print(f"WARNING: Using fallback: ambient_temperature = {ambient_temp} K (consider adding to YAML config)")
 
             elif 'mission_sequence' in raw_config and 'missions' in raw_config['mission_sequence']:
                 # Fallback to sequential mission format - use first mission
@@ -615,7 +615,7 @@ class SystemOrchestrator:
                 ambient_temp = getattr(mission_config, 'ambient_temperature', 288.15)
         except Exception as e:
             # Ultimate fallback
-            print(f"   ⚠️  Config reading failed: {e}")
+            print(f"   WARNING: Config reading failed: {e}")
             flow_rate = 0.001
             duration = 36000  # 10 hours
             mission_type = 'discharge'
@@ -684,7 +684,7 @@ class SystemOrchestrator:
             phase = parameters.get('phase', 'gas')
             ambient_temperature = mission_data.get('ambient_temperature', 288.15)
 
-            print(f"   📋 Loading CSV mission profile...")
+            print(f"   Loading CSV mission profile...")
             print(f"      CSV file: {csv_path.name}")
             print(f"      Cruise altitude: {cruise_altitude} m")
             print(f"      Standard temperature: {standard_temperature} K")
@@ -702,7 +702,7 @@ class SystemOrchestrator:
             )
 
         except Exception as e:
-            print(f"   ❌ CSV mission creation failed: {e}")
+            print(f"   ERROR: CSV mission creation failed: {e}")
             raise ValueError(f"Failed to create CSV mission: {e}")
 
     def _create_mission_sized_tank(self, geometry_data, material, operating_pressure):
@@ -758,21 +758,21 @@ class SystemOrchestrator:
 
                     if current_mission == sizing_mission:
                         # This is the sizing mission - calculate and cache geometry
-                        print(f"   🔧 Sizing mission '{sizing_mission}' - calculating tank geometry")
+                        print(f"   Sizing mission '{sizing_mission}' - calculating tank geometry")
                         SystemOrchestrator._sizing_mission_key = cache_key
                     else:
                         # This is a non-sizing mission - try to reuse cached geometry
                         if cache_key in SystemOrchestrator._cached_tank_geometries:
                             cached_tank = SystemOrchestrator._cached_tank_geometries[cache_key]
-                            print(f"   🔧 Non-sizing mission '{current_mission}' - reusing tank geometry from '{sizing_mission}'")
+                            print(f"   Non-sizing mission '{current_mission}' - reusing tank geometry from '{sizing_mission}'")
                             print(f"     Cached geometry: V={cached_tank.volume:.4f}m³, R={cached_tank.radius:.3f}m")
                             return cached_tank
                         else:
-                            print(f"   ⚠️  No cached geometry found for sizing mission '{sizing_mission}' - calculating new geometry")
+                            print(f"   WARNING: No cached geometry found for sizing mission '{sizing_mission}' - calculating new geometry")
                             print(f"     Cache key: {cache_key}")
                             print(f"     Available keys: {list(SystemOrchestrator._cached_tank_geometries.keys())}")
         except Exception as e:
-            print(f"   ⚠️  Sequential mission detection failed: {e} - proceeding with normal sizing")
+            print(f"   WARNING: Sequential mission detection failed: {e} - proceeding with normal sizing")
 
         # Get mission fuel requirements from the actual mission profile
         # This handles both predefined profiles (ATR72) and custom constant flow missions
@@ -780,7 +780,7 @@ class SystemOrchestrator:
             # First try to get fuel requirements directly from the mission profile
             if hasattr(self.mission_profile, 'required_fuel'):
                 required_fuel_mass = self.mission_profile.required_fuel
-                print(f"   🔧 Using mission profile fuel requirement: {required_fuel_mass:.2f} kg")
+                print(f"   Using mission profile fuel requirement: {required_fuel_mass:.2f} kg")
             else:
                 # Calculate from mission sections for custom profiles
                 required_fuel_mass = 0.0
@@ -793,10 +793,10 @@ class SystemOrchestrator:
                         elif hasattr(flow, 'mass_flow_rate') and flow.mass_flow_rate < 0:  # Outflow (negative)
                             section_fuel += abs(flow.mass_flow_rate) * section.duration
                     required_fuel_mass += section_fuel
-                print(f"   🔧 Calculated fuel requirement from sections: {required_fuel_mass:.2f} kg")
+                print(f"   Calculated fuel requirement from sections: {required_fuel_mass:.2f} kg")
         except Exception as e:
             # Fallback to config-based calculation for simple constant flow missions
-            print(f"   ⚠️ Mission profile fuel calculation failed: {e}")
+            print(f"   WARNING: Mission profile fuel calculation failed: {e}")
             try:
                 import yaml
                 config_path = getattr(self.scenario_config, '_config_path', 'NO_PATH')
@@ -808,16 +808,16 @@ class SystemOrchestrator:
                     flow_rate = current_mission.get('flow_rate', 0.001)
                     duration = current_mission.get('duration', 3600)
                     required_fuel_mass = flow_rate * duration
-                    print(f"   🔧 Using config-based fuel requirement: {required_fuel_mass:.2f} kg")
+                    print(f"   Using config-based fuel requirement: {required_fuel_mass:.2f} kg")
                 else:
                     required_fuel_mass = 36.0  # Default for ATR72-like missions
-                    print(f"   🔧 Using default fuel requirement: {required_fuel_mass:.2f} kg")
+                    print(f"   Using default fuel requirement: {required_fuel_mass:.2f} kg")
             except:
                 required_fuel_mass = 36.0  # Default for ATR72-like missions
-                print(f"   🔧 Using fallback fuel requirement: {required_fuel_mass:.2f} kg")
-        print(f"   🔧 Mission profile type: {type(self.mission_profile)}")
+                print(f"   Using fallback fuel requirement: {required_fuel_mass:.2f} kg")
+        print(f"   Mission profile type: {type(self.mission_profile)}")
         if hasattr(self.mission_profile, 'sections'):
-            print(f"   🔧 Mission sections: {len(self.mission_profile.sections)}")
+            print(f"   Mission sections: {len(self.mission_profile.sections)}")
             for i, section in enumerate(self.mission_profile.sections):
                 if hasattr(section, 'duration') and hasattr(section, 'fuel_flows'):
                     flows = getattr(section, 'fuel_flows', [])
@@ -852,7 +852,7 @@ class SystemOrchestrator:
                     geometry_data['initial_density'] = 78.0    # kg/m³ - discharge density
 
         except Exception as e:
-            print(f"   ⚠️  Could not override initial conditions: {e}")
+            print(f"   WARNING: Could not override initial conditions: {e}")
 
         initial_pressure = float(geometry_data['initial_pressure'])  # Pa
 
@@ -955,10 +955,10 @@ class SystemOrchestrator:
             # Replace only the outflow method - let coupling handle inflows
             self.tank_system._get_outflow_rate = mission_assigned_outflow_rate
 
-            print(f"     ✓ Mission flows applied to Tank {assigned_tank_id}")
-            print(f"     ✓ Coupling flows preserved for pressure compensation")
+            print(f"     Mission flows applied to Tank {assigned_tank_id}")
+            print(f"     Coupling flows preserved for pressure compensation")
         else:
-            print(f"     ⚠️ No mission assignment specified - applying mission to all tanks")
+            print(f"     WARNING: No mission assignment specified - applying mission to all tanks")
 
     def _get_mission_flow_rate(self, time: float) -> float:
         """Get mission flow rate at given time from mission profile."""
@@ -1031,7 +1031,7 @@ class SystemOrchestrator:
                     'max_step': max_step
                 }
 
-        print("\n🚀 Starting ScenarioConfig-based simulation...")
+        print("\nStarting ScenarioConfig-based simulation...")
         print(f"   Analysis: {self.scenario_config.analysis_name}")
         print(f"   Tanks: {len(self.tank_geometries)}")
         print(f"   Mission: {self.scenario_config.mission_sequence.missions[0].type}")
@@ -1046,7 +1046,7 @@ class SystemOrchestrator:
             for key in self.heat_flow_data:
                 self.heat_flow_data[key].clear()
             set_heat_flow_data_collector(self.heat_flow_data)
-            print("   🔧 Heat flow data collector configured for iHEX extraction")
+            print("   Heat flow data collector configured for iHEX extraction")
 
             # Run the MultiTankSystem DAE simulation
             self.results = self.tank_system.run_analysis(solver_method, solver_config)
@@ -1054,7 +1054,7 @@ class SystemOrchestrator:
             end_time = time.time()
             wall_time = end_time - start_time
 
-            print("✅ Simulation completed successfully!")
+            print("Simulation completed successfully!")
             print(f"   Wall time: {wall_time:.2f} seconds")
             print(f"   Final time: {self.results.times[-1]/3600:.2f} hours")
             print(f"   Data points: {len(self.results.times)}")
@@ -1063,7 +1063,7 @@ class SystemOrchestrator:
             qdot_disch_count = len(self.heat_flow_data['qdot_disch'])
             qdot_disch_nonzero = sum(1 for q in self.heat_flow_data['qdot_disch'] if abs(q) > 1e-3)
             max_qdot_disch = max(abs(q) for q in self.heat_flow_data['qdot_disch']) if self.heat_flow_data['qdot_disch'] else 0
-            print(f"   🔧 Heat flow data: {qdot_disch_count} points, {qdot_disch_nonzero} non-zero, max = {max_qdot_disch:.1f}W")
+            print(f"   Heat flow data: {qdot_disch_count} points, {qdot_disch_nonzero} non-zero, max = {max_qdot_disch:.1f}W")
 
             # Display final states
             final_multi_state = self.results.multi_tank_states[-1]
@@ -1076,7 +1076,7 @@ class SystemOrchestrator:
             return self.results
 
         except Exception as e:
-            print(f"❌ Simulation failed: {e}")
+            print(f"ERROR: Simulation failed: {e}")
             raise
 
     def validate_results(self) -> Dict[str, Any]:
@@ -1089,7 +1089,7 @@ class SystemOrchestrator:
         if not self.results:
             raise ValueError("No results available. Run simulation first.")
 
-        print("\n📊 Validating simulation results...")
+        print("\nValidating simulation results...")
         # Validation results - simplified for now
         self.validation_results = {"overall": True, "message": "TankSystem validation not yet implemented"}
 
@@ -1118,15 +1118,15 @@ class SystemOrchestrator:
 
         # Log fallback usage for heat exchanger parameters
         if 'ohex_target_temperature' not in hex_config:
-            print(f"⚠️  Using fallback: ohex_target_temperature = {target_temp} K (now available in YAML config)")
+            print(f"WARNING: Using fallback: ohex_target_temperature = {target_temp} K (now available in YAML config)")
         if 'ohex_target_pressure' not in hex_config:
-            print(f"⚠️  Using fallback: ohex_target_pressure = {target_press/1e5:.0f} bar (now available in YAML config)")
+            print(f"WARNING: Using fallback: ohex_target_pressure = {target_press/1e5:.0f} bar (now available in YAML config)")
 
         try:
             # Calculate target enthalpy (constant for all time points)
             h_target = PropsSI("Hmass", "T", target_temp, "P", target_press, "hydrogen")
         except Exception as e:
-            print(f"   ⚠️ Could not calculate OHEX target enthalpy: {e}")
+            print(f"   WARNING: Could not calculate OHEX target enthalpy: {e}")
             return [0.0] * len(self.results.times)
 
         qdot_ohex = []
@@ -1135,7 +1135,7 @@ class SystemOrchestrator:
         # Add statistics tracking
         max_q_ohex = 0.0
         valid_points = 0
-        print(f"   🔧 Calculating OHEX for {len(tank_series.states)} time points...")
+        print(f"   Calculating OHEX for {len(tank_series.states)} time points...")
 
         for i, state in enumerate(tank_series.states):
             try:
@@ -1179,7 +1179,7 @@ class SystemOrchestrator:
                 # Silently handle CoolProp errors (common at extreme conditions)
                 qdot_ohex.append(0.0)
 
-        print(f"   📊 OHEX calculated: {valid_points}/{len(qdot_ohex)} points, max = {max_q_ohex:.0f}W")
+        print(f"   OHEX calculated: {valid_points}/{len(qdot_ohex)} points, max = {max_q_ohex:.0f}W")
         return qdot_ohex
 
     def _calculate_ihex_requirements(self, tank_index: int = 0) -> List[float]:
@@ -1200,11 +1200,11 @@ class SystemOrchestrator:
         if not self.results:
             return []
 
-        print(f"   📊 Extracting iHEX requirements from DAE simulation data...")
+        print(f"   Extracting iHEX requirements from DAE simulation data...")
 
         # Check if heat flow data was collected during simulation
         if not hasattr(self, 'heat_flow_data') or not self.heat_flow_data['qdot_disch']:
-            print("   ⚠️  No heat flow data collected, returning zero iHEX requirements")
+            print("   WARNING: No heat flow data collected, returning zero iHEX requirements")
             return [0.0] * len(self.results.times)
 
         # Get raw data from DAE integration
@@ -1212,11 +1212,11 @@ class SystemOrchestrator:
         heat_qdot_disch = self.heat_flow_data['qdot_disch']
 
         if len(heat_times) != len(heat_qdot_disch):
-            print(f"   ⚠️  Heat flow time/data length mismatch: {len(heat_times)} vs {len(heat_qdot_disch)}")
+            print(f"   WARNING: Heat flow time/data length mismatch: {len(heat_times)} vs {len(heat_qdot_disch)}")
             return [0.0] * len(self.results.times)
 
         if len(heat_times) == 0:
-            print("   ⚠️  No heat flow data collected during integration")
+            print("   WARNING: No heat flow data collected during integration")
             return [0.0] * len(self.results.times)
 
         # Interpolate heat flow data to match results timeline
@@ -1227,7 +1227,7 @@ class SystemOrchestrator:
 
         # Handle length mismatch by interpolation
         if len(heat_times) != len(self.results.times):
-            print(f"   🔧 Interpolating heat flow data: {len(heat_times)} → {len(self.results.times)} points")
+            print(f"   Interpolating heat flow data: {len(heat_times)} → {len(self.results.times)} points")
             qdot_ihex = np.interp(results_times, heat_times_array, heat_qdot_array).tolist()
         else:
             qdot_ihex = heat_qdot_disch.copy()
@@ -1236,7 +1236,7 @@ class SystemOrchestrator:
         valid_points = sum(1 for q in qdot_ihex if abs(q) > 1e-3)
         max_q_ihex = max(abs(q) for q in qdot_ihex) if qdot_ihex else 0.0
 
-        print(f"   📊 iHEX extracted from DAE: {valid_points}/{len(qdot_ihex)} points, max = {max_q_ihex:.0f}W")
+        print(f"   iHEX extracted from DAE: {valid_points}/{len(qdot_ihex)} points, max = {max_q_ihex:.0f}W")
         return qdot_ihex
 
     def _get_mission_flow_rate_at_time(self, time_s: float) -> float:
@@ -1277,7 +1277,7 @@ class SystemOrchestrator:
         if not self.results:
             raise ValueError("No results available. Run simulation first.")
 
-        print("📊 Generating multi-tank analysis plots...")
+        print("Generating multi-tank analysis plots...")
 
         try:
             # Import the new plotting module
@@ -1293,7 +1293,7 @@ class SystemOrchestrator:
             enable_pgf = 'pgf' in output_formats
 
             if enable_pgf:
-                print(f"   🔧 PGF output enabled for LaTeX compatibility")
+                print(f"   PGF output enabled for LaTeX compatibility")
 
             # Load font configuration and update global font settings
             font_config = style_config.get('font', {})
@@ -1311,7 +1311,7 @@ class SystemOrchestrator:
                     font_name=font_name
                 )
 
-                print(f"   🎨 Font configuration loaded: master={master_size}, legend={legend_size}, font='{font_name}'")
+                print(f"   Font configuration loaded: master={master_size}, legend={legend_size}, font='{font_name}'")
 
             # Create plotter with analysis name and styling options from config
             plotter = DelftColourPlotter(
@@ -1325,20 +1325,20 @@ class SystemOrchestrator:
             # Get figure_prefix from config (if specified)
             figure_prefix = plot_config.get('figure_prefix', None)
             if figure_prefix:
-                print(f"   📝 Using figure prefix from config: '{figure_prefix}'")
+                print(f"   Using figure prefix from config: '{figure_prefix}'")
 
             # Check if this is a sequential mission analysis
             is_sequential = self._is_sequential_mission_analysis()
 
             if is_sequential:
-                print("🔍 Detected sequential mission analysis - using sequential plotting methods")
+                print("Detected sequential mission analysis - using sequential plotting methods")
                 return self._generate_sequential_plots(plotter, save_path, figure_prefix)
             else:
-                print("🔍 Detected single mission analysis - using standard plotting methods")
+                print("Detected single mission analysis - using standard plotting methods")
                 return self._generate_single_mission_plots(plotter, save_path, figure_prefix)
 
         except Exception as e:
-            print(f"   ⚠️ Plot generation failed: {e}")
+            print(f"   WARNING: Plot generation failed: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -1352,7 +1352,7 @@ class SystemOrchestrator:
         """
         # Check if we have stored mission results from sequential execution
         if hasattr(self, 'mission_results') and len(self.mission_results) > 1:
-            print(f"   🔎 Found {len(self.mission_results)} sequential mission results")
+            print(f"   Found {len(self.mission_results)} sequential mission results")
             return True
 
         # Check if config has mission section with multiple entries
@@ -1366,16 +1366,16 @@ class SystemOrchestrator:
 
             # Sequential if we have more than one mission type
             if len(found_missions) > 1:
-                print(f"   🔎 Found sequential missions in config: {', '.join(found_missions)}")
+                print(f"   Found sequential missions in config: {', '.join(found_missions)}")
                 return True
 
-        print("   🔎 Single mission analysis detected")
+        print("   Single mission analysis detected")
         return False
 
     def _generate_sequential_plots(self, plotter, save_path: str = None, figure_prefix: str = None):
         """Generate plots for sequential mission analysis."""
         if not hasattr(self, 'mission_results'):
-            print("⚠️  No mission results available for sequential plotting")
+            print("WARNING: No mission results available for sequential plotting")
             return None
 
         mission_data = self.mission_results
@@ -1385,7 +1385,7 @@ class SystemOrchestrator:
         num_tanks = len(self.tank_geometries)
 
         for tank_idx in range(num_tanks):
-            print(f"🎨 Generating sequential plots for Tank {tank_idx + 1}")
+            print(f"Generating sequential plots for Tank {tank_idx + 1}")
 
             # Create reference lines from tank configuration
             tank_config_data = list(self.scenario_config.tank_geometries.values())[tank_idx]
@@ -1474,7 +1474,7 @@ class SystemOrchestrator:
         if mf_config.get('enabled', True):
             plot_types.append('sequential mass flows')
 
-        print(f"   ✅ Generated {len(figures)} sequential plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
+        print(f"   Generated {len(figures)} sequential plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
 
         # Return the first figure (or all figures if multiple tanks)
         return figures[0] if len(figures) == 1 else figures
@@ -1488,7 +1488,7 @@ class SystemOrchestrator:
         use_overlay = plotter.enable_multi_tank_overlay and num_tanks > 1
 
         if use_overlay:
-            print(f"   🎨 Plotting multi-tank evolution (overlay mode, {num_tanks} tanks)...")
+            print(f"   Plotting multi-tank evolution (overlay mode, {num_tanks} tanks)...")
 
             # Create reference lines from first tank configuration (for overlay mode)
             tank_config_data = list(self.scenario_config.tank_geometries.values())[0]
@@ -1548,7 +1548,7 @@ class SystemOrchestrator:
 
             # Generate individual tank evolution plot (only if not using overlay mode)
             if not use_overlay:
-                print(f"   🎨 Plotting Tank {tank_idx + 1} evolution...")
+                print(f"   Plotting Tank {tank_idx + 1} evolution...")
 
                 # Read tank state plotting configuration
                 tank_states_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('tank_states', {})
@@ -1636,7 +1636,7 @@ class SystemOrchestrator:
                 try:
                     valve_events = plotter._extract_valve_events(self.results)
                 except Exception as e:
-                    print(f"   ⚠️ Valve event extraction failed for tank {tank_idx}: {e}")
+                    print(f"   WARNING: Valve event extraction failed for tank {tank_idx}: {e}")
 
             # Get arrow configuration from density_temperature config
             dt_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('density_temperature', {})
@@ -1773,7 +1773,7 @@ class SystemOrchestrator:
                 )
                 figures.append(pressure_req_fig)
             except Exception as e:
-                print(f"   ⚠️ Pressure requirements plot failed: {e}")
+                print(f"   WARNING: Pressure requirements plot failed: {e}")
 
         # Count plots generated
         mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
@@ -1797,7 +1797,7 @@ class SystemOrchestrator:
         if pressure_req_enabled:
             plot_types.append('pressure requirements')
 
-        print(f"   ✅ Generated {len(figures)} tank plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
+        print(f"   Generated {len(figures)} tank plots ({plots_per_tank} plots per tank: {' + '.join(plot_types)})")
 
         # Return the first figure (or all figures if multiple tanks)
         return figures[0] if len(figures) == 1 else figures
@@ -2157,7 +2157,7 @@ class SystemOrchestrator:
             return summary
 
         except Exception as e:
-            print(f"   ⚠️ Error generating comprehensive summary: {e}")
+            print(f"   WARNING: Error generating comprehensive summary: {e}")
             return {'error': str(e)}
 
     def print_scenario_summary(self):
@@ -2184,7 +2184,7 @@ class SystemOrchestrator:
 
         if 'validation' in summary:
             overall = summary['validation']['overall']
-            print(f"  Validation: {'✅ PASSED' if overall else '❌ FAILED'}")
+            print(f"  Validation: {'PASSED' if overall else 'FAILED'}")
 
         print("=" * 60)
 
@@ -2193,10 +2193,10 @@ class SystemOrchestrator:
         summary = self.get_comprehensive_analysis_summary()
 
         if 'error' in summary:
-            print(f"❌ Error generating summary: {summary['error']}")
+            print(f"ERROR: Error generating summary: {summary['error']}")
             return
 
-        print(f"\n📊 COMPREHENSIVE ANALYSIS SUMMARY: {summary['analysis_name']}")
+        print(f"\nCOMPREHENSIVE ANALYSIS SUMMARY: {summary['analysis_name']}")
         print("=" * 100)
 
         # Header
@@ -2295,7 +2295,7 @@ class SystemOrchestrator:
                 print(row)
 
         print("\n" + "=" * 100)
-        print("✅ Comprehensive analysis summary complete")
+        print("Comprehensive analysis summary complete")
         print("   📝 All input parameters, tank geometry, and performance metrics displayed")
 
         # Also save to markdown file
@@ -2323,7 +2323,7 @@ class SystemOrchestrator:
             summary = self.get_comprehensive_analysis_summary()
 
             if 'error' in summary:
-                print(f"❌ Cannot save summary due to error: {summary['error']}")
+                print(f"ERROR: Cannot save summary due to error: {summary['error']}")
                 return None
 
             # Generate markdown content
@@ -2443,11 +2443,11 @@ class SystemOrchestrator:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(md_content)
 
-            print(f"   💾 Comprehensive summary saved to: {filepath}")
+            print(f"   Comprehensive summary saved to: {filepath}")
             return filepath
 
         except Exception as e:
-            print(f"   ❌ Error saving markdown summary: {e}")
+            print(f"   ERROR: Error saving markdown summary: {e}")
             return None
 
     def save_comprehensive_results(self) -> str:
@@ -2614,7 +2614,7 @@ class SystemOrchestrator:
                 composite_density = tank_props.get('composite_density', 1800)  # NIST G10 density
                 # Estimate thickness from mass (simplified spherical shell approximation)
                 composite_thickness = composite_mass / (4 * np.pi * radius**2 * composite_density)
-                print(f"   ⚠️ Fallback thickness calculation: {composite_thickness*1000:.2f} mm")
+                print(f"   WARNING: Fallback thickness calculation: {composite_thickness*1000:.2f} mm")
 
             if composite_thickness <= 0:
                 raise ValueError("Calculated composite thickness is invalid")
@@ -2747,12 +2747,12 @@ All values extracted from specified data sources as per requirements table
             f.write(report_text)
 
         # Print summary to console
-        print(f"📊 COMPREHENSIVE RESULTS SUMMARY:")
-        print(f"   🔥 OHEX Energy: {ohex_energy_kwh:.1f} kWh")
-        print(f"   ❄️  iHEX Energy: {ihex_energy_kwh:.1f} kWh")
-        print(f"   ⚡ Total HEX Energy: {total_hex_energy_kwh:.1f} kWh")
-        print(f"   📈 Gravimetric Efficiency: {gravimetric_efficiency:.1%}")
-        print(f"   📦 Volumetric Efficiency: {volumetric_efficiency:.1%}")
+        print(f"COMPREHENSIVE RESULTS SUMMARY:")
+        print(f"   OHEX Energy: {ohex_energy_kwh:.1f} kWh")
+        print(f"   iHEX Energy: {ihex_energy_kwh:.1f} kWh")
+        print(f"   Total HEX Energy: {total_hex_energy_kwh:.1f} kWh")
+        print(f"   Gravimetric Efficiency: {gravimetric_efficiency:.1%}")
+        print(f"   Volumetric Efficiency: {volumetric_efficiency:.1%}")
 
         return str(output_file)
 
@@ -2762,7 +2762,7 @@ def main():
     import os
     from pathlib import Path
 
-    print("🚀 TESTING ORCHESTRATOR INTEGRATION")
+    print("TESTING ORCHESTRATOR INTEGRATION")
     print("=" * 60)
 
     # Find test configuration
@@ -2772,12 +2772,12 @@ def main():
         test_config_path = Path(__file__).parent.parent.parent / "analysis" / "multi_tank_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
     if not test_config_path.exists():
-        print(f"❌ Config file not found at expected locations")
+        print(f"ERROR: Config file not found at expected locations")
         return
 
     try:
         # Load ScenarioConfig first
-        print(f"📋 Loading configuration: {test_config_path}")
+        print(f"Loading configuration: {test_config_path}")
         from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
         scenario_config = ScenarioConfig.from_yaml(str(test_config_path))
 
@@ -2788,17 +2788,17 @@ def main():
         orchestrator.print_scenario_summary()
 
         # Run simulation
-        print("\n⚡ Running DAE simulation...")
+        print("\nRunning DAE simulation...")
         results = orchestrator.run_simulation()
 
         # Print final results
-        print(f"\n✅ Simulation Complete!")
+        print(f"\nSimulation Complete!")
         print(f"   Final time: {results.t[-1]/3600:.2f} hours")
         print(f"   Data points: {len(results.t)}")
 
         # Print final tank states
         n_tanks = len(orchestrator.tank_geometries)
-        print(f"\n🛢️  Final Tank States ({n_tanks} tanks):")
+        print(f"\nFinal Tank States ({n_tanks} tanks):")
         for i in range(n_tanks):
             idx = i * 3  # Each tank has 3 state variables: m, T, Ts
             m_final = results.y[idx, -1]
@@ -2806,10 +2806,10 @@ def main():
 
             print(f"   Tank {i+1}: m={m_final:.2f}kg, T={T_final:.1f}K")
 
-        print("\n🎉 ORCHESTRATOR INTEGRATION SUCCESS!")
+        print("\nORCHESTRATOR INTEGRATION SUCCESS!")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
 if __name__ == "__main__":

@@ -138,7 +138,7 @@ class TankSystem:
 
     def _setup_tanks(self):
         """Setup tanks from provided geometries and configurations."""
-        print(f"\n🏗️ TANK SETUP:")
+        print(f"\nTANK SETUP:")
 
         # Print tank configurations
         for i, tank_config in enumerate(self.config.tanks):
@@ -161,7 +161,7 @@ class TankSystem:
             self.thermal_models.append(thermal_model)
             self.dynamic_models.append(dynamic_model)
 
-            print(f"   ✅ Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m²")
+            print(f"   Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m²")
 
     def _extract_mission_profile_data(self) -> dict:
         """Extract mission profile data from system configuration."""
@@ -200,12 +200,12 @@ class TankSystem:
             }
 
         except Exception as e:
-            print(f"   ⚠️ Failed to extract mission profile: {e}")
+            print(f"   WARNING: Failed to extract mission profile: {e}")
             return {}
 
     def _setup_coupling_rules(self):
         """Setup inter-tank coupling based on rules."""
-        print(f"\n🔗 COUPLING SETUP:")
+        print(f"\nCOUPLING SETUP:")
 
         if not self.coupling_rules:
             print("   No coupling rules specified - tanks operate independently")
@@ -503,10 +503,10 @@ class TankSystem:
                 print(f"      Mission profile: {len(rule.get('mission_profile', {}).get('time_s', []))} time points")
 
             else:
-                print(f"   ⚠️  Unsupported coupling rule type '{rule_type}' - skipping")
+                print(f"   WARNING: Unsupported coupling rule type '{rule_type}' - skipping")
                 continue
 
-        print(f"   ✅ {len(self.coupling_valves)} coupling rules configured")
+        print(f"   {len(self.coupling_valves)} coupling rules configured")
 
         # Cache tank properties to avoid repeated calculations during simulation
         for i, tank_geom in enumerate(self.tank_geometries):
@@ -609,7 +609,7 @@ class TankSystem:
         endcap_thickness = endcap_model.compute_thickness(tank_section, working_pressure)
         thickness_wall = max(cylinder_thickness, endcap_thickness)  # Governing thickness
 
-        print(f"   🔧 Netting Analysis Results for {tank_id}:")
+        print(f"   Netting Analysis Results for {tank_id}:")
         print(f"      Radius: {inner_radius:.3f} m")
         print(f"      Design pressure: {design_pressure/1e5:.0f} bar, Working: {working_pressure/1e5:.0f} bar")
         print(f"      Safety factor: {safety_factor:.2f} (from config)")
@@ -667,7 +667,7 @@ class TankSystem:
 
         # Only print properties during initialization, not during simulation
         if hasattr(self, '_properties_printed') and tank_index not in self._properties_printed:
-            print(f"   🔧 {tank_id} properties calculated:")
+            print(f"   {tank_id} properties calculated:")
             print(f"      Volume: {volume:.6f} m³")
             print(f"      Inner surface area: {inner_surface_area:.4f} m²")
             print(f"      Outer surface area: {outer_surface_area:.4f} m²")
@@ -729,7 +729,7 @@ class TankSystem:
                     print(f"        Density: {density_init:.2f} kg/m³, Volume: {tank_volume:.4f} m³")
                     print(f"        Resulting mass: {m_init:.2f} kg")
                 except Exception as e:
-                    print(f"⚠️  Error calculating initial state for Tank {i+1}: {e}")
+                    print(f"WARNING: Error calculating initial state for Tank {i+1}: {e}")
                     # Use default values
                     m_init = 10.0  # kg
                     print(f"        Using default mass: {m_init:.2f} kg")
@@ -789,7 +789,7 @@ class TankSystem:
                 tank_summaries.append((P_i / 1e5, m_i))
             press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
             mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
-            print(f"[ODE HB] t={t:.1f}s | {press_str} | {mass_str}")
+            print(f"t={t:.1f}s | {press_str} | {mass_str}")
             self._ode_heartbeat_last_t = t
         try:
             # Check if we've already flagged stopping
@@ -817,7 +817,7 @@ class TankSystem:
                 # Check for minimum density (discharge/dormancy missions)
                 if current_density <= self.config.minimum_density:
                     if not hasattr(self, '_min_density_stop_printed'):
-                        print(f"   ⏹️  Tank {i+1} reached minimum density: {current_density:.2f} ≤ {self.config.minimum_density:.2f} kg/m³")
+                        print(f"   Tank {i+1} reached minimum density: {current_density:.2f} ≤ {self.config.minimum_density:.2f} kg/m³")
                         self._min_density_stop_printed = True
                     # Set very small derivatives instead of zero to allow graceful termination
                     dydt = np.ones(len(y)) * 1e-12
@@ -826,7 +826,7 @@ class TankSystem:
                 # Check for target density (refuel missions) - just log, don't terminate here
                 if self.config.target_density is not None and current_density >= self.config.target_density:
                     if not hasattr(self, '_target_density_stop_printed'):
-                        print(f"   ⏹️  Tank {i+1} reached target density: {current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³")
+                        print(f"   Tank {i+1} reached target density: {current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³")
                         self._target_density_stop_printed = True
                         # Set a flag to indicate stopping should occur
                         self._stop_requested = True
@@ -834,7 +834,7 @@ class TankSystem:
                 # Prevent numerical instability near empty tank
                 if tank_state.fuel_mass <= 1.0:  # 1 kg minimum
                     if not hasattr(self, '_empty_warn_printed'):
-                        print(f"   ⚠️  Tank {i+1} approaching empty: {tank_state.fuel_mass:.2f} kg")
+                        print(f"   WARNING: Tank {i+1} approaching empty: {tank_state.fuel_mass:.2f} kg")
                         self._empty_warn_printed = True
                     tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
 
@@ -918,7 +918,7 @@ class TankSystem:
         except Exception as e:
             # Print richer diagnostics to locate type/units issues without crashing the solver
             import traceback
-            print(f"❌ Failed to create tank system state at t={t:.6f}s: {e}")
+            print(f"ERROR: Failed to create tank system state at t={t:.6f}s: {e}")
             traceback.print_exc()
             # Return zero derivatives to prevent integration failure
             return np.zeros(len(y))
@@ -1299,7 +1299,7 @@ class TankSystem:
             return 0.0
 
         except Exception as e:
-            print(f"⚠️  Error calculating discharge flow at t={time:.1f}s: {e}")
+            print(f"WARNING: Error calculating discharge flow at t={time:.1f}s: {e}")
             return 0.0
 
     def _create_density_event(self):
@@ -1344,7 +1344,7 @@ class TankSystem:
         Returns:
             MultiTankResults with time series data
         """
-        print(f"\n🚀 Starting TankSystem-based simulation...")
+        print(f"\nStarting TankSystem-based simulation...")
         print(f"   Analysis: {getattr(self.config, 'analysis_name', 'Tank System Analysis')}")
         print(f"   Tanks: {len(self.tanks)}")
         print(f"   Solver: {solver_method}")
@@ -1369,7 +1369,7 @@ class TankSystem:
         if max_step is not None:
             solver_params['max_step'] = max_step
 
-        print(f"   🔧 Solver parameters: timestep={timestep}s, rtol={rtol:.0e}, atol={atol:.0e}, max_step={max_step}")
+        print(f"   Solver parameters: timestep={timestep}s, rtol={rtol:.0e}, atol={atol:.0e}, max_step={max_step}")
 
         if solver_method == "LSODA":
             self.solver = LSODASolver(**solver_params)
@@ -1429,21 +1429,21 @@ class TankSystem:
         # Add density stopping events if target density is specified
         if self.config.target_density is not None:
             integration_params['events'] = self._create_density_event()
-            print(f"   🔧 Added target density event: {self.config.target_density:.1f} kg/m³")
+            print(f"   Added target density event: {self.config.target_density:.1f} kg/m³")
 
-        print(f"   🔧 Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
+        print(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
         solution = self.solver.integrate_full(**integration_params)
 
         elapsed_time = time.time() - start_time
-        print(f"✅ Integration completed in {elapsed_time:.1f}s")
+        print(f"Integration completed in {elapsed_time:.1f}s")
         print(f"   Final time: {solution.t[-1]/3600:.2f} hours")
         print(f"   Data points: {len(solution.t)}")
 
         # Check if stopped due to event
         if hasattr(solution, 't_events') and solution.t_events and len(solution.t_events[0]) > 0:
             event_time = solution.t_events[0][0]
-            print(f"   🎯 Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
+            print(f"   Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []

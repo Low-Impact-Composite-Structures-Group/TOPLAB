@@ -418,7 +418,7 @@ class OHEXExtractionCoupling(InterTankCoupling):
         self.kd = control_params.get('pid_kd', 0.05)  # Derivative gain
 
         # Debug: print activation delay value
-        print(f"  🔧 DEBUG: Activation delay set to {self.activation_delay_seconds:.1f} seconds")
+        print(f"  DEBUG: Activation delay set to {self.activation_delay_seconds:.1f} seconds")
 
         # PID state variables
         self.pid_integral = 0.0
@@ -444,9 +444,9 @@ class OHEXExtractionCoupling(InterTankCoupling):
             self.mission_times = mission_profile['time_s']
             self.mission_flow_rates = mission_profile['flow_rate_kg_s']
             self.mission_profile = mission_profile
-            print(f"   ✓ Mission profile loaded: {len(self.mission_times)} time points, max flow: {max(self.mission_flow_rates):.3f} kg/s")
+            print(f"   Mission profile loaded: {len(self.mission_times)} time points, max flow: {max(self.mission_flow_rates):.3f} kg/s")
         else:
-            print(f"   ⚠️ Mission profile loading failed: missing keys in {list(mission_profile.keys())}")
+            print(f"   WARNING: Mission profile loading failed: missing keys in {list(mission_profile.keys())}")
 
     def get_mission_flow_rate(self, time: float) -> float:
         """Get mission flow rate from actual mission profile using safe interpolation."""
@@ -1261,9 +1261,9 @@ class OHEXExtractionCoupling(InterTankCoupling):
             self.mission_times = mission_profile['time_s']
             self.mission_flow_rates = mission_profile['flow_rate_kg_s']
             self.mission_profile = mission_profile
-            print(f"   ✓ Mission profile loaded into PressureGovernorValve: {len(self.mission_times)} points")
+            print(f"   Mission profile loaded into PressureGovernorValve: {len(self.mission_times)} points")
         else:
-            print(f"   ⚠️ Mission profile missing keys for PressureGovernorValve: {list(mission_profile.keys())}")
+            print(f"   WARNING: Mission profile missing keys for PressureGovernorValve: {list(mission_profile.keys())}")
 
     def get_mission_flow_rate(self, time: float) -> float:
         if not self.mission_times or not self.mission_flow_rates:
@@ -1769,7 +1769,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         if not self.mission_times or not self.mission_flow_rates:
             # Debug: Log when mission data is missing
             if not hasattr(self, '_warned_no_mission'):
-                print(f"⚠️ [FF] No mission data available! mission_times={self.mission_times}, mission_flow_rates={self.mission_flow_rates}")
+                print(f"WARNING [FF] No mission data available! mission_times={self.mission_times}, mission_flow_rates={self.mission_flow_rates}")
                 self._warned_no_mission = True
             return 0.0
         if time <= self.mission_times[0]:

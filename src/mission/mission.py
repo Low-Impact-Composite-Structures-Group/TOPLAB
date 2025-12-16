@@ -88,7 +88,7 @@ class Mission:
                 mach_number,
                 "Dormancy"
             )
-    
+
     @classmethod
     def rompokos(cls):
 
@@ -453,7 +453,7 @@ class Mission:
 
             mission_sections.append(section)
 
-        print(f"📋 Loaded CSV mission from {csv_file.name}")
+        print(f"Loaded CSV mission from {csv_file.name}")
         print(f"   Created {len(mission_sections)} mission sections")
         print(f"   Total duration: {sum(s.duration for s in mission_sections) / HOURS_TO_SECONDS:.2f} hours")
 

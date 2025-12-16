@@ -200,7 +200,7 @@ class TestSystemOrchestrator:
                 # Check for coupling section
                 if 'coupling_rules' in config:
                     coupling_rules = config['coupling_rules']
-                    print(f"📋 {analysis_name}: Found {len(coupling_rules)} coupling rules")
+                    print(f"{analysis_name}: Found {len(coupling_rules)} coupling rules")
 
                     # Validate coupling rule structure
                     for i, rule in enumerate(coupling_rules):
@@ -208,7 +208,7 @@ class TestSystemOrchestrator:
                         for field in required_fields:
                             assert field in rule, f"Missing {field} in coupling rule {i} for {analysis_name}"
 
-                    print(f"✅ {analysis_name}: Coupling rules structure validated")
+                    print(f"{analysis_name}: Coupling rules structure validated")
 
                 # Test orchestrator creation with coupling
                 config = ScenarioConfig.from_yaml(str(config_path))
@@ -245,10 +245,10 @@ class TestSystemOrchestrator:
                     assert hasattr(orchestrator, method), f"Missing method '{method}' in {analysis_name}"
                     assert callable(getattr(orchestrator, method)), f"'{method}' is not callable in {analysis_name}"
 
-                print(f"✅ {analysis_name}: All expected attributes and methods present")
+                print(f"{analysis_name}: All expected attributes and methods present")
 
             except Exception as e:
-                print(f"⚠️ {analysis_name}: Attribute validation error - {str(e)[:100]}...")
+                print(f"{analysis_name}: Attribute validation error - {str(e)[:100]}...")
                 continue
 
     @pytest.mark.integration
@@ -256,7 +256,7 @@ class TestSystemOrchestrator:
         """Test that configurations have all necessary parameters for orchestration."""
 
         for analysis_name, config_path in self.analysis_configs.items():
-            print(f"📋 Testing configuration completeness for {analysis_name}...")
+            print(f"Testing configuration completeness for {analysis_name}...")
 
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
