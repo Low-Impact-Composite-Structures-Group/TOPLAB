@@ -3,6 +3,8 @@ Inter-tank coupling mechanisms for multi-tank systems.
 
 This module provides base classes and specific implementations for mass transfer
 between tanks in a multi-tank hydrogen storage system.
+
+Author: Dante Raso
 """
 
 import math

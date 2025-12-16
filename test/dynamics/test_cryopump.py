@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.dynamics.cryopump_model import (
-    CryopumpModel,
+    CryoPumpModel,
     CryopumpParameters
 )
 

@@ -10,6 +10,8 @@ Key Features:
 - Optional reference lines (e.g., P_min, P_vent, stopping density)
 - Configurable titles based on analysis_name from config
 - Support for both single and multi-tank systems
+
+Author: Dante Raso
 """
 
 import sys

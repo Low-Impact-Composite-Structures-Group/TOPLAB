@@ -3,6 +3,8 @@ General tank system core engine for hydrogen storage analysis.
 
 This module provides the main TankSystem class that can manage any number of tanks
 (from 1 to N) with unified integration and inter-tank coupling capabilities.
+
+Author: Dante Raso
 """
 
 import math

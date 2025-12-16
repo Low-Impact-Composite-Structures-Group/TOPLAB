@@ -3,6 +3,8 @@ Isochoric Dynamic Models for stops_model integration within multi_tank.
 
 This module mirrors the functionality of `src/dynamics/isochoric_dynamic_models.py`
 but is colocated under `src/multi_tank/` to keep multi-state code self-contained.
+
+Author: Dante Raso
 """
 
 from abc import ABC, abstractmethod

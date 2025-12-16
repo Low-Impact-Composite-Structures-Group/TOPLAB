@@ -3,6 +3,8 @@ Isochoric Thermal Model colocated under multi_tank.
 
 Copied from `src/thermodynamics/isochoric_thermal_model.py` and adjusted
 to import NIST materials from `src.multi_tank.materials`.
+
+Author: Dante Raso
 """
 
 from abc import ABC, abstractmethod

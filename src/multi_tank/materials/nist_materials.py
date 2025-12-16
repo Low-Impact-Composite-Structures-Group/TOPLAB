@@ -3,6 +3,8 @@ NIST-backed materials colocated under multi_tank.
 
 Copied from `src/materials/nist_materials.py` and updated to import
 property polynomials from `src.multi_tank.materials.nist_material_properties`.
+
+Author: Dante Raso
 """
 
 import math

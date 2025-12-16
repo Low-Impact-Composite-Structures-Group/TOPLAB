@@ -3,6 +3,8 @@ Multi-Tank System Analysis Framework
 
 A modular framework for analyzing coupled tank systems with inter-tank mass transfer.
 Supports various coupling mechanisms and tank configurations with unified physics modeling.
+
+Author: Dante Raso
 """
 
 from .coupling.inter_tank_coupling import InterTankCoupling, PressureTriggeredValve

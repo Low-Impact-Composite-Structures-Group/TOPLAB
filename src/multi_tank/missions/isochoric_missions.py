@@ -3,6 +3,8 @@ Isochoric mission framework colocated under multi_tank.
 
 Copied from `src/mission/isochoric_missions.py` with imports updated to
 use multi_tank dynamics/thermals.
+
+Author: Dante Raso
 """
 
 from __future__ import annotations

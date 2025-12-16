@@ -13,6 +13,8 @@ Key Features:
 - Multi-tank coupling with pressure-triggered valves
 - Enhanced stopping criteria (density + time-based)
 - Production-ready orchestration framework
+
+Author: Dante Raso
 """
 
 import sys
