@@ -8,7 +8,6 @@ from src.tank_design.tank_shapes import (
     EllipsoidalEndCap, Tank, CylindricalTankSphericalCaps, SphericalTank,
     WinnefeldTank, TankFactory
 )
-from src.tank_design.liner import Liner
 
 __all__ = [
     'TankSection',
@@ -20,6 +19,5 @@ __all__ = [
     'CylindricalTankSphericalCaps',
     'SphericalTank',
     'WinnefeldTank',
-    'TankFactory',
-    'Liner'
+    'TankFactory'
 ]
