@@ -52,7 +52,9 @@ def plot_ellipsoid(ax, radius, b, y_offset, top=True):
 
 def plot_tank(radius, b, length):
     fig = plot_open_cylinder(radius, length)
-    ax = fig.gca(projection='3d')
+    # Matplotlib compatibility: Figure.gca(projection='3d') isn't supported in
+    # all versions. `plot_open_cylinder` already creates the 3D axes.
+    ax = fig.axes[0] if fig.axes else fig.add_subplot(111, projection='3d')
     
     ax.set_xlabel('X [m]')
     ax.set_ylabel('Y [m]')

@@ -66,7 +66,6 @@ FONTS_DIR = os.path.join(os.path.dirname(__file__), 'fonts')
 def register_custom_fonts():
 	"""Register custom fonts from the local fonts directory."""
 	if not os.path.exists(FONTS_DIR):
-		print(f"Warning: Custom fonts directory not found at {FONTS_DIR}")
 		return False
 
 	# Count how many fonts we register
@@ -80,7 +79,7 @@ def register_custom_fonts():
 				fm.fontManager.addfont(font_path)
 				font_count += 1
 			else:
-				print(f"Skipping empty placeholder font: {font_file}")
+				continue
 
 	# Force matplotlib to rebuild the font cache
 	try:
@@ -113,10 +112,8 @@ def set_font_with_fallbacks(primary_font=FONT_NAME, fallbacks=["Times New Roman"
 	for font in fallbacks:
 		if font in available_fonts:
 			plt.rcParams["font.family"] = font
-			print(f"{primary_font} not found, using {font} instead")
 			return font
 
-	print(f"None of the specified fonts found. Using default font.")
 	return plt.rcParams["font.family"]
 
 
@@ -140,15 +137,14 @@ def update_font_settings(master_size=None, legend_size=None, font_name=None):
 	if master_size is not None:
 		FONT_SIZE = master_size
 		plt.rcParams['font.size'] = FONT_SIZE
-		print(f"	Updated FONT_SIZE to {FONT_SIZE}")
 	if legend_size is not None:
 		LEGEND_FONT_SIZE = legend_size
 		plt.rcParams['legend.fontsize'] = LEGEND_FONT_SIZE
-		print(f"	Updated LEGEND_FONT_SIZE to {LEGEND_FONT_SIZE}")
 	if font_name is not None:
 		FONT_NAME = font_name
 		plt.rcParams['font.family'] = FONT_NAME
-		print(f"   Updated FONT_NAME to '{FONT_NAME}'")
+
+
 def configure_plot_style(font="Cambria", palette="delft", bbox_to_anchor_key=None, legend_position=None,
 						style="white", context="paper", figure_size=None, dpi=None, **kwargs):
 	"""Configure the global plot style settings."""

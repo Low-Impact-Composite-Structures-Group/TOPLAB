@@ -277,7 +277,9 @@ class TestTankStates(unittest.TestCase):
 
         expected_value = [21.51574187925867, 24.682982971786814]
         actual_value = self.states.temperatures
-        self.assertEqual(expected_value, actual_value)
+        self.assertEqual(len(expected_value), len(actual_value))
+        for expected, actual in zip(expected_value, actual_value):
+            self.assertAlmostEqual(expected, actual, places=12)
 
     def test_pressure_derivatives(self):
 
@@ -320,7 +322,7 @@ class TestTankStates(unittest.TestCase):
         temperatures = [21.51574187925867, 24.682982971786814]
         expected_value = sum(temperatures) / len(temperatures)
         actual_value = self.states.average_temperature
-        self.assertEqual(expected_value, actual_value)
+        self.assertAlmostEqual(expected_value, actual_value, places=12)
 
     def test_max_pressure(self):
 

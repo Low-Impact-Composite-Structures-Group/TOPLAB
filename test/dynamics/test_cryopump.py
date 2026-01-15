@@ -68,20 +68,20 @@ class TestCryopumpModel(unittest.TestCase):
     def test_init(self):
         """Test initialization of the cryopump model."""
         # With default parameters
-        model = CryopumpModel()
+        model = CryoPumpModel()
         self.assertEqual(model.parameters.reservoir_pressure, 3.0e5)
         self.assertEqual(model.parameters.efficiency, 0.78)
         self.assertTrue(model.enable_cache)
 
         # With custom parameters
-        model = CryopumpModel(self.test_params, enable_cache=False)
+        model = CryoPumpModel(self.test_params, enable_cache=False)
         self.assertEqual(model.parameters.reservoir_pressure, 4.0e5)
         self.assertEqual(model.parameters.efficiency, 0.80)
         self.assertFalse(model.enable_cache)
 
     def test_compute_pump_outlet_hydrogen(self):
         """Test computation of pump outlet hydrogen."""
-        model = CryopumpModel(self.test_params)
+        model = CryoPumpModel(self.test_params)
 
         # First call should compute
         result = model.compute_pump_outlet_hydrogen(100e5)
@@ -102,7 +102,7 @@ class TestCryopumpModel(unittest.TestCase):
 
     def test_compute_without_cache(self):
         """Test computation without caching."""
-        model = CryopumpModel(self.test_params, enable_cache=False)
+        model = CryoPumpModel(self.test_params, enable_cache=False)
 
         # First call should compute
         result = model.compute_pump_outlet_hydrogen(100e5)
@@ -120,7 +120,7 @@ class TestCryopumpModel(unittest.TestCase):
 
     def test_clear_cache(self):
         """Test clearing the cache."""
-        model = CryopumpModel(self.test_params)
+        model = CryoPumpModel(self.test_params)
 
         # First call should compute
         result = model.compute_pump_outlet_hydrogen(100e5)
@@ -141,7 +141,7 @@ class TestCryopumpModel(unittest.TestCase):
 
     def test_cache_different_pressures(self):
         """Test that different pressures create different cache entries."""
-        model = CryopumpModel(self.test_params)
+        model = CryoPumpModel(self.test_params)
 
         # Call with first pressure
         result1 = model.compute_pump_outlet_hydrogen(100e5)
@@ -159,7 +159,7 @@ class TestCryopumpModel(unittest.TestCase):
 
     def test_get_cache_info(self):
         """Test getting cache information."""
-        model = CryopumpModel(self.test_params)
+        model = CryoPumpModel(self.test_params)
 
         # Initially cache should be empty
         cache_info = model.get_cache_info()
@@ -186,7 +186,7 @@ class TestCryopumpModel(unittest.TestCase):
         self.assertEqual(cache_info["misses"], 1)
 
         # Test with disabled cache
-        no_cache_model = CryopumpModel(enable_cache=False)
+        no_cache_model = CryoPumpModel(enable_cache=False)
         cache_info = no_cache_model.get_cache_info()
         self.assertFalse(cache_info["enabled"])
 

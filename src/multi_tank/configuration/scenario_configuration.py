@@ -72,19 +72,38 @@ class MissionSequenceConfig:
     @classmethod
     def from_dict(cls, config_dict: dict, config_format: str = "old"):
         """Create MissionSequenceConfig from dictionary, handling both formats."""
-        mission_data = config_dict.get('mission', {})
+        # Legacy format: top-level mission_sequence.missions
+        if config_format == "old":
+            mission_sequence = config_dict.get('mission_sequence', {})
+            missions_list = mission_sequence.get('missions')
+            if isinstance(missions_list, list) and missions_list:
+                missions: List[MissionConfig] = []
+                for seq_mission in missions_list:
+                    missions.append(
+                        MissionConfig(
+                            type=seq_mission.get('type'),
+                            profile=seq_mission.get('profile'),
+                            ambient_temperature=mission_sequence.get('ambient_temperature', 288.15),
+                            parameters={k: v for k, v in seq_mission.items() if k not in {'type', 'profile', 'ambient_temperature', 'name'}},
+                            name=seq_mission.get('name')
+                        )
+                    )
+                return cls(missions=missions)
 
+        # New format: mission.sequence
+        mission_data = config_dict.get('mission', {})
         if 'sequence' in mission_data:
-            missions = []
-            for i, seq_mission in enumerate(mission_data['sequence']):
+            missions: List[MissionConfig] = []
+            for seq_mission in mission_data['sequence']:
                 mission_config = {
                     'mission': seq_mission
                 }
                 missions.append(MissionConfig.from_dict(mission_config, config_format))
             return cls(missions=missions)
-        else:
-            single_mission = MissionConfig.from_dict(config_dict, config_format)
-            return cls(missions=[single_mission])
+
+        # Single mission
+        single_mission = MissionConfig.from_dict(config_dict, config_format)
+        return cls(missions=[single_mission])
 
     def validate(self):
         if not self.missions:
@@ -105,19 +124,35 @@ class ScenarioConfig:
         self.config_format = config_format
         self._config_path = config_path
 
-        # Parse analysis metadata (always new format now)
-        analysis = config_dict.get('analysis', {})
-        self.analysis_name = analysis.get('name', 'Unnamed Analysis')
-        self.description = analysis.get('description', '')
-        self.version = analysis.get('version', '1.0')
+        if self.config_format == "new":
+            # Parse analysis metadata (new format)
+            analysis = config_dict.get('analysis', {})
+            self.analysis_name = analysis.get('name', 'Unnamed Analysis')
+            self.description = analysis.get('description', '')
+            self.version = analysis.get('version', '1.0')
 
-        # Parse mission configuration
-        self.mission_sequence = MissionSequenceConfig.from_dict(config_dict, "new")
+            # Parse mission configuration
+            self.mission_sequence = MissionSequenceConfig.from_dict(config_dict, "new")
 
-        # Parse materials and geometry (always new format)
-        self.materials = self._parse_materials_new_format()
-        self.tank_materials = self._parse_tank_materials_new_format()
-        self.tank_geometries = self._parse_tank_geometries_new_format()
+            # Parse materials and geometry
+            self.materials = self._parse_materials_new_format()
+            self.tank_materials = self._parse_tank_materials_new_format()
+            self.tank_geometries = self._parse_tank_geometries_new_format()
+        elif self.config_format == "old":
+            # Parse analysis metadata (legacy format)
+            self.analysis_name = config_dict.get('analysis_name', config_dict.get('analysis', {}).get('name', 'Unnamed Analysis'))
+            self.description = config_dict.get('description', config_dict.get('analysis', {}).get('description', ''))
+            self.version = str(config_dict.get('version', config_dict.get('analysis', {}).get('version', '1.0')))
+
+            # Parse mission configuration (supports legacy mission_sequence)
+            self.mission_sequence = MissionSequenceConfig.from_dict(config_dict, "old")
+
+            # Parse legacy materials/geometry
+            self.materials = self._parse_materials_old_format()
+            self.tank_materials = self._parse_tank_materials_old_format()
+            self.tank_geometries = self._parse_tank_geometries_old_format()
+        else:
+            raise ValueError(f"Unknown config_format '{self.config_format}'. Expected 'new' or 'old'.")
 
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]):
@@ -140,39 +175,48 @@ class ScenarioConfig:
         with open(yaml_path, 'r') as f:
             config_dict = yaml.safe_load(f)
 
-        # Convert network edges to coupling_rules for SystemOrchestrator
-        if 'network' in config_dict and 'edges' in config_dict['network']:
-            edges = config_dict['network']['edges']
-            coupling_rules = []
+        # Detect format
+        is_new_format = isinstance(config_dict, dict) and 'network' in config_dict
+        is_old_format = isinstance(config_dict, dict) and (
+            'mission_sequence' in config_dict or 'analysis_name' in config_dict or 'geometry' in config_dict
+        )
 
-            for edge in edges:
-                connection_type = edge.get('connection_type', 'pressure_compensation')
-                from_node = edge.get('from_node', 1)
-                to_node = edge.get('to_node', 2)
-                edge_id = edge.get('edge_id', f'coupling_{from_node}_{to_node}')
+        if is_new_format:
+            # Convert network edges to coupling_rules for SystemOrchestrator legacy compatibility
+            if 'edges' in config_dict.get('network', {}):
+                edges = config_dict['network']['edges']
+                coupling_rules = []
 
-                rule = {
-                    'coupling_id': edge_id,
-                    'coupling_type': connection_type,
-                    'description': edge.get('description', ''),
-                    'participants': {
-                        'source': from_node,
-                        'target': to_node,
-                    },
-                    'activation_conditions': edge.get('activation_conditions', {}),
-                    'control_parameters': edge.get('control_parameters', {}),
-                    'flow_parameters': edge.get('flow_parameters', {}),
-                    'flow_physics': edge.get('flow_physics', {}),
-                    'discharge_piping': edge.get('discharge_piping', {}),
-                }
-                coupling_rules.append(rule)
+                for edge in edges:
+                    connection_type = edge.get('connection_type', 'pressure_compensation')
+                    from_node = edge.get('from_node', 1)
+                    to_node = edge.get('to_node', 2)
+                    edge_id = edge.get('edge_id', f'coupling_{from_node}_{to_node}')
 
-            config_dict['coupling_rules'] = coupling_rules
-            print(f"   ✓ Converted {len(coupling_rules)} edges to coupling_rules for legacy compatibility")
+                    rule = {
+                        'coupling_id': edge_id,
+                        'coupling_type': connection_type,
+                        'description': edge.get('description', ''),
+                        'participants': {
+                            'source': from_node,
+                            'target': to_node,
+                        },
+                        'activation_conditions': edge.get('activation_conditions', {}),
+                        'control_parameters': edge.get('control_parameters', {}),
+                        'flow_parameters': edge.get('flow_parameters', {}),
+                        'flow_physics': edge.get('flow_physics', {}),
+                        'discharge_piping': edge.get('discharge_piping', {}),
+                    }
+                    coupling_rules.append(rule)
 
-        # Always treat as new format (network-based)
-        scenario = cls(config_dict, "new", str(yaml_path))
-        return scenario
+                config_dict['coupling_rules'] = coupling_rules
+
+            return cls(config_dict, "new", str(yaml_path))
+
+        if is_old_format:
+            return cls(config_dict, "old", str(yaml_path))
+
+        raise ValueError(f"Unrecognized configuration format in {yaml_path}")
 
     def _parse_materials_new_format(self) -> Dict[str, NISTMaterial]:
         """Parse materials from new format (from physics section)."""

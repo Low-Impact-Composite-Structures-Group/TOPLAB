@@ -13,17 +13,12 @@ Date: October 8, 2025
 """
 
 import pytest
-import os
-import sys
 import yaml
 import numpy as np
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-
-from configuration.scenario_configuration import ScenarioConfig
-from orchestration.system_orchestrator import SystemOrchestrator
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
 
 
 class TestMultiTankPlottingEnhancements:

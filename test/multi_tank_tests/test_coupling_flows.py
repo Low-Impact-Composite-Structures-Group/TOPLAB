@@ -10,18 +10,14 @@ Date: October 8, 2025
 """
 
 import pytest
-import os
-import sys
 import yaml
 import numpy as np
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-
-from configuration.scenario_configuration import ScenarioConfig
-from orchestration.system_orchestrator import SystemOrchestrator
-from multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
+from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve
+from src.multi_tank.fluids.flow_physics import FlowPhysics
 # from multi_tank.system.multi_tank_state import MultiTankState  # Not needed for these tests
 
 
@@ -40,13 +36,16 @@ class TestCouplingFlows:
     def test_pressure_triggered_valve_logic(self):
         """Test pressure-triggered valve activation/deactivation logic."""
 
+        flow_physics = FlowPhysics({})
+
         # Create valve with test parameters
         valve = PressureTriggeredValve(
             source_idx=0, target_idx=1,
             p_open=16e5,    # 16 bar activation
             p_close=20e5,   # 20 bar deactivation
             max_flow_rate=0.1,
-            orifice_diameter=0.002
+            orifice_diameter=0.002,
+            flow_physics=flow_physics,
         )
 
         # Test initial state
@@ -89,12 +88,15 @@ class TestCouplingFlows:
     def test_coupling_flow_calculation_physics(self):
         """Test coupling flow rate calculation with realistic physics."""
 
+        flow_physics = FlowPhysics({})
+
         # Create valve for testing
         valve = PressureTriggeredValve(
             source_idx=0, target_idx=1,
             p_open=16e5, p_close=20e5,
             max_flow_rate=0.1,
-            orifice_diameter=0.002  # 2mm orifice
+            orifice_diameter=0.002,  # 2mm orifice
+            flow_physics=flow_physics,
         )
 
         # Create realistic tank states
@@ -129,8 +131,11 @@ class TestCouplingFlows:
             volume=2.7          # 2.7 m³
         )
 
+        tank_states = [source_state, target_state]
+        valve.evaluate(0.0, tank_states)
+
         # Test flow calculation
-        flow_rate = valve.calculate_flow(source_state, target_state, 0)
+        flow_rate = valve.calculate_flow_rate(0.0, tank_states)
 
         # Validate flow rate
         assert flow_rate > 0, "Flow rate should be positive with pressure differential"
@@ -139,12 +144,14 @@ class TestCouplingFlows:
 
         # Test with no pressure differential (equal pressures)
         target_state.pressure = 700e5  # Same as source
-        flow_rate_equal = valve.calculate_flow(source_state, target_state, 0)
+        valve.evaluate(1.0, tank_states)
+        flow_rate_equal = valve.calculate_flow_rate(1.0, tank_states)
         assert flow_rate_equal == 0, "No flow with equal pressures"
 
         # Test with reverse pressure differential
         target_state.pressure = 800e5  # Higher than source
-        flow_rate_reverse = valve.calculate_flow(source_state, target_state, 0)
+        valve.evaluate(2.0, tank_states)
+        flow_rate_reverse = valve.calculate_flow_rate(2.0, tank_states)
         assert flow_rate_reverse == 0, "No flow with reverse pressure differential"
 
         print(f"✅ Coupling flow physics validated (flow rate: {flow_rate*1000:.1f} g/s)")
@@ -244,55 +251,27 @@ class TestCouplingFlows:
         with open(self.coupled_config, 'r') as f:
             config_dict = yaml.safe_load(f)
 
-        # Check coupling rules structure
-        assert 'coupling_rules' in config_dict, "No coupling_rules section in config"
-        coupling_rules = config_dict['coupling_rules']
-        assert isinstance(coupling_rules, (dict, list)), "coupling_rules should be a dictionary or list"
+        # New schema: network.edges
+        edges = config_dict.get('network', {}).get('edges', [])
+        assert isinstance(edges, list), "network.edges should be a list"
+        assert len(edges) > 0, "No network edges found in config"
 
-        # Handle both dict and list formats
-        if isinstance(coupling_rules, dict):
-            # Dictionary format: rule_name -> rule_config
-            rules_to_validate = coupling_rules.items()
-        else:
-            # List format: [rule_config, ...]
-            rules_to_validate = [(f"rule_{i}", rule_config) for i, rule_config in enumerate(coupling_rules)]
+        rules_to_validate = [(edge.get('edge_id', f"edge_{i}"), edge) for i, edge in enumerate(edges)]
 
         # Validate individual coupling rules
         for rule_name, rule_config in rules_to_validate:
             print(f"   🔗 Validating rule: {rule_name}")
 
-            # Check required fields (these may vary by config format)
-            if 'type' in rule_config:
-                rule_type = rule_config['type']
-                print(f"     Rule type: {rule_type}")
+            # Required edge fields
+            assert 'connection_type' in rule_config
+            assert 'from_node' in rule_config
+            assert 'to_node' in rule_config
 
-                if rule_type == 'pressure_compensation':
-                    # Look for various threshold field names
-                    threshold_fields = ['activation_threshold_bar', 'deactivation_threshold_bar',
-                                       'activation_conditions', 'deactivation_conditions']
-                    found_thresholds = [field for field in threshold_fields if field in rule_config]
-
-                    if found_thresholds:
-                        print(f"     ✓ Pressure compensation with thresholds: {found_thresholds}")
-                    else:
-                        print(f"     ℹ️ Pressure compensation rule format varies")
-
-                elif rule_type == 'mission_adaptive_pressure_valve':
-                    # Mission adaptive should have piping and mission config
-                    expected_fields = ['discharge_piping', 'control_params', 'mission_profile']
-                    found_fields = [field for field in expected_fields if field in rule_config]
-                    print(f"     ✓ Mission adaptive valve with fields: {found_fields}")
-
-                else:
-                    print(f"     ℹ️ Rule type: {rule_type}")
-            else:
-                # Check for legacy field names
-                legacy_fields = ['source_tank', 'destination_tank', 'trigger_condition']
-                found_fields = [field for field in legacy_fields if field in rule_config]
-                if found_fields:
-                    print(f"     ✓ Legacy rule format with fields: {found_fields}")
-                else:
-                    print(f"     ? Unknown rule format: {list(rule_config.keys())}")
+            print(f"     Connection type: {rule_config.get('connection_type')}")
+            if 'activation_conditions' in rule_config:
+                print(f"     ✓ Activation conditions present")
+            if 'flow_physics' in rule_config:
+                print(f"     ✓ Flow physics present")
 
         # Test orchestrator parsing of coupling rules
         config = ScenarioConfig.from_yaml(str(self.coupled_config))
@@ -300,7 +279,7 @@ class TestCouplingFlows:
 
         # Verify coupling valves were created
         valve_count = len(orchestrator.tank_system.coupling_valves)
-        rule_count = len(coupling_rules)
+        rule_count = len(edges)
 
         print(f"   ⚙️ Created {valve_count} valves from {rule_count} rules")
         assert valve_count > 0, "No coupling valves created"
@@ -404,12 +383,15 @@ class TestCouplingFlows:
 
         print("⚡ Testing coupling valve performance...")
 
+        flow_physics = FlowPhysics({})
+
         # Create valve
         valve = PressureTriggeredValve(
             source_idx=0, target_idx=1,
             p_open=16e5, p_close=20e5,
             max_flow_rate=0.1,
-            orifice_diameter=0.002
+            orifice_diameter=0.002,
+            flow_physics=flow_physics,
         )
 
         # Create mock states
@@ -435,10 +417,14 @@ class TestCouplingFlows:
         n_iterations = 1000
         start_time = time.time()
 
+        tank_states = [source_state, target_state]
+        valve.is_active = True
+        valve._valve_coefficient = 1.0
+
         for i in range(n_iterations):
             # Vary pressure slightly to test different conditions
             target_state.pressure = 15e5 + (i % 100) * 1e3  # 15-16 bar range
-            flow_rate = valve.calculate_flow(source_state, target_state, float(i))
+            flow_rate = valve.calculate_flow_rate(float(i), tank_states)
 
         elapsed_time = time.time() - start_time
         time_per_call = elapsed_time / n_iterations * 1000  # milliseconds

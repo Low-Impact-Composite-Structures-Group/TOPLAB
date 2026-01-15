@@ -10,16 +10,11 @@ Date: October 1, 2025
 """
 
 import pytest
-import os
-import sys
 import yaml
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-
-from configuration.scenario_configuration import ScenarioConfig
-from orchestration.system_orchestrator import SystemOrchestrator
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
 
 
 class TestPhysicsValidation:
@@ -131,27 +126,28 @@ class TestPhysicsValidation:
                 with open(config_path, 'r') as f:
                     config_dict = yaml.safe_load(f)
 
-                # Check coupling rules configuration
-                if 'coupling_rules' in config_dict:
-                    coupling_rules = config_dict['coupling_rules']
+                # New schema: network.edges
+                edges = config_dict.get('network', {}).get('edges', [])
+                assert isinstance(edges, list), f"network.edges must be a list in {analysis_name}"
+                assert len(edges) > 0, f"Expected at least one network edge in {analysis_name}"
 
-                    for i, rule in enumerate(coupling_rules):
-                        # Check basic rule structure
-                        assert 'source_tank' in rule, f"Missing source_tank in rule {i}"
-                        assert 'destination_tank' in rule, f"Missing destination_tank in rule {i}"
-                        assert 'trigger_condition' in rule, f"Missing trigger_condition in rule {i}"
+                for i, edge in enumerate(edges):
+                    assert 'from_node' in edge, f"Missing from_node in edge {i}"
+                    assert 'to_node' in edge, f"Missing to_node in edge {i}"
+                    assert 'connection_type' in edge, f"Missing connection_type in edge {i}"
 
-                        # Check pressure thresholds are reasonable
-                        trigger = rule.get('trigger_condition', {})
-                        if 'pressure_difference_threshold' in trigger:
-                            threshold = trigger['pressure_difference_threshold']
-                            assert 0 < threshold < 100e5, f"Invalid pressure threshold: {threshold/1e5:.1f} bar"
+                    activation = edge.get('activation_conditions', {})
+                    p_open = activation.get('pressure_open_bar')
+                    p_close = activation.get('pressure_close_bar')
 
-                        print(f"   ✅ Rule {i+1}: {rule['source_tank']} -> {rule['destination_tank']}")
+                    if p_open is not None:
+                        assert 0 < float(p_open) < 1000.0, f"Invalid pressure_open_bar in edge {i}: {p_open}"
+                    if p_close is not None:
+                        assert 0 < float(p_close) < 1000.0, f"Invalid pressure_close_bar in edge {i}: {p_close}"
 
-                    print(f"✅ {analysis_name}: {len(coupling_rules)} coupling rules validated")
-                else:
-                    print(f"ℹ️ {analysis_name}: No coupling rules found")
+                    print(f"   ✅ Edge {i+1}: {edge.get('from_node')} -> {edge.get('to_node')} ({edge.get('connection_type')})")
+
+                print(f"✅ {analysis_name}: {len(edges)} network edges validated")
 
                 # Test orchestrator creation
                 config = ScenarioConfig.from_yaml(str(config_path))
@@ -250,9 +246,12 @@ class TestPhysicsValidation:
             with open(config_path, 'r') as f:
                 config_dict = yaml.safe_load(f)
 
-            coupling_rules = config_dict.get('coupling_rules', [])
-            assert len(coupling_rules) > 0, "No coupling rules found for coupled system"
-            print(f"   🔗 Coupling system: {len(coupling_rules)} rules configured")
+            edges = config_dict.get('network', {}).get('edges', [])
+            assert len(edges) > 0, "No network edges found for coupled system"
+            print(f"   🔗 Coupling system: {len(edges)} edges configured")
+
+            # Orchestrator should build coupling valves from the edges
+            assert len(orchestrator.tank_system.coupling_valves) > 0, "No coupling valves created for coupled system"
 
             # Run short simulation (30 seconds) to test physics
             print(f"   🧮 Starting 30-second simulation...")
@@ -345,7 +344,10 @@ class TestPhysicsValidation:
             assert total_time < 50.0, f"Total time too slow: {total_time:.3f}s > 50.0s"
 
             print(f"🎉 {analysis_name}: Full simulation test PASSED!")
-            print(f"   📊 Summary: {tank_count} tanks, {len(coupling_rules)} coupling rules, {total_time:.3f}s runtime")
+            print(
+                f"   📊 Summary: {tank_count} tanks, {len(edges)} network edges, "
+                f"{len(orchestrator.tank_system.coupling_valves)} coupling valves, {total_time:.3f}s runtime"
+            )
 
         except Exception as e:
             print(f"❌ {analysis_name}: Full simulation test FAILED - {str(e)}")

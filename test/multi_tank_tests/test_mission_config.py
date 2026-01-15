@@ -50,11 +50,13 @@ class MissionConfig:
         profile = mission_data.get('profile')
         ambient_temp = mission_data.get('ambient_temperature', 288.15)
 
-        # Extract additional parameters (everything except type, profile, ambient_temperature)
-        parameters = {}
+        # Extract additional parameters
+        # Current configs use nested mission.parameters for profile-specific args.
+        parameters = dict(mission_data.get('parameters', {}) or {})
         for key, value in mission_data.items():
-            if key not in ['type', 'profile', 'ambient_temperature']:
-                parameters[key] = value
+            if key in ['type', 'profile', 'ambient_temperature', 'parameters']:
+                continue
+            parameters[key] = value
 
         return cls(
             type=mission_type,
@@ -100,9 +102,15 @@ class MissionConfig:
             raise ValueError(f"Invalid mission type '{self.type}'. Must be one of: {valid_types}")
 
         # Check valid profiles
-        valid_profiles = ['atr72', 'constant_flow', 'custom', 'cryogenic', 'ambient', 'storage']
+        valid_profiles = ['atr72', 'csv', 'constant_flow', 'custom', 'cryogenic', 'ambient', 'storage']
         if self.profile not in valid_profiles:
             raise ValueError(f"Invalid profile '{self.profile}'. Must be one of: {valid_profiles}")
+
+        if self.profile == 'csv':
+            required_params = ['csv_file']
+            missing_params = [p for p in required_params if p not in self.parameters]
+            if missing_params:
+                raise ValueError(f"Profile '{self.profile}' requires parameters: {missing_params}")
 
         # Profile-specific parameter validation
         if self.profile == 'constant_flow':
@@ -160,7 +168,7 @@ class MissionConfig:
         if stopping_criteria.get('use_duration_stopping', False):
             has_explicit_duration = 'duration' in self.parameters
             has_custom_sections = 'sections' in self.parameters and isinstance(self.parameters['sections'], list)
-            has_profile_duration = self.profile in ['atr72']  # Profile-driven missions have implicit duration
+            has_profile_duration = self.profile in ['atr72', 'csv']  # Profile-driven missions have implicit duration
 
             if not (has_explicit_duration or has_custom_sections or has_profile_duration):
                 raise ValueError("use_duration_stopping=true requires mission to have 'duration' parameter, 'sections' with durations, or a profile with predefined duration (e.g., atr72)")
@@ -503,7 +511,7 @@ class TestYAMLConfigurationFiles:
         mission_config.validate()
 
         assert mission_config.type == 'discharge'
-        assert mission_config.profile == 'atr72'
+        assert mission_config.profile == 'csv'
         assert mission_config.ambient_temperature == 288.15
 
     def test_coupled_ch2_cch2_config_file(self):
@@ -520,7 +528,7 @@ class TestYAMLConfigurationFiles:
         mission_config.validate()
 
         assert mission_config.type == 'discharge'
-        assert mission_config.profile == 'atr72'
+        assert mission_config.profile == 'csv'
         assert mission_config.ambient_temperature == 288.15
 
     def test_stops_verification_basic_config(self):

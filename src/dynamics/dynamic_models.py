@@ -727,7 +727,8 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         # Original code continues
         dP_dt, dT_dt = cls.solve_state_equations(tank_state, fuel_flow_in[0], fuel_flow_out[0], tank_state.heat_flux)
         dMg_dt, dMl_dt = cls.define_liquid_and_mass_derivatives(
-            tank_state.phase, in_flow_rate - out_flow_rate
+            # Mass derivatives use the inflow convention for this model.
+            tank_state.phase, in_flow_rate
         )
 
         # Apply safety limits to prevent non-physical values
@@ -835,18 +836,10 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
         tank_thermal_capacity: float,
         fuel_mass: float = None
     ) -> float:
-            print(f"current tank thermal capacity: {tank_thermal_capacity}, fuel mass: {fuel_mass}, hydrogen dH_dT: {hydrogen.dH_dT}")
-            return (
-                tank_thermal_capacity
-                + fuel_mass * hydrogen.dH_dT
-            )
-            # return (
-                # tank_thermal_capacity
-            # )
-            # return (
-            #     TEST_CP
-            #     + fuel_mass * hydrogen.dH_dT
-            # )
+        return (
+            tank_thermal_capacity
+            + tank_volume * hydrogen.density * hydrogen.dH_dT
+        )
 
     @staticmethod
     def y1(
@@ -877,29 +870,13 @@ class SinglePhaseInOutModel(SinglePhaseModelBase):
 
         net_mass_flow = in_flow_rate - out_flow_rate
 
-        # Use the raw enthalpy value if available
         if hasattr(fuel_flow_in, 'inlet_enthalpy') and fuel_flow_in.inlet_enthalpy is not None:
             h_in = fuel_flow_in.inlet_enthalpy
-            print(f"SinglePhaseInOutModel using raw enthalpy: {h_in:.2f} J/kg")
         else:
             h_in = fuel_flow_in.hydrogen.enthalpy
-            print(f"SinglePhaseInOutModel using hydrogen enthalpy: {h_in:.2f} J/kg")
 
         h_tank = tank_hydrogen.enthalpy
-        print(f"Tank enthalpy: {h_tank:.2f} J/kg, enthalpy difference: {h_in - h_tank:.2f} J/kg")
-
-        # Apply an enthalpy correction factor to limit extreme differences
-        enthalpy_diff = h_in - h_tank
-        # MAX_ENTHALPY_DIFF = 25000  # 25 kJ/kg limit for enthalpy difference
-        # if abs(enthalpy_diff) > MAX_ENTHALPY_DIFF:
-        #     # Scale down the difference while preserving sign
-        #     correction_factor = MAX_ENTHALPY_DIFF / abs(enthalpy_diff)
-        #     corrected_diff = enthalpy_diff * correction_factor
-        #     print(f"Limiting enthalpy difference from {enthalpy_diff:.2f} to {corrected_diff:.2f} J/kg")
-        #     enthalpy_diff = corrected_diff
-
-        result = heat_flux + net_mass_flow * enthalpy_diff
-        return result
+        return heat_flux + net_mass_flow * (h_in - h_tank)
 
     @classmethod
     def compute_venting_mass(cls):

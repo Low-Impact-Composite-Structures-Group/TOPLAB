@@ -29,30 +29,24 @@ class MyCycler:
         self.colors = ["#00A6D6", "#E03C31", "#009B77", "#A50034"]  # Delft colors
 
 def set_font():
-    """Set the font to Cambria from the local fonts directory"""
+    """Set a serif font, preferring Cambria if installed.
+
+    Note: This project intentionally does not bundle proprietary font files.
+    """
     import matplotlib.font_manager as fm
 
-    # Path to the Cambria font file
-    font_path = os.path.join(os.path.dirname(__file__), '..', '..', 'plotting', 'fonts', 'cambria.ttf')
+    available_fonts = {f.name for f in fm.fontManager.ttflist}
 
-    if os.path.exists(font_path):
-        # Register the Cambria font
-        fm.fontManager.addfont(font_path)
+    if 'Cambria' in available_fonts:
         plt.rcParams['font.family'] = 'Cambria'
-        print(f"Successfully loaded Cambria font from {font_path}")
     else:
-        # Fallback to available serif fonts
-        available_fonts = [f.name for f in fm.fontManager.ttflist]
-        preferred_fonts = ['Times New Roman', 'Georgia', 'Times', 'Palatino']
-
-        selected_font = 'serif'  # Default fallback
+        preferred_fonts = ['Times New Roman', 'Georgia', 'Times', 'Palatino', 'DejaVu Serif']
+        selected_font = 'serif'
         for font in preferred_fonts:
             if font in available_fonts:
                 selected_font = font
                 break
-
         plt.rcParams['font.family'] = selected_font
-        print(f"Cambria font not found, using {selected_font}")
 
     plt.rcParams['font.size'] = 10
     plt.rcParams['axes.labelsize'] = 12

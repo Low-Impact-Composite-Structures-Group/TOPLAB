@@ -1017,41 +1017,44 @@ def bisection_method(
 
     # Define max iterations and desired accuracy
     max_iterations = 1000
-    accuracy = 1e-4
+    accuracy = 1e-6
 
-    # Handle edge cases for target values
-    if target <= 0:
-        return 0.0
+    def f(x: float) -> float:
+        return function(x) - target
 
-    # Check if target is greater than function at high
-    high_value = function(high)
-    if target >= high_value:
+    f_low = f(low)
+    f_high = f(high)
+
+    # If one endpoint is already a solution
+    if abs(f_low) < accuracy:
+        return low
+    if abs(f_high) < accuracy:
         return high
 
-    # Check if target is less than function at low
-    low_value = function(low)
-    if target <= low_value:
-        return low
+    # If the interval doesn't bracket a root, fall back to the closer endpoint.
+    if f_low * f_high > 0:
+        return low if abs(f_low) < abs(f_high) else high
 
     for _ in range(max_iterations):
         mid = (high + low) / 2
-        mid_value = function(mid)
+        mid_value = f(mid)
 
         # Check if we've reached desired accuracy
-        if abs(target - mid_value) < accuracy:
+        if abs(mid_value) < accuracy:
             return mid
 
         # Handle numerical issues - if high and low are too close
         if abs(high - low) < 1e-10:
             return mid
 
-        if mid_value > target:
+        if f_low * mid_value < 0:
             high = mid
+            f_high = mid_value
         else:
             low = mid
+            f_low = mid_value
 
     # Instead of raising an exception, return the best estimate
-    print(f"Warning: Bisection method exceeded max iterations. Using best estimate.")
     return (high + low) / 2
 
 def random_points_on_ellipsoid(num_points, a, b, c):

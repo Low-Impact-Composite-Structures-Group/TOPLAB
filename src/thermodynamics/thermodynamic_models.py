@@ -390,20 +390,27 @@ class ThermodynamicModel:
         ]
 
     @staticmethod
-    def construct_a_matrix(num_resistances: int) -> npt.ArrayLike:
+    def construct_a_matrix(num_layers: int) -> npt.ArrayLike:
         """Method to construct the matrix required to compute the new
         temperatures, for the tank inner and outer wall, and when
         implemented, the different layers in the insulation.
 
         Args:
-            num_resistances (int): Number of resistances in the thermal model.
-                                  This can include insulation layers plus other components
-                                  like liner, internal and external resistances.
+            num_layers (int): Number of insulation layers. For $n$ layers, there
+                are $n+1$ unknown interface temperatures (inner wall through
+                outer wall), and $n+2$ resistances including the internal and
+                external convection resistances.
         """
-        a = np.zeros((num_resistances, num_resistances-1))
-        for i in range(num_resistances-1):
-            a[i,i] = 1
-            a[i+1,i] = -1
+        n = int(num_layers)
+        a = np.zeros((n + 2, n + 1), dtype=int)
+        # First resistance depends on first unknown temperature
+        a[0, 0] = 1
+        # Internal layers
+        for i in range(1, n + 1):
+            a[i, i - 1] = -1
+            a[i, i] = 1
+        # Last resistance depends on last unknown temperature
+        a[-1, -1] = -1
         return a
 
     @staticmethod

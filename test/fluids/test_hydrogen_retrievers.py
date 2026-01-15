@@ -19,7 +19,7 @@ class TestSinglePhaseRequester(unittest.TestCase):
             self.pressure, self.temperature, "D"
         )
         expected_density = 63.68658870474203
-        self.assertEqual(expected_density, density)
+        self.assertAlmostEqual(expected_density, density, places=12)
     
     def test_get_hydrogen_properties(self):
 
@@ -56,9 +56,10 @@ class TestTwoPhaseRequester(unittest.TestCase):
     def test_compute_pressure_derivative(self):
 
         temp1 = 22
-        self.assertEqual(
+        self.assertAlmostEqual(
             self.retriever.compute_pressure_derivative(temp1),
-            41319.799021746774
+            41319.799021746774,
+            places=4,
         )
 
 

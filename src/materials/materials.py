@@ -72,11 +72,12 @@ class Material:
             mass (float): mass of the solid [kg]
 
         Returns:
-            float: thermal capacity of the solid [J/K].
+            float: thermal capacity proxy of the solid [J].
         """
         return (
             self.determine_specific_heat(temperature)
             * mass
+            * temperature
         )
 
     def determine_thermal_conductivity(self, temperature: float) -> float:

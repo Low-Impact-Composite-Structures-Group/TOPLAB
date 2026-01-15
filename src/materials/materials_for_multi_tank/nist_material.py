@@ -53,7 +53,11 @@ class NISTMaterial:
         Returns:
             float: Specific heat in J/(kg·K)
         """
-        return self.specific_heat_func(temperature)
+        # NIST correlations are defined over a limited temperature range.
+        # Clamp inputs for numerical robustness and consistent behavior.
+        t = float(temperature)
+        t = min(max(t, 10.0), 400.0)
+        return self.specific_heat_func(t)
 
     def determine_specific_heat(self, temperature: float) -> float:
         """

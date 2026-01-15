@@ -175,10 +175,13 @@ class TankState:
         if self.phase == "liquid":
             return 1.0
 
-        # For supercritical phase, treat as single-phase gas (fill = 0)
-        # because supercritical fluids behave more like dense gases
-        if hasattr(self.hydrogen, 'phase') and 'supercritical' in self.hydrogen.phase:
-            return 0.0
+        if hasattr(self.hydrogen, 'phase'):
+            # Treat supercritical_liquid as a filled (liquid-like) state
+            if self.hydrogen.phase == "supercritical_liquid":
+                return 1.0
+            # Other supercritical states are treated as gas-like
+            if 'supercritical' in self.hydrogen.phase:
+                return 0.0
 
         # Ensure that divide by zero is not possible
         if self.volume == 0:
@@ -274,9 +277,11 @@ class TankState:
         # Check if hydrogen object has phase attribute
         if hasattr(self.hydrogen, 'phase'):
             phase = self.hydrogen.phase
-            # Map supercritical phases to simpler categories for thermal calculations
+            if phase == "supercritical_liquid":
+                return "liquid"
+            # Map other supercritical phases to gas-like behavior
             if 'supercritical' in phase:
-                return "gas"  # Treat supercritical as gas for thermal resistance
+                return "gas"
             return phase
 
         # Check phase based on available properties

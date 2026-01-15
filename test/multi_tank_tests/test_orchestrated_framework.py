@@ -10,19 +10,14 @@ Date: September 30, 2025
 """
 
 import pytest
-import os
-import sys
 import yaml
 import time
 import io
 import contextlib
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-
-from configuration.scenario_configuration import ScenarioConfig
-from orchestration.system_orchestrator import SystemOrchestrator
+from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
 
 
 class TestSystemOrchestrator:
@@ -90,12 +85,13 @@ class TestSystemOrchestrator:
                 # Skip validation for malformed YAML files
                 continue
 
-            # Validate required top-level sections exist
-            required_sections = ['network', 'geometry']
-            # Note: 'mission' section varies between configs, some have 'mission_sequence' instead
-
-            for section in required_sections:
-                assert section in config, f"Missing required section '{section}' in {analysis_name}"
+            # Validate required top-level sections exist (support both schemas)
+            if 'network' in config:
+                assert 'analysis' in config, f"Missing required section 'analysis' in {analysis_name}"
+            else:
+                # Legacy configs (e.g., stops_verification)
+                assert 'analysis_name' in config, f"Missing required key 'analysis_name' in {analysis_name}"
+                assert 'mission_sequence' in config, f"Missing required section 'mission_sequence' in {analysis_name}"
 
             # Validate heat exchanger parameters are present (from Phase 1 externalization)
             # Check in plots.heat_exchanger_requirements section
@@ -269,17 +265,32 @@ class TestSystemOrchestrator:
             if missing_solver_params:
                 print(f"ℹ️ {analysis_name}: Missing solver parameters: {missing_solver_params}")
 
-            # Test geometry configuration completeness (tanks are in geometry section)
-            geometry_config = config.get('geometry', {})
-            assert len(geometry_config) > 0, f"No tank geometries configured in {analysis_name}"
+            # Test tank configuration completeness
+            if 'network' in config:
+                nodes = config.get('network', {}).get('nodes', [])
+                tank_nodes = [n for n in nodes if n.get('type') == 'tank']
+                assert len(tank_nodes) > 0, f"No tank nodes configured in {analysis_name}"
 
-            # Check that each tank has basic required parameters
-            for tank_id, tank_config in geometry_config.items():
-                required_tank_params = ['phi', 'initial_pressure', 'initial_density']
-                missing_tank_params = [p for p in required_tank_params if p not in tank_config]
+                for node in tank_nodes:
+                    tank_id = node.get('node_id', 'unknown')
+                    geometry = node.get('geometry', {})
+                    initial = node.get('initial_conditions', {})
 
-                if missing_tank_params:
-                    print(f"ℹ️ {analysis_name}.tank_{tank_id}: Missing parameters: {missing_tank_params}")
+                    assert 'phi' in geometry, f"Missing geometry.phi for tank {tank_id} in {analysis_name}"
+                    for required_key in ['pressure', 'temperature']:
+                        if required_key not in initial:
+                            print(f"ℹ️ {analysis_name}.tank_{tank_id}: Missing initial_conditions.{required_key}")
+            else:
+                # Legacy geometry-section schema
+                geometry_config = config.get('geometry', {})
+                assert len(geometry_config) > 0, f"No tank geometries configured in {analysis_name}"
+
+                for tank_id, tank_config in geometry_config.items():
+                    required_tank_params = ['phi', 'initial_pressure', 'initial_density']
+                    missing_tank_params = [p for p in required_tank_params if p not in tank_config]
+
+                    if missing_tank_params:
+                        print(f"ℹ️ {analysis_name}.tank_{tank_id}: Missing parameters: {missing_tank_params}")
 
             print(f"✅ {analysis_name}: Configuration completeness validated")
 

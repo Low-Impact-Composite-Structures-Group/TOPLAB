@@ -109,16 +109,30 @@ class Hydrogen(ConvectiveMedium):
         Returns:
             str: Phase name (liquid, gas, supercritical, etc.)
         """
+        # CoolProp can return either numeric phase codes or string phase names
+        # depending on backend/version.
+        if isinstance(self.state, str):
+            s = self.state.strip().lower()
+            # Normalize a few common variants
+            if s in {"two-phase", "two phase"}:
+                return "twophase"
+            if s in {
+                "liquid",
+                "gas",
+                "twophase",
+                "supercritical",
+                "supercritical_gas",
+                "supercritical_liquid",
+            }:
+                return s
+            # If it's a numeric string, fall through to numeric handling
         try:
             state_code = str(int(self.state))
-            phase = PHASE_INDICES.get(state_code)
-            if not phase:
-                print(f"Warning: Unknown phase state code: {state_code}")
-                return "unknown"
-            return phase
-        except (ValueError, TypeError) as e:
-            print(f"Error determining phase from state value: {self.state}")
+        except (ValueError, TypeError):
             return "unknown"
+
+        phase = PHASE_INDICES.get(state_code)
+        return phase if phase is not None else "unknown"
 
     @property
     def gas(self) -> Hydrogen:
@@ -130,9 +144,12 @@ class Hydrogen(ConvectiveMedium):
         as the properties are continuous across the pseudo-critical line.
         """
         if self.phase not in [
-            "supercritical", "supercritical_gas", "gas", "supercritical_liquid"
+            "supercritical",
+            "supercritical_gas",
+            "gas",
+            "supercritical_liquid",
         ]:
-            raise ValueError(f"Cannot access gas properties: hydrogen is in {self.phase} phase")
+            raise ValueError("Hydrogen not in gas phase")
         return self
 
     @property
@@ -145,7 +162,7 @@ class Hydrogen(ConvectiveMedium):
         supercritical fluid has more liquid-like properties.
         """
         if self.phase not in ["liquid", "supercritical_liquid", "twophase"]:
-            raise ValueError(f"Cannot access liquid properties: hydrogen is in {self.phase} phase")
+            raise ValueError("Hydrogen not in liquid phase")
         return self
 
     def get_phase(self, phase: str) -> Hydrogen:
@@ -161,13 +178,13 @@ class Hydrogen(ConvectiveMedium):
         Raises:
             ValueError: If the requested phase is not supported
         """
+        if phase in (None, ""):
+            return self
         if phase == "gas":
             return self.gas
-        elif phase == "liquid":
+        if phase == "liquid":
             return self.liquid
-        else:
-            raise ValueError(f"Unsupported phase request: {phase}")
-        return self
+        raise ValueError(f"Unsupported phase request: {phase}")
 
 
 @dataclass
@@ -232,14 +249,8 @@ class TwoPhaseHydrogen:
             return self.gas
         if phase == "liquid":
             return self.liquid
-        if phase == "supercritical":
-            # For supercritical conditions, use gas phase as a fallback
-            print(f"SUPERCRITICAL PHASE REQUESTED - Using gas phase as fallback")
-            return self.gas
 
-        # Default to gas phase as a fallback with warning
-        print(f"WARNING: Unsupported phase '{phase}' requested - falling back to gas phase")
-        return self.gas
+        raise ValueError(f"'{phase}' is an unsupported phase...")
 
 
 @dataclass

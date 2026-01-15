@@ -50,15 +50,16 @@ class TestScenarioConfig:
 
         mission = scenario.mission_sequence.missions[0]
         assert mission.type == "discharge"
-        assert mission.profile == "atr72"
+        assert mission.profile == "csv"
 
-        # Verify materials parsing
-        assert "liner" in scenario.materials
-        assert "composite" in scenario.materials
+        # Verify materials parsing (new format is per-tank materials)
+        tank_materials = scenario.get_tank_materials(1)
+        assert "liner" in tank_materials
+        assert "composite" in tank_materials
 
         # Test material properties
-        liner = scenario.materials["liner"]
-        composite = scenario.materials["composite"]
+        liner = tank_materials["liner"]
+        composite = tank_materials["composite"]
 
 
         # Test temperature-dependent properties
@@ -86,7 +87,7 @@ class TestScenarioConfig:
         assert "Single Tank CCH2 Benchmark" in summary
         assert "Tanks: 1" in summary
         assert "Missions: 1" in summary
-        assert "['liner', 'composite']" in summary
+        assert "Nodes: 1" in summary
 
 
 if __name__ == "__main__":

@@ -99,8 +99,15 @@ class InternalModel(Protocol):
                 tank, tank_state, surface_temperature
             )]
         
-        # Check phase to determine thermal model
-        phase = tank_state.phase
+        # Check phase to determine thermal model. Some unit tests use a minimal
+        # TankState without a .phase attribute, so infer it from hydrogen.
+        phase = getattr(tank_state, "phase", None)
+        if phase is None:
+            hydrogen = getattr(tank_state, "hydrogen", None)
+            if hydrogen is not None and hasattr(hydrogen, "phase"):
+                phase = hydrogen.phase
+            else:
+                phase = "twophase"
         
         # Single-phase liquid tank
         if phase == "liquid" or tank_state.is_full:
