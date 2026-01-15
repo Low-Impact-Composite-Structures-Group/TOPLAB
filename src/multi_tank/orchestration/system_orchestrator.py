@@ -2492,31 +2492,40 @@ class SystemOrchestrator:
         initial_conditions = tank_node.get('initial_conditions', {})
         operating_limits = tank_node.get('operating_limits', {})
 
+        def _float_or_default(value, default: float = 0.0) -> float:
+            if value is None or value == "":
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         # Convert values, handling both numeric and string inputs
         p_init_pa = initial_conditions.get('pressure', 0)
-        p_init_bar = float(p_init_pa) / 1e5 if p_init_pa else 0  # Pa to bar
+        p_init_bar = _float_or_default(p_init_pa, 0.0) / 1e5  # Pa to bar
 
-        rho_init = float(initial_conditions.get('density', 0))  # kg/m³
-        lr_ratio = float(geometry.get('phi', 3.0))  # L/R ratio (phi in YAML)
+        rho_raw = initial_conditions.get('density', None)
+        rho_init = _float_or_default(rho_raw, np.nan)  # kg/m³ (may be omitted)
+        lr_ratio = _float_or_default(geometry.get('phi', 3.0), 3.0)  # L/R ratio (phi in YAML)
 
         p_min_pa = operating_limits.get('minimum_pressure', 0)
-        p_min_bar = float(p_min_pa) / 1e5 if p_min_pa else 0  # Pa to bar
+        p_min_bar = _float_or_default(p_min_pa, 0.0) / 1e5  # Pa to bar
 
         p_vent_pa = operating_limits.get('venting_pressure', 0)
-        p_vent_bar = float(p_vent_pa) / 1e5 if p_vent_pa else 0  # Pa to bar
+        p_vent_bar = _float_or_default(p_vent_pa, 0.0) / 1e5  # Pa to bar
 
 
         # Extract from materials section
         materials_config = config_dict.get('materials', {})
         liner_config = materials_config.get('liner', {})
-        liner_thickness = float(liner_config.get('thickness', 0.005))  # m
+        liner_thickness = _float_or_default(liner_config.get('thickness', 0.005), 0.005)  # m
         insulation_config = materials_config.get('insulation', {})
-        insulation_thickness = float(insulation_config.get('thickness', 0.05))  # m
+        insulation_thickness = _float_or_default(insulation_config.get('thickness', 0.05), 0.05)  # m
 
         # Extract from mission section
         mission_config = config_dict.get('mission', {})
-        ambient_temp = float(mission_config.get('ambient_temperature', 288.15))  # K
-        ambient_htc = float(insulation_config.get('heat_transfer_coefficient', 30))  # W/m²K from insulation
+        ambient_temp = _float_or_default(mission_config.get('ambient_temperature', 288.15), 288.15)  # K
+        ambient_htc = _float_or_default(insulation_config.get('heat_transfer_coefficient', 30), 30.0)  # W/m²K from insulation
 
         # Material names
         liner_material = config_dict.get('materials', {}).get('liner', {}).get('name', 'aluminum')
@@ -2533,6 +2542,13 @@ class SystemOrchestrator:
 
         # H2 mass - computed at start of sim (initial fuel mass)
         h2_mass = initial_state.fuel_mass  # kg
+
+        # If density was omitted/blank in YAML, fall back to simulation-derived value.
+        if np.isnan(rho_init):
+            rho_init = _float_or_default(getattr(initial_state, 'density', None), np.nan)
+        if np.isnan(rho_init):
+            volume = getattr(tank_geometry, 'volume', None)
+            rho_init = (h2_mass / volume) if volume else 0.0
 
         # === FROM MISSION PROFILE ===
         # Calculate discharge rate from actual simulation results (more accurate than mission config)
