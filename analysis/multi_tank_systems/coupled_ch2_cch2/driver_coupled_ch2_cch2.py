@@ -31,3 +31,12 @@ def main():
     return result
 
 
+if __name__ == "__main__":
+    # Make this module runnable directly via `python driver_coupled_ch2_cch2.py`
+    try:
+        main()
+    except Exception:
+        # Ensure failures are visible when run as a script
+        raise
+
+
