@@ -1393,14 +1393,20 @@ class TankSystem:
         y0 = self.create_initial_state()
 
         # Integration setup - use mission duration from configuration
-        duration_seconds = self.config.MISSION_DURATION
+        duration_seconds = float(self.config.MISSION_DURATION)
+
+        # Optional override (primarily for tests/smoke runs)
+        max_simulation_time = solver_config.get('max_simulation_time', None)
+        if max_simulation_time is not None:
+            duration_seconds = min(duration_seconds, float(max_simulation_time))
+
         duration_hours = duration_seconds / 3600.0
         t_span = (0.0, duration_seconds)
 
-        print(f"Integration setup:")
+        print("Integration setup:")
         print(f"   • Duration: {duration_hours:.3f} hours ({duration_seconds:.0f} seconds)")
-        print(f"   • Time step: 1.0s")
-        print(f"   • Expected points: {int(duration_seconds) + 1}")
+        print(f"   • Time step: {timestep:.3f}s")
+        print(f"   • Expected points: {int(duration_seconds / timestep) + 1 if timestep > 0 else 'unknown'}")
 
         # Run integration
         print("Starting ODE integration...")

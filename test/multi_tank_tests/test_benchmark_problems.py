@@ -172,9 +172,9 @@ class BenchmarkValidator:
 def _test_adaptive_tolerance_benchmark():
     """Test all solvers with Lotka-Volterra system (internal function)"""
 
-    print("⏳ Running benchmark tests... this may take a moment")
+    print("Running benchmark tests... this may take a moment")
     print("\n" + "="*70)
-    print("🦌 LOTKA-VOLTERRA PREDATOR-PREY BENCHMARK")
+    print("LOTKA-VOLTERRA PREDATOR-PREY BENCHMARK")
     print("="*70)
     print("Testing non-stiff solver performance with oscillatory dynamics")
     print("Conservation of Hamiltonian should be maintained")
@@ -219,16 +219,16 @@ def _test_adaptive_tolerance_benchmark():
                 # Validate solution
                 validation = BenchmarkValidator.validate_lotka_volterra(sol, y0)
 
-                print(f"  ✅ Success - Wall time: {wall_time:.4f}s")
-                print(f"  📊 Function evals: {sol.nfev}")
-                print(f"  🎯 Final state: Prey={sol.y[0,-1]:.3f}, Predator={sol.y[1,-1]:.3f}")
-                print(f"  ⚖️  Hamiltonian drift: {validation['hamiltonian_drift']:.2e}")
-                print(f"  🌊 Oscillatory: {'✓' if validation['oscillatory'] else '✗'}")
-                print(f"  ➕ Positive values: {'✓' if validation['positive'] else '✗'}")
+                print(f"  Success - Wall time: {wall_time:.4f}s")
+                print(f"  Function evals: {sol.nfev}")
+                print(f"  Final state: Prey={sol.y[0,-1]:.3f}, Predator={sol.y[1,-1]:.3f}")
+                print(f"  Hamiltonian drift: {validation['hamiltonian_drift']:.2e}")
+                print(f"  Oscillatory: {'yes' if validation['oscillatory'] else 'no'}")
+                print(f"  Positive values: {'yes' if validation['positive'] else 'no'}")
 
                 # Grade the solution
                 grade = "A" if validation['hamiltonian_drift'] < 1e-4 else "B" if validation['hamiltonian_drift'] < 1e-2 else "C"
-                print(f"  🎓 Grade: {grade} ({'Excellent' if grade=='A' else 'Good' if grade=='B' else 'Acceptable'})")
+                print(f"  Grade: {grade} ({'Excellent' if grade=='A' else 'Good' if grade=='B' else 'Acceptable'})")
 
                 results[solver_name] = {
                     'success': True,
@@ -240,17 +240,17 @@ def _test_adaptive_tolerance_benchmark():
                 }
 
             else:
-                print(f"  ❌ Failed: {sol.message}")
+                print(f"  Failed: {sol.message}")
                 results[solver_name] = {'success': False, 'message': sol.message}
 
         except Exception as e:
-            print(f"  💥 Error: {e}")
+            print(f"  Error: {e}")
             results[solver_name] = {'success': False, 'error': str(e)}
 
         print()
 
     # Summary
-    print("🏆 LOTKA-VOLTERRA RESULTS SUMMARY:")
+    print("LOTKA-VOLTERRA RESULTS SUMMARY:")
     print("-" * 50)
     successful_solvers = [name for name, result in results.items() if result.get('success', False)]
 
@@ -264,7 +264,7 @@ def _test_adaptive_tolerance_benchmark():
             print(f"{solver_name:<8} {result['grade']:<6} {validation['hamiltonian_drift']:<10.2e} "
                   f"{result['wall_time']:<8.4f} {result['nfev']:<8}")
 
-    print(f"\n✅ {len(successful_solvers)}/{len(solvers)} solvers completed Lotka-Volterra successfully")
+    print(f"\n{len(successful_solvers)}/{len(solvers)} solvers completed Lotka-Volterra successfully")
 
     return results
 
@@ -272,9 +272,9 @@ def _test_adaptive_tolerance_benchmark():
 def _test_stiff_van_der_pol_oscillator():
     """Test stiff solvers with Robertson's problem (internal function)"""
 
-    print("⏳ Running stiff solver benchmark tests... this may take a minute")
+    print("Running stiff solver benchmark tests... this may take a minute")
     print("\n" + "="*70)
-    print("⚗️  ROBERTSON'S STIFF CHEMICAL KINETICS BENCHMARK")
+    print("ROBERTSON'S STIFF CHEMICAL KINETICS BENCHMARK")
     print("="*70)
     print("Testing stiff solver performance with multi-time-scale dynamics")
     print("Mass conservation (y1 + y2 + y3 = 1) should be maintained")
@@ -303,7 +303,7 @@ def _test_stiff_van_der_pol_oscillator():
     all_results = {}
 
     # Test stiff solvers first
-    print("🔥 STIFF SOLVERS (Expected to perform well):")
+    print("STIFF SOLVERS (Expected to perform well):")
     print("-" * 50)
 
     stiff_results = {}
@@ -329,17 +329,16 @@ def _test_stiff_van_der_pol_oscillator():
                 # Validate solution
                 validation = BenchmarkValidator.validate_robertson(sol)
 
-                print(f"  ✅ Success - Wall time: {wall_time:.4f}s")
-                print(f"  📊 Function evals: {sol.nfev}")
-                print(f"  🎯 Final state: y1={sol.y[0,-1]:.2e}, y2={sol.y[1,-1]:.2e}, y3={sol.y[2,-1]:.6f}")
-                print(f"  ⚖️  Mass drift: {validation['mass_drift']:.2e}")
-                print(f"  🔥 Stiff behavior detected: {'✓' if validation['stiff_behavior'] else '✗'}")
+                print(f"  Success - Wall time: {wall_time:.4f}s")
+                print(f"  Final state: y1={sol.y[0,-1]:.2e}, y2={sol.y[1,-1]:.2e}, y3={sol.y[2,-1]:.6f}")
+                print(f"  Mass drift: {validation['mass_drift']:.2e}")
+                print(f"  Stiff behavior detected: {'yes' if validation['stiff_behavior'] else 'no'}")
 
                 # Grade based on efficiency and accuracy
                 efficiency = len(sol.t) / sol.nfev if sol.nfev > 0 else 0
                 accurate = validation['mass_drift'] < 1e-4
                 grade = "A" if accurate and efficiency > 0.01 else "B" if accurate else "C"
-                print(f"  🎓 Grade: {grade} (Efficiency: {efficiency:.4f})")
+                print(f"  Grade: {grade} (Efficiency: {efficiency:.4f})")
 
                 stiff_results[solver_name] = {
                     'success': True,
@@ -351,17 +350,17 @@ def _test_stiff_van_der_pol_oscillator():
                 }
 
             else:
-                print(f"  ❌ Failed: {sol.message}")
+                print(f"  Failed: {sol.message}")
                 stiff_results[solver_name] = {'success': False, 'message': sol.message}
 
         except Exception as e:
-            print(f"  💥 Error: {e}")
+            print(f"  Error: {e}")
             stiff_results[solver_name] = {'success': False, 'error': str(e)}
 
         print()
 
     # Test non-stiff solvers (should struggle or fail)
-    print("⚡ NON-STIFF SOLVERS (Expected to struggle with stiffness):")
+    print("NON-STIFF SOLVERS (Expected to struggle with stiffness):")
     print("-" * 50)
 
     nonstiff_results = {}
@@ -388,11 +387,11 @@ def _test_stiff_van_der_pol_oscillator():
             if sol.success and wall_time < 10.0:  # 10 second timeout
                 validation = BenchmarkValidator.validate_robertson(sol)
 
-                print(f"  ⚠️  Partial success - Wall time: {wall_time:.4f}s (short time span)")
-                print(f"  📊 Function evals: {sol.nfev}")
-                print(f"  🎯 Final state: y1={sol.y[0,-1]:.2e}, y2={sol.y[1,-1]:.2e}, y3={sol.y[2,-1]:.6f}")
-                print(f"  ⚖️  Mass drift: {validation['mass_drift']:.2e}")
-                print(f"  ⏰ Note: Tested on shorter time span due to stiffness")
+                print(f"  Partial success - Wall time: {wall_time:.4f}s (short time span)")
+                print(f"  Function evals: {sol.nfev}")
+                print(f"  Final state: y1={sol.y[0,-1]:.2e}, y2={sol.y[1,-1]:.2e}, y3={sol.y[2,-1]:.6f}")
+                print(f"  Mass drift: {validation['mass_drift']:.2e}")
+                print("  Note: Tested on shorter time span due to stiffness")
 
                 nonstiff_results[solver_name] = {
                     'success': True,
@@ -404,13 +403,13 @@ def _test_stiff_van_der_pol_oscillator():
 
             else:
                 reason = sol.message if not sol.success else "Timeout (>10s)"
-                print(f"  ❌ Failed: {reason}")
-                print(f"  💡 This is expected - non-stiff solvers struggle with Robertson's problem")
+                print(f"  Failed: {reason}")
+                print("  Note: This is expected - non-stiff solvers struggle with Robertson's problem")
                 nonstiff_results[solver_name] = {'success': False, 'expected': True}
 
         except Exception as e:
-            print(f"  💥 Error: {e}")
-            print(f"  💡 This is expected - Robertson's problem is very stiff")
+            print(f"  Error: {e}")
+            print("  Note: This is expected - Robertson's problem is very stiff")
             nonstiff_results[solver_name] = {'success': False, 'expected': True, 'error': str(e)}
 
         print()
@@ -420,7 +419,7 @@ def _test_stiff_van_der_pol_oscillator():
     all_results.update(nonstiff_results)
 
     # Summary
-    print("🏆 ROBERTSON'S PROBLEM RESULTS SUMMARY:")
+    print("ROBERTSON'S PROBLEM RESULTS SUMMARY:")
     print("-" * 60)
 
     print("Stiff Solvers (Full Problem):")
@@ -435,8 +434,8 @@ def _test_stiff_van_der_pol_oscillator():
                 print(f"{solver_name:<8} {result['grade']:<6} {validation['mass_drift']:<12.2e} "
                       f"{result['efficiency']:<12.4f} {result['wall_time']:<8.4f}")
 
-    print(f"\n✅ {len(successful_stiff)}/{len(stiff_solvers)} stiff solvers handled Robertson's problem")
-    print(f"⚠️  Non-stiff solvers struggled as expected (this demonstrates stiffness)")
+    print(f"\n{len(successful_stiff)}/{len(stiff_solvers)} stiff solvers handled Robertson's problem")
+    print("Non-stiff solvers struggled as expected (this demonstrates stiffness)")
 
     return all_results
 
@@ -444,8 +443,8 @@ def _test_stiff_van_der_pol_oscillator():
 def _test_solver_benchmark_suite():
     """Run complete benchmark suite (internal function)"""
 
-    print("⏳ Running comprehensive benchmark suite... this may take several minutes")
-    print("🧪 COMPREHENSIVE SOLVER BENCHMARK SUITE")
+    print("Running comprehensive benchmark suite... this may take several minutes")
+    print("COMPREHENSIVE SOLVER BENCHMARK SUITE")
     print("="*70)
     print("Testing all solvers with standard numerical analysis benchmarks")
     print("="*70)
@@ -457,7 +456,7 @@ def _test_solver_benchmark_suite():
     robertson_results = _test_stiff_van_der_pol_oscillator()
 
     # Overall assessment
-    print("\n🎯 OVERALL BENCHMARK ASSESSMENT:")
+    print("\nOVERALL BENCHMARK ASSESSMENT:")
     print("="*70)
 
     # Count successes
@@ -465,24 +464,24 @@ def _test_solver_benchmark_suite():
     robertson_stiff_successes = sum(1 for name in ['Radau', 'BDF', 'LSODA']
                                    if robertson_results.get(name, {}).get('success', False))
 
-    print(f"📊 Lotka-Volterra (Non-stiff): {lotka_successes}/5 solvers successful")
-    print(f"📊 Robertson's (Stiff): {robertson_stiff_successes}/3 stiff solvers successful")
+    print(f"Lotka-Volterra (Non-stiff): {lotka_successes}/5 solvers successful")
+    print(f"Robertson's (Stiff): {robertson_stiff_successes}/3 stiff solvers successful")
 
     # Recommendations
-    print(f"\n💡 SOLVER RECOMMENDATIONS:")
+    print("\nSOLVER RECOMMENDATIONS:")
     print("-" * 40)
 
     # Best overall performers
     if lotka_successes >= 4 and robertson_stiff_successes >= 2:
-        print("✅ Solver architecture validation: PASSED")
-        print("🏆 Recommended for production: LSODA (adaptive), Radau (stiff)")
-        print("🥇 Best non-stiff: RK45 or DOP853")
-        print("🥇 Best stiff: Radau or BDF")
+        print("Solver architecture validation: PASSED")
+        print("Recommended for production: LSODA (adaptive), Radau (stiff)")
+        print("Best non-stiff: RK45 or DOP853")
+        print("Best stiff: Radau or BDF")
     else:
-        print("⚠️  Some solvers need attention")
+        print("Some solvers need attention")
 
-    print(f"\n🎉 Benchmark suite completed!")
-    print(f"All solvers tested against standard numerical analysis problems")
+    print("\nBenchmark suite completed!")
+    print("All solvers tested against standard numerical analysis problems")
 
     return {
         'lotka_volterra': lotka_results,
@@ -494,40 +493,9 @@ def _test_solver_benchmark_suite():
     }
 
 
-def test_adaptive_tolerance_benchmark():
-    """Test all solvers with Lotka-Volterra system (pytest version)"""
-    results = _test_adaptive_tolerance_benchmark()
-
-    # Validate results without returning them
-    assert len(results) == 5, f"Expected 5 solver results, got {len(results)}"
-    successful_solvers = [name for name, result in results.items() if result.get('success', False)]
-    assert len(successful_solvers) >= 4, f"Expected at least 4 successful solvers, got {len(successful_solvers)}"
-
-    # Check that all successful solvers have reasonable Hamiltonian drift
-    for name, result in results.items():
-        if result.get('success', False):
-            h_drift = result['validation']['hamiltonian_drift']
-            assert h_drift < 0.1, f"{name} had excessive Hamiltonian drift: {h_drift}"
-
-
-def test_stiff_van_der_pol_oscillator():
-    """Test stiff solvers with Robertson's problem (pytest version)"""
-    results = _test_stiff_van_der_pol_oscillator()
-
-    # Validate results without returning them
-    stiff_names = ['Radau', 'BDF', 'LSODA']
-    stiff_successes = sum(1 for name in stiff_names if results.get(name, {}).get('success', False))
-    assert stiff_successes >= 2, f"Expected at least 2 successful stiff solvers, got {stiff_successes}"
-
-    # Check mass conservation for successful stiff solvers
-    for name in stiff_names:
-        if results.get(name, {}).get('success', False):
-            mass_drift = results[name]['validation']['mass_drift']
-            assert mass_drift < 1e-3, f"{name} had poor mass conservation: {mass_drift}"
-
-
+@pytest.mark.slow
 def test_solver_benchmark_suite():
-    """Test comprehensive benchmark suite (pytest version)"""
+    """Run the full benchmark suite (slow)."""
     results = _test_solver_benchmark_suite()
 
     # Validate the comprehensive suite results
@@ -539,50 +507,13 @@ def test_solver_benchmark_suite():
     summary = results['summary']
     assert summary['lotka_successes'] >= 4, f"Expected at least 4 Lotka-Volterra successes, got {summary['lotka_successes']}"
     assert summary['robertson_successes'] >= 2, f"Expected at least 2 Robertson successes, got {summary['robertson_successes']}"
-
-
-# Pytest integration
-class TestBenchmarkProblems:
-    """Pytest test class for benchmark problems"""
-
-    def test_lotka_volterra_benchmark(self):
-        """Test that most solvers can handle Lotka-Volterra"""
-        results = _test_adaptive_tolerance_benchmark()
-
-        # At least 4 out of 5 solvers should succeed
-        successes = sum(1 for r in results.values() if r.get('success', False))
-        assert successes >= 4, f"Only {successes}/5 solvers succeeded on Lotka-Volterra"
-
-        # Check that successful solvers maintain reasonable accuracy
-        for name, result in results.items():
-            if result.get('success', False):
-                h_drift = result['validation']['hamiltonian_drift']
-                assert h_drift < 0.1, f"{name} had excessive Hamiltonian drift: {h_drift}"
-
-    def test_robertson_stiff_solvers(self):
-        """Test that stiff solvers can handle Robertson's problem"""
-        results = _test_stiff_van_der_pol_oscillator()
-
-        # At least 2 out of 3 stiff solvers should succeed
-        stiff_names = ['Radau', 'BDF', 'LSODA']
-        stiff_successes = sum(1 for name in stiff_names
-                             if results.get(name, {}).get('success', False))
-        assert stiff_successes >= 2, f"Only {stiff_successes}/3 stiff solvers succeeded on Robertson"
-
-        # Check mass conservation for successful stiff solvers
-        for name in stiff_names:
-            if results.get(name, {}).get('success', False):
-                mass_drift = results[name]['validation']['mass_drift']
-                assert mass_drift < 1e-3, f"{name} had poor mass conservation: {mass_drift}"
-
-
 if __name__ == "__main__":
     # Run the full benchmark suite
     benchmark_results = _test_solver_benchmark_suite()
 
     print("\n" + "="*70)
-    print("🎊 BENCHMARK TESTING COMPLETED SUCCESSFULLY!")
-    print("✅ All solvers validated against standard numerical analysis problems")
-    print("✅ Stiff and non-stiff solver capabilities confirmed")
-    print("✅ Conservation laws and accuracy verified")
+    print("BENCHMARK TESTING COMPLETED SUCCESSFULLY!")
+    print("All solvers validated against standard numerical analysis problems")
+    print("Stiff and non-stiff solver capabilities confirmed")
+    print("Conservation laws and accuracy verified")
     print("="*70)

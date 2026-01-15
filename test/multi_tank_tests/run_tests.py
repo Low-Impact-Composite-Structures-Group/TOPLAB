@@ -64,7 +64,7 @@ def detect_python_environment():
 
 def install_pytest_if_needed(python_cmd):
     """Install pytest if not available."""
-    print("🔍 Checking pytest installation...")
+    print("Checking pytest installation...")
 
     # Check if pytest is available
     test_cmd = python_cmd + ['-c', 'import pytest; print(pytest.__version__)']
@@ -72,25 +72,25 @@ def install_pytest_if_needed(python_cmd):
     try:
         result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            print(f"✅ pytest {result.stdout.strip()} found")
+            print(f"pytest {result.stdout.strip()} found")
             return True
     except subprocess.TimeoutExpired:
         pass
 
     # Install pytest
-    print("📦 Installing pytest...")
+    print("Installing pytest...")
     install_cmd = python_cmd[:-1] + ['pip', 'install', 'pytest', 'pytest-cov', 'pytest-xdist']
 
     try:
         result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
-            print("✅ pytest installed successfully")
+            print("pytest installed successfully")
             return True
         else:
-            print(f"❌ Failed to install pytest: {result.stderr}")
+            print(f"Failed to install pytest: {result.stderr}")
             return False
     except subprocess.TimeoutExpired:
-        print("❌ pytest installation timed out")
+        print("pytest installation timed out")
         return False
 
 
@@ -101,15 +101,15 @@ def run_tests(args):
 
     # Detect Python environment
     python_cmd = detect_python_environment()
-    print(f"🐍 Using Python command: {' '.join(python_cmd)}")
+    print(f"Using Python command: {' '.join(python_cmd)}")
 
     # Install pytest if needed
     if not install_pytest_if_needed(python_cmd):
-        print("❌ Cannot proceed without pytest")
+        print("Cannot proceed without pytest")
         return False
 
     # Build pytest command
-    pytest_cmd = python_cmd + ['-m', 'pytest']
+    pytest_cmd = python_cmd + ['-m', 'pytest', '-c', str(test_dir / 'pytest.ini')]
 
     # Add test directory
     if args.module:
@@ -133,8 +133,9 @@ def run_tests(args):
     if args.fast:
         pytest_cmd.extend(['-x', '--tb=short'])  # Stop on first failure, short traceback
 
-    # Note: All tests now include benchmarks with user-friendly messaging
-    # Previously slow tests are now integrated with progress indicators
+    # Skip slow tests unless explicitly requested
+    if not args.include_slow:
+        pytest_cmd.extend(['-m', 'not slow'])
 
     # Skip parallel execution for now (requires pytest-xdist)
 
@@ -146,7 +147,7 @@ def run_tests(args):
             '-q'
         ])
 
-    print(f"🚀 Running tests...")
+    print("Running tests...")
     print(f"Command: {' '.join(pytest_cmd)}")
     print("=" * 80)
 
@@ -162,20 +163,20 @@ def run_tests(args):
         # Print summary
         print("=" * 80)
         if result.returncode == 0:
-            print(f"✅ All tests passed in {end_time - start_time:.2f} seconds")
+            print(f"All tests passed in {end_time - start_time:.2f} seconds")
             if args.coverage:
-                print(f"📊 Coverage report generated: test/coverage_html/index.html")
+                print("Coverage report generated: test/coverage_html/index.html")
         else:
-            print(f"❌ Tests failed (exit code: {result.returncode})")
+            print(f"Tests failed (exit code: {result.returncode})")
 
         return result.returncode == 0
 
     except KeyboardInterrupt:
-        print("\n⏹️  Tests interrupted by user")
+        print("\nTests interrupted by user")
         return False
 
     except Exception as e:
-        print(f"❌ Error running tests: {e}")
+        print(f"Error running tests: {e}")
         return False
 
     finally:

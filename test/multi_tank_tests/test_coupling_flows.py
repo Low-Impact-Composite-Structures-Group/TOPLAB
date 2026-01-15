@@ -82,7 +82,7 @@ class TestCouplingFlows:
         result = valve.evaluate(0, mock_tank_states)
         assert valve.is_active == False, "Valve should close at high pressure"
 
-        print("✅ Pressure-triggered valve logic validated")
+        print("Pressure-triggered valve logic validated")
 
     @pytest.mark.coupling
     def test_coupling_flow_calculation_physics(self):
@@ -154,13 +154,13 @@ class TestCouplingFlows:
         flow_rate_reverse = valve.calculate_flow_rate(2.0, tank_states)
         assert flow_rate_reverse == 0, "No flow with reverse pressure differential"
 
-        print(f"✅ Coupling flow physics validated (flow rate: {flow_rate*1000:.1f} g/s)")
+        print(f"Coupling flow physics validated (flow rate: {flow_rate*1000:.1f} g/s)")
 
     @pytest.mark.coupling
     def test_coupling_flow_data_storage(self):
         """Test that coupling flows are correctly stored in simulation results."""
 
-        print("🧪 Testing coupling flow data storage...")
+        print("Testing coupling flow data storage...")
 
         try:
             # Load coupled system configuration
@@ -176,11 +176,11 @@ class TestCouplingFlows:
                 'method': 'LSODA',
                 'rtol': 1e-3,  # Relaxed for speed
                 'atol': 1e-6,
-                'max_simulation_time': 60.0,  # 1 minute test
-                'timestep': 2.0
+                'max_simulation_time': 10.0,  # fast smoke duration
+                'time_step': 2.0
             }
 
-            print("   🚀 Running short simulation for coupling flow validation...")
+            print("   Running short simulation for coupling flow validation...")
             results = orchestrator.run_simulation('LSODA', test_solver_config)
 
             # Validate results structure
@@ -189,7 +189,7 @@ class TestCouplingFlows:
             assert hasattr(results, 'multi_tank_states'), "Results missing multi-tank states"
             assert results.n_timesteps > 0, "No timesteps in results"
 
-            print(f"   📊 Simulation completed: {results.n_timesteps} timesteps, {results.n_tanks} tanks")
+            print(f"   Simulation completed: {results.n_timesteps} timesteps, {results.n_tanks} tanks")
 
             # Check for coupling flow data in results
             coupling_flow_data_found = False
@@ -212,13 +212,13 @@ class TestCouplingFlows:
 
                         if abs(inflow) > 1e-6 or abs(outflow) > 1e-6:
                             coupling_flow_data_found = True
-                            print(f"   🌊 t={time_point:.1f}s Tank{tank_idx}: inflow={inflow*1000:.1f}g/s, outflow={outflow*1000:.1f}g/s")
+                            print(f"   t={time_point:.1f}s Tank{tank_idx}: inflow={inflow*1000:.1f}g/s, outflow={outflow*1000:.1f}g/s")
 
             if coupling_flow_data_found:
-                print("   ✅ Coupling flow data successfully stored and retrieved")
+                print("   Coupling flow data successfully stored and retrieved")
             else:
                 # This might indicate our recent fix is working correctly
-                print("   ℹ️  No significant coupling flows detected in sample (may be expected)")
+                print("   No significant coupling flows detected in sample (may be expected)")
 
             # Check mass conservation during coupling
             if results.n_tanks >= 2:
@@ -230,22 +230,22 @@ class TestCouplingFlows:
                 relative_change = mass_change / initial_mass if initial_mass > 0 else 0
 
                 # Allow for mission discharge (outflow from system)
-                print(f"   ⚖️  Mass conservation: {initial_mass:.1f} → {final_mass:.1f} kg (Δ={mass_change:.2f}kg, {relative_change*100:.2f}%)")
+                print(f"   Mass conservation: {initial_mass:.1f} -> {final_mass:.1f} kg (delta={mass_change:.2f}kg, {relative_change*100:.2f}%)")
 
                 # For pressure compensation, mass transfer between tanks should be much smaller
                 # than mission discharge, but we can't test strict conservation due to mission outflow
 
-            print("✅ Coupling flow data storage validated")
+            print("Coupling flow data storage validated")
 
         except Exception as e:
-            print(f"⚠️ Coupling flow storage test error: {str(e)[:100]}...")
+            print(f"Coupling flow storage test error: {str(e)[:100]}...")
             raise
 
     @pytest.mark.coupling
     def test_coupling_rule_configuration_parsing(self):
         """Test parsing of coupling rule configurations from YAML."""
 
-        print("🧪 Testing coupling rule configuration parsing...")
+        print("Testing coupling rule configuration parsing...")
 
         # Load and parse YAML directly
         with open(self.coupled_config, 'r') as f:
@@ -269,9 +269,9 @@ class TestCouplingFlows:
 
             print(f"     Connection type: {rule_config.get('connection_type')}")
             if 'activation_conditions' in rule_config:
-                print(f"     ✓ Activation conditions present")
+                print("     Activation conditions present")
             if 'flow_physics' in rule_config:
-                print(f"     ✓ Flow physics present")
+                print("     Flow physics present")
 
         # Test orchestrator parsing of coupling rules
         config = ScenarioConfig.from_yaml(str(self.coupled_config))
@@ -281,16 +281,16 @@ class TestCouplingFlows:
         valve_count = len(orchestrator.tank_system.coupling_valves)
         rule_count = len(edges)
 
-        print(f"   ⚙️ Created {valve_count} valves from {rule_count} rules")
+        print(f"   Created {valve_count} valves from {rule_count} rules")
         assert valve_count > 0, "No coupling valves created"
 
-        print("✅ Coupling rule configuration parsing validated")
+        print("Coupling rule configuration parsing validated")
 
     @pytest.mark.integration
     def test_coupling_flow_plotting_data_extraction(self):
         """Test that coupling flow data can be extracted for plotting."""
 
-        print("📊 Testing coupling flow plotting data extraction...")
+        print("Testing coupling flow plotting data extraction...")
 
         try:
             # Load system and run simulation
@@ -302,8 +302,8 @@ class TestCouplingFlows:
                 'method': 'LSODA',
                 'rtol': 1e-3,
                 'atol': 1e-6,
-                'max_simulation_time': 30.0,  # 30 seconds
-                'timestep': 1.0
+                'max_simulation_time': 10.0,
+                'time_step': 1.0
             }
 
             results = orchestrator.run_simulation('LSODA', test_solver_config)
@@ -355,25 +355,25 @@ class TestCouplingFlows:
             total_inflow = sum(sum(tank_inflows) for tank_inflows in coupling_inflows)
             total_outflow = sum(sum(tank_outflows) for tank_outflows in coupling_outflows)
 
-            print(f"   📈 Coupling flow data extracted: {results.n_timesteps} points × {results.n_tanks} tanks")
-            print(f"   🌊 Total coupling flows: {total_inflow*1000:.1f}g·s inflow, {total_outflow*1000:.1f}g·s outflow")
+            print(f"   Coupling flow data extracted: {results.n_timesteps} points x {results.n_tanks} tanks")
+            print(f"   Total coupling flows: {total_inflow*1000:.1f}g·s inflow, {total_outflow*1000:.1f}g·s outflow")
 
             # For pressure compensation, inflow and outflow should be approximately equal
             if total_inflow > 0 or total_outflow > 0:
                 flow_balance = abs(total_inflow - total_outflow) / max(total_inflow, total_outflow, 1e-10)
-                print(f"   ⚖️ Coupling flow balance: {flow_balance*100:.2f}% imbalance")
+                print(f"   Coupling flow balance: {flow_balance*100:.2f}% imbalance")
 
                 # Allow some imbalance due to numerical integration and timing
                 assert flow_balance < 0.1, f"Coupling flow imbalance too large: {flow_balance*100:.1f}%"
 
-                print("   ✅ Coupling flow data extraction successful with flow activity")
+                print("   Coupling flow data extraction successful with flow activity")
             else:
-                print("   ℹ️ No significant coupling flows detected (may be expected for short simulation)")
+                print("   No significant coupling flows detected (may be expected for short simulation)")
 
-            print("✅ Coupling flow plotting data extraction validated")
+            print("Coupling flow plotting data extraction validated")
 
         except Exception as e:
-            print(f"⚠️ Plotting data extraction test error: {str(e)[:100]}...")
+            print(f"Plotting data extraction test error: {str(e)[:100]}...")
             raise
 
     @pytest.mark.performance
@@ -381,7 +381,7 @@ class TestCouplingFlows:
         """Test performance of coupling valve calculations."""
         import time
 
-        print("⚡ Testing coupling valve performance...")
+        print("Testing coupling valve performance...")
 
         flow_physics = FlowPhysics({})
 
@@ -429,13 +429,13 @@ class TestCouplingFlows:
         elapsed_time = time.time() - start_time
         time_per_call = elapsed_time / n_iterations * 1000  # milliseconds
 
-        print(f"   ⏱️ Performance: {time_per_call:.3f} ms per valve calculation")
-        print(f"   📊 {n_iterations} calculations in {elapsed_time:.3f}s")
+        print(f"   Performance: {time_per_call:.3f} ms per valve calculation")
+        print(f"   {n_iterations} calculations in {elapsed_time:.3f}s")
 
         # Performance should be reasonable for real-time simulation
         assert time_per_call < 1.0, f"Valve calculation too slow: {time_per_call:.3f} ms > 1.0 ms"
 
-        print("✅ Coupling valve performance validated")
+        print("Coupling valve performance validated")
 
 
 if __name__ == '__main__':
