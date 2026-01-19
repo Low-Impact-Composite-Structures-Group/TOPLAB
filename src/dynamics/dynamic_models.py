@@ -1,4 +1,4 @@
-"""Dynamic models can be used to compute the pressure and temperature 
+"""Dynamic models can be used to compute the pressure and temperature
 changes in the fuel tank. These entail the models of Lin and Ahluwalia.
 
 Fuel Tank - Dynamic Models
@@ -59,7 +59,7 @@ class TankState(Protocol):
 
 @dataclass
 class StateDerivatives:
-    """Dataclass for the state derivatives with respect to time for the 
+    """Dataclass for the state derivatives with respect to time for the
     fuel tank state.
     """
     pressure: float
@@ -71,7 +71,7 @@ class StateDerivatives:
 
 
 class DynamicModel(Protocol):
-	
+
     @abstractmethod
     def compute_state_derivatives(
         cls,
@@ -82,7 +82,7 @@ class DynamicModel(Protocol):
 
 
 class SinglePhaseModel(DynamicModel):
-    
+
     @classmethod
     def compute_state_derivatives(
         cls, tank_state: TankState, fuel_flows: list[FuelFlow]
@@ -270,7 +270,7 @@ class TwoPhaseModel(DynamicModel):
             / hydrogen.liquid.density ** 2
         )
         return - (term1 + term2)
-    
+
     @staticmethod
     def a23(
         hydrogen: TwoPhaseHydrogen
@@ -346,7 +346,7 @@ class TwoPhaseModel(DynamicModel):
             [0, 0, 1, 1],
             [0, a42, a43, 0]
         ]
-        
+
         return a
 
     @staticmethod
@@ -586,7 +586,7 @@ class LinModel(DynamicModel):
         )
         factor1 = energy_derivative / tank_state.volume
         term2 = sum([
-            fuel_flow.mass_flow * fuel_flow.hydrogen.enthalpy 
+            fuel_flow.mass_flow * fuel_flow.hydrogen.enthalpy
             for fuel_flow in fuel_flows
             if fuel_flow.mass_flow != 0
         ])
@@ -595,7 +595,7 @@ class LinModel(DynamicModel):
             + term2
         )
         return factor1 * factor2
-    
+
     def compute_energy_derivative(
         self, hydrogen: Hydrogen, fill: float
     ) -> float:

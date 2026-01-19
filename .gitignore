@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# output files from plotting
+*.png
+*.pgf
+*.pdf
+
 # Distribution / packaging
 .Python
 build/
@@ -26,6 +31,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+check_results/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -51,6 +57,9 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 .coveragerc
+
+# Ignore results directories
+results/
 
 # Translations
 *.mo

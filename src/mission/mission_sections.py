@@ -1,11 +1,48 @@
-
 from __future__ import annotations
 
-import warnings
-
 from dataclasses import dataclass
+from typing import Protocol, Union
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
-from .fuel_flow import FuelFlow, OutFlow
+
+
+class Hydrogen(Protocol):
+    ...
+
+
+@dataclass
+class FuelFlow:
+    mass_flow:  Union[float, list[float]]
+
+
+@dataclass
+class OutFlow(FuelFlow):
+    phase: str
+
+    @classmethod
+    def rompokos_cruise(cls, phase: str):
+        full_fuel_flow = - 0.384104551391600    # Estimated from paper
+        throttle = 0.2                          # Estimated from paper
+        fuel_flow = full_fuel_flow * throttle
+        return cls(fuel_flow, phase)
+
+    @classmethod
+    def SMR_cruise(cls, phase: str):
+        fuel_flow = -0.21
+        return cls(fuel_flow, phase)
+
+@dataclass
+class InFlow(FuelFlow):
+    hydrogen: Hydrogen
+
+@dataclass
+class InFlowWithDirectEnthalpy(FuelFlow):
+    """
+    InFlow variant that carries direct enthalpy values instead of hydrogen objects.
+    This is used specifically for the TwoPhaseRefuelModel to avoid issues with
+    crossing the saturation line during refueling.
+    """
+    hydrogen: Hydrogen  # Still needed for compatibility with existing code
+    direct_enthalpy: float = None  # Direct enthalpy value in J/kg
 
 
 @dataclass
@@ -14,9 +51,9 @@ class MissionSection:
     fuel_flows: list[FuelFlow]
     altitude: float
     mach_number: float
+    fuel_flow_key: str=None
 
     ground_temperature: float = None
-    name: str = None
 
     def __post_init__(self) -> None:
         self.ambient = get_ISA_air_properties(
@@ -30,14 +67,12 @@ class MissionSection:
     @property
     def flight_speed(self) -> float:
         return self.ambient.speed_of_sound * self.mach_number
-    
+
     def number_of_timesteps(self, timestep: float) -> float:
-        modulus = self.duration % timestep
-        if modulus != 0:
-            warnings.warn(
-                f"Selected timestep ({timestep}) leaves remainder in mission duration.\n"
-                + f"Remaining time is: {modulus}.\n"
-                + "It is up to the user to see if this is desired..."
+        if self.duration % timestep != 0:
+            raise ValueError(
+                "Invalid timestep and duration combination\n"
+                "Ensure that the duration is a multiple of the step."
             )
         return int(self.duration // timestep)
 
@@ -52,6 +87,24 @@ class MissionSection:
         return cls(
             duration, fuel_flows, altitude, mach_number
         )
+
+    def has_multiple_flows(self) -> bool:
+        """Check if this section has multiple fuel flows"""
+        return len(self.fuel_flows) > 1
+
+    def get_inflows(self) -> list[InFlow]:
+        """Get all inflows for this section"""
+        return [ff for ff in self.fuel_flows if isinstance(ff, InFlow)]
+
+    def get_outflows(self) -> list[OutFlow]:
+        """Get all outflows for this section"""
+        return [ff for ff in self.fuel_flows if isinstance(ff, OutFlow)]
+
+    def get_single_flow(self) -> FuelFlow:
+        """Get single flow (for backward compatibility)"""
+        if len(self.fuel_flows) != 1:
+            raise ValueError("Section has multiple flows, use get_inflows/get_outflows")
+        return self.fuel_flows[0]
 
 
 def main():

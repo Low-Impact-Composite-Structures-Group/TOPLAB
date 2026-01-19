@@ -1,11 +1,10 @@
-
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
 import numpy.typing as npt
-from src.thermodynamics.thermal_resistances import SeriesResistances
+from src.thermodynamics.thermal_resistances import SeriesResistances, ParallelResistances
 
 
 class MissionSection(Protocol):
@@ -25,7 +24,7 @@ class FuelTank(Protocol):
 
 
 class Insulation(Protocol):
-    
+
     @abstractmethod
     def compute_thermal_resistances(
         self,
@@ -59,9 +58,66 @@ class ExternalModel(Protocol):
         ...
 
 
-class NoInsulation:
-    def compute_thermal_resistances(self, temperatures, tank) -> list[float]:
-        return []  # No insulation layers → no additional resistances
+@dataclass
+class ThermodynamicModel:
+    internal_model: InternalModel
+    external_model: ExternalModel
+    insulation: Insulation
+    insulation_layers: int = 12
+    liner_layers: int = 1
+    max_iterations: int = int(1e3)
+    constant_heat_flux: float = None
+
+
+class MissionSection(Protocol):
+    temperature: float
+
+
+class TankState(Protocol):
+    temperature: float
+
+
+class FuelTank(Protocol):
+    ...
+
+    @abstractmethod
+    def compute_fuel_wetted_surface(self, fuel_height: float) -> float:
+        ...
+
+
+class Insulation(Protocol):
+
+    @abstractmethod
+    def compute_thermal_resistances(
+        self,
+        temperatures: list[float],
+        tank: FuelTank
+    ) -> list[float]:
+        ...
+
+
+class InternalModel(Protocol):
+
+    @abstractmethod
+    def compute_equivalent_resistance(
+        self,
+        tank: FuelTank,
+        tank_state: TankState,
+        surface_temperature: float
+    ) -> float:
+        ...
+
+
+class ExternalModel(Protocol):
+
+    @abstractmethod
+    def compute_equivalent_resistance(
+        self,
+        tank: FuelTank,
+        mission_section: MissionSection,
+        surface_temperature: float
+    ) -> float:
+        ...
 
 
 @dataclass
@@ -69,14 +125,10 @@ class ThermodynamicModel:
     internal_model: InternalModel
     external_model: ExternalModel
     insulation: Insulation
-
     insulation_layers: int = 12
+    liner_layers: int = 5
     max_iterations: int = int(1e3)
-
-    def __post_init__(self):
-        if self.insulation is None:
-            self.insulation = NoInsulation()
-            self.insulation_layers = 0
+    constant_heat_flux: float = None
 
     def compute_heat_flux(
         self,
@@ -84,52 +136,100 @@ class ThermodynamicModel:
         tank_state: TankState,
         mission_section: MissionSection
     ) -> tuple[float, list]:
-        
+
+        if self.constant_heat_flux is not None:
+            # Use the constant heat flux value
+            heat_flux = self.constant_heat_flux
+
+            # Define the number of temperature interfaces based on total layers
+            num_interfaces = self._compute_total_temperature_interfaces(tank)
+
+            # Define initial temperatures with the calculated number of interfaces
+            temperatures = self.define_initial_temperatures(
+                tank_state.temperature, mission_section.temperature, num_interfaces
+            )
+            return heat_flux, temperatures
+
+        # Define the number of temperature interfaces based on total layers
+        num_interfaces = self._compute_total_temperature_interfaces(tank)
+
+        # Define initial temperatures with the calculated number of interfaces
         temperatures = self.define_initial_temperatures(
-            tank_state.temperature, mission_section.temperature
+            tank_state.temperature, mission_section.temperature, num_interfaces
         )
 
-        for _ in range(self.max_iterations):
-            
-            # Compute the thermal resistances that are in series in the 
-            # fuel tank
-            series_resistances = self.compute_thermal_resistances(
+        for iteration in range(self.max_iterations):
+
+            # Compute the thermal resistances that are in series in the fuel tank
+            thermal_resistances = self.compute_thermal_resistances(
                 tank, tank_state, mission_section, temperatures
             )
 
             # Compute the total heat flux
+            total_resistance = SeriesResistances().compute_equivalent_resistance(thermal_resistances)
+
             heat_flux = self.compute_total_tank_heat_flux(
                 mission_section.temperature,
                 tank_state.temperature,
-                SeriesResistances().compute_equivalent_resistance(
-                    series_resistances
-                )
+                total_resistance
+            )            # Compute new temperatures
+            # The number of resistances determines both matrix dimensions
+            num_resistances = len(thermal_resistances)
+
+            # Create y vector first to get its dimensions
+            y_vector = self.construct_y_vector(
+                thermal_resistances,
+                tank_state.temperature,
+                mission_section.temperature,
+                heat_flux
             )
 
-            # If there is no insulation, the heat flux convergence iterations are not required
-            if isinstance(self.insulation, NoInsulation):
-                return heat_flux, temperatures
+            # Now create A matrix with dimensions that match y_vector
+            # A matrix should have dimensions (num_resistances, num_resistances-1)
+            a_matrix = np.zeros((num_resistances, num_resistances-1))
+            for i in range(num_resistances-1):
+                a_matrix[i,i] = 1
+                a_matrix[i+1,i] = -1
 
-            # Compute new temperatures
-            new_temperatures = self.compute_new_temperatures(
-                self.construct_a_matrix(
-                    self.insulation_layers
-                ),
-                self.construct_y_vector(
-                    series_resistances,
-                    tank_state.temperature,
-                    mission_section.temperature,
-                    heat_flux
+            try:
+                new_temperatures = self.compute_new_temperatures(
+                    a_matrix,
+                    y_vector
                 )
-            )
-            
-            # Test convergence
-            if self.temperatures_have_converged(
-                temperatures, new_temperatures
-            ):
-                return heat_flux, temperatures
-            temperatures = new_temperatures
+
+                # Test convergence
+                has_converged = self.temperatures_have_converged(
+                    temperatures, new_temperatures
+                )
+
+                if has_converged:
+                    return heat_flux, temperatures
+
+                temperatures = new_temperatures
+            except Exception as e:
+                raise
         raise StopIteration("Reached maximum number of iterations.")
+
+    def _compute_total_temperature_interfaces(self, tank: FuelTank) -> int:
+        """Compute the total number of temperature interfaces needed.
+
+        This accounts for liner layers and insulation layers.
+
+        Args:
+            tank: Tank object to check for liner presence
+
+        Returns:
+            int: Total number of temperature interfaces needed
+        """
+        # Check if tank has a liner
+        has_liner = hasattr(tank, 'liner') and tank.liner is not None
+
+        if has_liner:
+            # Total interfaces = liner_layers + insulation_layers
+            return self.liner_layers + self.insulation_layers
+        else:
+            # Only insulation layers
+            return self.insulation_layers
 
     def compute_thermal_resistances(
         self,
@@ -138,49 +238,179 @@ class ThermodynamicModel:
         mission_section: MissionSection,
         temperatures
     ) -> list[float]:
-        
+
+        # Start with internal model resistance
         internal_resistance = self.internal_model.compute_equivalent_resistance(
             tank, tank_state, temperatures[0]
         )
+        thermal_resistances = [internal_resistance]
+
+        # Detailed breakdown of internal resistance
+        if hasattr(self.internal_model, 'get_thermal_resistances'):
+            internal_resistances = self.internal_model.get_thermal_resistances(
+                tank, tank_state, temperatures[0]
+            )
+            for i, resistance in enumerate(internal_resistances):
+                # Try to identify the heat transfer mode
+                if hasattr(resistance, 'heat_transfer_coefficient'):
+                    htc = resistance.heat_transfer_coefficient
+                    area = resistance.surface_area
+
+        # Add liner resistances if present (potentially multiple layers)
+        has_liner = hasattr(tank, 'liner') and tank.liner is not None
+        temp_idx = 0  # Track which temperature index we're at
+
+        if has_liner:
+
+            if self.liner_layers == 1:
+                # Use single resistance method for backward compatibility
+                if hasattr(tank.liner, 'compute_thermal_resistance'):
+                    liner_resistance = tank.liner.compute_thermal_resistance(
+                        temperatures[temp_idx], temperatures[temp_idx + 1]
+                    )
+                    thermal_resistances.append(liner_resistance)
+                    temp_idx += 1
+
+                    # Get liner details
+                    if hasattr(tank.liner, 'thickness') and tank.liner.thickness:
+                        liner_thickness = tank.liner.thickness
+                    if hasattr(tank.liner, 'material'):
+                        liner_material = tank.liner.material
+
+                    # Calculate thermal conductivity and HTC
+                    if hasattr(tank.liner, 'compute_thermal_conductivity'):
+                        k = tank.liner.compute_thermal_conductivity(
+                            temperatures[temp_idx-1], temperatures[temp_idx]
+                        )
+
+                    if hasattr(tank.liner, 'compute_heat_transfer_coefficient'):
+                        htc = tank.liner.compute_heat_transfer_coefficient(
+                            temperatures[temp_idx-1], temperatures[temp_idx]
+                        )
+            else:
+                # Use multiple resistance method for discretized liner
+                if hasattr(tank.liner, 'compute_thermal_resistances'):
+                    liner_temps = temperatures[temp_idx:temp_idx + self.liner_layers + 1]
+                    liner_resistances = tank.liner.compute_thermal_resistances(
+                        liner_temps, self.liner_layers
+                    )
+                    thermal_resistances.extend(liner_resistances)
+                    temp_idx += self.liner_layers
+                else:
+                    # Fallback to single resistance repeated for each layer
+                    total_liner_resistance = 0
+                    for i in range(self.liner_layers):
+                        liner_resistance = tank.liner.compute_thermal_resistance(
+                            temperatures[temp_idx], temperatures[temp_idx + 1]
+                        )
+                        thermal_resistances.append(liner_resistance)
+                        total_liner_resistance += liner_resistance
+                        temp_idx += 1
+        # Select temperatures for the insulation layers
+        # Start from the current temperature index
+        insulation_temps = temperatures[temp_idx:temp_idx+self.insulation_layers+1]
+
+        # Add insulation resistances using the remaining temperatures
         insulation_resistances = self.insulation.compute_thermal_resistances(
-            temperatures, tank
+            insulation_temps, tank
         )
+        thermal_resistances.extend(insulation_resistances)
+
+        total_insulation_resistance = 0
+        for i, resistance in enumerate(insulation_resistances):
+            total_insulation_resistance += resistance
+
+        # Get insulation properties if available
+        if hasattr(self.insulation, 'compute_thermal_conductivity'):
+            k_insulation = self.insulation.compute_thermal_conductivity(
+                insulation_temps[0], insulation_temps[-1]
+            )
+
+        # Add external model resistance
         external_resistance = self.external_model.compute_equivalent_resistance(
             tank, mission_section, temperatures[-1]
         )
+        thermal_resistances.append(external_resistance)
 
-        return [
-            internal_resistance,
-            *insulation_resistances,
-            external_resistance,
-        ]
-            
+        # Detailed breakdown of external resistance
+        if hasattr(self.external_model, 'get_convective_motions'):
+            convective_resistances = self.external_model.get_convective_motions(
+                tank, mission_section, temperatures[-1]
+            )
+            for i, resistance in enumerate(convective_resistances):
+                if hasattr(resistance, 'heat_transfer_coefficient'):
+                    htc = resistance.heat_transfer_coefficient
+                    area = resistance.surface_area
+
+        # Add radiation resistance details
+        if hasattr(self.external_model, 'define_radiation_resistance'):
+            radiation_resistance = self.external_model.define_radiation_resistance(
+                tank, mission_section, temperatures[-1]
+            )
+
+        # Summary
+        total_resistance = sum(thermal_resistances)
+
+        if has_liner:
+            liner_total = sum(thermal_resistances[1:1+self.liner_layers])
+            insulation_start_idx = 1 + self.liner_layers
+        else:
+            insulation_start_idx = 1
+
+        insulation_total = sum(thermal_resistances[insulation_start_idx:insulation_start_idx+self.insulation_layers])
+
+        # Calculate overall heat flux
+        total_temp_diff = mission_section.temperature - tank_state.temperature
+        heat_flux = total_temp_diff / total_resistance
+
+        return thermal_resistances
+
     def define_initial_temperatures(
-        self, fuel_temperature: float, ambient_temperature: float
+        self, fuel_temperature: float, ambient_temperature: float, num_layers=None
     ) -> list[float]:
-        if self.insulation_layers == 0:
-            return [fuel_temperature, ambient_temperature]
-        
+        """Define initial temperatures for each interface between resistances.
+
+        Args:
+            fuel_temperature: Temperature of the fuel
+            ambient_temperature: Ambient temperature
+            num_layers: Optional number of layers to use (defaults to total layers)
+
+        Returns:
+            list[float]: List of temperatures at each interface
+        """
+        if num_layers is None:
+            # Use the provided value (calculated by _compute_total_temperature_interfaces)
+            num_layers = self.insulation_layers
+
         temp_difference = ambient_temperature - fuel_temperature
-        temperature_step = temp_difference / self.insulation_layers
+        temperature_step = temp_difference / num_layers
         return [
             fuel_temperature + i * temperature_step
-            for i in range(self.insulation_layers + 1)
+            for i in range(num_layers + 1)
         ]
 
     @staticmethod
-    def construct_a_matrix(insulation_layers: int) -> npt.ArrayLike:
+    def construct_a_matrix(num_layers: int) -> npt.ArrayLike:
         """Method to construct the matrix required to compute the new
         temperatures, for the tank inner and outer wall, and when
         implemented, the different layers in the insulation.
 
         Args:
-            insulation_layers (int): number of insulation layers.
+            num_layers (int): Number of insulation layers. For $n$ layers, there
+                are $n+1$ unknown interface temperatures (inner wall through
+                outer wall), and $n+2$ resistances including the internal and
+                external convection resistances.
         """
-        a = np.zeros((insulation_layers+2, insulation_layers+1))
-        for i in range(insulation_layers+1):
-            a[i,i] = 1
-            a[i+1,i] = -1
+        n = int(num_layers)
+        a = np.zeros((n + 2, n + 1), dtype=int)
+        # First resistance depends on first unknown temperature
+        a[0, 0] = 1
+        # Internal layers
+        for i in range(1, n + 1):
+            a[i, i - 1] = -1
+            a[i, i] = 1
+        # Last resistance depends on last unknown temperature
+        a[-1, -1] = -1
         return a
 
     @staticmethod
@@ -195,8 +425,8 @@ class ThermodynamicModel:
 
         Args:
             resistances (List[float]): List of all the resistances, note
-            that the first value is the fuel resistance, then goes 
-            through the insulation to the outer wall and the ambient 
+            that the first value is the fuel resistance, then goes
+            through the insulation to the outer wall and the ambient
             resistance.
             fuel_temperature (float): Temperature of the fuel.
             ambient_temperature (float): Ambient temperature.
@@ -218,7 +448,7 @@ class ThermodynamicModel:
         fuel_temperature: float,
         total_resistance: float
     ) -> float:
-        """Static method to compute the total heat flux going into the 
+        """Static method to compute the total heat flux going into the
         fuel tank.
 
         Args:
@@ -241,11 +471,11 @@ class ThermodynamicModel:
         process.
 
         Args:
-            old_temperatures (list): Temperatures of the previous 
+            old_temperatures (list): Temperatures of the previous
             iteration.
-            new_temperatures (list): Temperatures of the new 
+            new_temperatures (list): Temperatures of the new
             iteration.
-            threshold (float, optional): Threshold to define if the 
+            threshold (float, optional): Threshold to define if the
             temperatures have converged. Defaults to 0.1.
 
         Returns:
@@ -260,9 +490,9 @@ class ThermodynamicModel:
     def compute_new_temperatures(
         a_matrix: npt.ArrayLike, y_vector: npt.ArrayLike
     ) -> npt.ArrayLike:
-        """Compute the new temperatures through the thickness of the 
-        fuel tank. This is computed with the normal equation used in 
-        leased square methods.
+        """Compute the new temperatures through the thickness of the
+        fuel tank. This is computed with the normal equation used in
+        least square methods.
 
         Args:
             a_matrix (npt.ArrayLike): A matrix with the zeros and ones.
@@ -272,6 +502,10 @@ class ThermodynamicModel:
         Returns:
             npt.ArrayLike: Array with the new suggested temperatures.
         """
+        # Ensure dimensions are compatible
+        if a_matrix.shape[0] != y_vector.shape[0]:
+            raise ValueError(f"Matrix dimensions incompatible: a_matrix shape {a_matrix.shape}, y_vector shape {y_vector.shape}")
+
         step1 = np.linalg.matrix_power(
             np.dot(np.transpose(a_matrix), a_matrix), -1
         )
@@ -281,6 +515,95 @@ class ThermodynamicModel:
             for temp in np.dot(step2, y_vector)
         ]
         return temperatures
+
+
+class SimplifiedThermodynamicModel:
+    """
+    Simplified thermodynamic model that calculates heat transfer using:
+    Q_dot = k_amb * A * (T_amb - T_H2)
+
+    This bypasses the complex thermal resistance assembly and uses a single
+    overall heat transfer coefficient for the insulation.
+    """
+
+    def __init__(self, k_amb: float):
+        """
+        Initialize simplified model.
+
+        Args:
+            k_amb: Overall insulation heat transfer coefficient [W/(m²·K)]
+        """
+        self.k_amb = k_amb
+        self.insulation_layers = 1  # For compatibility with existing code
+        self.liner_layers = 1        # For compatibility with existing code
+        self.max_iterations = 1      # Only one iteration needed for simplified model
+        self.constant_heat_flux = None  # Not using constant heat flux
+
+    def compute_heat_flux(self, tank, tank_state, mission_section) -> tuple[float, list]:
+        """
+        Compute heat flux using simplified approach.
+
+        Args:
+            tank: Tank object with surface area property
+            tank_state: Tank state with temperature
+            mission_section: Mission section with ambient temperature
+
+        Returns:
+            tuple: (heat_flux [W/m²], temperature_profile [list])
+        """
+        # Get temperatures
+        T_amb = mission_section.temperature  # Ambient temperature [K]
+        T_H2 = tank_state.temperature       # Hydrogen temperature [K]
+
+        # Calculate temperature difference
+        delta_T = T_amb - T_H2
+
+        # Calculate heat flux using simplified approach: Q_dot = k_amb * (T_amb - T_H2)
+        # Note: This gives heat flux per unit area [W/m²]
+        heat_flux = self.k_amb * delta_T
+
+        # Create a simple temperature profile for compatibility
+        # Just use ambient and hydrogen temperatures
+        temperature_profile = [T_H2, T_amb]
+
+        if abs(delta_T) > 1e-6:  # Only print if there's meaningful heat transfer
+            print(f"\n=== SIMPLIFIED HEAT TRANSFER ===")
+            print(f"H2 temperature: {T_H2:.1f} K")
+            print(f"Ambient temperature: {T_amb:.1f} K")
+            print(f"Temperature difference: {delta_T:.1f} K")
+            print(f"Overall k_amb: {self.k_amb:.6f} W/(m²·K)")
+            print(f"Heat flux: {heat_flux:.3f} W/m²")
+
+            # Calculate total heat rate for reference
+            if hasattr(tank, 'surface_area'):
+                total_heat_rate = heat_flux * tank.surface_area
+                print(f"Tank surface area: {tank.surface_area:.3f} m²")
+                print(f"Total heat rate: {total_heat_rate:.2f} W")
+            print(f"=================================")
+
+        return heat_flux, temperature_profile
+
+    def compute_thermal_resistances(self, tank, tank_state, mission_section, temperatures):
+        """
+        Compatibility method - not used in simplified approach.
+
+        Returns empty list since we don't use thermal resistances.
+        """
+        return []
+
+    def _compute_total_temperature_interfaces(self, tank):
+        """
+        Compatibility method - simplified model only needs 2 temperature points.
+        """
+        return 2
+
+    def define_initial_temperatures(self, tank_temp, ambient_temp, num_interfaces):
+        """
+        Define temperature profile for compatibility.
+
+        For simplified model, we only need tank and ambient temperatures.
+        """
+        return [tank_temp, ambient_temp]
 
 
 def main():

@@ -222,7 +222,7 @@ class TestTankState(unittest.TestCase):
             self.state, fuel_flows
         )
         self.assertEqual(expected_value, actual_value)
-    
+
 
 class TestTankStates(unittest.TestCase):
 
@@ -314,7 +314,7 @@ class TestTankStates(unittest.TestCase):
         expected_value = self.state_2.fill
         actual_value = self.states.last_fill
         self.assertEqual(expected_value, actual_value)
-        
+
     def test_average_temperature(self):
 
         temperatures = [21.51574187925867, 24.682982971786814]
@@ -364,7 +364,7 @@ class TestTankStates(unittest.TestCase):
     def test_liquid_masses(self):
 
         expected_value = [
-            self.state_1.liquid_mass, 
+            self.state_1.liquid_mass,
             self.state_2.liquid_mass
         ]
         actual_value = self.states.liquid_masses

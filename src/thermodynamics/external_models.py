@@ -45,7 +45,7 @@ class ExternalModel(Protocol):
         return SeriesResistances().compute_equivalent_resistance(
             [convection_resistance, radiation_resistance]
         )
-    
+
     def equivalent_convection_resistance(
         self,
         tank: FuelTank,
@@ -75,7 +75,7 @@ class ExternalModel(Protocol):
             radiation.heat_transfer_coefficient,
             tank.surface_area
         ).value
-  
+
     @abstractmethod
     def get_convective_motions(
         self,
@@ -119,9 +119,9 @@ class ForcedConvectionModel(ExternalModel):
 class NaturalConvectionModel(ExternalModel):
 
     def get_convective_motions(
-        self, 
-        tank: FuelTank, 
-        mission_section: MissionSection, 
+        self,
+        tank: FuelTank,
+        mission_section: MissionSection,
         surface_temperature: float
     ) -> list[ThermalResistance]:
         cylinder_convection = NaturalCylinderConvection(
@@ -155,7 +155,7 @@ class ExternalModelFactory:
     @property
     def _available(self):
         return ", ".join(self._models.keys())
-    
+
     def create_model(self, type: str):
         model = self._models.get(type)
 

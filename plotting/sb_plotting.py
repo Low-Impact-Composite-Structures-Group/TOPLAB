@@ -1,0 +1,2725 @@
+from typing import Protocol, Union, List, Optional, Tuple, Dict, Any
+from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+from CoolProp.CoolProp import PropsSI, PhaseSI
+from plotting.plot_style_sb import (
+    DELFT_PALETTE, DONKERBLAUW, TURKOOIS, KONINGSBLAUW, PAARS, ROZE,
+    BORDEAUX, ROOD, ORANJE, GEEL, GROEN, BOSGROEN, DONKERGRIJS
+)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import pandas as pd
+
+# Define additional light colors for annotations
+LICHTBLAUW = "#ADD8E6"  # Light Blue
+LICHTGRIJS = "#D3D3D3"  # Light Gray
+
+
+# Import from our custom seaborn style module
+from plotting.plot_style_sb import (
+    set_seaborn_style,
+    configure_plot_style,
+    create_figure_with_ax,
+    apply_custom_ticks,
+    format_axis_labels,
+    add_legend
+)
+
+# Constants (matching those in plot_tank_states.py)
+SECONDS_TO_HOURS = 1 / 60 ** 2
+PASCAL_TO_BAR = 1e-5
+TO_MEGA = 1e-6
+
+
+class Performances(Protocol):
+    volumetric_efficiency: float
+    gravimetric_efficiency: float
+
+
+class TankStates(Protocol):
+    pressures: list[float]
+    temperatures: list[float]
+    timesteps_in_hours: list[float]
+    pressures_in_bar: list[float]
+    required_fluxes: list[float]
+    fills: list[float]
+    liquid_masses: list[float]
+    gas_masses: list[float]
+
+
+class SeabornPlotter:
+    """A class to handle all Seaborn-based plotting for hydrogen fuel tank analysis."""
+
+    def __init__(self, style: str = "whitegrid", font: str = "Cambria",
+                 palette: str = "delft", context: str = "paper", use_greyscale: bool = False):  # Changed default from "deep" to "delft"
+        """Initialize the plotter with styling options.
+
+        Args:
+            style: Seaborn style ("whitegrid", "darkgrid", "white", "dark", "ticks")
+            font: Font family name
+            palette: Color palette name
+            context: Scaling parameters ("paper", "notebook", "talk", "poster")
+            use_greyscale: Whether to use greyscale styling instead of colors
+        """
+        self.use_greyscale = use_greyscale
+
+        configure_plot_style(font=font, palette=palette, style=style, context=context)
+
+        # Store the actual color palette for consistent use
+        if use_greyscale:
+            # Define greyscale color scheme similar to multi_tank_plotting
+            self.palette = ['#000000', '#404040', '#808080', '#A0A0A0', '#C0C0C0', '#E0E0E0']
+            self.marker_styles = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
+        elif palette == "delft":
+            self.palette = DELFT_PALETTE
+            self.marker_styles = None
+        else:
+            self.palette = sns.color_palette(palette)
+            self.marker_styles = None
+
+        self.figsize = (8, 6)  # Default figure size
+
+    def plot_tank_loads(self, tank_states: Union[TankStates, List[TankStates]],
+                        labels: Optional[List[str]] = None,
+                        x_ticks: Optional[List[float]] = None,
+                        y_ticks: Optional[List[float]] = None,
+                        figsize: Tuple[float, float] = (8, 6)):
+        """Plot tank pressure loads over time with Seaborn styling."""
+        fig, ax = create_figure_with_ax(figsize)
+
+        # Handle both single TankStates and lists
+        if not isinstance(tank_states, list):
+            tank_states = [tank_states]
+
+        # Create default labels if not provided
+        if labels is None:
+            labels = [f"Tank {i+1}" for i in range(len(tank_states))]
+        elif len(labels) < len(tank_states):
+            # Extend labels if needed
+            labels.extend([f"Tank {i+1}" for i in range(len(labels), len(tank_states))])
+
+        # Plot each tank state
+        for i, (state, label) in enumerate(zip(tank_states, labels)):
+            color = self.palette[i % len(self.palette)]
+
+            # Convert to numpy arrays to avoid pandas indexing issues
+            x_data = np.array(state.timesteps_in_hours)
+            y_data = np.array(state.pressures_in_bar)
+
+            # Plot using direct matplotlib instead of seaborn for more compatibility
+            ax.plot(x_data, y_data, label=label, color=color)
+
+        format_axis_labels(ax, xlabel="Time [hour]", ylabel="Pressure [bar]")
+        apply_custom_ticks(ax, xticks=x_ticks, yticks=y_ticks)
+        add_legend(ax)
+        fig.tight_layout()
+        return fig
+
+    def plot_tank_temperatures(self, tank_states: Union[TankStates, List[TankStates]],
+                              labels: Optional[List[str]] = None,
+                              x_ticks: Optional[List[float]] = None,
+                              y_ticks: Optional[List[float]] = None,
+                              figsize: Tuple[float, float] = (8, 6)):
+        """Plot tank temperatures over time with Seaborn styling."""
+        # Implementation similar to plot_tank_loads but for temperatures
+        fig, ax = create_figure_with_ax(figsize)
+
+        # Handle both single TankStates and lists
+        if not isinstance(tank_states, list):
+            tank_states = [tank_states]
+
+        # Create default labels if not provided
+        if labels is None:
+            labels = [f"Tank {i+1}" for i in range(len(tank_states))]
+        elif len(labels) < len(tank_states):
+            # Extend labels if needed
+            labels.extend([f"Tank {i+1}" for i in range(len(labels), len(tank_states))])
+
+        # Plot each tank state
+        for i, (state, label) in enumerate(zip(tank_states, labels)):
+            color = self.palette[i % len(self.palette)]
+            sns.lineplot(
+                x=state.timesteps_in_hours,
+                y=state.temperatures,
+                label=label,
+                color=color,
+                ax=ax
+            )
+
+        format_axis_labels(ax, xlabel="Time [hour]", ylabel="Temperature [K]")
+        apply_custom_ticks(ax, xticks=x_ticks, yticks=y_ticks)
+        add_legend(ax)
+        fig.tight_layout()
+        return fig
+
+    def plot_comparative_tank_states(self, tank_states_1, tank_states_2, figsize=(15, 5), titles=None):
+        """
+        Create a single figure with three comparative plots for two tanks:
+        1. Fuel Mass comparison
+        2. Temperature comparison
+        3. Pressure comparison
+
+        Args:
+            tank_states_1: Tank states for Tank 1 (Reservoir)
+            tank_states_2: Tank states for Tank 2 (Consumer)
+            figsize: Figure size (width, height) in inches
+            titles: Optional custom titles for the three plots
+
+        Returns:
+            Figure with three subplots
+        """
+        from plotting.plot_style_sb import configure_plot_style, KONINGSBLAUW, BORDEAUX
+
+        # Apply styling with Cambria font and Delft palette
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Default titles if none provided
+        if titles is None:
+            titles = [
+                "Comparative Fuel Mass",
+                "Comparative Tank Temperatures",
+                "Comparative Tank Pressures"
+            ]
+
+        # Create a single figure with 3 subplots (side by side)
+        fig, axs = plt.subplots(1, 3, figsize=figsize)
+
+        # Unpack the axes for easier access
+        mass_ax, temp_ax, pressure_ax = axs
+
+        # Get time data for both tanks
+        times1 = tank_states_1.timesteps_in_hours
+        times2 = tank_states_2.timesteps_in_hours
+
+        # SUBPLOT 1: Fuel Mass Comparison
+        # Extract masses safely
+        try:
+            masses1 = []
+            for state in tank_states_1.states:
+                masses1.append(state.fuel_mass)
+
+            masses2 = []
+            for state in tank_states_2.states:
+                masses2.append(state.fuel_mass)
+        except (AttributeError, IndexError):
+            # Fall back to total_masses if available
+            try:
+                masses1 = tank_states_1.total_masses
+                masses2 = tank_states_2.total_masses
+            except (AttributeError, IndexError):
+                # Last resort - try to compute from liquid+gas masses
+                try:
+                    masses1 = [l + g for l, g in zip(tank_states_1.liquid_masses, tank_states_1.gas_masses)]
+                    masses2 = [l + g for l, g in zip(tank_states_2.liquid_masses, tank_states_2.gas_masses)]
+                except (AttributeError, IndexError):
+                    print("Warning: Could not access fuel masses")
+                    masses1 = [0] * len(times1)
+                    masses2 = [0] * len(times2)
+
+        # Plot mass data
+        mass_ax.plot(times1, masses1, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        mass_ax.plot(times2, masses2, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
+        mass_ax.set_xlabel("Time [hour]")
+        mass_ax.set_ylabel("Fuel Mass [kg]")
+        mass_ax.set_title(titles[0])
+        mass_ax.legend()
+        mass_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 2: Temperature Comparison
+        temp_ax.plot(times1, tank_states_1.temperatures, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        temp_ax.plot(times2, tank_states_2.temperatures, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
+        temp_ax.set_xlabel("Time [hour]")
+        temp_ax.set_ylabel("Temperature [K]")
+        temp_ax.set_title(titles[1])
+        temp_ax.legend()
+        temp_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 3: Pressure Comparison
+        pressure_ax.plot(times1, tank_states_1.pressures_in_bar, '-', color=BORDEAUX, label="Tank 1 (Reservoir)", linewidth=2)
+        pressure_ax.plot(times2, tank_states_2.pressures_in_bar, '-', color=KONINGSBLAUW, label="Tank 2 (Consumer)", linewidth=2)
+        pressure_ax.set_xlabel("Time [hour]")
+        pressure_ax.set_ylabel("Pressure [bar]")
+        pressure_ax.set_title(titles[2])
+        pressure_ax.legend()
+        pressure_ax.grid(True, alpha=0.3)
+
+        # Apply tight layout to the entire figure
+        fig.tight_layout()
+
+        return fig
+
+    def plot_tank_mass_flows(self, time_points, tank1_inflow, tank1_outflow, tank2_inflow, tank2_outflow,
+                         figsize=(10, 6), title="Tank Mass Flow Rates"):
+        """
+        Plot mass flows between tanks and to mission with Seaborn styling.
+
+        Args:
+            time_points: Time points in seconds
+            tank1_inflow: Inflow rates for tank 1
+            tank1_outflow: Outflow rates from tank 1
+            tank2_inflow: Inflow rates for tank 2
+            tank2_outflow: Outflow rates from tank 2 (mission flow)
+            figsize: Figure size tuple (width, height)
+            title: Plot title
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style, KONINGSBLAUW, BORDEAUX, ROOD, BOSGROEN
+
+        # Apply consistent styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Ensure all arrays have the same length by truncating to the time array length
+        time_len = min(len(time_points), len(tank1_inflow), len(tank1_outflow),
+                        len(tank2_inflow), len(tank2_outflow))
+
+        # Convert time from seconds to hours for consistent plotting
+        time_hours = [t * (1 / 60**2) for t in time_points[:time_len]]
+
+        # Plot the flow rates with consistent Delft colors
+        ax.plot(time_hours, tank2_outflow[:time_len], '-', color=KONINGSBLAUW,
+                label="Tank 2 Outflow (Mission)", linewidth=2)
+        ax.plot(time_hours, tank1_inflow[:time_len], '-', color=BORDEAUX,
+                label="Tank 1 Inflow", linewidth=2)
+        ax.plot(time_hours, tank1_outflow[:time_len], '-', color=ROOD,
+                label="Tank 1 Outflow", linewidth=2)
+        ax.plot(time_hours, tank2_inflow[:time_len], '-', color=BOSGROEN,
+                label="Tank 2 Inflow", linewidth=2)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Add annotation with better styling
+        ax.text(0.02, 0.02, "Tank 1 supplies Tank 2, which supplies the mission",
+                transform=ax.transAxes, fontsize=10,
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray', boxstyle='round,pad=0.5'))
+
+        # Set labels and title
+        ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Mass Flow Rate [kg/s]")
+
+        # Add legend with better positioning
+        ax.legend(loc='best', framealpha=0.9)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_single_tank_states(self, tank_states, figsize=(15, 5)):
+        """
+        Create a single figure with three plots for a single tank:
+        1. Fuel Mass
+        2. Temperature
+        3. Pressure
+
+        Similar to plot_comparative_tank_states but for a single dataset
+        """
+        # Colors from the Delft palette
+        from plotting.plot_style_sb import KONINGSBLAUW
+
+        # Create figure with 3 subplots
+        fig, axs = plt.subplots(1, 3, figsize=figsize)
+
+        # Unpack the axes for easier access
+        mass_ax, temp_ax, pressure_ax = axs
+
+        # Get time data
+        times = tank_states.timesteps_in_hours
+
+        # SUBPLOT 1: Fuel Mass
+        try:
+            # Try to get masses directly from states
+            masses = []
+            for state in tank_states.states:
+                masses.append(state.fuel_mass)
+        except (AttributeError, IndexError):
+            # Fall back to total_masses if available
+            try:
+                masses = tank_states.total_masses
+            except (AttributeError, IndexError):
+                # Last resort - compute from liquid+gas masses
+                try:
+                    masses = [l + g for l, g in zip(tank_states.liquid_masses, tank_states.gas_masses)]
+                except (AttributeError, IndexError):
+                    print("Warning: Could not access fuel masses")
+                    masses = [0] * len(times)
+
+        # Plot mass data
+        mass_ax.plot(times, masses, '-', color=KONINGSBLAUW, linewidth=2)
+        mass_ax.set_xlabel("Time [hour]")
+        mass_ax.set_ylabel("Fuel Mass [kg]")
+        mass_ax.set_title("Tank Fuel Mass")
+        mass_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 2: Temperature
+        temp_ax.plot(times, tank_states.temperatures, '-', color=KONINGSBLAUW, linewidth=2)
+        temp_ax.set_xlabel("Time [hour]")
+        temp_ax.set_ylabel("Temperature [K]")
+        temp_ax.set_title("Tank Temperature")
+        temp_ax.grid(True, alpha=0.3)
+
+        # SUBPLOT 3: Pressure
+        pressure_ax.plot(times, tank_states.pressures_in_bar, '-', color=KONINGSBLAUW, linewidth=2)
+        pressure_ax.set_xlabel("Time [hour]")
+        pressure_ax.set_ylabel("Pressure [bar]")
+        pressure_ax.set_title("Tank Pressure")
+        pressure_ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_single_mission_flows(self, mass_flows, fuel_flow_keys, durations, total_duration,
+                 interpolated_mass_flows=None, figsize=(10, 6)):
+        """
+        Plot mission mass flows with Seaborn styling for a single tank.
+
+        Standardized convention:
+        - Positive values: Flow INTO the tank (Refuelling)
+        - Negative values: Flow OUT OF the tank (consumption/draining)
+
+        Args:
+            mass_flows: List of flow rates for each mission section
+            fuel_flow_keys: Keys/names for each flow section
+            durations: Duration of each section in seconds
+            total_duration: Total mission duration in hours
+            interpolated_mass_flows: Optional interpolated flow data
+            figsize: Figure size (width, height) tuple
+        """
+        # Colors from the Delft palette
+        from plotting.plot_style_sb import KONINGSBLAUW, BORDEAUX
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Create time array
+        cumulative_time = 0
+        time_points = []
+        section_mass_flows = []
+
+        # Process each mission section
+        for i, (flows, duration) in enumerate(zip(mass_flows, durations)):
+            # Add section start and end times
+            section_start_time = cumulative_time
+            section_end_time = section_start_time + duration
+
+            # For the sign convention, we need to handle InFlow objects differently
+            # since their mass_flow values are already positive
+            section_flows = []
+            for f in flows:
+                # Check if this is a value from an InFlow (already in correct convention)
+                section_flows.append(f)
+
+            # Add mass flow points
+            if len(section_flows) == 2:  # If we have start and end values
+                time_points.extend([section_start_time, section_end_time])
+                section_mass_flows.extend(section_flows)
+            elif len(section_flows) == 1:  # Handle single constant flow value case
+                # Create two time points (start and end) with the same flow value
+                time_points.extend([section_start_time, section_end_time])
+                section_mass_flows.extend([section_flows[0], section_flows[0]])  # Duplicate the flow value
+            else:  # If we have more detailed points
+                # Create evenly spaced time points for this section
+                section_times = np.linspace(section_start_time, section_end_time, len(section_flows))
+                time_points.extend(section_times)
+                section_mass_flows.extend(section_flows)
+
+            cumulative_time = section_end_time
+
+        # Convert time to hours for plotting
+        time_hours = [t * (1 / 3600) for t in time_points]
+
+        # Plot the mission flow rate
+        ax.plot(time_hours, section_mass_flows, '-', color=KONINGSBLAUW,
+                label="Mission Flow Rate", linewidth=2)
+
+        # If we have interpolated mass flows, plot those too for comparison
+        if interpolated_mass_flows is not None:
+            # For interpolated flows, use the values directly
+            interp_flows = interpolated_mass_flows
+
+            # Create time points matching the length of interpolated_mass_flows
+            # interp_times = np.linspace(0, total_duration, len(interp_flows))
+            # ax.plot(interp_times, interp_flows, '--', color=BORDEAUX,
+            #         label="Interpolated Flow Rate", linewidth=1.5, alpha=0.7)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title with standardized convention
+        ax.set_title("Mission Mass Flow Rate")
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Mass Flow Rate [kg/s]")
+
+        # Add legend if we have multiple datasets
+        # if interpolated_mass_flows is not None:
+        #     ax.legend(loc='best', framealpha=0.9)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_density_temperature_combined(self, scenario_data, include_saturation_line=True,
+                                 include_isobars=True, include_ref_data=False, figsize=(10, 8),
+                                 temperature_range=(15, 80), density_range=(0, 80)):
+        """
+        Create a combined density-temperature plot for discharge, refuel and dormancy phases.
+
+        Args:
+            scenario_data: Dictionary containing temperature, density and pressure data for each scenario
+            include_saturation_line: Whether to include hydrogen saturation line
+            include_isobars: Whether to include isobar lines
+            include_ref_data: Whether to include reference data from literature
+            figsize: Figure size tuple
+            temperature_range: Min/max temperature range for the plot
+            density_range: Min/max density range for the plot
+
+        Returns:
+            Figure with the combined density-temperature plot
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
+        import os
+        import pandas as pd
+
+        # Create figure and axes
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot each scenario - using solid lines for consistency
+        # Discharge (gray solid line)
+        discharge_line, = ax.plot(scenario_data['discharge']['temperatures'],
+                scenario_data['discharge']['densities'],
+                '-', color=DONKERGRIJS, linewidth=2, label="Discharge")
+
+        # Refuel (red solid line)
+        refuel_line, = ax.plot(scenario_data['refuel']['temperatures'],
+                scenario_data['refuel']['densities'],
+                '-', color=BORDEAUX, linewidth=2, label="Refuelling")
+
+        # Dormancy (blue solid line)
+        dormancy_line, = ax.plot(scenario_data['dormancy']['temperatures'],
+                scenario_data['dormancy']['densities'],
+                '-', color=KONINGSBLAUW, linewidth=2, label="Dormancy")
+
+        # Add reference data from literature if requested
+        ref_discharge_line = None
+        ref_refuel_line = None
+        ref_dormancy_line = None
+
+        if include_ref_data:
+            # Base path for reference data files
+            ref_data_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "analysis", "verification", "reference_data"
+            )
+
+            # Use the sorted CSV files
+            discharge_ref_file = os.path.join(ref_data_path, "discharge_data_15bar.csv")
+            if os.path.exists(discharge_ref_file):
+                try:
+                    # Read CSV data
+                    discharge_ref_data = pd.read_csv(discharge_ref_file, header=None)
+                    x_values = discharge_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = discharge_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    # Use dashed line style for reference data
+                    ref_discharge_line, = ax.plot(x_values, y_values, '--', color=DONKERGRIJS,
+                                               linewidth=2, label="Discharge (Ref)")
+                except Exception as e:
+                    print(f"Warning: Could not load reference discharge data: {e}")
+
+            # Load and plot reference refuel data
+            refuel_ref_file = os.path.join(ref_data_path, "refuel_data_15bar.csv")
+            if os.path.exists(refuel_ref_file):
+                try:
+                    # Read CSV data
+                    refuel_ref_data = pd.read_csv(refuel_ref_file, header=None)
+                    x_values = refuel_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = refuel_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    ref_refuel_line, = ax.plot(x_values, y_values, '--', color=BORDEAUX,
+                                             linewidth=2, label="Refuelling (Ref)")
+
+                except Exception as e:
+                    print(f"Warning: Could not load reference refuel data: {e}")
+
+            # Load and plot reference dormancy data
+            dormancy_ref_file = os.path.join(ref_data_path, "dormancy_data_15bar.csv")
+            if os.path.exists(dormancy_ref_file):
+                try:
+                    # Read CSV data
+                    dormancy_ref_data = pd.read_csv(dormancy_ref_file, header=None)
+                    x_values = dormancy_ref_data.iloc[:, 0].to_numpy()  # First column as numpy array
+                    y_values = dormancy_ref_data.iloc[:, 1].to_numpy()  # Second column as numpy array
+
+                    ref_dormancy_line, = ax.plot(x_values, y_values, '--', color=KONINGSBLAUW,
+                                               linewidth=2, label="Dormancy (Ref)")
+
+                except Exception as e:
+                    print(f"Warning: Could not load reference dormancy data: {e}")        # Add direction arrows to each line
+        # For discharge (about 1/3 along the path)
+        if len(scenario_data['discharge']['temperatures']) > 10:
+            idx = len(scenario_data['discharge']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['discharge']['temperatures'][idx],
+                               scenario_data['discharge']['densities'][idx]),
+                       xytext=(scenario_data['discharge']['temperatures'][idx-5],
+                               scenario_data['discharge']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=DONKERGRIJS, lw=1.5))
+
+        # For refuel (about 1/3 along the path)
+        if len(scenario_data['refuel']['temperatures']) > 10:
+            idx = len(scenario_data['refuel']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['refuel']['temperatures'][idx],
+                               scenario_data['refuel']['densities'][idx]),
+                       xytext=(scenario_data['refuel']['temperatures'][idx-5],
+                               scenario_data['refuel']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=BORDEAUX, lw=1.5))
+
+        # For dormancy (about 1/3 along the path)
+        if len(scenario_data['dormancy']['temperatures']) > 10:
+            idx = len(scenario_data['dormancy']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['dormancy']['temperatures'][idx],
+                               scenario_data['dormancy']['densities'][idx]),
+                       xytext=(scenario_data['dormancy']['temperatures'][idx-5],
+                               scenario_data['dormancy']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=KONINGSBLAUW, lw=1.5))
+
+        # Optional: Add saturation line
+        saturation_line = None
+        if include_saturation_line:
+            # Get critical point data
+            try:
+                from CoolProp.CoolProp import PropsSI
+                fluid = 'hydrogen'  # Use the fluid defined in hydrogen_retrievers.py
+                T_triple = PropsSI('Ttriple', fluid)
+                T_crit = PropsSI('Tcrit', fluid)
+
+                # Create temperature range from triple point to critical point
+                # but limited to our plot range
+                temps = np.linspace(
+                    max(temperature_range[0], T_triple),
+                    min(temperature_range[1], T_crit),
+                    100
+                )
+
+                # Create complete saturation curve
+                sat_temps = []
+                sat_densities = []
+
+                # First add the saturated liquid branch (bottom to top)
+                for temp in temps:
+                    try:
+                        # Get saturated liquid density (Q=0)
+                        density = PropsSI('D', 'T', temp, 'Q', 0, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Then add the saturated vapor branch (top to bottom)
+                for temp in reversed(temps):
+                    try:
+                        # Get saturated vapor density (Q=1)
+                        density = PropsSI('D', 'T', temp, 'Q', 1, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Plot the complete saturation dome
+                if len(sat_temps) > 0:
+                    saturation_line, = ax.plot(sat_temps, sat_densities, '--', color=ORANJE,
+                            linewidth=1.5, label="Saturation line")
+            except Exception as e:
+                print(f"Warning: Could not create saturation line: {e}")
+
+        # Optional: Add isobar lines
+        isobar_line = None
+        if include_isobars:
+            # Define key pressure levels in bar
+            pressure_levels = [10, 15, 25, 100, 400, 450]
+
+            # Create temperature points
+            temps = np.linspace(temperature_range[0], temperature_range[1], 100)
+
+            for pressure in pressure_levels:
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'Hydrogen')
+                        densities.append(density)
+                    except:
+                        densities.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot isobar line with dotted gray
+                    isobar_line, = ax.plot(valid_temps, valid_densities, ':', color='gray', alpha=0.7, linewidth=1)
+
+                    # Add pressure labels
+                    if pressure in [400, 450]:
+                        # Place label at 75% of the way through the line
+                        idx = int(len(valid_temps) * 0.75)
+                    else:
+                        # For other pressures, use the midpoint as before
+                        idx = len(valid_temps) // 2
+
+                    if idx < len(valid_temps):
+                        ax.text(valid_temps[idx], valid_densities[idx],
+                                f"{pressure} bar", fontsize=12, alpha=0.8,
+                                horizontalalignment='center', verticalalignment='center',
+                                color='gray', bbox=dict(facecolor='white', alpha=0.7,
+                                                       edgecolor=None, pad=1))
+
+        # Mark starting points of each scenario with X
+        # Get the first point from each dataset
+        starting_point = None
+        if len(scenario_data['discharge']['temperatures']) > 0:
+            starting_point, = ax.plot(scenario_data['discharge']['temperatures'][0],
+                    scenario_data['discharge']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2, label='Starting point')
+
+        refuel_start = None
+        if len(scenario_data['refuel']['temperatures']) > 0:
+            refuel_start, = ax.plot(scenario_data['refuel']['temperatures'][0],
+                    scenario_data['refuel']['densities'][0],
+                    'o', color=BORDEAUX, markersize=8, markerfacecolor='none', markeredgewidth=2)
+
+        if len(scenario_data['dormancy']['temperatures']) > 0:
+            ax.plot(scenario_data['dormancy']['temperatures'][0],
+                    scenario_data['dormancy']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2)
+
+        # Create a proper legend with actual markers
+        legend_elements = [
+            discharge_line,
+            refuel_line,
+            dormancy_line
+        ]
+
+        legend_labels = ['Discharge', 'Refuelling', 'Dormancy']
+
+        # Add reference data lines to legend if they exist
+        if include_ref_data:
+            if ref_discharge_line is not None:
+                # Use the actual line objects for correct dashed line style in legend
+                legend_elements.append(ref_discharge_line)
+                legend_labels.append('Discharge (Ref)')
+
+            if ref_refuel_line is not None:
+                legend_elements.append(ref_refuel_line)
+                legend_labels.append('Refuelling (Ref)')
+
+            if ref_dormancy_line is not None:
+                legend_elements.append(ref_dormancy_line)
+                legend_labels.append('Dormancy (Ref)')
+
+        if saturation_line is not None:
+            legend_elements.append(saturation_line)
+            legend_labels.append('Saturation line')
+
+        if isobar_line is not None:
+            legend_elements.append(isobar_line)
+            legend_labels.append('Isobars')
+
+        if starting_point is not None:
+            legend_elements.append(starting_point)
+            legend_labels.append('Starting point')
+
+        legend = ax.legend(legend_elements, legend_labels,
+                           loc='upper right', title='Legend')
+
+        # Set labels and limits
+        ax.set_xlabel('Temperature [K]')
+        ax.set_ylabel('Density [g/L]')
+        ax.set_xlim(temperature_range)
+        ax.set_ylim(density_range)
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_heat_exchanger_requirements(self, heat_flow_data, scenario_name=None,
+                                         ihex_data=None, ohex_data=None, plot_total=True, figsize=(10, 6)):
+        """
+        Plot heat exchanger requirements over time.
+
+        Args:
+            heat_flow_data: Dictionary containing heat flow data from simulation results
+                           Expected keys: 't', 'qdot_disch', 'qdot_ohex'
+            scenario_name: Optional scenario name for title
+            ihex_data: Optional separate IHEX data (time, heat_flow) tuple
+            ohex_data: Optional separate OHEX data (time, heat_flow) tuple for future use
+            plot_total: Boolean flag to plot total heat flow requirement (IHEX + OHEX) as dashed line
+            figsize: Figure size tuple (width, height)
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style, KONINGSBLAUW, BORDEAUX, BOSGROEN
+
+        # Apply consistent styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Convert time from seconds to hours for consistent plotting
+        SECONDS_TO_HOURS = 1 / 3600
+
+        # Plot IHEX heat flow requirement (Qdot_disch)
+        if ihex_data is not None:
+            # Use provided separate IHEX data
+            time_hours, ihex_heat_flow = ihex_data
+            ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=KONINGSBLAUW,
+                    label="IHEX Heat Flow Requirement", linewidth=2)
+        elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+            # Use data from simulation results
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=KONINGSBLAUW,
+                    label="IHEX Heat Flow Requirement", linewidth=2)
+
+        # Plot OHEX heat flow requirement
+        ohex_plotted = False
+        ohex_values = None
+        if ohex_data is not None:
+            # Use provided separate OHEX data
+            time_hours_ohex, ohex_heat_flow = ohex_data
+            ohex_heat_flow_kw = [q / 1000 for q in ohex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours_ohex, ohex_heat_flow_kw, '-', color=BORDEAUX,
+                    label="OHEX Heat Flow Requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = ohex_heat_flow_kw
+        elif 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
+            # Use data from simulation results (only if non-zero values exist)
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+            ax.plot(time_hours, ohex_heat_flow_kw, '-', color=BORDEAUX,
+                    label="OHEX Heat Flow Requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = ohex_heat_flow_kw
+
+        # Plot total heat flow requirement (IHEX + OHEX) if requested and both curves exist
+        if plot_total:
+            ihex_values_kw = None
+            total_time_hours = None
+
+            # Get IHEX values and convert to kW
+            if ihex_data is not None:
+                total_time_hours, ihex_values = ihex_data
+                ihex_values_kw = [q / 1000 for q in ihex_values]  # Convert W to kW
+            elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+                total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                ihex_values_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+
+            # Get OHEX values for total calculation (already converted to kW above if plotted)
+            ohex_values_kw = None
+            if ohex_values is not None:
+                # ohex_values is already in kW from the plotting section above
+                ohex_values_kw = ohex_values
+            elif 'qdot_ohex' in heat_flow_data:
+                ohex_values_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+
+            # Calculate and plot total if we have both datasets
+            if ihex_values_kw is not None and ohex_values_kw is not None and len(ihex_values_kw) == len(ohex_values_kw):
+                total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values_kw)]
+                ax.plot(total_time_hours, total_heat_flow, '--', color=BOSGROEN,
+                        label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        title = "Heat Exchanger Requirements"
+        if scenario_name:
+            title += f" - {scenario_name.capitalize()}"
+        ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Heat Flow Requirement [kW]")
+
+        # Add legend if we have data to plot
+        if len(ax.get_lines()) > 1:  # More than just the reference line
+            ax.legend(loc='best', framealpha=0.9)
+
+        # Apply grid
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_heat_exchanger_requirements_with_reference(self, heat_flow_data, scenario_name=None,
+                                                       ihex_data=None, reference_data=None,
+                                                       suppress_ohex_total=False, figsize=(10, 6)):
+        """
+        Plot heat exchanger requirements over time with optional reference data.
+
+        Args:
+            heat_flow_data: Dictionary containing heat flow data from simulation results
+                           Expected keys: 't', 'qdot_disch', 'qdot_ohex'
+            scenario_name: Optional scenario name for title
+            ihex_data: Optional separate IHEX data (time, heat_flow) tuple
+            reference_data: Optional reference data tuple (time_hours, heat_flow_kw)
+            suppress_ohex_total: If True, only show IHEX curves (actual and reference)
+            figsize: Figure size tuple (width, height)
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style, KONINGSBLAUW, BORDEAUX, BOSGROEN
+
+        # Apply consistent styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Convert time from seconds to hours for consistent plotting
+        SECONDS_TO_HOURS = 1 / 3600
+
+        # Plot IHEX heat flow requirement (Qdot_disch)
+        if ihex_data is not None:
+            # Use provided separate IHEX data
+            time_hours, ihex_heat_flow = ihex_data
+            ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=KONINGSBLAUW,
+                    label="IHEX Heat Flow Requirement", linewidth=2)
+        elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+            # Use data from simulation results
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=KONINGSBLAUW,
+                    label="IHEX Heat Flow Requirement", linewidth=2)
+
+        # Plot reference data if provided
+        if reference_data is not None:
+            ref_time_hours, ref_heat_flow_kw = reference_data
+            ax.plot(ref_time_hours, ref_heat_flow_kw, '--', color=BORDEAUX,
+                    label="Reference IHEX", linewidth=2, alpha=0.8)
+
+        # Only plot OHEX and total if not suppressed
+        if not suppress_ohex_total:
+            # Plot OHEX heat flow requirement
+            ohex_plotted = False
+            ohex_values = None
+            if 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
+                # Use data from simulation results (only if non-zero values exist)
+                time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+                ax.plot(time_hours, ohex_heat_flow_kw, '-', color=BORDEAUX,
+                        label="OHEX Heat Flow Requirement", linewidth=2)
+                ohex_plotted = True
+                ohex_values = ohex_heat_flow_kw
+
+            # Plot total heat flow requirement (IHEX + OHEX) if we have both datasets
+            if ohex_plotted:
+                ihex_values_kw = None
+                total_time_hours = None
+
+                # Get IHEX values and convert to kW
+                if ihex_data is not None:
+                    total_time_hours, ihex_values = ihex_data
+                    ihex_values_kw = [q / 1000 for q in ihex_values]  # Convert W to kW
+                elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+                    total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                    ihex_values_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+
+                # Calculate and plot total if we have both datasets
+                if ihex_values_kw is not None and ohex_values is not None and len(ihex_values_kw) == len(ohex_values):
+                    total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values)]
+                    ax.plot(total_time_hours, total_heat_flow, '--', color=BOSGROEN,
+                            label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        title = "Heat Exchanger Requirements"
+        if scenario_name:
+            title += f" - {scenario_name.capitalize()}"
+        ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Heat Flow Requirement [kW]")
+
+        # Add legend if we have data to plot
+        if len(ax.get_lines()) > 1:  # More than just the reference line
+            ax.legend(loc='best', framealpha=0.9)
+
+        # Apply grid
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        return fig
+
+    def plot_chained_scenarios(self, results, postprocessed_data=None, figsize=(16, 12)):
+        """
+        Plot results from multiple scenarios with different colors using SeabornPlotter styling.
+
+        Parameters
+        ----------
+        results : list
+            List of result dictionaries from run_hydrogen_tank_simulation()
+        postprocessed_data : list, optional
+            List of postprocessed data dictionaries. If None, will postprocess automatically.
+        figsize : tuple, optional
+            Figure size (width, height) in inches
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
+
+        if postprocessed_data is None:
+            raise ValueError("postprocessed_data must be provided for plotting")
+
+        # Color mapping for scenarios using Delft palette colors
+        scenario_colors = {
+            'DISCHARGE': DONKERGRIJS,
+            'REFUEL': BORDEAUX,
+            'DORMANCY': KONINGSBLAUW
+        }
+
+        # Apply consistent styling
+        from plotting.plot_style_sb import configure_plot_style
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        fig, axes = plt.subplots(3, 4, figsize=figsize)
+        axes = axes.flatten()  # Make indexing easier
+
+        # 1. Mass vs time
+        ax = axes[0]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['m'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Mass (kg)")
+        ax.set_title("Mass vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 2. Gas Temperature vs time
+        ax = axes[1]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['T'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Gas Temperature vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 3. Liner/Wall Temperature vs time
+        ax = axes[2]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['Ts'], color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Solid Temperature (K)")
+        ax.set_title("Liner/Wall Temperature vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 4. Pressure vs time
+        ax = axes[3]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['p']/1e5, color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 5. Density vs time
+        ax = axes[4]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['t'], data['rho'], color=color, label=data['scenario'], linewidth=2)
+            # Add density stopping threshold for reference
+            result = results[i]
+            rho_stop = result['metadata']['rho_stop']
+            ax.axhline(y=rho_stop, color=color, linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density vs Time")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 6. Model usage vs time
+        ax = axes[5]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            model_numeric = np.where(data['model_used'] == 'single_phase', 0, 1)
+            ax.plot(data['t'], model_numeric, color=color, label=data['scenario'], linewidth=2)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Model Type")
+        ax.set_title("Model Usage vs Time")
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['Single Phase', 'Two Phase'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 7. Pressure vs Temperature
+        ax = axes[6]
+        for data in postprocessed_data:
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            single_phase_mask = data['model_used'] == 'single_phase'
+            two_phase_mask = data['model_used'] == 'two_phase'
+
+            if np.any(single_phase_mask):
+                ax.scatter(data['T'][single_phase_mask], data['p'][single_phase_mask]/1e5,
+                          c=color, alpha=0.6, s=10, marker='o',
+                          label=f'{data["scenario"]} (Single)')
+            if np.any(two_phase_mask):
+                ax.scatter(data['T'][two_phase_mask], data['p'][two_phase_mask]/1e5,
+                          c=color, alpha=0.6, s=10, marker='s',
+                          label=f'{data["scenario"]} (Two)')
+        ax.set_xlabel("Temperature (K)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure vs Temperature")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 8. Density vs Temperature
+        ax = axes[7]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            ax.plot(data['T'], data['rho'], color=color, label=data['scenario'], linewidth=2)
+            # Add density stopping threshold for reference
+            result = results[i]
+            rho_stop = result['metadata']['rho_stop']
+            ax.axhline(y=rho_stop, color=color, linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_xlabel("Temperature (K)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density vs Temperature")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 9. Summary statistics
+        ax = axes[8]
+        scenarios = [data['scenario'] for data in postprocessed_data]
+        single_percentages = [data['stats']['single_phase_percentage'] for data in postprocessed_data]
+        two_percentages = [data['stats']['two_phase_percentage'] for data in postprocessed_data]
+
+        x = np.arange(len(scenarios))
+        width = 0.35
+
+        ax.bar(x - width/2, single_percentages, width, label='Single Phase', alpha=0.7, color=KONINGSBLAUW)
+        ax.bar(x + width/2, two_percentages, width, label='Two Phase', alpha=0.7, color=BORDEAUX)
+        ax.set_xlabel('Scenario')
+        ax.set_ylabel('Percentage (%)')
+        ax.set_title('Model Usage Summary')
+        ax.set_xticks(x)
+        ax.set_xticklabels(scenarios, rotation=45)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 10. Timeline overview
+        ax = axes[9]
+        for i, data in enumerate(postprocessed_data):
+            color = scenario_colors.get(data['scenario'], KONINGSBLAUW)
+            scenario_duration = data['t'][-1] - data['t'][0]
+            ax.barh(i, scenario_duration, left=data['t'][0], color=color, alpha=0.7, label=data['scenario'])
+            ax.text(data['t'][0] + scenario_duration/2, i, f'{scenario_duration:.0f}s',
+                    ha='center', va='center', fontweight='bold')
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Scenario')
+        ax.set_title('Scenario Timeline')
+        ax.set_yticks(range(len(postprocessed_data)))
+        ax.set_yticklabels([data['scenario'] for data in postprocessed_data])
+        ax.grid(True, alpha=0.3)
+
+        # 11. Final density comparison
+        ax = axes[10]
+        final_densities = [data['rho'][-1] for data in postprocessed_data]
+        target_densities = [results[i]['metadata']['rho_stop'] for i in range(len(results))]
+
+        x = np.arange(len(scenarios))
+        colors = [scenario_colors.get(scenario, KONINGSBLAUW) for scenario in scenarios]
+        ax.bar(x, final_densities, alpha=0.7, label='Final Density', color=colors)
+        ax.scatter(x, target_densities, color='red', s=50, label='Target Density', zorder=5)
+        ax.set_xlabel('Scenario')
+        ax.set_ylabel('Density (kg/m³)')
+        ax.set_title('Final vs Target Density')
+        ax.set_xticks(x)
+        ax.set_xticklabels(scenarios, rotation=45)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # 12. Summary text
+        ax = axes[11]
+        ax.axis('off')
+        summary_text = "Simulation Summary:\n\n"
+        for i, data in enumerate(postprocessed_data):
+            result = results[i]
+            stats = data['stats']
+            summary_text += f"{data['scenario']}:\n"
+            summary_text += f"  Duration: {data['t'][-1] - data['t'][0]:.1f}s\n"
+            summary_text += f"  Final ρ: {stats['final_density']:.1f} kg/m³\n"
+            summary_text += f"  Two-phase: {stats['two_phase_percentage']:.1f}%\n"
+            if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+                summary_text += f"  ✓ Stopped at threshold\n"
+            else:
+                summary_text += f"  ○ Completed time span\n"
+            summary_text += "\n"
+
+        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
+                verticalalignment='top', fontfamily='monospace', fontsize=9)
+
+        plt.tight_layout()
+        return fig
+
+    def _get_marker_config(self, line_index: int = 0, data_length: int = 100) -> Dict[str, Any]:
+        """
+        Get marker configuration for greyscale plotting.
+
+        Args:
+            line_index: Index of the line/series for different marker styles
+            data_length: Length of data array to calculate marker density
+
+        Returns:
+            Dictionary with marker configuration
+        """
+        if not self.use_greyscale or not self.marker_styles:
+            return {}
+
+        marker_style = self.marker_styles[line_index % len(self.marker_styles)]
+        # Calculate marker density - show ~15-25 evenly spaced markers per line
+        target_markers = 20
+        markevery = max(1, data_length // target_markers) if data_length > target_markers else 1
+
+        return {
+            'marker': marker_style,
+            'markevery': markevery,
+            'markersize': 5,
+            'markerfacecolor': 'white',
+            'markeredgewidth': 1.2,
+            'markeredgecolor': self.palette[line_index % len(self.palette)]
+        }
+
+    def print_detailed_simulation_statistics(self, results, postprocessed_data):
+        """
+        Print detailed statistics for simulation results.
+
+        Parameters
+        ----------
+        results : list
+            List of result dictionaries from run_hydrogen_tank_simulation()
+        postprocessed_data : list
+            List of postprocessed data dictionaries
+        """
+        print(f"\n{'='*80}")
+        print("DETAILED SIMULATION STATISTICS")
+        print(f"{'='*80}")
+
+        for i, (result, data) in enumerate(zip(results, postprocessed_data)):
+            print(f"\n{i+1}. {data['scenario']} SCENARIO:")
+            print(f"   Time range: {data['t'][0]:.1f} - {data['t'][-1]:.1f} seconds ({data['t'][-1] - data['t'][0]:.1f}s duration)")
+            print(f"   Final density: {data['stats']['final_density']:.2f} kg/m³ (target: {result['metadata']['rho_stop']:.1f} kg/m³)")
+            print(f"   Density range: {data['stats']['density_range'][0]:.2f} - {data['stats']['density_range'][1]:.2f} kg/m³")
+            print(f"   Model usage: {data['stats']['single_phase_percentage']:.1f}% single-phase, {data['stats']['two_phase_percentage']:.1f}% two-phase")
+
+            if result['stop_info'] and result['stop_info'].get('stopped_by_event', False):
+                print(f"   ✓ Stopped by density threshold at t={result['stop_info']['stop_time']:.2f}s")
+            else:
+                print(f"   ○ Completed full time span")
+
+            if 'two_phase_pressure_range' in data['stats']:
+                p_range = data['stats']['two_phase_pressure_range']
+                T_range = data['stats']['two_phase_temperature_range']
+                print(f"   Two-phase region: P={p_range[0]/1e5:.2f}-{p_range[1]/1e5:.2f} bar, T={T_range[0]:.2f}-{T_range[1]:.2f} K")
+
+    def plot_refuel_analysis(self, times, masses, temperatures, densities, pressures,
+                           initial_conditions, figsize=(14, 10)):
+        """
+        Create comprehensive plots for refuel scenario analysis.
+
+        Parameters
+        ----------
+        times : array_like
+            Time points [s]
+        masses : array_like
+            Mass values [kg]
+        temperatures : array_like
+            Temperature values [K]
+        densities : array_like
+            Density values [kg/m³]
+        pressures : array_like
+            Pressure values [bar]
+        initial_conditions : dict
+            Dictionary with 'pressure', 'temperature', 'density' keys
+        figsize : tuple, optional
+            Figure size (width, height) in inches
+        """
+        from plotting.plot_style_sb import BORDEAUX, KONINGSBLAUW, BOSGROEN, DONKERGRIJS, ORANJE
+
+        # Apply consistent styling
+        from plotting.plot_style_sb import configure_plot_style
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create subplot grid
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle("CCH2 Refuel Scenario Analysis", fontsize=16, fontweight='bold')
+
+        # 1. Mass vs Time
+        ax = axes[0, 0]
+        ax.plot(times, masses, color=BORDEAUX, linewidth=2.5, label='Tank Mass')
+        ax.axhline(y=initial_conditions['density'] * 0.5, color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Target Mass (78 kg/m³)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Mass (kg)")
+        ax.set_title("Mass Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for mass gain
+        mass_gain = masses[-1] - masses[0]
+        ax.annotate(f'Mass gain: {mass_gain:.2f} kg', xy=(times[-1] * 0.7, masses[-1] * 0.9),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=BORDEAUX, alpha=0.2))
+
+        # 2. Temperature vs Time
+        ax = axes[0, 1]
+        ax.plot(times, temperatures, color=ORANJE, linewidth=2.5, label='Tank Temperature')
+        ax.axhline(y=initial_conditions['temperature'], color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Initial Temperature')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Temperature Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for temperature change
+        temp_change = temperatures[-1] - temperatures[0]
+        ax.annotate(f'ΔT: {temp_change:+.2f} K', xy=(times[-1] * 0.7, temperatures[-1] * 1.02),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=ORANJE, alpha=0.2))
+
+        # 3. Pressure vs Time
+        ax = axes[1, 0]
+        ax.plot(times, pressures, color=KONINGSBLAUW, linewidth=2.5, label='Tank Pressure')
+        ax.axhline(y=initial_conditions['pressure'], color=DONKERGRIJS,
+                   linestyle='--', alpha=0.7, label='Initial Pressure')
+        ax.axhline(y=15.0, color='red', linestyle=':', alpha=0.7, label='Min Pressure (15 bar)')
+        ax.axhline(y=450.0, color='red', linestyle=':', alpha=0.7, label='Vent Pressure (450 bar)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for pressure change
+        pressure_change = pressures[-1] - pressures[0]
+        ax.annotate(f'ΔP: {pressure_change:+.1f} bar', xy=(times[-1] * 0.7, pressures[-1] * 1.05),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=KONINGSBLAUW, alpha=0.2))
+
+        # 4. Density vs Time
+        ax = axes[1, 1]
+        ax.plot(times, densities, color=BOSGROEN, linewidth=2.5, label='Tank Density')
+        ax.axhline(y=initial_conditions['density'], color='red',
+                   linestyle='--', alpha=0.7, label='Target Density (78 kg/m³)')
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density Evolution During Refuel")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Add annotation for density change
+        density_change = densities[-1] - densities[0]
+        ax.annotate(f'Δρ: {density_change:+.2f} kg/m³', xy=(times[-1] * 0.7, densities[-1] * 0.95),
+                   fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor=BOSGROEN, alpha=0.2))
+
+        # Add summary text box
+        summary_text = f"""Refuel Scenario Summary:
+Duration: {times[-1]:.1f} s
+Mass added: {mass_gain:.2f} kg
+Final density: {densities[-1]:.1f} kg/m³
+Config B disabled (REFUEL mode)"""
+
+        fig.text(0.02, 0.02, summary_text, fontsize=10, verticalalignment='bottom',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8))
+
+        plt.tight_layout()
+        return fig
+
+    def plot_phi_optimization_results(self, phi_values: List[float], volumes: List[float],
+                                    converged: List[bool], save_path: Optional[str] = None) -> plt.Figure:
+        """Plot phi optimization results showing volume vs aspect ratio trade-offs.
+
+        Args:
+            phi_values: List of phi parameter values tested
+            volumes: List of corresponding tank volumes [m³]
+            converged: List of boolean convergence flags
+            save_path: Optional path to save the figure
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create figure with custom styling
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+        # Plot 1: Volume vs Phi
+        colors = [BOSGROEN if conv else ROOD for conv in converged]
+        ax1.scatter(phi_values, volumes, c=colors, s=100, alpha=0.7,
+                   edgecolors=DONKERGRIJS, linewidths=1)
+        ax1.plot(phi_values, volumes, color=KONINGSBLAUW, linestyle='--',
+                alpha=0.7, linewidth=2, label='Optimization Path')
+
+        # Mark optimal point
+        optimal_idx = np.argmin(volumes)
+        ax1.scatter(phi_values[optimal_idx], volumes[optimal_idx],
+                   c=ORANJE, s=200, marker='*', edgecolors=DONKERGRIJS,
+                   linewidths=2, label=f'Optimal (φ={phi_values[optimal_idx]:.1f})')
+
+        ax1.set_xlabel('Phi Parameter (φ = radius/body_length)', fontsize=12)
+        ax1.set_ylabel('Tank Volume [m³]', fontsize=12)
+        ax1.set_title('Phi-Based Optimization Results\nVolume vs Aspect Ratio',
+                     fontsize=14, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+
+        # Add value annotations
+        for i, (phi, vol) in enumerate(zip(phi_values, volumes)):
+            ax1.annotate(f'φ={phi:.1f}\nV={vol:.3f}m³',
+                        xy=(phi, vol), xytext=(10, 10),
+                        textcoords='offset points', fontsize=9,
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor=LICHTBLAUW, alpha=0.8))
+
+        # Plot 2: Tank shape visualization
+        ax2.set_xlim(-1.5, 1.5)
+        ax2.set_ylim(-1.5, 1.5)
+        ax2.set_aspect('equal')
+
+        # Plot representative tank shapes for different phi values
+        if len(phi_values) >= 3:
+            phi_examples = [phi_values[0], phi_values[len(phi_values)//2], phi_values[-1]]
+            colors_shapes = [ROOD, KONINGSBLAUW, BOSGROEN]
+            y_positions = [1.0, 0.0, -1.0]
+
+            for i, (phi, color, y_pos) in enumerate(zip(phi_examples, colors_shapes, y_positions)):
+                # Calculate representative dimensions (scaled for visualization)
+                scale = 0.3  # Scale factor for visualization
+                radius = 0.5 * scale
+                body_length = radius / phi
+
+                # Draw cylindrical body
+                cylinder = plt.Rectangle((-body_length/2, y_pos - radius), body_length, 2*radius,
+                                       facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                ax2.add_patch(cylinder)
+
+                # Draw hemispherical caps
+                left_cap = plt.Circle((-body_length/2, y_pos), radius,
+                                     facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                right_cap = plt.Circle((body_length/2, y_pos), radius,
+                                      facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
+                ax2.add_patch(left_cap)
+                ax2.add_patch(right_cap)
+
+                # Add labels
+                ax2.text(0, y_pos + radius + 0.2, f'φ = {phi:.1f}',
+                         ha='center', va='bottom', fontweight='bold', fontsize=10)
+                volume_idx = phi_values.index(phi) if phi in phi_values else 0
+                ax2.text(0, y_pos - radius - 0.2, f'V = {volumes[volume_idx]:.3f} m³',
+                         ha='center', va='top', fontsize=9)
+
+        ax2.set_title('Tank Shape Evolution\n(Cylindrical <- φ -> Spherical)',
+                 fontsize=14, fontweight='bold')
+        ax2.set_xlabel('More Cylindrical <- Shape -> More Spherical', fontsize=12)
+        ax2.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+        # Add shape descriptions
+        if len(phi_values) >= 3:
+            ax2.text(-1.2, 1.4, 'Cylindrical\n(Low φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=ROOD, alpha=0.7))
+            ax2.text(0, 1.4, 'Balanced\n(Mid φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=KONINGSBLAUW, alpha=0.7))
+            ax2.text(1.2, 1.4, 'Spherical\n(High φ)', ha='center', va='center',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=BOSGROEN, alpha=0.7))
+
+        plt.tight_layout()
+
+        # Add summary statistics as text box
+        volume_reduction = (max(volumes) - min(volumes))/max(volumes)*100
+        optimal_phi = phi_values[optimal_idx]
+        optimal_volume = volumes[optimal_idx]
+
+        summary_text = f"""Optimization Summary:
+φ range: [{min(phi_values):.1f}, {max(phi_values):.1f}]
+Volume reduction: {volume_reduction:.1f}%
+Optimal: φ = {optimal_phi:.1f}, V = {optimal_volume:.3f} m³
+Converged: {sum(converged)}/{len(converged)} solutions"""
+
+        fig.text(0.02, 0.02, summary_text, fontsize=10, verticalalignment='bottom',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor=LICHTGRIJS, alpha=0.8))
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Phi optimization plot saved to: {save_path}")
+
+        return fig
+
+    def plot_baseline_tank_states(self, times, masses, temperatures, pressures, densities,
+                                 target_density=None, figsize=(12, 10)) -> plt.Figure:
+        """Create 4-panel baseline tank states plot.
+
+        Args:
+            times: Time array [hours]
+            masses: Mass array [kg]
+            temperatures: Temperature array [K]
+            pressures: Pressure array [bar]
+            densities: Density array [kg/m³]
+            target_density: Optional target density line [kg/m³]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create subplots
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle('Baseline CCH2 Discharge Analysis', fontsize=16, fontweight='bold')
+
+        # Mass vs time
+        axes[0, 0].plot(times, masses, color=BORDEAUX, linewidth=2)
+        axes[0, 0].set_xlabel('Time [h]')
+        axes[0, 0].set_ylabel('Mass [kg]')
+        axes[0, 0].set_title('H₂ Mass Evolution')
+        axes[0, 0].grid(True, alpha=0.3)
+
+        # Temperature vs time
+        axes[0, 1].plot(times, temperatures, color=KONINGSBLAUW, linewidth=2)
+        axes[0, 1].set_xlabel('Time [h]')
+        axes[0, 1].set_ylabel('Temperature [K]')
+        axes[0, 1].set_title('Temperature Evolution')
+        axes[0, 1].grid(True, alpha=0.3)
+
+        # Pressure vs time
+        axes[1, 0].plot(times, pressures, color=BOSGROEN, linewidth=2)
+        axes[1, 0].set_xlabel('Time [h]')
+        axes[1, 0].set_ylabel('Pressure [bar]')
+        axes[1, 0].set_title('Pressure Evolution')
+        axes[1, 0].grid(True, alpha=0.3)
+
+        # Density vs time
+        axes[1, 1].plot(times, densities, color=ORANJE, linewidth=2)
+        if target_density:
+            axes[1, 1].axhline(y=target_density, color='red', linestyle='--',
+                              label=f'Target: {target_density} kg/m³')
+            axes[1, 1].legend()
+        axes[1, 1].set_xlabel('Time [h]')
+        axes[1, 1].set_ylabel('Density [kg/m³]')
+        axes[1, 1].set_title('Density Evolution')
+        axes[1, 1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_density_temperature(self, temperatures, densities, pressures=None,
+                                         include_saturation_line=True, include_isobars=True,
+                                         figsize=(8, 6)) -> plt.Figure:
+        """Create density-temperature plot for baseline analysis with isobars.
+
+        Args:
+            temperatures: Temperature array [K]
+            densities: Density array [kg/m³]
+            pressures: Pressure array [bar] - if provided, min/max will be used for isobars
+            include_saturation_line: Whether to include saturation line
+            include_isobars: Whether to include isobar lines
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Plot discharge process
+        ax.plot(temperatures, densities, color=DONKERGRIJS, linewidth=2,
+                marker='o', markersize=3, label='Discharge Process')
+
+        # Add saturation line if requested
+        if include_saturation_line:
+            try:
+                fluid = 'PARAHYDROGEN'
+                T_triple = PropsSI('Ttriple', fluid)
+                T_crit = PropsSI('Tcrit', fluid)
+
+                # Create temperature range
+                temps = np.linspace(T_triple, T_crit, 100)
+
+                # Create complete continuous saturation curve
+                sat_temps = []
+                sat_densities = []
+
+                # First add the saturated liquid branch (low to high temperature)
+                for temp in temps:
+                    try:
+                        density = PropsSI('D', 'T', temp, 'Q', 0, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Then add the saturated vapor branch (high to low temperature)
+                for temp in reversed(temps):
+                    try:
+                        density = PropsSI('D', 'T', temp, 'Q', 1, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Plot the complete continuous saturation dome
+                if len(sat_temps) > 0:
+                    ax.plot(sat_temps, sat_densities, '--', color=ORANJE,
+                            linewidth=1.5, label="Saturation Line", alpha=0.8)
+
+            except Exception as e:
+                print(f"Warning: Could not add saturation line: {e}")
+
+        # Add isobar lines if requested
+        if include_isobars:
+            # Create smart temperature range: 5K below min, 10K above max discharge temp
+            temp_min = min(temperatures) - 5
+            temp_max = max(temperatures) + 10
+            temps = np.linspace(temp_min, temp_max, 200)  # More points for smoother curves
+
+            # Define pressure levels in bar
+            regular_pressure_levels = [100, 400]  # Regular pressure levels
+
+            # Use dynamic pressures if provided, otherwise fall back to defaults
+            if pressures is not None and len(pressures) > 0:
+                min_pressure = round(min(pressures))  # Round to nearest integer
+                max_pressure = round(max(pressures))  # Round to nearest integer
+                special_pressures = {
+                    min_pressure: {'color': PAARS, 'label': f'{min_pressure} bar (Min Pressure)', 'style': '-'},
+                    max_pressure: {'color': TURKOOIS, 'label': f'{max_pressure} bar (Max Pressure)', 'style': '-'}
+                }
+            else:
+                # Fallback to hardcoded values if no pressure data available
+                special_pressures = {
+                    15: {'color': PAARS, 'label': '15 bar (Min Pressure)', 'style': '-'},
+                    500: {'color': TURKOOIS, 'label': '500 bar (Max Pressure)', 'style': '-'}
+                }
+
+            # Filter out regular pressures that are too close to special pressures
+            special_pressure_values = set(special_pressures.keys())
+            regular_pressure_levels = [p for p in regular_pressure_levels
+                                     if not any(abs(p - sp) < 50 for sp in special_pressure_values)]
+
+            # Track legend entries to avoid duplicates
+            isobar_legend_added = False
+
+            # Plot regular isobars first
+            for pressure in regular_pressure_levels:
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities_iso = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'PARAHYDROGEN')
+                        densities_iso.append(density)
+                    except:
+                        densities_iso.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities_iso)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities_iso)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot regular isobar line with dotted gray
+                    label = 'Isobars' if not isobar_legend_added else None
+                    ax.plot(valid_temps, valid_densities, ':', color='gray',
+                           alpha=0.7, linewidth=1, label=label)
+                    isobar_legend_added = True
+
+                    # Add pressure labels
+                    idx = int(len(valid_temps) * 0.75) if pressure == 400 else len(valid_temps) // 2
+                    if idx < len(valid_temps):
+                        ax.text(valid_temps[idx], valid_densities[idx],
+                                f"{pressure} bar", fontsize=10, alpha=0.8,
+                                horizontalalignment='center', verticalalignment='center',
+                                color='gray', bbox=dict(facecolor='white', alpha=0.7,
+                                                       edgecolor=None, pad=1))
+
+            # Plot special pressure isobars (minimum and venting)
+            for pressure, props in special_pressures.items():
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities_iso = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'PARAHYDROGEN')
+                        densities_iso.append(density)
+                    except:
+                        densities_iso.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities_iso)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities_iso)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot special isobar with distinctive color and style
+                    ax.plot(valid_temps, valid_densities, props['style'],
+                           color=props['color'], alpha=0.8, linewidth=2,
+                           label=props['label'])
+
+                    # Add pressure labels with matching color
+                    idx = int(len(valid_temps) * 0.25) if pressure == 15 else int(len(valid_temps) * 0.85)
+                    if idx < len(valid_temps):
+                        ax.text(valid_temps[idx], valid_densities[idx],
+                                f"{pressure} bar", fontsize=11, fontweight='bold',
+                                horizontalalignment='center', verticalalignment='center',
+                                color=props['color'],
+                                bbox=dict(facecolor='white', alpha=0.9,
+                                         edgecolor=props['color'], pad=2))
+
+        ax.set_xlabel('Temperature [K]')
+        ax.set_ylabel('Density [kg/m³]')
+        ax.set_title('Density vs Temperature - Discharge Process')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        # Add annotations for start and end points with boxes
+        if len(densities) > 0 and len(temperatures) > 0:
+            ax.annotate('Start', xy=(temperatures[0], densities[0]),
+                        xytext=(10, 10), textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', color='black'),
+                        bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', pad=2),
+                        fontweight='bold')
+            ax.annotate('End', xy=(temperatures[-1], densities[-1]),
+                        xytext=(10, 10), textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', color='black'),
+                        bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', pad=2),
+                        fontweight='bold')
+
+        # Set smart axis limits: 5K below min, 10K above max discharge temp
+        if len(temperatures) > 0:
+            temp_min = min(temperatures) - 5
+            temp_max = max(temperatures) + 10
+            ax.set_xlim(temp_min, temp_max)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_fuel_flow(self, mission_sections, figsize=(14, 10)) -> plt.Figure:
+        """Create fuel flow profile plot for baseline analysis.
+
+        Args:
+            mission_sections: Mission sections with durations and fuel flows
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Extract mission profile data
+        mission_times = []
+        mission_flows = []
+        analysis_times = []
+        analysis_flows = []
+
+        current_time = 0.0
+        analysis_time = 0.0
+        section_names = ['Taxi-out', 'Takeoff', 'Climb', 'Cruise', 'Initial Descent',
+                        'Approach', 'Go-around', 'Climb-2', 'Cruise-2', 'Final Descent', 'Taxi-in']
+
+        for i, section in enumerate(mission_sections):
+            duration = section.duration  # already in seconds
+            section_start = current_time
+            section_end = current_time + duration
+
+            # Extract fuel flow from section
+            fuel_flow = section.fuel_flows[0].mass_flow  # Get the OutFlow mass_flow
+
+            if isinstance(fuel_flow, list):
+                # Linear ramp section
+                start_flow = abs(fuel_flow[0])
+                end_flow = abs(fuel_flow[1])
+
+                # Mission profile (step representation)
+                mission_times.extend([section_start, section_end])
+                mission_flows.extend([start_flow, end_flow])
+
+                # Analysis resolution with interpolation
+                timestep = 1.0  # Use 1 second timestep for analysis resolution
+                section_steps = int(duration / timestep)
+                for step in range(section_steps):
+                    # Linear interpolation within section
+                    interpolated_flow = start_flow + (end_flow - start_flow) * step / section_steps
+                    analysis_times.append(analysis_time)
+                    analysis_flows.append(interpolated_flow)
+                    analysis_time += timestep
+            else:
+                # Constant flow section
+                flow_rate = abs(fuel_flow)
+
+                # Mission profile
+                mission_times.extend([section_start, section_end])
+                mission_flows.extend([flow_rate, flow_rate])
+
+                # Analysis resolution
+                timestep = 1.0
+                section_steps = int(duration / timestep)
+                for step in range(section_steps):
+                    analysis_times.append(analysis_time)
+                    analysis_flows.append(flow_rate)
+                    analysis_time += timestep
+
+            current_time += duration
+
+        # Convert to hours for plotting
+        mission_times_hr = np.array(mission_times) / 3600.0
+        analysis_times_hr = np.array(analysis_times) / 3600.0
+        total_time_hours = current_time / 3600.0
+
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
+
+        # Top panel: ATR72 Mission Profile
+        ax1.plot(mission_times_hr, mission_flows, linewidth=3, color=KONINGSBLAUW,
+                label='ATR72 Mission Profile')
+        ax1.fill_between(mission_times_hr, 0, mission_flows, alpha=0.3, color=KONINGSBLAUW)
+
+        # Add section labels
+        cumulative_time = 0
+        for i, (section, name) in enumerate(zip(mission_sections, section_names)):
+            section_center = (cumulative_time + section.duration / 2) / 3600.0
+            if i % 2 == 0:  # Alternate label heights to avoid overlap
+                ax1.annotate(name, xy=(section_center, max(mission_flows) * 0.9),
+                           ha='center', va='bottom', rotation=45, fontsize=10, color='darkred')
+            else:
+                ax1.annotate(name, xy=(section_center, max(mission_flows) * 0.7),
+                           ha='center', va='bottom', rotation=45, fontsize=10, color='darkred')
+            cumulative_time += section.duration
+
+        ax1.set_xlabel('Time [h]')
+        ax1.set_ylabel('Discharge Rate [kg/s]')
+        ax1.set_title('ATR72 Mission Fuel Flow Profile (11 Sections)')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        ax1.set_xlim(0, total_time_hours)
+
+        # Bottom panel: Analysis Resolution with Linear Interpolation
+        ax2.plot(analysis_times_hr, analysis_flows, linewidth=1, color=BORDEAUX,
+                label='Analysis Resolution (Δt = 1s)')
+        ax2.set_xlabel('Time [h]')
+        ax2.set_ylabel('Discharge Rate [kg/s]')
+        ax2.set_title('Interpolated Flow Profile (Analysis Timesteps)')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        ax2.set_xlim(0, total_time_hours)
+
+        # Calculate total fuel for summary
+        total_fuel = sum(flow * 1.0 for flow in analysis_flows)  # Approximate total fuel
+
+        fig.suptitle(f'ATR72 Mission Profile Analysis\nTotal Duration: {total_time_hours:.2f}h, Total Fuel: {total_fuel:.1f}kg',
+                    fontsize=14, fontweight='bold')
+
+        plt.tight_layout()
+        return fig
+
+    def plot_baseline_optimization_progress(self, optimization_data, target_fuel,
+                                          figsize=(8, 6)) -> plt.Figure:
+        """Create optimization progress plot for baseline analysis.
+
+        Args:
+            optimization_data: Dictionary with optimization progress data
+            target_fuel: Target fuel requirement [kg]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Extract data
+        iterations = optimization_data['iterations']
+        fuel_consumed = optimization_data['fuel_consumed']
+        phi_values = optimization_data['phi_values']
+        converged = optimization_data['converged']
+
+        # Plot non-converged points
+        non_converged_fuel = [f for i, f in enumerate(fuel_consumed) if not converged[i]]
+        non_converged_phi = [p for i, p in enumerate(phi_values) if not converged[i]]
+
+        if non_converged_fuel:
+            ax.scatter(non_converged_phi, non_converged_fuel,
+                      color=ROOD, alpha=0.6, s=50, label='Non-converged', marker='x')
+
+        # Plot converged points
+        converged_fuel = [f for i, f in enumerate(fuel_consumed) if converged[i]]
+        converged_phi = [p for i, p in enumerate(phi_values) if converged[i]]
+
+        if converged_fuel:
+            ax.scatter(converged_phi, converged_fuel,
+                      color=BOSGROEN, alpha=0.8, s=80, label='Converged', marker='o')
+
+        # Connect points with iteration order
+        ax.plot(phi_values, fuel_consumed, 'k--', alpha=0.3, linewidth=1, label='Iteration Path')
+
+        # Add iteration numbers as annotations
+        for i, (phi, fuel, iteration) in enumerate(zip(phi_values, fuel_consumed, iterations)):
+            ax.annotate(f'{iteration}', (phi, fuel),
+                       xytext=(5, 5), textcoords='offset points',
+                       fontsize=8, alpha=0.7)
+
+        # Add target fuel requirement line
+        ax.axhline(y=target_fuel, color=ORANJE, linestyle='--',
+                  linewidth=2, label=f'Required Fuel: {target_fuel:.1f} kg')
+
+        ax.set_xlabel('Phi (radius/body_length) [-]')
+        ax.set_ylabel('Fuel Consumed [kg]')
+        ax.set_title('Optimization Progress: Fuel Mass vs Phi Parameter')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        plt.tight_layout()
+        return fig
+
+    def plot_bisection_optimization_progress(self, optimization_data, target_density,
+                                           density_tolerance=2.0, figsize=(12, 8)) -> plt.Figure:
+        """Create bisection optimization progress plot for radius search.
+
+        Shows the convergence of the bisection search algorithm including:
+        - Radius vs final density with feasible/infeasible regions
+        - Range width convergence showing bisection narrowing
+        - Phase visualization (bound search vs bisection)
+
+        Args:
+            optimization_data: Dictionary with bisection optimization progress data
+            target_density: Minimum target density requirement [kg/m³]
+            density_tolerance: Density tolerance for convergence [kg/m³]
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, gridspec_kw={'height_ratios': [3, 1]})
+
+        # Extract data
+        iterations = optimization_data['iterations']
+        radii = optimization_data['radii']
+        final_densities = optimization_data['final_densities']
+        feasible = optimization_data['feasible']
+        phases = optimization_data['phase']
+        converged = optimization_data['converged']
+        range_widths = optimization_data['range_widths']
+
+        # Separate bound search and bisection phases
+        bound_search_mask = [p == 'bound_search' for p in phases]
+        bisection_mask = [p == 'bisection' for p in phases]
+
+        # Plot bound search points (Phase 1 & 2)
+        if any(bound_search_mask):
+            bound_radii = [r for r, is_bound in zip(radii, bound_search_mask) if is_bound]
+            bound_densities = [d for d, is_bound in zip(final_densities, bound_search_mask) if is_bound]
+            bound_feasible = [f for f, is_bound in zip(feasible, bound_search_mask) if is_bound]
+            bound_converged = [c for c, is_bound in zip(converged, bound_search_mask) if is_bound]
+
+            # Plot bound search - feasible points
+            feasible_bound_radii = [r for r, f, c in zip(bound_radii, bound_feasible, bound_converged) if f and c]
+            feasible_bound_densities = [d for d, f, c in zip(bound_densities, bound_feasible, bound_converged) if f and c]
+            if feasible_bound_radii:
+                ax1.scatter(feasible_bound_radii, feasible_bound_densities,
+                          color=GROEN, alpha=0.7, s=80, marker='s', label='Bound Search (Feasible)', zorder=5)
+
+            # Plot bound search - infeasible points
+            infeasible_bound_radii = [r for r, f, c in zip(bound_radii, bound_feasible, bound_converged) if not (f and c)]
+            infeasible_bound_densities = [d for d, f, c in zip(bound_densities, bound_feasible, bound_converged) if not (f and c)]
+            if infeasible_bound_radii:
+                ax1.scatter(infeasible_bound_radii, infeasible_bound_densities,
+                          color=ROOD, alpha=0.7, s=80, marker='s', label='Bound Search (Infeasible)', zorder=5)
+
+        # Plot bisection points (Phase 3)
+        if any(bisection_mask):
+            bisection_radii = [r for r, is_bisection in zip(radii, bisection_mask) if is_bisection]
+            bisection_densities = [d for d, is_bisection in zip(final_densities, bisection_mask) if is_bisection]
+            bisection_feasible = [f for f, is_bisection in zip(feasible, bisection_mask) if is_bisection]
+            bisection_converged = [c for c, is_bisection in zip(converged, bisection_mask) if is_bisection]
+
+            # Plot bisection - feasible points
+            feasible_bisection_radii = [r for r, f, c in zip(bisection_radii, bisection_feasible, bisection_converged) if f and c]
+            feasible_bisection_densities = [d for d, f, c in zip(bisection_densities, bisection_feasible, bisection_converged) if f and c]
+            if feasible_bisection_radii:
+                ax1.scatter(feasible_bisection_radii, feasible_bisection_densities,
+                          color=BOSGROEN, alpha=0.8, s=100, marker='o', label='Bisection (Feasible)', zorder=6)
+
+            # Plot bisection - infeasible points
+            infeasible_bisection_radii = [r for r, f, c in zip(bisection_radii, bisection_feasible, bisection_converged) if not (f and c)]
+            infeasible_bisection_densities = [d for d, f, c in zip(bisection_densities, bisection_feasible, bisection_converged) if not (f and c)]
+            if infeasible_bisection_radii:
+                ax1.scatter(infeasible_bisection_radii, infeasible_bisection_densities,
+                          color=ORANJE, alpha=0.8, s=100, marker='o', label='Bisection (Infeasible)', zorder=6)
+
+        # Connect points with iteration order (show search path)
+        if len(radii) > 1:
+            ax1.plot(radii, final_densities, 'k--', alpha=0.4, linewidth=1,
+                    label='Search Path', zorder=3)
+
+        # Add iteration numbers as annotations for bisection points
+        bisection_iter = 0
+        for i, (r, d, phase) in enumerate(zip(radii, final_densities, phases)):
+            if phase == 'bisection':
+                bisection_iter += 1
+                ax1.annotate(f'{bisection_iter}', (r, d),
+                           xytext=(8, 8), textcoords='offset points',
+                           fontsize=9, alpha=0.8, fontweight='bold')
+
+        # Add target density and tolerance lines
+        ax1.axhline(y=target_density, color=DONKERBLAUW, linestyle='-',
+                   linewidth=2, label=f'Target Density: {target_density:.1f} kg/m³', zorder=4)
+
+        # Add tolerance band
+        ax1.axhline(y=target_density + density_tolerance, color=DONKERBLAUW, linestyle='--',
+                   linewidth=1, alpha=0.7, label=f'Tolerance: ±{density_tolerance:.1f} kg/m³', zorder=4)
+        ax1.axhline(y=target_density - density_tolerance, color=DONKERBLAUW, linestyle='--',
+                   linewidth=1, alpha=0.7, zorder=4)
+
+        # Fill tolerance band
+        ax1.fill_between([min(radii) * 0.95, max(radii) * 1.05],
+                        target_density - density_tolerance, target_density + density_tolerance,
+                        color=DONKERBLAUW, alpha=0.1, zorder=1)
+
+        ax1.set_xlabel('Tank Radius [m]')
+        ax1.set_ylabel('Final Density [kg/m³]')
+        ax1.set_title('Bisection Optimization Progress: Radius vs Final Density')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+
+        # Lower subplot: Range width convergence
+        bisection_iterations = [i for i, phase in enumerate(phases) if phase == 'bisection']
+        bisection_range_widths = [range_widths[i] for i in bisection_iterations]
+
+        if bisection_range_widths:
+            ax2.plot(range(1, len(bisection_range_widths) + 1), bisection_range_widths,
+                    color=BOSGROEN, marker='o', linewidth=2, markersize=6,
+                    label='Search Range Width')
+            ax2.set_xlabel('Bisection Iteration')
+            ax2.set_ylabel('Range Width [m]')
+            ax2.set_title('Bisection Convergence: Search Range Narrowing')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend()
+            ax2.set_yscale('log')  # Log scale to show exponential convergence
+
+        plt.tight_layout()
+        return fig
+
+    def plot_dormancy_mass_evolution(self, times, masses, pressures, time_to_vent_hours=None,
+                                    venting_pressure=None, storage_type="Unknown", figsize=(10, 6)):
+        """
+        Create standalone mass vs time plot for dormancy analysis with SeabornPlotter styling.
+
+        Args:
+            times: Time array [hours]
+            masses: Mass array [kg]
+            pressures: Pressure array [bar]
+            time_to_vent_hours: Time when venting starts [hours], if any
+            venting_pressure: Venting pressure threshold [bar]
+            storage_type: Storage type name for title
+            figsize: Figure size tuple
+
+        Returns:
+            matplotlib Figure object
+        """
+        configure_plot_style()
+
+        # Create single plot figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+        # Plot mass evolution using consistent Seaborn styling colors
+        ax.plot(times, masses, color=BORDEAUX, linewidth=2.5, label='Fuel Mass')
+
+        # Mark venting onset if it occurred
+        if time_to_vent_hours is not None:
+            ax.axvline(x=time_to_vent_hours, color=KONINGSBLAUW, linestyle='--',
+                      linewidth=2, alpha=0.8,
+                      label=f'Venting starts at {time_to_vent_hours:.1f}h')
+
+            # Add annotation for clarity
+            max_mass = max(masses)
+            min_mass = min(masses)
+            y_annotation = min_mass + 0.7 * (max_mass - min_mass)
+            ax.annotate(f'First venting\nat {time_to_vent_hours:.1f}h',
+                       xy=(time_to_vent_hours, y_annotation),
+                       xytext=(time_to_vent_hours + max(times)*0.1, y_annotation),
+                       arrowprops=dict(arrowstyle='->', color=KONINGSBLAUW, alpha=0.7),
+                       fontsize=10, color=KONINGSBLAUW, fontweight='bold')
+
+        # Formatting
+        ax.set_xlabel('Time [h]', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Fuel Mass [kg]', fontsize=12, fontweight='bold')
+        ax.set_title(f'{storage_type} Dormancy Analysis - Mass Evolution',
+                    fontsize=14, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3)
+        legend = ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+        # Ensure 3D effect is visible
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_edgecolor('black')
+        legend.get_frame().set_linewidth(1.0)
+
+        # Add info box with key metrics
+        mass_lost = masses[0] - masses[-1]
+        duration = max(times)
+        info_text = f'Duration: {duration:.1f}h\nMass lost: {mass_lost:.2f}kg'
+        if time_to_vent_hours is not None:
+            info_text += f'\nTime to vent: {time_to_vent_hours:.1f}h'
+        else:
+            info_text += f'\nNo venting occurred'
+
+        # Place info box in upper right
+        ax.text(0.98, 0.98, info_text, transform=ax.transAxes,
+               verticalalignment='top', horizontalalignment='right',
+               bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8),
+               fontsize=10)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_refuel_analysis_bw(self, times, masses, temperatures, densities, pressures,
+                           initial_conditions, figsize=(14, 10)):
+        """
+        Create comprehensive plots for refuel scenario analysis using greyscale styling.
+        This is the black and white version of plot_refuel_analysis.
+
+        Parameters
+        ----------
+        times : array_like
+            Time points [s]
+        masses : array_like
+            Mass values [kg]
+        temperatures : array_like
+            Temperature values [K]
+        densities : array_like
+            Density values [kg/m³]
+        pressures : array_like
+            Pressure values [bar]
+        initial_conditions : dict
+            Dictionary with 'pressure', 'temperature', 'density' keys
+        figsize : tuple, optional
+            Figure size (width, height) in inches
+        """
+        from plotting.plot_style_sb import configure_plot_style
+
+        # Apply consistent greyscale styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create subplot grid
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+
+        # Greyscale colors
+        primary_color = self.palette[0]  # Black
+
+        # Convert times to hours for plotting
+        times_hours = times / 3600.0
+
+        # 1. Mass vs Time
+        ax = axes[0, 0]
+        marker_config = self._get_marker_config(0, len(times_hours))
+        ax.plot(times_hours, masses, color=primary_color, linewidth=2.5, **marker_config)
+        ax.set_xlabel("Time (hours)")
+        ax.set_ylabel("Mass (kg)")
+        ax.set_title("Mass Evolution During Refuel")
+        ax.grid(True, alpha=0.3)        # 2. Temperature vs Time
+        ax = axes[0, 1]
+        marker_config = self._get_marker_config(1, len(times_hours))
+        ax.plot(times_hours, temperatures, color=primary_color, linewidth=2.5, **marker_config)
+        ax.set_xlabel("Time (hours)")
+        ax.set_ylabel("Temperature (K)")
+        ax.set_title("Temperature Evolution During Refuel")
+        ax.grid(True, alpha=0.3)
+
+        # 3. Pressure vs Time
+        ax = axes[1, 0]
+        marker_config = self._get_marker_config(2, len(times_hours))
+        ax.plot(times_hours, pressures, color=primary_color, linewidth=2.5, **marker_config)
+        ax.set_xlabel("Time (hours)")
+        ax.set_ylabel("Pressure (bar)")
+        ax.set_title("Pressure Evolution During Refuel")
+        ax.grid(True, alpha=0.3)
+
+        # 4. Density vs Time
+        ax = axes[1, 1]
+        marker_config = self._get_marker_config(3, len(times_hours))
+        ax.plot(times_hours, densities, color=primary_color, linewidth=2.5, **marker_config)
+        ax.set_xlabel("Time (hours)")
+        ax.set_ylabel("Density (kg/m³)")
+        ax.set_title("Density Evolution During Refuel")
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_density_temperature_combined_bw(self, scenario_data, include_saturation_line=True,
+                                 include_isobars=True, include_ref_data=False, figsize=(10, 8),
+                                 temperature_range=(15, 80), density_range=(0, 80)):
+        """
+        Create a combined density-temperature plot for discharge, refuel and dormancy phases using greyscale styling.
+        This is the black and white version of plot_density_temperature_combined.
+
+        Args:
+            scenario_data: Dictionary containing temperature, density and pressure data for each scenario
+            include_saturation_line: Whether to include hydrogen saturation line
+            include_isobars: Whether to include isobar lines
+            include_ref_data: Whether to include reference data from literature
+            figsize: Figure size tuple
+            temperature_range: Min/max temperature range for the plot
+            density_range: Min/max density range for the plot
+
+        Returns:
+            Figure with the combined density-temperature plot
+        """
+        import os
+        import pandas as pd
+        from plotting.plot_style_sb import configure_plot_style
+
+        # Apply greyscale styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axes
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Greyscale colors for each scenario
+        discharge_color = self.palette[0]  # Black
+        refuel_color = self.palette[2]     # Dark grey
+        dormancy_color = self.palette[4]   # light grey
+
+        # Discharge (black solid line, no markers)
+        discharge_line, = ax.plot(scenario_data['discharge']['temperatures'],
+                scenario_data['discharge']['densities'],
+                '-', color=discharge_color, linewidth=2, label="Discharge")
+
+        # Refuel (dark grey solid line, no markers)
+        refuel_line, = ax.plot(scenario_data['refuel']['temperatures'],
+                scenario_data['refuel']['densities'],
+                '-', color=refuel_color, linewidth=2, label="Refuelling")
+
+        # Dormancy (medium grey solid line, no markers)
+        dormancy_line, = ax.plot(scenario_data['dormancy']['temperatures'],
+                scenario_data['dormancy']['densities'],
+                '-', color=dormancy_color, linewidth=2, label="Dormancy")
+
+        # Add reference data from literature if requested
+        ref_discharge_line = None
+        ref_refuel_line = None
+        ref_dormancy_line = None
+
+        if include_ref_data:
+            # Base path for reference data files
+            ref_data_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "analysis", "verification", "reference_data"
+            )
+
+            # Use different line styles for each reference scenario
+            # Discharge: dotted line (:)
+            # Refuel: dashed line (--)
+            # Dormancy: dash-dot line (-.)
+            discharge_ref_file = os.path.join(ref_data_path, "discharge_data_15bar.csv")
+            if os.path.exists(discharge_ref_file):
+                try:
+                    discharge_ref_data = pd.read_csv(discharge_ref_file, header=None)
+                    x_values = discharge_ref_data.iloc[:, 0].to_numpy()
+                    y_values = discharge_ref_data.iloc[:, 1].to_numpy()
+                    ref_discharge_line, = ax.plot(x_values, y_values, ':', color=discharge_color,
+                                               linewidth=2, label="Discharge (Ref)")
+                except Exception as e:
+                    print(f"Warning: Could not load reference discharge data: {e}")
+
+            # Load and plot reference refuel data
+            refuel_ref_file = os.path.join(ref_data_path, "refuel_data_15bar.csv")
+            if os.path.exists(refuel_ref_file):
+                try:
+                    refuel_ref_data = pd.read_csv(refuel_ref_file, header=None)
+                    x_values = refuel_ref_data.iloc[:, 0].to_numpy()
+                    y_values = refuel_ref_data.iloc[:, 1].to_numpy()
+                    ref_refuel_line, = ax.plot(x_values, y_values, '--', color=refuel_color,
+                                             linewidth=2, label="Refuelling (Ref)")
+                except Exception as e:
+                    print(f"Warning: Could not load reference refuel data: {e}")
+
+            # Load and plot reference dormancy data
+            dormancy_ref_file = os.path.join(ref_data_path, "dormancy_data_15bar.csv")
+            if os.path.exists(dormancy_ref_file):
+                try:
+                    dormancy_ref_data = pd.read_csv(dormancy_ref_file, header=None)
+                    x_values = dormancy_ref_data.iloc[:, 0].to_numpy()
+                    y_values = dormancy_ref_data.iloc[:, 1].to_numpy()
+                    ref_dormancy_line, = ax.plot(x_values, y_values, '-.', color=dormancy_color,
+                                               linewidth=2, label="Dormancy (Ref)")
+                except Exception as e:
+                    print(f"Warning: Could not load reference dormancy data: {e}")
+
+        # Add direction arrows to each line
+        # For discharge (about 1/3 along the path)
+        if len(scenario_data['discharge']['temperatures']) > 10:
+            idx = len(scenario_data['discharge']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['discharge']['temperatures'][idx],
+                               scenario_data['discharge']['densities'][idx]),
+                       xytext=(scenario_data['discharge']['temperatures'][idx-5],
+                               scenario_data['discharge']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=discharge_color, lw=1.5))
+
+        # For refuel (about 1/3 along the path)
+        if len(scenario_data['refuel']['temperatures']) > 10:
+            idx = len(scenario_data['refuel']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['refuel']['temperatures'][idx],
+                               scenario_data['refuel']['densities'][idx]),
+                       xytext=(scenario_data['refuel']['temperatures'][idx-5],
+                               scenario_data['refuel']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=refuel_color, lw=1.5))
+
+        # For dormancy (about 1/3 along the path)
+        if len(scenario_data['dormancy']['temperatures']) > 10:
+            idx = len(scenario_data['dormancy']['temperatures']) // 3
+            ax.annotate('', xy=(scenario_data['dormancy']['temperatures'][idx],
+                               scenario_data['dormancy']['densities'][idx]),
+                       xytext=(scenario_data['dormancy']['temperatures'][idx-5],
+                               scenario_data['dormancy']['densities'][idx-5]),
+                       arrowprops=dict(arrowstyle='->', color=dormancy_color, lw=1.5))
+
+        # Optional: Add saturation line
+        saturation_line = None
+        critical_point = None
+        T_crit = None
+        rho_crit = None
+        if include_saturation_line:
+            # Get critical point data
+            try:
+                from CoolProp.CoolProp import PropsSI
+                fluid = 'hydrogen'  # Use the fluid defined in hydrogen_retrievers.py
+                T_triple = PropsSI('Ttriple', fluid)
+                T_crit = PropsSI('Tcrit', fluid)
+                rho_crit = PropsSI('rhocrit', fluid)  # Critical density
+
+                # Create temperature range from triple point to critical point
+                # but limited to our plot range
+                temps = np.linspace(
+                    max(temperature_range[0], T_triple),
+                    min(temperature_range[1], T_crit),
+                    100
+                )
+
+                # Create complete saturation curve
+                sat_temps = []
+                sat_densities = []
+
+                # First add the saturated liquid branch (bottom to top)
+                for temp in temps:
+                    try:
+                        # Get saturated liquid density (Q=0)
+                        density = PropsSI('D', 'T', temp, 'Q', 0, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Then add the saturated vapor branch (top to bottom)
+                for temp in reversed(temps):
+                    try:
+                        # Get saturated vapor density (Q=1)
+                        density = PropsSI('D', 'T', temp, 'Q', 1, fluid)
+                        sat_temps.append(temp)
+                        sat_densities.append(density)
+                    except Exception:
+                        pass
+
+                # Plot the complete saturation dome in light grey
+                if len(sat_temps) > 0:
+                    saturation_line, = ax.plot(sat_temps, sat_densities, '--', color=self.palette[3],
+                            linewidth=1.5, label="Saturation line")
+
+                # Mark critical point
+                crit_color = self.palette[1] if len(self.palette) > 1 else self.palette[0]
+                critical_point, = ax.plot(T_crit, rho_crit, 'o', color=crit_color, markersize=8,
+                                        label=f'Critical Point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
+
+            except Exception as e:
+                print(f"Warning: Could not create saturation line: {e}")
+
+        # Optional: Add isobar lines
+        isobar_line = None
+        if include_isobars:
+            # Define key pressure levels in bar
+            pressure_levels = [15, 25, 400, 450]
+
+            # Create temperature points
+            temps = np.linspace(temperature_range[0], temperature_range[1], 100)
+
+            for pressure in pressure_levels:
+                pressure_pa = pressure * 1e5  # Convert bar to Pa
+                densities = []
+
+                for temp in temps:
+                    try:
+                        # Calculate density at this temperature and pressure
+                        density = PropsSI('D', 'T', temp, 'P', pressure_pa, 'Hydrogen')
+                        densities.append(density)
+                    except:
+                        densities.append(np.nan)
+
+                # Remove NaN values
+                valid_indices = ~np.isnan(densities)
+                valid_temps = temps[valid_indices]
+                valid_densities = np.array(densities)[valid_indices]
+
+                if len(valid_temps) > 0:
+                    # Plot isobar line with dotted light grey
+                    isobar_line, = ax.plot(valid_temps, valid_densities, ':', color=self.palette[4], alpha=0.7, linewidth=1)
+
+                    # Add pressure labels at right edge of plot (1mm from edge)
+                    if len(valid_temps) > 0:
+                        # Find the rightmost point of the isobar line
+                        right_idx = -1  # Last point
+                        right_temp = valid_temps[right_idx]
+                        right_density = valid_densities[right_idx]
+
+                        # Position label at right edge with 1mm spacing (~1K from right edge)
+                        label_x = temperature_range[1] - 1.0  # 1K from right edge
+
+                        ax.annotate(f"{pressure} bar",
+                                  xy=(right_temp, right_density),
+                                  xytext=(label_x, right_density),
+                                  arrowprops=dict(arrowstyle='->', color='black', lw=1, alpha=0.8),
+                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                                           edgecolor='black', alpha=0.95),
+                                  fontsize=10, ha='right', va='center')
+
+        # Mark starting points of each scenario with X
+        starting_point = None
+        if len(scenario_data['discharge']['temperatures']) > 0:
+            starting_point, = ax.plot(scenario_data['discharge']['temperatures'][0],
+                    scenario_data['discharge']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2, label='Starting point')
+
+        if len(scenario_data['refuel']['temperatures']) > 0:
+            ax.plot(scenario_data['refuel']['temperatures'][0],
+                    scenario_data['refuel']['densities'][0],
+                    'o', color=refuel_color, markersize=8, markerfacecolor='none', markeredgewidth=2)
+
+        if len(scenario_data['dormancy']['temperatures']) > 0:
+            ax.plot(scenario_data['dormancy']['temperatures'][0],
+                    scenario_data['dormancy']['densities'][0],
+                    'x', color='black', markersize=8, markeredgewidth=2)
+
+        # Create a proper legend with actual markers
+        legend_elements = [
+            discharge_line,
+            refuel_line,
+            dormancy_line
+        ]
+
+        legend_labels = ['Discharge', 'Refuelling', 'Dormancy']
+
+        # Add reference data lines to legend if they exist
+        if include_ref_data:
+            if ref_discharge_line is not None:
+                legend_elements.append(ref_discharge_line)
+                legend_labels.append('Discharge (ref)')
+
+            if ref_refuel_line is not None:
+                legend_elements.append(ref_refuel_line)
+                legend_labels.append('Refuelling (ref)')
+
+            if ref_dormancy_line is not None:
+                legend_elements.append(ref_dormancy_line)
+                legend_labels.append('Dormancy (ref)')
+
+        if saturation_line is not None:
+            legend_elements.append(saturation_line)
+            legend_labels.append('Saturation line')
+
+        if critical_point is not None:
+            legend_elements.append(critical_point)
+            legend_labels.append(f'Critical point ({T_crit:.1f} K, {rho_crit:.1f} kg/m³)')
+
+        if isobar_line is not None:
+            legend_elements.append(isobar_line)
+            legend_labels.append('Isobars')
+
+        if starting_point is not None:
+            legend_elements.append(starting_point)
+            legend_labels.append('Starting point')
+
+        legend = ax.legend(legend_elements, legend_labels,
+                           loc='center right', fontsize=16, frameon=True, fancybox=True,
+                                 shadow=True, framealpha=0.9, edgecolor='black')
+
+        # Set labels and limits
+        ax.set_xlabel('Temperature [K]')
+        ax.set_ylabel('Density [g/L]')
+        ax.set_xlim(temperature_range)
+        ax.set_ylim(density_range)
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        fig.savefig('density_temperature_combined_bw.png', dpi=900)
+
+        return fig
+
+    def plot_heat_exchanger_requirements_bw(self, heat_flow_data, scenario_name=None,
+                                         ihex_data=None, ohex_data=None, plot_total=True, figsize=(10, 6)):
+        """
+        Plot heat exchanger requirements over time using greyscale styling.
+        This is the black and white version of plot_heat_exchanger_requirements.
+
+        Args:
+            heat_flow_data: Dictionary containing heat flow data from simulation results
+                           Expected keys: 't', 'qdot_disch', 'qdot_ohex'
+            scenario_name: Optional scenario name for title
+            ihex_data: Optional separate IHEX data (time, heat_flow) tuple
+            ohex_data: Optional separate OHEX data (time, heat_flow) tuple for future use
+            plot_total: Boolean flag to plot total heat flow requirement (IHEX + OHEX) as dashed line
+            figsize: Figure size tuple (width, height)
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style
+
+        # Apply consistent greyscale styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Convert time from seconds to hours for consistent plotting
+        SECONDS_TO_HOURS = 1 / 3600
+
+        # Greyscale colors
+        ihex_color = self.palette[0]    # Black for IHEX
+        ohex_color = self.palette[1]    # Dark grey for OHEX
+        total_color = self.palette[2]   # Medium grey for total
+
+        # Plot IHEX heat flow requirement (Qdot_disch)
+        if ihex_data is not None:
+            # Use provided separate IHEX data
+            time_hours, ihex_heat_flow = ihex_data
+            ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
+                    label="IHEX heat flow requirement", linewidth=2)
+        elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+            # Use data from simulation results
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
+                    label="IHEX heat flow requirement", linewidth=2)
+
+        # Plot OHEX heat flow requirement
+        ohex_plotted = False
+        ohex_values = None
+        if ohex_data is not None:
+            # Use provided separate OHEX data
+            time_hours_ohex, ohex_heat_flow = ohex_data
+            ohex_heat_flow_kw = [q / 1000 for q in ohex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours_ohex, ohex_heat_flow_kw, '-', color=ohex_color,
+                    label="OHEX heat flow requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = ohex_heat_flow_kw
+        elif 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
+            # Use data from simulation results (only if non-zero values exist)
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+            ax.plot(time_hours, ohex_heat_flow_kw, '-', color=ohex_color,
+                    label="OHEX heat flow requirement", linewidth=2)
+            ohex_plotted = True
+            ohex_values = ohex_heat_flow_kw
+
+        # Plot total heat flow requirement (IHEX + OHEX) if requested and both curves exist
+        if plot_total:
+            ihex_values_kw = None
+            total_time_hours = None
+
+            # Get IHEX values and convert to kW
+            if ihex_data is not None:
+                total_time_hours, ihex_values = ihex_data
+                ihex_values_kw = [q / 1000 for q in ihex_values]  # Convert W to kW
+            elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+                total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                ihex_values_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+
+            # Get OHEX values for total calculation (already converted to kW above if plotted)
+            ohex_values_kw = None
+            if ohex_values is not None:
+                # ohex_values is already in kW from the plotting section above
+                ohex_values_kw = ohex_values
+            elif 'qdot_ohex' in heat_flow_data:
+                ohex_values_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+
+            # Calculate and plot total if we have both datasets
+            if ihex_values_kw is not None and ohex_values_kw is not None and len(ihex_values_kw) == len(ohex_values_kw):
+                total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values_kw)]
+                ax.plot(total_time_hours, total_heat_flow, '--', color=total_color,
+                        label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        # title = "Heat Exchanger Requirements"
+        # if scenario_name:
+        #     title += f" - {scenario_name.capitalize()}"
+        # ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Heat Flow Requirement [kW]")
+
+        # Add legend if we have data to plot
+        if len(ax.get_lines()) > 1:  # More than just the reference line
+            ax.legend(loc='best', fontsize=16, frameon=True, fancybox=True,
+                                 shadow=True, framealpha=0.9, edgecolor='black')
+
+        # Apply grid
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+
+        return fig
+
+    def plot_heat_exchanger_requirements_with_reference_bw(self, heat_flow_data, scenario_name=None,
+                                                          ihex_data=None, reference_data=None,
+                                                          suppress_ohex_total=False, figsize=(10, 6)):
+        """
+        Plot heat exchanger requirements over time with optional reference data using greyscale styling.
+        This is the black and white version of plot_heat_exchanger_requirements_with_reference.
+
+        Args:
+            heat_flow_data: Dictionary containing heat flow data from simulation results
+                           Expected keys: 't', 'qdot_disch', 'qdot_ohex'
+            scenario_name: Optional scenario name for title
+            ihex_data: Optional separate IHEX data (time, heat_flow) tuple
+            reference_data: Optional reference data tuple (time_hours, heat_flow_kw)
+            suppress_ohex_total: If True, only show IHEX curves (actual and reference)
+            figsize: Figure size tuple (width, height)
+
+        Returns:
+            Matplotlib figure
+        """
+        from plotting.plot_style_sb import configure_plot_style
+
+        # Apply consistent greyscale styling
+        configure_plot_style(font="Cambria", palette="delft", style="whitegrid", context="paper")
+
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Convert time from seconds to hours for consistent plotting
+        SECONDS_TO_HOURS = 1 / 3600
+
+        # Greyscale colors
+        ihex_color = self.palette[0]        # Black for IHEX
+        reference_color = self.palette[1]   # Dark grey for reference
+        ohex_color = self.palette[2]        # Medium grey for OHEX
+        total_color = self.palette[3]       # Light grey for total
+
+        # Plot IHEX heat flow requirement (Qdot_disch) — no markers
+        if ihex_data is not None:
+            # Use provided separate IHEX data
+            time_hours, ihex_heat_flow = ihex_data
+            ihex_heat_flow_kw = [q / 1000 for q in ihex_heat_flow]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
+                    label="IHEX heat flow requirement", linewidth=2)
+        elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+            # Use data from simulation results
+            time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+            ihex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+            ax.plot(time_hours, ihex_heat_flow_kw, '-', color=ihex_color,
+                    label="IHEX heat flow requirement", linewidth=2)
+
+        # Plot reference data if provided — no markers
+        if reference_data is not None:
+            ref_time_hours, ref_heat_flow_kw = reference_data
+            ax.plot(ref_time_hours, ref_heat_flow_kw, '--', color=reference_color,
+                    label="IHEX heat flow requirement (ref)", linewidth=2, alpha=0.8)
+
+        # Only plot OHEX and total if not suppressed
+        if not suppress_ohex_total:
+            # Plot OHEX heat flow requirement
+            ohex_plotted = False
+            ohex_values = None
+            if 'qdot_ohex' in heat_flow_data and any(q != 0.0 for q in heat_flow_data['qdot_ohex']):
+                # Use data from simulation results (only if non-zero values exist)
+                time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                ohex_heat_flow_kw = [q / 1000 for q in heat_flow_data['qdot_ohex']]  # Convert W to kW
+                ax.plot(time_hours, ohex_heat_flow_kw, '-', color=ohex_color,
+                        label="OHEX Heat Flow Requirement", linewidth=2)
+                ohex_plotted = True
+                ohex_values = ohex_heat_flow_kw
+
+            # Plot total heat flow requirement (IHEX + OHEX) if we have both datasets
+            if ohex_plotted:
+                ihex_values_kw = None
+                total_time_hours = None
+
+                # Get IHEX values and convert to kW
+                if ihex_data is not None:
+                    total_time_hours, ihex_values = ihex_data
+                    ihex_values_kw = [q / 1000 for q in ihex_values]  # Convert W to kW
+                elif 'qdot_disch' in heat_flow_data and len(heat_flow_data['qdot_disch']) > 0:
+                    total_time_hours = [t * SECONDS_TO_HOURS for t in heat_flow_data['t']]
+                    ihex_values_kw = [q / 1000 for q in heat_flow_data['qdot_disch']]  # Convert W to kW
+
+                # Calculate and plot total if we have both datasets — no markers
+                if ihex_values_kw is not None and ohex_values is not None and len(ihex_values_kw) == len(ohex_values):
+                    total_heat_flow = [ihex + ohex for ihex, ohex in zip(ihex_values_kw, ohex_values)]
+                    ax.plot(total_time_hours, total_heat_flow, '--', color=total_color,
+                            label="Total Heat Flow Requirement", linewidth=2, alpha=0.8)
+
+        # Add a zero reference line
+        ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+
+        # Set labels and title
+        # title = "Heat Exchanger Requirements"
+        # if scenario_name:
+        #     title += f" - {scenario_name.capitalize()}"
+        # ax.set_title(title)
+        ax.set_xlabel("Time [hour]")
+        ax.set_ylabel("Heat Flow Requirement [kW]")
+
+        # Add legend if we have data to plot
+        if len(ax.get_lines()) > 1:  # More than just the reference line
+            ax.legend(loc='best', fontsize=16, frameon=True, fancybox=True,
+                                 shadow=True, framealpha=0.9, edgecolor='black')
+
+        # Apply grid
+        ax.grid(True, alpha=0.3)
+
+        # Apply tight layout
+        fig.tight_layout()
+
+        fig.savefig('heat_exchanger_requirements_bw.png', dpi=900)
+
+        return fig

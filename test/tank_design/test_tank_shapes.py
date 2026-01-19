@@ -53,7 +53,7 @@ class TestCylindricalBody(unittest.TestCase):
             self.operating_pressure * self.radius
             / self.material.failure_stress
         )
-        volume = thickness * self.cylinder.surface_area        
+        volume = thickness * self.cylinder.surface_area
         expected_value = volume * self.material.density
         actual_value = self.cylinder.structural_mass
         self.assertEqual(expected_value, actual_value)
@@ -129,7 +129,7 @@ class TestCylindricalBody(unittest.TestCase):
         self.assertTrue(
             "Fuel height higher than tank..." in str(context.exception)
         )
-    
+
     def test_compute_fuel_amplitude_angle(self):
 
         # No fuel present
@@ -195,14 +195,14 @@ class TestSphericalEndCap(unittest.TestCase):
         self.end_cap = SphericalEndCap(
             radius, material, operating_pressure
         )
-    
+
     def test_surface_area(self):
 
         expected_value = 39.26991
         self.assertAlmostEqual(
             self.end_cap.surface_area, expected_value, places=5
         )
-    
+
     def test_volume(self):
 
         expected_value = 32.72492
@@ -248,7 +248,7 @@ class TestSphericalEndCap(unittest.TestCase):
         self.assertTrue(
             "Fuel height higher than diameter..."
             in str(context.exception)
-        )  
+        )
 
     def test_compute_wetted_surface(self):
 
@@ -387,7 +387,7 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
         self.tank = CylindricalTankSphericalCaps(
             self.radius, total_length, material, operating_pressure
         )
-    
+
     def test_compute_fuel_height(self):
 
         fuel_volume = self.tank.volume / 2
@@ -488,7 +488,7 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
         )
 
     def test_compute_zone_1_area(self):
-        
+
         # Test for normal case where the fuel is in zone 1
         fuel_height = self.radius * 2 - self.tank.outer_segment / 2
         cap_area = self.tank.end_cap.compute_wetted_surface(
@@ -555,7 +555,7 @@ class TestCylindricalTankSphericalCaps(unittest.TestCase):
             self.tank.compute_zone_3_area(fuel_height), expected_area
         )
 
-        # Case where the fuel is only in zone 2 
+        # Case where the fuel is only in zone 2
         self.assertEqual(
             self.tank.compute_zone_3_area(
                 self.tank.outer_segment

@@ -85,7 +85,7 @@ class FoamInsulation(Insulation):
         return (
             thermal_conductivity / math.log(outer_radius / inner_radius)
         )
-    
+
     def compute_thermal_resistances(
         self,
         temperatures: list[float],
@@ -179,7 +179,7 @@ class VariableFoamInsulation(FoamInsulation):
         with self.path.open("r") as file:
             self.data: dict = json.load(file)
         return self.data
-    
+
     def _extract_density(self):
         self.density = self.data.get("density")
         return self.density
@@ -223,7 +223,7 @@ class VariableFoamInsulation(FoamInsulation):
 
 
 class VariableFoamInsulationLinearInterpolated(VariableFoamInsulation):
-    
+
     def __init__(self, name: str, thickness: float) -> None:
         self.name = name
         self.thickness = thickness

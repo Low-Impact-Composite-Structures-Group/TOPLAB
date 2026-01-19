@@ -20,7 +20,7 @@ class TestSinglePhaseRequester(unittest.TestCase):
         )
         expected_density = 63.68658870474203
         self.assertEqual(expected_density, density)
-    
+
     def test_get_hydrogen_properties(self):
 
         self.retriever.get_hydrogen_properties(
@@ -116,9 +116,9 @@ class TestHydrogenRequesterFactory(unittest.TestCase):
 
     def setUp(self) -> None:
         self.factory = HydrogenRequesterFactory()
-    
+
     def test_get_hydrogen_retriever(self):
-        
+
         retriever = self.factory.get_hydrogen_retriever("twophase")
         self.assertIsInstance(retriever, TwoPhaseRequester)
 

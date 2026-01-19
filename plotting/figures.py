@@ -37,7 +37,7 @@ class GeneralFigure:
     def format_ticks(self):
         ...
 
-    @abstractmethod    
+    @abstractmethod
     def format_labels(self):
         ...
 
@@ -66,7 +66,7 @@ class SingleFigure(GeneralFigure):
     def plot_data(self):
         self.plots = [
             self.ax1.plot(
-                line.x_data, 
+                line.x_data,
                 line.y_data,
                 label=line.label,
                 marker=line.marker

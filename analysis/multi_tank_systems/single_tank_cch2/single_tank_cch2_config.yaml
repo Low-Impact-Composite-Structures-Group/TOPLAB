@@ -1,0 +1,149 @@
+analysis:
+  name: Single Tank CCH2 Benchmark
+  description: Cryocompressed hydrogen single tank validation case using orchestrated
+    framework
+  version: '1.0'
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: CcH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 40000000.0
+      density: 80.0
+      temperature: 45.0
+    operating_limits:
+      minimum_pressure: 1500000.0
+      venting_pressure: 45000000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+        thickness: calculated
+      insulation:
+        thickness: 0.05
+        heat_transfer_coefficient: 0.025
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: false
+    plotting: {}
+  edges: []
+mission:
+  type: discharge
+  profile: csv
+  parameters:
+    csv_file: ../../../src/multi_tank/missions/atr72_fuel_flows.csv
+    cruise_altitude: 7010.0
+    standard_temperature: 273.15
+    mach_number: 0.0
+    phase: gas
+  ambient_temperature: 288.15
+  assigned_to_node: 1
+solver:
+  method: LSODA
+  rtol: 1e-6
+  atol: 1e-9
+  time_step: 0.1
+  max_step: 10.0
+  custom_config: false
+output:
+  identifier: single_tank_cch2
+  save_plots: true
+  plot_formats:
+  - png
+  - pdf
+  - pgf
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
+  plots:
+    figure_prefix: single_tank_cch2
+    style:
+      use_greyscale: true
+      font:
+        master_size: 16
+        legend_size: 16
+        font_name: Cambria
+    reference_lines:
+      pressure:
+        show_p_min: true
+        show_p_vent: true
+      temperature:
+        show_t_ambient: false
+      density:
+        show_stopping_density: false
+    tank_states:
+      enabled: true
+      figsize:
+      - 12
+      - 10
+      filename: evolution
+      event_lines:
+      - time: 0.185
+        label: IHEX activation
+        y_position: 0.75
+      xlim: null
+      ylim_pressure: null
+      ylim_temperature: null
+      ylim_density: null
+      legend_locations:
+        pressure: best
+        temperature: best
+        density: best
+    fuel_flow_profile:
+      enabled: true
+      figsize:
+      - 14
+      - 10
+      filename: fuel_flow_profile
+    density_temperature:
+      enabled: true
+      figsize:
+      - 12
+      - 8
+      filename: density_temperature
+      isobar_pressures:
+      - 450
+      - 400
+      - 15
+      - 5
+      show_reference_pressures: true
+      include_saturation_line: true
+      include_isobars: true
+      arrow_position: 0.0
+      arrow_size: 1.0
+      valve_marker_size: 8.0
+      legend_location: center right
+    mass_flows:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: mass_flows
+      include_venting_flow: true
+      xlim: null
+      ylim: null
+      legend_location: best
+    heat_exchanger_requirements:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: hex
+      include_ihex: true
+      include_ohex: true
+      ohex_target_temperature: 200.0
+      ohex_target_pressure: 20e5
+      include_total: true
+      xlim: null
+      ylim: null
+      legend_location: best

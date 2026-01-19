@@ -60,7 +60,7 @@ class GravimetricEfficiency(GravimetricEfficiencyComputer):
     def compute_system_mass(
         self, tank: FuelTank, insulation: Insulation
     ) -> float:
-        
+
         mass = tank.structural_mass
 
         if insulation is not None:
@@ -77,7 +77,7 @@ class VolumetricEfficiencyComputer(Protocol):
     ) -> float:
         ...
 
-    
+
 class VolumetricEfficiency(VolumetricEfficiencyComputer):
 
     def compute_efficiency(
@@ -88,13 +88,13 @@ class VolumetricEfficiency(VolumetricEfficiencyComputer):
         fuel_volume = tank.volume
         system_volume = self.compute_system_volume(tank, insulation)
         return fuel_volume / system_volume
-    
+
     def compute_system_volume(
         self,
         tank: FuelTank,
         insulation: Insulation
     ):
-        
+
         volume = tank.volume + tank.structural_volume
         if insulation is not None:
             volume += insulation.compute_volume(tank.surface_area)
@@ -147,7 +147,7 @@ class HexagonVolumetricEfficiency(SquareVolumetricEfficiency):
     ):
         radius = self.compute_effective_radius(tank, insulation)
         return 2 * math.sqrt(3) * radius ** 2
-    
+
 
 class GravimetricEfficiencyComputerFactory():
 
@@ -164,12 +164,12 @@ class GravimetricEfficiencyComputerFactory():
 
         if comp is None:
             raise ValueError(
-                f"{computer} is an invalid gravimetric efficiency computer.\n" 
+                f"{computer} is an invalid gravimetric efficiency computer.\n"
                 f"Available computers are: {self._available}."
             )
-    
+
         return comp
-    
+
 
 class VolumetricEfficiencyComputerFactory():
 
@@ -188,10 +188,10 @@ class VolumetricEfficiencyComputerFactory():
 
         if comp is None:
             raise ValueError(
-                f"{computer} is an invalid volumetric efficiency computer.\n" 
+                f"{computer} is an invalid volumetric efficiency computer.\n"
                 f"Available computers are: {self._available}."
             )
-    
+
         return comp
 
 

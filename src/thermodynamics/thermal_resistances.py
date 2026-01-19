@@ -31,8 +31,8 @@ class ThermalResistance:
     def value(self) -> float:
         """Compute the value of the thermal resistance.
 
-        This also accounts for null values in the surface area or the 
-        heat transfer coefficient, which would lead to infinite 
+        This also accounts for null values in the surface area or the
+        heat transfer coefficient, which would lead to infinite
         resistance.
 
         Returns:
@@ -59,7 +59,7 @@ class ResistanceCoupling(Protocol):
         """Compute the equivalent resistance of the resistances.
 
         Args:
-            resistances (List[float]): List with values of the single 
+            resistances (List[float]): List with values of the single
             resistances.
         """
         pass

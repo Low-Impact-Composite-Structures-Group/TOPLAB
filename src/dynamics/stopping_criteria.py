@@ -37,9 +37,9 @@ class TankIsEmpty(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        
+
         return (
-            fuel_tank_state.fill <= target_state.min_fill 
+            fuel_tank_state.fill <= target_state.min_fill
             and fuel_tank_state.phase == "twophase"
         )
 
@@ -113,7 +113,7 @@ class StoppingCriteriaFactory:
 
         if criterion is not None:
             return criterion
-        
+
         raise ValueError(
             f"'{type}' is not a valid stopping criterion.\n"
             f"Available criteria are: {self._available}"

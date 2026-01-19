@@ -62,7 +62,7 @@ class CompositeModel(StructuralModel):
     @staticmethod
     def hoop_stress(pressure: float, radius: float) -> float:
         return pressure * radius
-    
+
     @staticmethod
     def meridional_stress(pressure: float, radius: float) -> float:
         return pressure * radius / 2

@@ -1,0 +1,20 @@
+name: python-h2-dev
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - pybind11
+  - jupyter
+  - matplotlib==3.5.1
+  - pandas
+  - meshio
+  - numpy
+  - pylint
+  - pytest
+  - regex
+  - rich
+  - scipy
+  - yaml
+  - coolprop
+  - optuna
+  - networkx

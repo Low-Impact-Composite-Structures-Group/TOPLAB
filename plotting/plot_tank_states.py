@@ -104,7 +104,7 @@ def plot_tank_efficiencies(
         Line(
             x_data,
             [
-                performance.gravimetric_efficiency 
+                performance.gravimetric_efficiency
                 for performance in performances
             ],
             "Gravimetric",
@@ -113,7 +113,7 @@ def plot_tank_efficiencies(
         Line(
             x_data,
             [
-                performance.volumetric_efficiency 
+                performance.volumetric_efficiency
                 for performance in performances
             ],
             "Volumetric",

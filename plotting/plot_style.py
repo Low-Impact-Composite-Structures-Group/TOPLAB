@@ -108,7 +108,7 @@ class MyFigure:
         xticks = TickFormatter(self.y_data[0]).ticks
         self.ax.set_yticks(xticks)
         self.ax.set_ylim((xticks[0], xticks[-1]))
-  
+
 
 @dataclass
 class AxisValue:
@@ -186,7 +186,7 @@ class TickFormatter:
         if self.upper.order_of_magnitude == 2:
             return 50
         return 10 ** (self.upper.order_of_magnitude - 1)
-    
+
     @property
     def ticks(self):
         ticks = [self.lower.value]

@@ -21,7 +21,7 @@ def euler_method(
     """Euler method as explicit multistep method.
 
     Args:
-        derivative_value (float): value of the derivative at the 
+        derivative_value (float): value of the derivative at the
         time instance.
         function_value (float): value of the function at the time
         instance.
@@ -38,11 +38,11 @@ def two_step_adam_bashforth(
     function_value: float,
     timestep: float
 ) -> float:
-    """Second step of the two step Adam-Bashforth method to compute the 
+    """Second step of the two step Adam-Bashforth method to compute the
     value in a forward explicit method.
 
     Args:
-        derivative_values (List[float]): list of with the previous 
+        derivative_values (List[float]): list of with the previous
         derivative values. Note that it is assumed that only the desired
         values of the are provided.
         function_value (float): previous value of the function.
@@ -63,11 +63,11 @@ def three_step_adam_bashforth(
     function_value: float,
     timestep: float
 ) -> float:
-    """Third step of the two step Adam-Bashforth method to compute the 
+    """Third step of the two step Adam-Bashforth method to compute the
     value in a forward explicit method.
 
     Args:
-        derivative_values (List[float]): list of with the previous 
+        derivative_values (List[float]): list of with the previous
         derivative values. Note that it is assumed that only the desired
         values of the are provided.
         function_value (float): previous value of the function.
@@ -89,11 +89,11 @@ def four_step_adam_bashforth(
     function_value: float,
     timestep: float
 ) -> float:
-    """Fourth step of the two step Adam-Bashforth method to compute the 
+    """Fourth step of the two step Adam-Bashforth method to compute the
     value in a forward explicit method.
 
     Args:
-        derivative_values (List[float]): list of with the previous 
+        derivative_values (List[float]): list of with the previous
         derivative values. Note that it is assumed that only the desired
         values of the are provided.
         function_value (float): previous value of the function.
@@ -183,7 +183,7 @@ class AdamBashforthMethod(MultistepMethod):
     ) -> float:
         return adam_bashforth(derivatives, current_value, self.timestep)
 
-        
+
 
 class MultistepMethodFactory:
 
@@ -195,7 +195,7 @@ class MultistepMethodFactory:
     @property
     def _available(self):
         return ", ".join(self._methods.keys())
-    
+
     def create_method(self, type: str, timestep: float) -> MultistepMethod:
         initialiser = self._methods.get(type)
 
@@ -204,7 +204,7 @@ class MultistepMethodFactory:
                 f"'{type}' is an invalid stepping method.\n"
                 f"Available methods are: {self._available}"
             )
-        
+
         return initialiser(timestep)
 
 
