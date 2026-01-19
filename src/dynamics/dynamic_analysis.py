@@ -542,22 +542,25 @@ class MissionAnalysis:
         thermal_model: ThermodynamicModel,
         heat_flux_factor: float,
         thermal_capacity_convergence: bool = False,
+        user_update: bool = False,
     ) -> TankStates:
 
-        # With NIST materials, thermal capacity is directly temperature-dependent
-        # No iteration needed - just run the analysis once
-        print("Using NIST materials - no thermal capacity iteration required")
+        # Keep stdout noise opt-in (some analyses run many simulations).
+        if user_update and not thermal_capacity_convergence:
+            print("Thermal capacity convergence disabled; running single pass")
 
         # Define initial state of the tank
         initial = initial_state
         tank_states = TankStates(list(), multistep_method.timestep)
 
         for mission_section in mission.sections:
-            section_string = mission_section.fuel_flow_key  # Access the key associated with the fuel flow
-            if section_string == None:
-                print(f"Now calculating singular mission section")
-            else:
-                print(f"Now calculating mission section {section_string}")
+            if user_update:
+                section_string = mission_section.fuel_flow_key
+                if section_string is None:
+                    print("Now calculating singular mission section")
+                else:
+                    print(f"Now calculating mission section {section_string}")
+
             tank_states += MissionSectionAnalysis().analyse_section(
                 tank,
                 initial,
@@ -567,14 +570,14 @@ class MissionAnalysis:
                 multistep_method,
                 dynamic_model_factory,
                 thermal_model,
-                heat_flux_factor
+                heat_flux_factor,
             )
 
             initial = InitialState(
                 tank_states.last_pressure,
                 tank_states.last_temperature,
                 tank_states.last_fill,
-                multi_flow=getattr(initial, "multi_flow", False)
+                multi_flow=getattr(initial, "multi_flow", False),
             )
 
         # Set the final operating pressure for thermal capacity calculation
@@ -621,7 +624,7 @@ class SwitchMissionAnalysis:
                 tank_states.last_pressure,
                 tank_states.last_temperature,
                 tank_states.last_fill,
-                multi_flow=getattr(initial, "multi_flow", False)
+                multi_flow=getattr(initial, "multi_flow", False),
             )
 
         return tank_states
