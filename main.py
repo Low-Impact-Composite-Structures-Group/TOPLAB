@@ -1,6 +1,7 @@
 import os
 import yaml
 import pickle
+import inspect
 
 from typing import Protocol
 
@@ -49,7 +50,8 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
             print("Performing analysis...")
             data = analysis.perform_analysis(config)
             print("Analysis done!")
-            data["config"] = config
+            if data is None:
+                data = {}
         else:
             print("Opening pickle...")
             with open(pickle_path, "rb") as f:
@@ -58,8 +60,12 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
     else:
         data = analysis.perform_analysis(config)
 
-    # Add config to data, for completeness
-    data["config"] = config
+    if data is None:
+        data = {}
+
+    # Add config to data, for completeness (only when the result is a dict)
+    if isinstance(data, dict):
+        data["config"] = config
 
     user_input = input("Save to pickle? (y/n): ").lower()
     if user_input in ["y", "yes"]:
@@ -68,15 +74,35 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
             pickle.dump(data, f)
         print("Pickle saved!")
 
-    # Extract and plot
-    print("Extracting data...")
-    analysis.extract_data(data, store_path)
-    print("Data extracted!")
-    print("Plotting...")
-    fig: Figure = analysis.plot_results(store_path, fig_path, config.get("plotting"))
-    print("Plotting completed!")
-    if fig is not None:
-        fig.show()
+    # Extract and plot (optional for lightweight example modules)
+    extract_data = getattr(analysis, "extract_data", None)
+    if callable(extract_data):
+        print("Extracting data...")
+        # Backward-compatible calling convention:
+        # - Newer modules: extract_data(data: dict, store_path: str)
+        # - Legacy modules: extract_data(pickle_path: str, store_path: str)
+        sig = inspect.signature(extract_data)
+        params = list(sig.parameters.values())
+
+        if len(params) >= 2:
+            first_param_name = params[0].name
+            if first_param_name in {"pickle_path", "pkl_path", "picklefile"}:
+                extract_data(pickle_path, store_path)
+            else:
+                extract_data(data, store_path)
+        elif len(params) == 1:
+            extract_data(data)
+        else:
+            extract_data()
+        print("Data extracted!")
+
+    plot_results = getattr(analysis, "plot_results", None)
+    if callable(plot_results):
+        print("Plotting...")
+        fig: Figure = plot_results(store_path, fig_path, config.get("plotting"))
+        print("Plotting completed!")
+        if fig is not None:
+            fig.show()
 
 
 if __name__ == "__main__":
