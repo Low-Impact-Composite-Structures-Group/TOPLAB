@@ -131,6 +131,42 @@ class TargetState:
     mass: float
     density: float = None
 
+    # Optional targets for refuel-style criteria
+    target_fill: float = None
+    target_mass: float = None
+
+    @property
+    def min_fill(self) -> float:
+        return self.fill
+
+    @property
+    def min_mass(self) -> float:
+        return self.mass
+
+
+# Backwards-compatible names expected by older analyses/examples
+InitialConditions = InitialState
+
+
+@dataclass
+class OperationalEnvelope:
+    max_pressure: float = None
+    min_pressure: float = None
+    min_temperature: float = None
+    min_fill: float = None
+    min_mass: float = None
+    density: float = None
+    target_fill: float = None
+    target_mass: float = None
+
+    @property
+    def fill(self) -> float:
+        return self.min_fill
+
+    @property
+    def mass(self) -> float:
+        return self.min_mass
+
 
 
 @dataclass
@@ -315,8 +351,8 @@ class TankState:
             phase_requester = PhaseRequester()
             natural_phase = phase_requester.get_fluid_phase(self.temperature, self.pressure)
 
-            # Debug: Always print the phase comparison
-            print(f"PHASE CHECK: current={self.phase}, natural={natural_phase}, P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
+            # Debug: print the phase comparison
+            # print(f"PHASE CHECK: current={self.phase}, natural={natural_phase}, P={self.pressure/1e5:.2f}bar, T={self.temperature:.2f}K")
 
             # Only transition if the natural phase is different from current phase
             if natural_phase != self.phase:

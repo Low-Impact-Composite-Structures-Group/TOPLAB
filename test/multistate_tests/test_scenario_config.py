@@ -28,7 +28,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_from_yaml(self):
         """Test ScenarioConfig can parse single_tank_cch2_config.yaml"""
-        config_path = project_root / "analysis" / "multi_tank_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         assert config_path.exists(), f"Test config file not found: {config_path}"
 
@@ -71,7 +71,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_validation(self):
         """Test ScenarioConfig validation catches errors"""
-        config_path = project_root / "analysis" / "multi_tank_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         # Should not raise for valid config
         scenario = ScenarioConfig.from_yaml(config_path)
@@ -79,7 +79,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_summary(self):
         """Test ScenarioConfig summary generation"""
-        config_path = project_root / "analysis" / "multi_tank_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         scenario = ScenarioConfig.from_yaml(config_path)
         summary = scenario.summary()

@@ -19,31 +19,31 @@ def _ensure_import_paths(repo_root: Path) -> None:
 
 @pytest.fixture(scope="session")
 def main_analysis_configs(repo_root: Path) -> dict[str, Path]:
-    """The five main analyses under analysis/multi_tank_systems (excluding single_tank_lh2)."""
+    """The main analyses under analysis/multistate_systems."""
     return {
         "single_tank_ch2": repo_root
         / "analysis"
-        / "multi_tank_systems"
+        / "multistate_systems"
         / "single_tank_ch2"
         / "single_tank_ch2_config.yaml",
         "single_tank_slh2": repo_root
         / "analysis"
-        / "multi_tank_systems"
+        / "multistate_systems"
         / "single_tank_slh2"
         / "single_tank_slh2_config.yaml",
         "single_tank_cch2": repo_root
         / "analysis"
-        / "multi_tank_systems"
+        / "multistate_systems"
         / "single_tank_cch2"
         / "single_tank_cch2_config.yaml",
         "coupled_ch2_cch2": repo_root
         / "analysis"
-        / "multi_tank_systems"
+        / "multistate_systems"
         / "coupled_ch2_cch2"
         / "coupled_ch2_cch2_config.yaml",
         "coupled_ch2_lh2": repo_root
         / "analysis"
-        / "multi_tank_systems"
+        / "multistate_systems"
         / "coupled_ch2_lh2"
         / "coupled_ch2_lh2_config.yaml",
     }
