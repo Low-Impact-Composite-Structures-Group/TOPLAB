@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol, Union, List, Optional
 
 from src.dynamics.stopping_criteria import NoFuelMass, TankIsEmpty
+from src.dynamics.stopping_criteria import LowerPressureReached, MaxPressureReached
 from src.dynamics.cryopump_model import CryoPumpModel
 from src.fluids.hydrogen_retrievers import SinglePhaseRequester, TwoPhaseRequester, HydrogenRetriever
 from src.mission.mission import Mission, MissionSection, InFlow
@@ -198,10 +200,12 @@ class MissionSectionAnalysis:
         Returns:
             The calculated enthalpy value (J/kg)
         """
-        # Get enthalpy from cryopump model with configurable parameters
-        # TODO: Extract cryopump parameters from mission configuration if available
-        enthalpy = CryoPumpModel.compute_pump_outlet_hydrogen(tank_pressure, tank_temperature)
-        return enthalpy
+        # Get outlet state from cryopump model and return its mass-specific enthalpy.
+        # NOTE: The cryopump model depends only on target outlet pressure.
+        from src.dynamics.cryopump_model import compute_pump_outlet_hydrogen
+
+        outlet_hydrogen = compute_pump_outlet_hydrogen(tank_pressure)
+        return float(getattr(outlet_hydrogen, "enthalpy", 0.0))
 
     @classmethod
     def compute_state_derivatives(
@@ -371,11 +375,11 @@ class MissionSectionAnalysis:
         )
 
         # Debug mass changes
-        if abs(new_mass - tank_states.last_state.fuel_mass) > 0.1:
-            print(f"WARNING: Large mass change: {new_mass - tank_states.last_state.fuel_mass:.3f}kg")
-            print(f"  Current: {tank_states.last_state.fuel_mass:.3f}kg → New: {new_mass:.3f}kg")
-            print(f"  Mass derivatives: {tank_states.last_state.derivatives.liquid_mass + tank_states.last_state.derivatives.gas_mass:.3f}kg/s")
-            print(f"  Timestep: {timestep}s")
+        # if abs(new_mass - tank_states.last_state.fuel_mass) > 0.1:
+        #     print(f"WARNING: Large mass change: {new_mass - tank_states.last_state.fuel_mass:.3f}kg")
+        #     print(f"  Current: {tank_states.last_state.fuel_mass:.3f}kg → New: {new_mass:.3f}kg")
+        #     print(f"  Mass derivatives: {tank_states.last_state.derivatives.liquid_mass + tank_states.last_state.derivatives.gas_mass:.3f}kg/s")
+        #     print(f"  Timestep: {timestep}s")
 
         return new_mass
     @classmethod
@@ -415,9 +419,15 @@ class MissionSectionAnalysis:
             multistep_method.timestep
         )
 
-        # Initial calculation of refuel enthalpy using our simplified cryopump model
-        enthalpy = cls.calculate_inflow_enthalpy(tank_states.last_state.pressure, tank_states.last_state.temperature)
-        print(f"Initial refuel enthalpy calculated: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar")
+        has_inflow = any(isinstance(flow, ConcreteInFlow) for flow in mission_section.fuel_flows)
+        if has_inflow:
+            enthalpy = cls.calculate_inflow_enthalpy(
+                tank_states.last_state.pressure,
+                tank_states.last_state.temperature,
+            )
+            print(
+                f"Initial refuel enthalpy calculated: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar"
+            )
 
         for section_iter in range(steps):
             # We don't need to update flow objects here anymore - we'll calculate the enthalpy
@@ -447,10 +457,15 @@ class MissionSectionAnalysis:
                     except Exception as e:
                         print(f"Could not update hydrogen object during transition: {e}")
 
-            # Print enthalpy updates occasionally for debugging
-            if section_iter > 0 and section_iter % 100 == 0:
-                enthalpy = cls.calculate_inflow_enthalpy(tank_states.last_state.pressure, tank_states.last_state.temperature)
-                print(f"Updated refuel enthalpy: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar at step {section_iter}")
+            # Print enthalpy updates occasionally for debugging (refuel only)
+            if has_inflow and section_iter > 0 and section_iter % 100 == 0:
+                enthalpy = cls.calculate_inflow_enthalpy(
+                    tank_states.last_state.pressure,
+                    tank_states.last_state.temperature,
+                )
+                print(
+                    f"Updated refuel enthalpy: {enthalpy:.0f} J/kg at tank pressure {tank_states.last_state.pressure/1e5:.2f}bar at step {section_iter}"
+                )
 
             cls.compute_state_derivatives(
                 tank,
@@ -525,7 +540,8 @@ class MissionAnalysis:
         multistep_method: MultistepMethod,
         dynamic_model_factory: DynamicModelFactory,
         thermal_model: ThermodynamicModel,
-        heat_flux_factor: float
+        heat_flux_factor: float,
+        thermal_capacity_convergence: bool = False,
     ) -> TankStates:
 
         # With NIST materials, thermal capacity is directly temperature-dependent
@@ -660,6 +676,116 @@ class DrainingAnalysis:
             thermal_model,
             heat_flux_factor
         )
+
+
+class SwitchPhaseDrainingAnalysis:
+
+    @staticmethod
+    def _define_flow_state(operating_envelope: TargetState, tank_states: TankStates) -> str:
+        """Choose which phase to drain to keep pressure within the envelope.
+
+        Heuristic (matches historical facade behavior):
+        - First segment drains liquid.
+        - If pressure drops below min -> drain liquid.
+        - If pressure rises above max -> drain gas.
+        - If within bounds -> keep draining liquid.
+        """
+        if len(tank_states.states) == 0:
+            return "liquid"
+
+        if operating_envelope.min_pressure is not None and tank_states.last_pressure < operating_envelope.min_pressure:
+            return "liquid"
+
+        if operating_envelope.max_pressure is not None and tank_states.last_pressure > operating_envelope.max_pressure:
+            return "gas"
+
+        return "liquid"
+
+    @staticmethod
+    def _with_outflow_phase(mission: Mission, phase: str) -> Mission:
+        new_mission = copy.deepcopy(mission)
+        for section in new_mission.sections:
+            for flow in getattr(section, "fuel_flows", []):
+                if hasattr(flow, "phase"):
+                    flow.phase = phase
+        return new_mission
+
+    @staticmethod
+    def _is_drained(target: TargetState, tank_states: TankStates) -> bool:
+        if len(tank_states.states) == 0:
+            return False
+
+        min_mass = getattr(target, "min_mass", None)
+        min_fill = getattr(target, "min_fill", None)
+        if min_mass is not None and tank_states.last_state.fuel_mass <= min_mass:
+            return True
+        if min_fill is not None and tank_states.last_fill <= min_fill:
+            return True
+        return False
+
+    @classmethod
+    def perform_analysis(
+        cls,
+        tank: FuelTank,
+        initial_state: InitialState,
+        mission: Mission,
+        operating_envelope: TargetState,
+        multistep_method: MultistepMethod,
+        dynamic_model_factory: DynamicModelFactory,
+        thermal_model: ThermodynamicModel,
+        heat_flux_factor: float,
+        max_iterations: int = 100,
+    ) -> TankStates:
+
+        # Build a TargetState from the operating envelope (supports both TargetState and OperationalEnvelope).
+        target = TargetState(
+            getattr(operating_envelope, "max_pressure", None),
+            getattr(operating_envelope, "min_pressure", None),
+            getattr(operating_envelope, "min_temperature", None),
+            getattr(operating_envelope, "min_fill", getattr(operating_envelope, "fill", None)),
+            getattr(operating_envelope, "min_mass", getattr(operating_envelope, "mass", None)),
+            density=getattr(operating_envelope, "density", None),
+            target_fill=getattr(operating_envelope, "target_fill", None),
+            target_mass=getattr(operating_envelope, "target_mass", None),
+        )
+
+        stopping_criteria: list[StoppingCriterion] = [
+            NoFuelMass(),
+            TankIsEmpty(),
+            MaxPressureReached(),
+            LowerPressureReached(),
+        ]
+
+        tank_states = TankStates(list(), multistep_method.timestep)
+        current_initial = initial_state
+
+        for _ in range(max_iterations):
+            flow_state = cls._define_flow_state(target, tank_states)
+            switched_mission = cls._with_outflow_phase(mission, flow_state)
+
+            tank_states += SwitchMissionAnalysis.perform_analysis(
+                tank,
+                current_initial,
+                switched_mission,
+                stopping_criteria,
+                target,
+                multistep_method,
+                dynamic_model_factory,
+                thermal_model,
+                heat_flux_factor,
+            )
+
+            if cls._is_drained(target, tank_states):
+                return tank_states
+
+            current_initial = InitialState(
+                tank_states.last_pressure,
+                tank_states.last_temperature,
+                tank_states.last_fill,
+                multi_flow=getattr(current_initial, "multi_flow", False),
+            )
+
+        raise ValueError("Exceeded maximum iterations in switch drain analysis")
 
  # TODO: add refuelling class here
 
