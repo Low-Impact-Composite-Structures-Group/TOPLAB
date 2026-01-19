@@ -30,6 +30,94 @@ AVERAGE_GROUND_MACH_NUMBER = (
 class Mission:
     sections: list[MissionSection]
 
+    @classmethod
+    def from_csv(
+        cls,
+        csv_path: str,
+        cruise_altitude: float = 7010.0,
+        standard_temperature: float = 273.15,
+        mach_number: float = 0.0,
+        phase: str = "gas",
+        ambient_temperature: float = 288.15,
+    ) -> "Mission":
+        """Create a Mission from a CSV time series of mass flow.
+
+        Expected columns (case-insensitive):
+        - "Time [hr]" (hours)
+        - "Mass flow rate [kg/s]" (kg/s, positive for consumption)
+
+        The returned mission is built as piecewise-linear segments between
+        successive sample points.
+        """
+
+        import csv
+        from pathlib import Path
+
+        csv_file = Path(csv_path)
+        if not csv_file.exists():
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        def _norm(header: str) -> str:
+            return "".join(ch for ch in header.strip().lower() if ch.isalnum())
+
+        with csv_file.open("r", newline="") as f:
+            reader = csv.reader(f)
+            try:
+                headers = next(reader)
+            except StopIteration:
+                raise ValueError(f"CSV is empty: {csv_path}")
+
+            header_map = {_norm(h): idx for idx, h in enumerate(headers)}
+            time_idx = header_map.get(_norm("Time [hr]"))
+            flow_idx = header_map.get(_norm("Mass flow rate [kg/s]"))
+
+            if time_idx is None or flow_idx is None:
+                raise ValueError(
+                    "CSV must contain columns 'Time [hr]' and 'Mass flow rate [kg/s]'. "
+                    f"Found headers: {headers}"
+                )
+
+            times_hr: list[float] = []
+            flow_rates: list[float] = []
+
+            for row in reader:
+                if not row or all(cell.strip() == "" for cell in row):
+                    continue
+                times_hr.append(float(row[time_idx]))
+                flow_rates.append(float(row[flow_idx]))
+
+        if len(times_hr) < 2:
+            raise ValueError(f"CSV must contain at least 2 rows of data: {csv_path}")
+
+        mission_sections: list[MissionSection] = []
+        for i in range(len(times_hr) - 1):
+            dt_hr = times_hr[i + 1] - times_hr[i]
+            if dt_hr <= 0:
+                continue
+            duration = dt_hr * HOURS_TO_SECONDS
+
+            flow_start = abs(flow_rates[i])
+            flow_end = abs(flow_rates[i + 1])
+
+            flow_tolerance = 1e-12
+            if abs(flow_end - flow_start) < flow_tolerance:
+                fuel_flow = OutFlow(-flow_start, phase)
+            else:
+                fuel_flow = OutFlow([-flow_start, -flow_end], phase)
+
+            mission_sections.append(
+                MissionSection(
+                    duration=duration,
+                    fuel_flows=[fuel_flow],
+                    altitude=cruise_altitude,
+                    mach_number=mach_number,
+                    fuel_flow_key=None,
+                    ground_temperature=standard_temperature,
+                )
+            )
+
+        return cls(mission_sections)
+
     @property
     def required_fuel(self) -> float:
         total_fuel = 0.0
@@ -128,6 +216,63 @@ class Mission:
         ]
 
         return cls(mission_sections)
+
+
+class MissionFactory:
+    def create_mission_from_list(self, mission_sections: list[dict]) -> Mission:
+        sections: list[MissionSection] = []
+        for section in mission_sections:
+            fuel_flow_key = section.get("name", section.get("fuel_flow_key"))
+
+            flows: list[OutFlow | InFlow] = []
+            for flow in section.get("fuel_flows", []):
+                if "phase" in flow:
+                    flows.append(OutFlow(flow["mass_flow"], flow["phase"]))
+                elif "hydrogen" in flow:
+                    flows.append(InFlow(flow["mass_flow"], flow["hydrogen"]))
+                else:
+                    raise ValueError(
+                        "Invalid fuel flow config; expected either 'phase' (OutFlow) or 'hydrogen' (InFlow)."
+                    )
+
+            sections.append(
+                MissionSection(
+                    duration=section["duration"],
+                    fuel_flows=flows,
+                    altitude=section["altitude"],
+                    mach_number=section["mach_number"],
+                    fuel_flow_key=fuel_flow_key,
+                    ground_temperature=section.get("ground_temperature"),
+                )
+            )
+
+        return Mission(sections)
+
+    def create_mission_from_file(
+        self,
+        file_name: str | None = None,
+        fuel_flow_phase: str | None = None,
+        **kwargs,
+    ) -> Mission:
+        mission_name = file_name or kwargs.pop("file", None)
+        if not mission_name:
+            raise ValueError("Missing mission name; expected 'file_name' (or legacy 'file').")
+
+        try:
+            mission_builder = getattr(Mission, mission_name)
+        except AttributeError as exc:
+            raise ValueError(f"Unknown mission '{mission_name}'.") from exc
+
+        if kwargs:
+            return mission_builder(**kwargs)
+
+        if fuel_flow_phase is None:
+            return mission_builder()
+
+        try:
+            return mission_builder(fuel_flow_phase)
+        except TypeError:
+            return mission_builder()
 
     @classmethod
     def atr72(cls):
