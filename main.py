@@ -7,6 +7,81 @@ import sys
 from typing import Protocol
 
 from importlib import import_module
+import importlib.util
+
+
+def _import_module_from_path(path: str):
+    module_id = f"analysis_from_path_{abs(hash(os.path.abspath(path)))}"
+    spec = importlib.util.spec_from_file_location(module_id, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module from path: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_analysis_module(module_name: str):
+    """Resolve user-provided module names.
+
+    Supports:
+    - Regular import paths (e.g. analysis.compare_dynamic_models)
+    - Shorthands (e.g. compare_dynamic_models -> analysis.compare_dynamic_models)
+    - File/dir paths (e.g. examples/compare_dynamic_models/main.py or examples/compare_dynamic_models)
+    """
+
+    def _try_import(name: str):
+        try:
+            return import_module(name)
+        except ModuleNotFoundError as exc:
+            # Only treat as "module not found" if the missing name is *this* module.
+            # If an internal dependency is missing, re-raise so the traceback is preserved.
+            if getattr(exc, "name", None) == name:
+                return None
+            raise
+
+    candidates: list[str] = [module_name]
+    if "." not in module_name:
+        candidates.extend(
+            [
+                f"examples.{module_name}.main",
+                f"analysis.{module_name}",
+                f"examples.{module_name}",
+            ]
+        )
+
+    for candidate in candidates:
+        mod = _try_import(candidate)
+        if mod is not None:
+            return mod
+
+    # Fall back to path-based resolution
+    path_candidates: list[str] = []
+    user_path = os.path.expanduser(module_name)
+
+    if user_path.endswith(".py"):
+        path_candidates.append(user_path)
+    else:
+        path_candidates.extend(
+            [
+                user_path,
+                os.path.join(user_path, "main.py"),
+                os.path.join("examples", user_path, "main.py"),
+                os.path.join("examples", user_path, "__init__.py"),
+                os.path.join("analysis", f"{user_path}.py"),
+            ]
+        )
+
+    for p in path_candidates:
+        if os.path.isfile(p):
+            return _import_module_from_path(p)
+
+    attempted = "\n".join(f"  - {c}" for c in candidates)
+    raise ModuleNotFoundError(
+        "Could not import analysis module.\n"
+        f"Requested: {module_name}\n"
+        f"Tried import paths:\n{attempted}\n"
+        f"Python: {sys.executable}"
+    )
 
 class Figure(Protocol):
     def show(self):
@@ -27,11 +102,17 @@ class AnalysisProtocol(Protocol):
 
 def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
     # Load the analysis module dynamically
-    analysis: AnalysisProtocol = import_module(module_name)
+    analysis: AnalysisProtocol = _resolve_analysis_module(module_name)
 
     # Load YAML config
-    with open(config_file, "r") as file:
-        config = yaml.safe_load(file)
+    try:
+        with open(config_file, "r") as file:
+            config = yaml.safe_load(file)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Config file not found: {config_file}\n"
+            "Tip: paths on some systems are case-sensitive (e.g. main.YAML vs main.yaml)."
+        )
 
     # Construct file paths
     base_name = os.path.splitext(os.path.basename(config_file))[0]
@@ -124,6 +205,7 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) != 3:
         print("Usage: python main.py <analysis_module> <config_file>")
-        print("Example: python main.py switch_drain_analysis config/switch_drain.yaml")
+        print("Example: python main.py analysis.compare_dynamic_models examples/compare_dynamic_models/main.yaml")
+        print("Shorthand: python main.py compare_dynamic_models examples/compare_dynamic_models/main.yaml")
     else:
         run_analysis(sys.argv[1], sys.argv[2])

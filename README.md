@@ -8,7 +8,20 @@ Analysis and example files are run using python through the command line as foll
 python main.py path.to.main path/to/main.YAML
 ~~~
 
-Where the first path is the main file while the second is the path to the YAML config file for the analysis.
+Where the first argument is a Python import path (module), and the second is the path to the YAML config file for the analysis.
+
+Examples:
+
+~~~
+python main.py analysis.compare_dynamic_models examples/compare_dynamic_models/main.YAML
+python main.py examples.compare_dynamic_models.main examples/compare_dynamic_models/main.YAML
+~~~
+
+Shorthand is also supported for common cases:
+
+~~~
+python main.py compare_dynamic_models examples/compare_dynamic_models/main.YAML
+~~~
 
 Each main file (with the exception for the Lin energy derivative) has at least a perform_analysis function which runs, with config input. Examples only have this function, where analysis files also have a save_data and plot_data method. This ensures that data is stored for reproducibility.
 
