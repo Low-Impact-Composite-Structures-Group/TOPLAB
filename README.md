@@ -9,6 +9,16 @@ This repository currently contains two related workstreams that share a common P
 
 Both workstreams can coexist in the same repo and environment, but you may run them in slightly different ways depending on whether you are running a single analysis module through the shared runner, or running a dedicated multistate driver.
 
+## Copyright and licensing
+Copyright (c) 2022–2026 Victor Kees Poorte and Dante Raso.
+
+This repository includes both **source code** and **data/outputs**, so licensing is split:
+
+- **Code license**: Apache License 2.0 — see [LICENSE/Apache-2.0.txt](LICENSE/Apache-2.0.txt)
+- **Data and outputs license**: Creative Commons Attribution 4.0 (CC BY 4.0) — see [LICENSE/CC-BY-4.0.txt](LICENSE/CC-BY-4.0.txt)
+
+If a file or subdirectory specifies a different license, that license takes precedence.
+
 ## Dependencies
 Most failures to “run” come from using an interpreter that does not have the required scientific dependencies installed.
 
