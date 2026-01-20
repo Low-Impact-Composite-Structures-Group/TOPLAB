@@ -2,6 +2,7 @@ import os
 import yaml
 import pickle
 import inspect
+import sys
 
 from typing import Protocol
 
@@ -43,10 +44,25 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
     store_path = os.path.join(data_dir, f"{base_name}.npz")
     fig_path = os.path.join(data_dir, f"{base_name}")
 
+    def _is_interactive() -> bool:
+        # Pytest often runs with a TTY but should never block on prompts.
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return False
+        return sys.stdin.isatty()
+
+    def _prompt_yes_no(prompt: str, default: bool = False) -> bool:
+        if not _is_interactive():
+            return default
+        user_input = input(prompt).strip().lower()
+        if user_input in {"y", "yes"}:
+            return True
+        if user_input in {"n", "no"}:
+            return False
+        return default
+
     # Reuse or recompute
     if os.path.exists(pickle_path):
-        user_input = input("Pickle exists. Recompute? (y/n): ").lower()
-        if user_input in ["y", "yes"]:
+        if _prompt_yes_no("Pickle exists. Recompute? (y/n): ", default=False):
             print("Performing analysis...")
             data = analysis.perform_analysis(config)
             print("Analysis done!")
@@ -67,8 +83,7 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
     if isinstance(data, dict):
         data["config"] = config
 
-    user_input = input("Save to pickle? (y/n): ").lower()
-    if user_input in ["y", "yes"]:
+    if _prompt_yes_no("Save to pickle? (y/n): ", default=False):
         print("Saving pickle...")
         with open(pickle_path, "wb") as f:
             pickle.dump(data, f)
@@ -101,7 +116,7 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
         print("Plotting...")
         fig: Figure = plot_results(store_path, fig_path, config.get("plotting"))
         print("Plotting completed!")
-        if fig is not None:
+        if fig is not None and _is_interactive():
             fig.show()
 
 
