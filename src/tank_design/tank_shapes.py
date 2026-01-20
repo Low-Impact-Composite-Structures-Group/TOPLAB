@@ -26,6 +26,50 @@ STRUCTURAL_MODEL_FACTORY = StructuralModelFactory()
 FUEL_HEIGHT_TOLERANCE = 1e-3
 
 
+def bisection_method(
+    high: float,
+    low: float,
+    target: float,
+    func,
+    tolerance: float = 1e-6,
+    max_iterations: int = 10_000,
+) -> float:
+    """Find x in [low, high] such that func(x) ~= target using bisection."""
+
+    if high < low:
+        low, high = high, low
+
+    f_low = func(low) - target
+    f_high = func(high) - target
+
+    if f_low == 0:
+        return low
+    if f_high == 0:
+        return high
+
+    if f_low * f_high > 0:
+        raise ValueError(
+            "bisection_method requires func(low)-target and func(high)-target "
+            "to have opposite signs"
+        )
+
+    for _ in range(max_iterations):
+        mid = 0.5 * (low + high)
+        f_mid = func(mid) - target
+
+        if abs(f_mid) <= tolerance or (high - low) <= tolerance:
+            return mid
+
+        if f_low * f_mid <= 0:
+            high = mid
+            f_high = f_mid
+        else:
+            low = mid
+            f_low = f_mid
+
+    raise RuntimeError("bisection_method did not converge")
+
+
 class Material(Protocol):
     density: float
 

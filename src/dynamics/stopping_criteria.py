@@ -8,10 +8,14 @@ class TargetState(Protocol):
     max_pressure: float
     min_pressure: float
     min_temperature: float
+    # Newer configs use explicit min/target fields; legacy tests use
+    # `fill` and `mass`.
     min_fill: float
     min_mass: float
     target_fill: float
     target_mass: float
+    fill: float
+    mass: float
 
 
 class FuelTankState(Protocol):
@@ -37,9 +41,9 @@ class TankIsEmpty(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-
+        min_fill = getattr(target_state, "min_fill", EMPTY_LIMIT)
         return (
-            fuel_tank_state.fill <= target_state.min_fill
+            fuel_tank_state.fill <= min_fill
             and fuel_tank_state.phase == "twophase"
         )
 
@@ -49,7 +53,8 @@ class NoFuelMass(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fuel_mass <= target_state.min_mass
+        min_mass = getattr(target_state, "min_mass", getattr(target_state, "mass", 0.0))
+        return fuel_tank_state.fuel_mass <= min_mass
 
 
 class TankIsFull(StoppingCriterion):
@@ -65,7 +70,8 @@ class TargetFillReached(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fill >= target_state.target_fill
+        target_fill = getattr(target_state, "target_fill", getattr(target_state, "fill", 1.0))
+        return fuel_tank_state.fill >= target_fill
 
 
 class TargetMassReached(StoppingCriterion):
@@ -73,7 +79,8 @@ class TargetMassReached(StoppingCriterion):
     def is_met(
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
-        return fuel_tank_state.fuel_mass >= target_state.target_mass
+        target_mass = getattr(target_state, "target_mass", getattr(target_state, "mass", 0.0))
+        return fuel_tank_state.fuel_mass >= target_mass
 
 
 class LowerPressureReached(StoppingCriterion):
@@ -90,6 +97,11 @@ class MaxPressureReached(StoppingCriterion):
         self, fuel_tank_state: FuelTankState, target_state: TargetState
     ) -> bool:
         return fuel_tank_state.pressure >= target_state.max_pressure
+
+
+# Backward-compatible alias (older code/tests import MaxPressure).
+class MaxPressure(MaxPressureReached):
+    pass
 
 
 class StoppingCriteriaFactory:
