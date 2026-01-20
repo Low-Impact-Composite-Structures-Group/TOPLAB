@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol, Union
+import math
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
 
 
@@ -69,12 +70,22 @@ class MissionSection:
         return self.ambient.speed_of_sound * self.mach_number
 
     def number_of_timesteps(self, timestep: float) -> float:
-        if self.duration % timestep != 0:
+        if timestep <= 0:
+            raise ValueError("Timestep must be > 0")
+
+        # Floating-point tolerant check: many configs use decimal timesteps
+        # like 0.1, which are not exactly representable in binary.
+        quotient = self.duration / timestep
+        nearest = round(quotient)
+
+        # Absolute tolerance scales with the quotient magnitude.
+        # This keeps strictness for small values while avoiding false failures.
+        if not math.isclose(quotient, nearest, rel_tol=1e-12, abs_tol=1e-9):
             raise ValueError(
                 "Invalid timestep and duration combination\n"
                 "Ensure that the duration is a multiple of the step."
             )
-        return int(self.duration // timestep)
+        return int(nearest)
 
     @classmethod
     def draining(

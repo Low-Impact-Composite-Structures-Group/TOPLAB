@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from types import SimpleNamespace
 from typing import Protocol
 
 from src.thermodynamics.heat_transfer_modes import (GasPhaseConvection,
@@ -84,6 +85,14 @@ class InternalModel(Protocol):
         tank_state: TankState,
         surface_temperature: float
     ) -> list[ThermalResistance]:
+        def _all_gas_state() -> TankState:
+            return SimpleNamespace(
+                fuel_height=0.0,
+                hydrogen=tank_state.hydrogen,
+                is_full=False,
+                is_empty=True,
+            )
+
         # Only gas in the tank
         if tank_state.is_empty:
             return [self.create_gas_resistance(
@@ -91,13 +100,23 @@ class InternalModel(Protocol):
             )]
         # Full liquid tank
         if tank_state.is_full:
-            return self.create_liquid_resistance(
+            try:
+                return self.create_liquid_resistance(
+                    tank, tank_state, surface_temperature
+                )
+            except ValueError:
+                return [self.create_gas_resistance(
+                    tank, _all_gas_state(), surface_temperature
+                )]
+        # Partial gas partial liquid tank
+        try:
+            return self.create_two_phase_thermal_resistances(
                 tank, tank_state, surface_temperature
             )
-        # Partial gas partial liquid tank
-        return self.create_two_phase_thermal_resistances(
-            tank, tank_state, surface_temperature
-        )
+        except ValueError:
+            return [self.create_gas_resistance(
+                tank, _all_gas_state(), surface_temperature
+            )]
 
     def create_two_phase_thermal_resistances(
         self,

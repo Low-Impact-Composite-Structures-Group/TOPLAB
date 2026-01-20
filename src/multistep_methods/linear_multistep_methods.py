@@ -134,7 +134,7 @@ def adam_bashforth(
     Returns:
         float: value of the function at the new time instance.
     """
-    if isinstance(derivative_values, float):
+    if isinstance(derivative_values, (int, float, np.number)):
         return euler_method(derivative_values, function_value, timestep)
     if len(derivative_values) == 1:
         return euler_method(derivative_values[0], function_value, timestep)
@@ -219,7 +219,7 @@ class AdamBashforthMethod(MultistepMethod):
                 derivatives, current_value, self.timestep
             )
         return adam_bashforth(
-            derivatives[-1], current_value, self.timestep
+            derivatives, current_value, self.timestep
         )
 
 
@@ -685,6 +685,32 @@ class LSODASolver(SciPySolver):
 
 # Backward compatibility alias (maintains existing interface)
 ScipyMethod = RK45Solver
+
+
+class MultistepMethodFactory:
+    def create_method(self, type: str, timestep: float, **kwargs):
+        method_type = type.lower()
+        if method_type in {"euler", "forward_euler"}:
+            return EulerMethod(timestep=timestep)
+        if method_type in {"adam_bashforth", "adams_bashforth", "ab"}:
+            return AdamBashforthMethod(timestep=timestep)
+        if method_type in {"rk4", "runge_kutta_4"}:
+            return RK4Method(timestep=timestep)
+        if method_type in {"backward_euler", "implicit_euler"}:
+            return BackwardEulerMethod(timestep=timestep, jacobian=kwargs.get("jacobian", 1.0))
+
+        if method_type == "rk45":
+            return RK45Solver(timestep=timestep, **kwargs)
+        if method_type == "radau":
+            return RadauSolver(timestep=timestep, **kwargs)
+        if method_type == "dop853":
+            return DOP853Solver(timestep=timestep, **kwargs)
+        if method_type == "bdf":
+            return BDFSolver(timestep=timestep, **kwargs)
+        if method_type == "lsoda":
+            return LSODASolver(timestep=timestep, **kwargs)
+
+        raise ValueError(f"Unknown multistep method type: {type}")
 
 
 def main():
