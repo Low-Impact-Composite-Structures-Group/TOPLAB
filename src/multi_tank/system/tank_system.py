@@ -26,6 +26,7 @@ from src.multi_tank.dynamics.isochoric_dynamic_models import IsochoricModelSwitc
 from .state_management import MultiTankState, MultiTankResults
 from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
 from src.multi_tank.fluids.flow_physics import FlowPhysics
+from src.multi_tank.peripheral_components.factory import build_peripheral_component_chain
 
 
 @dataclass
@@ -99,6 +100,7 @@ class TankSystem:
 
         # Store coupling flows for post-processing (time -> {tank_idx: flow_rate})
         self.coupling_flow_history = {}
+        self._current_coupling_edge_flows = {}
 
         # Initialize flow physics if configuration is available
         self.flow_physics = None
@@ -237,7 +239,7 @@ class TankSystem:
                 valve.source_tank = source_idx
                 valve.target_tank = target_idx
 
-                self.coupling_valves.append(valve)
+                self._register_coupling_valve(valve, rule)
 
                 print(f"   🔗 Valve: Tank{source_idx+1} → Tank{target_idx+1}")
                 print(f"      Opens at {rule.get('opening_pressure', 17e5)/1e5:.0f} bar, closes at {rule.get('closing_pressure', 18e5)/1e5:.0f} bar")
@@ -281,7 +283,7 @@ class TankSystem:
                     if mission_data:
                         valve.set_mission_profile(mission_data)
 
-                self.coupling_valves.append(valve)
+                self._register_coupling_valve(valve, rule)
 
                 piping_params = rule.get('piping', rule.get('discharge_piping', {}))
                 pipe_d = piping_params.get('diameter_m', 0.01)
@@ -346,7 +348,7 @@ class TankSystem:
                     if mission_data:
                         valve.set_mission_profile(mission_data)
 
-                self.coupling_valves.append(valve)
+                self._register_coupling_valve(valve, rule)
 
                 piping_params = rule.get('piping', rule.get('discharge_piping', {}))
                 pipe_d = piping_params.get('diameter_m', 0.01)
@@ -402,7 +404,7 @@ class TankSystem:
                     if mission_data:
                         valve.set_mission_profile(mission_data)
 
-                self.coupling_valves.append(valve)
+                self._register_coupling_valve(valve, rule)
 
                 piping_params = rule.get('piping', rule.get('discharge_piping', {}))
                 pipe_d = piping_params.get('diameter_m', 0.01)
@@ -450,7 +452,7 @@ class TankSystem:
                     if mission_data:
                         valve.set_mission_profile(mission_data)
 
-                self.coupling_valves.append(valve)
+                self._register_coupling_valve(valve, rule)
 
                 piping_params = rule.get('piping', rule.get('discharge_piping', {}))
                 pipe_d = piping_params.get('diameter_m', 0.01)
@@ -496,7 +498,7 @@ class TankSystem:
                 ohex_coupling.source_tank = source_idx
                 ohex_coupling.target_tank = -1  # No target tank for extraction
 
-                self.coupling_valves.append(ohex_coupling)
+                self._register_coupling_valve(ohex_coupling, rule)
 
                 print(f"   🔗 OHEX Extraction: Tank{source_idx+1} → OHEX")
                 print(f"      Min extraction pressure: {rule.get('min_extraction_pressure', 3.0e5)/1e5:.1f} bar")
@@ -511,6 +513,40 @@ class TankSystem:
         # Cache tank properties to avoid repeated calculations during simulation
         for i, tank_geom in enumerate(self.tank_geometries):
             self._cached_tank_properties[i] = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
+
+    def _register_coupling_valve(self, valve, rule: Dict[str, Any]) -> None:
+        component_configs = rule.get('peripheral_components', rule.get('components', []))
+        if component_configs and hasattr(valve, 'set_component_chain'):
+            valve.set_component_chain(build_peripheral_component_chain(component_configs))
+        self.coupling_valves.append(valve)
+
+    def _calculate_coupling_enthalpy(self, tank_idx: int, multi_state: MultiTankState) -> float:
+        inflow_edges = self._current_coupling_edge_flows.get(tank_idx, [])
+        if not inflow_edges:
+            return 0.0
+
+        total_inflow = 0.0
+        enthalpy_flow = 0.0
+        target_state = multi_state.tank_states[tank_idx]
+
+        for inflow_edge in inflow_edges:
+            flow_rate = inflow_edge['flow_rate']
+            if flow_rate <= 0.0:
+                continue
+
+            source_state = multi_state.tank_states[inflow_edge['source_tank']]
+            delivered_enthalpy = inflow_edge['valve'].get_delivered_enthalpy(
+                source_state,
+                target_state,
+                flow_rate,
+            )
+            total_inflow += flow_rate
+            enthalpy_flow += flow_rate * delivered_enthalpy
+
+        if total_inflow <= 0.0:
+            return 0.0
+
+        return enthalpy_flow / total_inflow
 
     def _get_tank_properties(self, tank: SphericalTank, tank_id: str = "Unknown", tank_index: int = -1):
         """Calculate tank properties from SphericalTank geometry.
@@ -843,15 +879,8 @@ class TankSystem:
 
                 # Calculate coupling enthalpy (hydrogen coming from other tanks)
                 coupling_enthalpy = 0.0
-                if net_coupling_flow > 0:  # Receiving hydrogen from other tanks
-                    # Find source tank with highest pressure (likely Tank 1 supplying Tank 2)
-                    source_tank_idx = 0 if i == 1 else 1  # Simple 2-tank case
-                    if source_tank_idx < len(multi_state.tank_states):
-                        source_state = multi_state.tank_states[source_tank_idx]
-                        from CoolProp.CoolProp import PropsSI
-                        coupling_enthalpy = PropsSI("Hmass", "T", source_state.temperature,
-                                                    "Dmass", source_state.density, "hydrogen")
-                        # print(f"coupling enthalpy for Tank {i+1} from Tank {source_tank_idx+1}: {coupling_enthalpy:.1f} J/kg")
+                if net_coupling_flow > 0:
+                    coupling_enthalpy = self._calculate_coupling_enthalpy(i, multi_state)
 
 
                 # Helper to ensure scalar float from any flow source
@@ -932,6 +961,7 @@ class TankSystem:
         """
         # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
         coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
+        self._current_coupling_edge_flows = {i: [] for i in range(len(self.tanks))}
 
         for valve in self.coupling_valves:
             source_state = multi_state.tank_states[valve.source_tank]
@@ -949,6 +979,11 @@ class TankSystem:
                 if flow_rate > 0:
                     coupling_flows[valve.source_tank] -= flow_rate
                     coupling_flows[valve.target_tank] += flow_rate
+                    self._current_coupling_edge_flows[valve.target_tank].append({
+                        'valve': valve,
+                        'source_tank': valve.source_tank,
+                        'flow_rate': flow_rate,
+                    })
 
         # Store coupling flows for post-processing
         if any(abs(flow) > 1e-9 for flow in coupling_flows.values()):

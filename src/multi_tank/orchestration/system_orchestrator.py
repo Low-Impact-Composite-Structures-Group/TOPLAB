@@ -123,6 +123,13 @@ class SystemOrchestrator:
 
         # Convert coupling rules to TankSystem expected format
         tank_system_coupling_rules = []
+
+        def _append_tank_system_rule(rule_config: Dict[str, Any], tank_system_rule: Dict[str, Any]) -> None:
+            peripheral_components = rule_config.get('peripheral_components', rule_config.get('components', []))
+            if peripheral_components:
+                tank_system_rule['peripheral_components'] = peripheral_components
+            tank_system_coupling_rules.append(tank_system_rule)
+
         for rule_config in coupling_rules_config:
             coupling_type = rule_config.get('coupling_type')
 
@@ -158,7 +165,7 @@ class SystemOrchestrator:
                 if 'orifice_diameter_m' not in flow_params:
                     print(f"WARNING: Using fallback: orifice_diameter_m = {tank_system_rule['orifice_diameter']} m (consider adding to YAML config)")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'mission_adaptive_pressurization':
                 # Convert mission-adaptive pressurization to MissionAdaptivePressureValve
@@ -186,7 +193,7 @@ class SystemOrchestrator:
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'pressure_governor':
                 # New simplified margin-free pressure tracking
@@ -212,7 +219,7 @@ class SystemOrchestrator:
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'feedforward_pressure_enforcer':
                 # Convert feedforward pressure enforcement to FeedforwardPressureEnforcer
@@ -238,7 +245,7 @@ class SystemOrchestrator:
                 print(f"     Piping: {discharge_piping.get('diameter_m', 0.01)*1000:.0f}mm × {discharge_piping.get('length_m', 2.0):.1f}m")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'flow_matching_pressurization':
                 # Convert flow-matching pressurization to MassFlowPIDControlledValve
@@ -264,7 +271,7 @@ class SystemOrchestrator:
                 print(f"     Direct flow-to-flow PID control")
                 print(f"     PID gains: kp={control_params.get('pid_kp', 1.0)}, ki={control_params.get('pid_ki', 0.1)}, kd={control_params.get('pid_kd', 0.01)}")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'pressure_compensation':
                 # Convert pressure compensation to PressureTriggeredValve
@@ -326,7 +333,7 @@ class SystemOrchestrator:
                 print(f"     Activation: {activation_threshold} bar, Deactivation: {deactivation_threshold} bar")
                 print(f"     Max flow: {tank_system_rule['max_flow_rate']*1000:.1f} g/s")
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             elif coupling_type == 'ohex_extraction':
                 # Convert OHEX extraction to OHEXExtractionCoupling
@@ -342,7 +349,7 @@ class SystemOrchestrator:
                     'coupling_id': rule_config.get('coupling_id', 'ohex_extraction')
                 }
 
-                tank_system_coupling_rules.append(tank_system_rule)
+                _append_tank_system_rule(rule_config, tank_system_rule)
 
             else:
                 print(f"WARNING: Unsupported coupling type '{coupling_type}' - skipping")

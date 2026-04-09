@@ -206,6 +206,7 @@ class ScenarioConfig:
                         'flow_parameters': edge.get('flow_parameters', {}),
                         'flow_physics': edge.get('flow_physics', {}),
                         'discharge_piping': edge.get('discharge_piping', {}),
+                        'peripheral_components': edge.get('peripheral_components', edge.get('components', [])),
                     }
                     coupling_rules.append(rule)
 

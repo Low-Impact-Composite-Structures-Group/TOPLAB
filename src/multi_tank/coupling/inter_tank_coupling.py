@@ -10,6 +10,7 @@ Author: Dante Raso
 import math
 from typing import List, Optional, Dict, Any
 from src.multi_tank.fluids.flow_physics import FlowPhysics
+from src.multi_tank.peripheral_components.base import PeripheralFlowState
 from CoolProp.CoolProp import PropsSI
 
 
@@ -21,6 +22,7 @@ class InterTankCoupling:
         self.target_idx = target_idx
         self.coupling_id = coupling_id or f"Coupling_{source_idx}→{target_idx}"
         self.is_active = False
+        self.component_chain = []
 
     def evaluate(self, time_s, source_tank, dest_tank):
         """Evaluate the coupling (base implementation - should be overridden)."""
@@ -29,6 +31,25 @@ class InterTankCoupling:
     def calculate_flow_rate(self, t: float, tank_states: List) -> float:
         """Calculate mass flow rate [kg/s] when coupling is active."""
         raise NotImplementedError("Subclasses must implement calculate_flow_rate()")
+
+    def set_component_chain(self, component_chain: List) -> None:
+        self.component_chain = list(component_chain or [])
+
+    def get_delivered_enthalpy(self, source_state, target_state, mass_flow_rate: float) -> float:
+        if mass_flow_rate <= 0.0:
+            return 0.0
+
+        stream = PeripheralFlowState.from_tank_state(source_state, mass_flow_rate)
+        target_pressure = None
+        if target_state is not None:
+            target_pressure = getattr(target_state, 'pressure', None)
+            if target_pressure is None and hasattr(target_state, 'compute_pressure'):
+                target_pressure = target_state.compute_pressure()
+
+        for component in self.component_chain:
+            stream = component.process_stream(stream, target_pressure=target_pressure)
+
+        return stream.resolved().enthalpy
 
 
 # Utility: robustly coerce scalars/arrays/sequences to a Python float
