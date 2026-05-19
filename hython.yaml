@@ -1,4 +1,4 @@
-name: python-h2-dev
+name: hython
 channels:
   - conda-forge
 dependencies:
