@@ -22,6 +22,7 @@ from ..solver import (
 )
 from src.thermodynamics.tank_states import IsochoricTankState
 from src.multi_tank.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
+from src.multi_tank.dynamics.edge_flow import EdgeFlow
 
 from .state_management import MultiTankState, MultiTankResults
 from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
@@ -896,16 +897,36 @@ class TankSystem:
                     except Exception:
                         return 0.0
 
-                # Create flow functions that include both mission and coupling flows
-                def fuel_flow_func(time):
-                    mission_inflow = _as_float(self._get_inflow_rate(time, i))  # Mission-based inflow (refuel)
-                    coupling_inflow = max(0.0, _as_float(net_coupling_flow))  # Positive coupling = inflow
-                    return mission_inflow + coupling_inflow
+                # Build directed edge-flow list for this tank
+                edge_flows = []
 
-                def discharge_flow_func(time):
-                    mission_outflow = _as_float(self._get_outflow_rate(time, i))  # Mission-based outflow (discharge)
-                    coupling_outflow = max(0.0, _as_float(-net_coupling_flow))  # Negative coupling = outflow
-                    return mission_outflow + coupling_outflow
+                mission_inflow = _as_float(self._get_inflow_rate(t, i))
+                if mission_inflow > 0.0:
+                    edge_flows.append(EdgeFlow(
+                        mdot=mission_inflow, h=0.0,
+                        edge_type='refuel', from_node=-1, to_node=i,
+                    ))
+
+                mission_outflow = _as_float(self._get_outflow_rate(t, i))
+                if mission_outflow > 0.0:
+                    edge_flows.append(EdgeFlow(
+                        mdot=mission_outflow, h=0.0,
+                        edge_type='discharge', from_node=i, to_node=-1,
+                    ))
+
+                coupling_inflow = max(0.0, _as_float(net_coupling_flow))
+                if coupling_inflow > 0.0:
+                    edge_flows.append(EdgeFlow(
+                        mdot=coupling_inflow, h=coupling_enthalpy,
+                        edge_type='coupling', from_node=-2, to_node=i,
+                    ))
+
+                coupling_outflow = max(0.0, _as_float(-net_coupling_flow))
+                if coupling_outflow > 0.0:
+                    edge_flows.append(EdgeFlow(
+                        mdot=coupling_outflow, h=0.0,
+                        edge_type='coupling', from_node=i, to_node=-2,
+                    ))
 
                 # Get thermal derivatives from thermal model using correct interface
                 Q_solid = self.thermal_models[i].compute_heat_flux(t, tank_state)
@@ -915,12 +936,11 @@ class TankSystem:
                 state_derivatives = self.dynamic_models[i].compute_state_derivatives(
                     time=t,
                     state=tank_state,
-                    fuel_flow_func=fuel_flow_func,
-                    discharge_flow_func=discharge_flow_func,
+                    edge_flows=edge_flows,
                     Q_solid=Q_solid,
                     dTs_dt=dTs_dt,
                     Q_discharge=0.0,
-                    coupling_enthalpy=coupling_enthalpy  # Pass coupling enthalpy for proper energy balance
+                    tank_index=i,
                 )
 
                 # Pack derivatives: [dm/dt, dT/dt, dTs/dt]

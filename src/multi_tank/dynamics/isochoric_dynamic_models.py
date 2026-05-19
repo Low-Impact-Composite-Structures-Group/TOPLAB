@@ -7,9 +7,12 @@ but is colocated under `src/multi_tank/` to keep multi-state code self-contained
 Author: Dante Raso
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Callable, List
 import numpy as np
+
+from .edge_flow import EdgeFlow
 
 from CoolProp.CoolProp import PropsSI
 
@@ -35,8 +38,7 @@ class IsochoricDynamicModel(ABC):
         self,
         time: float,
         state: IsochoricTankState,
-        fuel_flow_func: Callable[[float], float],
-        discharge_flow_func: Callable[[float], float],
+        edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
         pass
@@ -62,8 +64,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         self,
         time: float,
         state: IsochoricTankState,
-        fuel_flow_func: Callable[[float], float],
-        discharge_flow_func: Callable[[float], float],
+        edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1.0)
@@ -91,20 +92,18 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         state.configuration = config
         self._last_config = config
 
-        mdot_fuel = fuel_flow_func(time)
-        mdot_discharge = discharge_flow_func(time)
-        mdot_vent = self._get_vent_flow_rate(config, T, rho, p, time, discharge_flow_func, Ts)
+        tank_idx = kwargs.get('tank_index', 0)
+        mdot_discharge = sum(e.mdot for e in edge_flows if e.is_outflow_for(tank_idx))
+        mdot_vent = self._get_vent_flow_rate(config, p)
 
-        h_fuel = self._compute_fuel_enthalpy(p, T)
-        coupling_enthalpy = kwargs.get('coupling_enthalpy', None)
-        if coupling_enthalpy is not None and coupling_enthalpy != 0.0:
-            h_fuel = coupling_enthalpy
+        h_term = 0.0
+        for e in edge_flows:
+            if e.is_inflow_for(tank_idx):
+                h_in = e.h if (e.edge_type == 'coupling' and e.h != 0.0) else self._compute_fuel_enthalpy(p, T)
+                h_term += e.mdot * (h_in - h)
+            # outflows carry h_tank  →  (h_edge − h_tank) = 0, no contribution
 
-        h_discharge = h
-        h_vent = h
-
-        h_term = mdot_fuel * (h_fuel - h) - mdot_discharge * (h_discharge - h) - mdot_vent * (h_vent - h)
-        net_mass_flow = mdot_fuel - mdot_discharge - mdot_vent
+        net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_dT_rho * net_mass_flow
 
         Q_solid = kwargs.get('Q_solid', 0.0)
@@ -159,7 +158,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         else:
             return "A"
 
-    def _get_vent_flow_rate(self, config: str, T: float, rho: float, p: float, time: float, discharge_func: Callable, Ts: float) -> float:
+    def _get_vent_flow_rate(self, config: str, p: float) -> float:
         if config == "C":
             return max(0.0, (p - self.p_vent) * 1e-8)
         else:
@@ -204,8 +203,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         self,
         time: float,
         state: IsochoricTankState,
-        fuel_flow_func: Callable[[float], float],
-        discharge_flow_func: Callable[[float], float],
+        edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1e-12)
@@ -243,15 +241,23 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         state.configuration = config
         state.pressure = p_sat
 
-        mdot_fuel = fuel_flow_func(time)
-        mdot_discharge = discharge_flow_func(time)
-        mdot_vent = self._get_vent_flow_rate(config, T, rho, p_sat, time, discharge_flow_func, Ts)
+        tank_idx = kwargs.get('tank_index', 0)
+        mdot_discharge = sum(e.mdot for e in edge_flows if e.is_outflow_for(tank_idx))
+        mdot_vent = self._get_vent_flow_rate(config, p_sat)
 
+        # NOTE: Old TwoPhaseIsochoricModel always used _compute_fuel_enthalpy for
+        # ALL inflows (did not honour coupling_enthalpy / e.h).  We replicate that
+        # behaviour here so that the two-phase energy balance is unchanged from the
+        # pre-EdgeFlow baseline.  The physically-correct CH2 enthalpy path belongs
+        # in a future change once the full graph refactor is in place.
         h_fuel = self._compute_fuel_enthalpy(p_sat, T)
-        h_discharge = h
-        h_vent = h
-        h_term = mdot_fuel * (h_fuel - h) - mdot_discharge * (h_discharge - h) - mdot_vent * (h_vent - h)
-        net_mass_flow = mdot_fuel - mdot_discharge - mdot_vent
+        h_term = 0.0
+        for e in edge_flows:
+            if e.is_inflow_for(tank_idx):
+                h_term += e.mdot * (h_fuel - h)
+            # outflows carry h_tank  →  (h_edge − h_tank) = 0, no contribution
+
+        net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_sat_dT * net_mass_flow
 
         Q_solid = kwargs.get('Q_solid', 0.0)
@@ -300,7 +306,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         else:
             return "A"
 
-    def _get_vent_flow_rate(self, config: str, T: float, rho: float, p: float, time: float, discharge_func: Callable, Ts: float) -> float:
+    def _get_vent_flow_rate(self, config: str, p: float) -> float:
         if config == "C":
             return max(0.0, (p - self.p_vent) * 1e-7)
         else:
@@ -351,9 +357,8 @@ class IsochoricModelSwitcher:
         self,
         time: float,
         state: IsochoricTankState,
-        fuel_flow_func: Callable[[float], float],
-        discharge_flow_func: Callable[[float], float],
+        edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
         model = self.select_model(state)
-        return model.compute_state_derivatives(time, state, fuel_flow_func, discharge_flow_func, **kwargs)
+        return model.compute_state_derivatives(time, state, edge_flows, **kwargs)
