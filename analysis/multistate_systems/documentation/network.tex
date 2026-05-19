@@ -1,0 +1,164 @@
+% =============================================================================
+\section{Network Graph Representation}
+\label{sec:network}
+% =============================================================================
+
+The multi-tank system is described as a directed graph
+\begin{equation}
+  G = (\Nodes,\, \Edges),
+\end{equation}
+where $\Nodes$ is the set of \emph{nodes} and $\Edges \subseteq \Nodes\times\Nodes$
+is the set of directed \emph{edges}.  Every mass-transfer path in the system is
+represented by an edge; the governing equations (Section~\ref{sec:dae}) are then
+assembled purely from graph incidence.
+
+% -----------------------------------------------------------------------------
+\subsection{Nodes}
+\label{sec:network:nodes}
+% -----------------------------------------------------------------------------
+
+Three node types are recognised:
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{} l l X @{}}
+\toprule
+\textbf{Type} & \textbf{YAML \texttt{type}} & \textbf{Description} \\
+\midrule
+\texttt{tank}       & \texttt{tank}       &
+  Finite-volume hydrogen storage vessel with evolving thermodynamic state
+  $(m_i, T_i, T_{s,i})$. \\[4pt]
+\texttt{source}     & \texttt{source}     &
+  Infinite reservoir that supplies mass at a prescribed enthalpy (e.g.\ a
+  cryogenic pump feeding a refuel edge). \\[4pt]
+\texttt{sink}       & \texttt{sink}       &
+  Infinite reservoir that absorbs mass with no back-pressure (e.g.\
+  \texttt{atmosphere} for venting, \texttt{fuel\_cell} for mission discharge). \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Only \texttt{tank} nodes carry dynamic states; \texttt{source} and \texttt{sink}
+nodes act as boundary conditions.
+
+% -----------------------------------------------------------------------------
+\subsection{Edges}
+\label{sec:network:edges}
+% -----------------------------------------------------------------------------
+
+Four edge types are currently implemented, summarised in
+\cref{tab:edge-types}.
+
+\begin{table}[ht]
+\centering
+\caption{Edge types, their activation conditions, and the enthalpy assigned to
+the transferred mass.}
+\label{tab:edge-types}
+\begin{tabularx}{\linewidth}{@{} l l X l @{}}
+\toprule
+\textbf{Type} & \textbf{Direction} & \textbf{Activation / flow rate} & \textbf{Enthalpy} \\
+\midrule
+\texttt{coupling}  & tank $\to$ tank &
+  Activated by a valve model (e.g.\ pressure-triggered, PID, governor)
+  when the pressure differential across the edge meets the opening criterion. &
+  $h_\text{source}(T_\text{src},\rho_\text{src})$ \\[6pt]
+
+\texttt{discharge} & tank $\to$ sink &
+  Flow rate prescribed by a mission CSV file, $\mdot_\text{CSV}(t)$.
+  In Config~B, throttled to the algebraic limit (see \cref{sec:dae:configB}). &
+  $h(T_i,\rho_i)$ \\[6pt]
+
+\texttt{vent}      & tank $\to$ sink &
+  Activated when $P_i \ge P_{\text{vent},i}$.
+  Proportional rate model: $\mdot_\text{vent} = k_v\max(0, P_i - P_{\text{vent},i})$. &
+  $h(T_i,\rho_i)$ \\[6pt]
+
+\texttt{refuel}    & source $\to$ tank &
+  Flow rate prescribed by a mission CSV or fixed schedule.
+  Enthalpy computed from cryogenic pump isentropic model. &
+  $h_\text{cryo}(P_i)$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% -----------------------------------------------------------------------------
+\subsection{YAML Schema Mapping}
+\label{sec:network:yaml}
+% -----------------------------------------------------------------------------
+
+The graph is declared in the \texttt{network} block of the scenario YAML file:
+
+\begin{lstlisting}[language=Python, caption={Excerpt of YAML network declaration.}]
+network:
+  nodes:
+    - node_id: 1
+      type: tank          # tank / source / sink
+      fluid: CH2
+      ...
+    - node_id: atmosphere
+      type: sink
+
+  edges:
+    - edge_id: ch2_cch2_coupling
+      connection_type: coupling     # coupling / discharge / vent / refuel
+      from_node: 1
+      to_node: 2
+      ...
+    - edge_id: discharge_fc
+      connection_type: discharge
+      from_node: 2
+      to_node: fuel_cell
+      ...
+\end{lstlisting}
+
+Mission discharge and venting edges that were previously implicit (hard-coded in
+the dynamic model) are now explicit edges in the \texttt{network.edges} list.
+
+% -----------------------------------------------------------------------------
+\subsection{Example: CH2/CCH2 Two-Tank System}
+\label{sec:network:example}
+% -----------------------------------------------------------------------------
+
+\Cref{fig:network-example} shows the directed graph for the reference scenario:
+a 800-bar compressed hydrogen tank (CH2) coupled to a 400-bar cryo-compressed
+hydrogen tank (CCH2) with mission discharge assigned to Tank~2.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    node distance = 2.2cm and 3.0cm,
+    tank/.style    = {draw, rounded corners=4pt, fill=blue!8, minimum width=2.8cm,
+                      minimum height=1.2cm, align=center, font=\small\bfseries},
+    boundary/.style= {draw, dashed, rounded corners=4pt, fill=gray!10,
+                      minimum width=2.0cm, minimum height=0.9cm, align=center,
+                      font=\small\itshape},
+    edge/.style    = {-{Latex[length=6pt]}, thick},
+    label/.style   = {font=\scriptsize, midway, align=center, text width=2.2cm},
+  ]
+
+  % Nodes
+  \node[tank]     (t1)                      {Tank 1\\CH2\\800 bar};
+  \node[tank]     (t2) [right=4.5cm of t1]  {Tank 2\\CCH2\\400 bar};
+  \node[boundary] (fc) [right=3.5cm of t2]  {Fuel Cell\\(sink)};
+  \node[boundary] (atm1) [above=1.8cm of t1]{Atmosphere\\(sink)};
+  \node[boundary] (atm2) [above=1.8cm of t2]{Atmosphere\\(sink)};
+
+  % Coupling edge
+  \draw[edge, blue!70!black]
+        (t1) -- node[label, above] {coupling\\$P_1 > P_2 + \Delta P$} (t2);
+
+  % Vent edges
+  \draw[edge, red!70!black]
+        (t1) -- node[label, right] {vent\\$P_1 \ge P_{\text{vent},1}$} (atm1);
+  \draw[edge, red!70!black]
+        (t2) -- node[label, right] {vent\\$P_2 \ge P_{\text{vent},2}$} (atm2);
+
+  % Discharge edge
+  \draw[edge, green!50!black]
+        (t2) -- node[label, above] {discharge\\$\mdot_\text{CSV}(t)$} (fc);
+
+\end{tikzpicture}
+\caption{Directed network graph for the CH2/CCH2 coupled system.  Tank~1 has no
+discharge edge; Tank~2 carries the full mission discharge load.  Both tanks have
+vent edges to the atmosphere sink.}
+\label{fig:network-example}
+\end{figure}

@@ -1,0 +1,221 @@
+% =============================================================================
+\section{Governing Equations}
+\label{sec:dae}
+% =============================================================================
+
+% -----------------------------------------------------------------------------
+\subsection{System State Vector}
+\label{sec:dae:state}
+% -----------------------------------------------------------------------------
+
+Each tank node $i \in \{1,\dots,N\}$ carries three dynamic states:
+\begin{equation}
+  \vect{x}_i = \begin{bmatrix} m_i \\ T_i \\ T_{s,i} \end{bmatrix},
+\end{equation}
+where $m_i$ is the hydrogen mass [\si{\kilogram}], $T_i$ is the bulk gas
+temperature [\si{\kelvin}], and $T_{s,i}$ is the lumped solid (wall/liner)
+temperature [\si{\kelvin}].
+
+The full system state vector is
+\begin{equation}
+  \vect{x} = \begin{bmatrix}
+    \vect{x}_1 \\ \vdots \\ \vect{x}_N
+  \end{bmatrix} \in \mathbb{R}^{3N}.
+\end{equation}
+
+The specific volume and density are derived quantities:
+\begin{equation}
+  V_i = \text{const.},\qquad
+  \rho_i = \frac{m_i}{V_i}.
+\end{equation}
+All thermodynamic properties ($P_i$, $h_i$, $c_{v,i}$, \dots) are evaluated
+from $(T_i, \rho_i)$ via CoolProp.
+
+% -----------------------------------------------------------------------------
+\subsection{Conservation Equations}
+\label{sec:dae:ode}
+% -----------------------------------------------------------------------------
+
+\subsubsection{Mass balance}
+
+Let $\Edges_i^+$ and $\Edges_i^-$ denote the sets of edges entering and leaving
+node $i$, respectively.  The mass balance is
+\begin{equation}
+  \dot{m}_i = \sum_{e \in \Edges_i^+} \mdot_e - \sum_{e \in \Edges_i^-} \mdot_e
+            \equiv \mdot_i^{\text{net}}.
+  \label{eq:mass-balance}
+\end{equation}
+
+\subsubsection{Gas temperature}
+
+For an isochoric open system, the first law of thermodynamics gives (see
+derivation in \cref{app:energy})
+\begin{equation}
+  m_i c_{v,i}\, \dot{T}_i =
+    \underbrace{\sum_{e \in \Edges_i^+} \mdot_e \bigl(h_e - h_i\bigr)
+      - \sum_{e \in \Edges_i^-} \mdot_e \bigl(h_e - h_i\bigr)}_{\text{net enthalpy flux}}
+    + \underbrace{\frac{T_i}{\rho_i}\,\alpha_i\,\mdot_i^{\text{net}}}_{\text{real-gas work term}}
+    + \underbrace{\dot{Q}_{s,i}}_{\text{wall heat}},
+  \label{eq:energy-balance}
+\end{equation}
+where
+\begin{align}
+  \alpha_i &= \at{\frac{\partial P}{\partial T}}{\rho}
+    \quad \text{(isochoric pressure--temperature coefficient)}, \\
+  h_e      &= \text{enthalpy of the fluid carried by edge } e
+    \quad \text{(evaluated at the source node)}, \\
+  h_i      &= h(T_i, \rho_i)
+    \quad \text{(local specific enthalpy)}.
+\end{align}
+For discharge and vent edges leaving tank $i$, the fluid enthalpy equals the
+local value ($h_e = h_i$), so those terms vanish from the enthalpy flux.
+
+\subsubsection{Solid temperature}
+
+The liner and composite wall are modelled as a single lumped thermal mass:
+\begin{equation}
+  \dot{T}_{s,i} = \frac{\dot{Q}_{s,i}^{\text{ext}} - \dot{Q}_{s,i}}{m_{s,i}\,c_{s,i}},
+  \label{eq:solid-temp}
+\end{equation}
+where $\dot{Q}_{s,i}^{\text{ext}}$ is the external (ambient) heat influx computed
+by the thermal model, and $\dot{Q}_{s,i}$ is the gas-side heat transfer.  The
+thermal model follows the Stops convection formulation.
+
+% -----------------------------------------------------------------------------
+\subsection{Edge Flow-Rate Models}
+\label{sec:dae:edges}
+% -----------------------------------------------------------------------------
+
+\subsubsection{Coupling edge}
+
+Coupling valves are modelled as one of several valve archetypes
+(\texttt{PressureTriggeredValve}, \texttt{FeedforwardPressureEnforcer}, etc.).
+The generic interface is
+\begin{equation}
+  \mdot_e^{\text{coup}} = f_\text{valve}(P_\text{src},\, P_\text{tgt},\, t;\; \theta),
+\end{equation}
+where $\theta$ denotes valve-specific parameters (orifice diameter, opening
+pressure, PID gains, \dots).  The enthalpy of the transferred mass is evaluated
+at the source tank: $h_e = h(T_\text{src}, \rho_\text{src})$.
+
+\subsubsection{Discharge edge}
+
+In the normal operating regime (Configuration~A, \cref{sec:dae:config}), the
+discharge flow rate is prescribed by the mission profile:
+\begin{equation}
+  \mdot_e^{\text{disc}} = \mdot_\text{CSV}(t) \quad [\text{Config~A}].
+\end{equation}
+In Configuration~B the rate is reduced to the algebraic pressure-floor limit
+(Section~\ref{sec:dae:configB}).
+
+\subsubsection{Vent edge}
+
+Venting is activated when the tank pressure reaches the maximum operating
+pressure $P_{\text{vent},i}$.  The flow rate is
+\begin{equation}
+  \mdot_e^{\text{vent}} = k_v\,\max\!\bigl(0,\, P_i - P_{\text{vent},i}\bigr),
+  \label{eq:vent-rate}
+\end{equation}
+with proportionality constant $k_v = \SI{1e-8}{\kilogram\per\second\per\pascal}$.
+Only the flow rate is needed for venting (per \cref{sec:dae:config}, Config~C).
+
+\subsubsection{Refuel edge}
+
+For refuel missions the incoming mass is compressed from a low-pressure source
+reservoir by an ideal cryogenic pump with isentropic efficiency $\eta_p = 0.78$:
+\begin{equation}
+  h_e^{\text{cryo}}(P_i) = h_1 + \frac{h_{2s} - h_1}{\eta_p},\quad
+  h_1 = h(P_0, x{=}0),\quad
+  h_{2s} = h(P_i, s_1),
+\end{equation}
+where $P_0 = \SI{3}{\bar}$ is the suction pressure and $s_1$ is the specific
+entropy at suction conditions.
+
+% -----------------------------------------------------------------------------
+\subsection{Operating Configurations}
+\label{sec:dae:config}
+% -----------------------------------------------------------------------------
+
+Each tank independently operates in one of three configurations depending on its
+current pressure:
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{} c l X @{}}
+\toprule
+\textbf{Config} & \textbf{Activation condition} & \textbf{Effect} \\
+\midrule
+A & $P_{\min,i} < P_i < P_{\text{vent},i}$ &
+  Free ODE evolution.  All edge flows as prescribed. \\[4pt]
+B & $P_i \le P_{\min,i}$ &
+  Pressure-floor constraint: $\dot{P}_i = 0$.
+  Discharge edge is algebraically throttled
+  (Section~\ref{sec:dae:configB}). \\[4pt]
+C & $P_i \ge P_{\text{vent},i}$ &
+  Vent edge activated; $\mdot_e^{\text{vent}} > 0$. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Config~B is implemented with a hysteresis band to prevent chattering.  The
+transition $\text{A}\to\text{B}$ occurs at $P_i \le P_{\min,i}(1-\delta)$ and
+the return $\text{B}\to\text{A}$ at $P_i > P_{\min,i}(1+\delta)$, where
+$\delta = 0.01$.
+
+% -----------------------------------------------------------------------------
+\subsection{Configuration~B: Algebraic Pressure-Floor Constraint}
+\label{sec:dae:configB}
+% -----------------------------------------------------------------------------
+
+When $P_i = P_{\min,i}$, the pressure must not fall further.  Differentiating
+$P_i = P(T_i, \rho_i)$ with respect to time and imposing the constraint:
+\begin{equation}
+  \dot{P}_i = \alpha_i\,\dot{T}_i + \frac{\beta_i}{V_i}\,\mdot_i^{\text{net}} = 0,
+  \label{eq:config-b-constraint}
+\end{equation}
+where $\beta_i = \at{\partial P/\partial\rho}{T}$.
+
+Solving \cref{eq:config-b-constraint} for $\dot{T}_i$ and substituting into
+\cref{eq:energy-balance} (noting that $h_e - h_i = 0$ for edges leaving $i$):
+\begin{equation}
+  \frac{\alpha_i\, \Phi_i}{m_i c_{v,i}} +
+  \mdot_i^{\text{net}}\!\left(\frac{T_i \alpha_i^2}{\rho_i\, m_i c_{v,i}}
+                              + \frac{\beta_i}{V_i}\right) = 0,
+  \label{eq:config-b-mdot}
+\end{equation}
+where $\Phi_i$ collects all forcing terms that do \emph{not} depend on the
+discharge rate:
+\begin{equation}
+  \Phi_i = \sum_{e \in \Edges_i^+} \mdot_e (h_e - h_i) + \dot{Q}_{s,i}.
+  \label{eq:phi}
+\end{equation}
+
+Rearranging \cref{eq:config-b-mdot} gives the required net mass-flow rate to
+maintain $\dot{P}_i = 0$:
+\begin{equation}
+  \boxed{
+  \mdot_i^{\text{net,B}} = -\frac{\alpha_i\,\Phi_i}
+    {\dfrac{T_i \alpha_i^2}{\rho_i} + c_{v,i}\,\beta_i\,\rho_i}
+  }
+  \label{eq:config-b-solution}
+\end{equation}
+(using $V_i = m_i / \rho_i$).  The maximum sustainable discharge rate follows
+from the net-flow identity:
+\begin{equation}
+  \mdot_\text{disc}^{\max} =
+    \mdot_i^{\text{in}} - \mdot_i^{\text{vent}} - \mdot_i^{\text{net,B}},
+\end{equation}
+and the actual discharge edge flow rate is clipped to this value:
+\begin{equation}
+  \mdot_e^{\text{disc}} = \min\!\bigl(\mdot_\text{CSV}(t),\;
+                                       \mdot_\text{disc}^{\max}\bigr).
+  \label{eq:config-b-clip}
+\end{equation}
+
+\paragraph{Physical interpretation.}
+\Cref{eq:config-b-solution} states that the net outflow is limited to whatever
+rate the ambient heat leak can sustain while holding pressure constant.  In a
+pure-discharge scenario with no inflows, $\Phi_i = \dot{Q}_{s,i}$, so any
+discharge must be matched by heat entering the gas.  If the fuel cell demands
+more than $\mdot_\text{disc}^{\max}$, the supply is throttled and the fuel
+cell operates in a starved condition.  No fictitious heat source is introduced.
+

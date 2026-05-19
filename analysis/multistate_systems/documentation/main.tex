@@ -1,0 +1,86 @@
+\documentclass[11pt, a4paper]{article}
+
+% ── Encoding & language ─────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+
+% ── Math ────────────────────────────────────────────────────────────────────
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{bm}
+
+% ── Units ───────────────────────────────────────────────────────────────────
+\usepackage{siunitx}
+\sisetup{per-mode=symbol}
+
+% ── Graphics & diagrams ─────────────────────────────────────────────────────
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit,
+                backgrounds, calc, decorations.pathreplacing}
+
+% ── Tables ──────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+
+% ── Code listings ───────────────────────────────────────────────────────────
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries\color{blue!70!black},
+  commentstyle=\itshape\color{gray},
+  stringstyle=\color{orange!80!black},
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  xleftmargin=1.5em,
+}
+
+% ── Typography ───────────────────────────────────────────────────────────────
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=2.5cm, top=3cm, bottom=3cm}
+
+% ── Cross-referencing ────────────────────────────────────────────────────────
+\usepackage{enumitem}
+\usepackage[hidelinks, colorlinks=false]{hyperref}
+\usepackage[noabbrev, capitalise]{cleveref}
+
+% ── Custom math macros ───────────────────────────────────────────────────────
+\newcommand{\at}[2]{\left.#1\right|_{#2}}   % evaluated-at bar
+\newcommand{\mdot}{\dot{m}}                  % mass flow rate
+\newcommand{\qdot}{\dot{Q}}                  % heat transfer rate
+\newcommand{\vect}[1]{\bm{#1}}               % bold vector
+\newcommand{\Edges}{\mathcal{E}}
+\newcommand{\Nodes}{\mathcal{N}}
+
+% ── Document info ────────────────────────────────────────────────────────────
+\title{\textbf{Multi-Tank Hydrogen Storage System}\\[0.4em]
+       \large Model Description, Governing Equations, and Method of Solution}
+\author{Dante Raso\\
+        \small Aerospace Engineering, TU Delft}
+\date{\today}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+\maketitle
+\tableofcontents
+\bigskip
+\hrule
+\vspace{2em}
+
+\input{network}
+\clearpage
+\input{dae_system}
+\clearpage
+\input{method_of_solution}
+\clearpage
+\appendix
+\input{appendices}
+
+\end{document}

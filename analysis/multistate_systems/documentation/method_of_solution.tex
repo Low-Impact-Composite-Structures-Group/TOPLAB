@@ -1,0 +1,151 @@
+% =============================================================================
+\section{Method of Solution}
+\label{sec:method}
+% =============================================================================
+
+% -----------------------------------------------------------------------------
+\subsection{DAE Structure}
+\label{sec:method:structure}
+% -----------------------------------------------------------------------------
+
+When all tanks operate in Configuration~A or~C, \cref{eq:mass-balance,eq:energy-balance,eq:solid-temp}
+form a pure system of ODEs:
+\begin{equation}
+  \dot{\vect{x}} = \vect{f}(\vect{x}, t).
+\end{equation}
+When one or more tanks enter Configuration~B, the discharge edge flow rate is
+no longer a prescribed function of time but is instead constrained by
+\cref{eq:config-b-clip}.  The system becomes a \emph{semi-explicit index-1 DAE}:
+\begin{align}
+  \dot{\vect{x}} &= \vect{f}(\vect{x}, \vect{z}, t), \label{eq:dae-ode}\\
+  \vect{0}       &= \vect{g}(\vect{x}, \vect{z}, t), \label{eq:dae-alg}
+\end{align}
+where $\vect{z}$ collects the algebraically determined discharge rates of all
+Config-B tanks.  The constraint \cref{eq:dae-alg} is \cref{eq:config-b-clip}
+for each active Config-B tank.
+
+Because the constraint is linear in $\vect{z}$ (the clip operation is
+monotone), \cref{eq:dae-alg} is solved \emph{explicitly} at the beginning of
+each RHS evaluation rather than via an inner Newton iteration — reducing the
+DAE to a sequence of modified ODEs.
+
+% -----------------------------------------------------------------------------
+\subsection{Per-Step Algebraic Solve for Configuration~B}
+\label{sec:method:configB-solve}
+% -----------------------------------------------------------------------------
+
+\Cref{alg:rhs} summarises the right-hand-side evaluation procedure.
+
+\begin{figure}[ht]
+\begin{tikzpicture}[
+    box/.style    = {draw, rounded corners=3pt, fill=blue!5, minimum width=8cm,
+                     minimum height=0.7cm, align=left, font=\small, inner sep=6pt},
+    diamond/.style= {draw, diamond, fill=yellow!15, minimum width=2.5cm,
+                     minimum height=0.7cm, align=center, font=\small, inner sep=4pt},
+    arr/.style    = {-{Latex[length=5pt]}, thick},
+    node distance = 0.35cm,
+  ]
+  \node[box] (s1)  {\textbf{1.} Reconstruct $\vect{x}_i = (m_i, T_i, T_{s,i})$ from state vector $\vect{y}$.};
+  \node[box] (s2) [below=of s1]
+                   {\textbf{2.} Compute all coupling edge flows $\mdot_e^{\text{coup}}$.};
+  \node[box] (s3) [below=of s2]
+                   {\textbf{3.} For each tank~$i$: determine configuration (A/B/C).};
+  \node[box] (s4) [below=of s3]
+                   {\textbf{4.\ Config~B tanks:} evaluate $\mdot_\text{disc}^{\max}$ via
+                    \cref{eq:config-b-solution}; clip $\mdot_e^{\text{disc}}$.};
+  \node[box] (s5) [below=of s4]
+                   {\textbf{5.\ Config~C tanks:} compute vent edge flow $\mdot_e^{\text{vent}}$
+                    via \cref{eq:vent-rate}.};
+  \node[box] (s6) [below=of s5]
+                   {\textbf{6.} Compute thermal model: $\dot{Q}_{s,i}$, $\dot{T}_{s,i}$.};
+  \node[box] (s7) [below=of s6]
+                   {\textbf{7.} Assemble $\dot{m}_i$, $\dot{T}_i$, $\dot{T}_{s,i}$
+                    from \cref{eq:mass-balance}, \cref{eq:energy-balance}, and \cref{eq:solid-temp}.};
+  \node[box] (s8) [below=of s7]
+                   {\textbf{8.} Return $\dot{\vect{y}}$.};
+
+  \foreach \a/\b in {s1/s2, s2/s3, s3/s4, s4/s5, s5/s6, s6/s7, s7/s8}
+    \draw[arr] (\a.south) -- (\b.north);
+\end{tikzpicture}
+\caption{RHS evaluation procedure for one ODE time step.  Steps 4 and 5 handle
+the algebraic parts of the DAE; all remaining steps are explicit ODE evaluations.}
+\label{alg:rhs}
+\end{figure}
+
+Steps 2--5 together constitute the algebraic solve.  The coupling flows (step~2)
+are computed using the current state and are treated as explicit inputs to the
+remainder of the RHS; no fixed-point iteration is required for the coupling
+because the valve models are explicit functions of the state.
+
+% -----------------------------------------------------------------------------
+\subsection{Time Integration}
+\label{sec:method:integration}
+% -----------------------------------------------------------------------------
+
+The modified ODE system (after Config-B discharge throttling has been applied)
+is integrated using the \textsc{lsoda} solver from \texttt{scipy.integrate},
+accessed through the \texttt{solve\_ivp} interface.
+
+\textsc{lsoda} was chosen for the following reasons:
+
+\begin{itemize}[nosep, left=0pt]
+  \item It switches automatically between Adams (non-stiff) and BDF (stiff)
+        formulæ, which is important because stiffness changes throughout the
+        mission as configurations switch and coupling valves open or close.
+  \item Relative and absolute tolerances are set by the user (\texttt{rtol},
+        \texttt{atol}) and are tightened by default to \num{1e-4} and
+        \num{1e-7} respectively to control mass-conservation drift.
+  \item It produces dense output, enabling post-processing at arbitrary time
+        points without re-running the simulation.
+\end{itemize}
+
+The integrator step size is fully adaptive; no explicit step-size control is
+needed from user code.
+
+% -----------------------------------------------------------------------------
+\subsection{Stopping Criteria}
+\label{sec:method:stopping}
+% -----------------------------------------------------------------------------
+
+Integration terminates when any of the following events is detected:
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{} l l X @{}}
+\toprule
+\textbf{Criterion} & \textbf{Variable} & \textbf{Description} \\
+\midrule
+Minimum density  & $\rho_i \le \rho_{\min}$ &
+  The tank is effectively empty for the given mission.
+  Default: $\rho_{\min} = \SI{5.8}{\kilogram\per\cubic\metre}$ (gaseous H$_2$). \\[4pt]
+Target density   & $\rho_i \ge \rho_{\text{target}}$ &
+  Used in refuel missions.  Integration stops when the tank has been filled
+  to the desired density. \\[4pt]
+Duration         & $t \ge t_{\text{mission}}$ &
+  Hard time limit derived from the mission profile duration. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+All criteria are checked at each RHS evaluation.  When a criterion is met, a
+flag is set and the RHS returns a near-zero vector, allowing the solver to
+cleanly reach the termination point without an abrupt step.
+
+% -----------------------------------------------------------------------------
+\subsection{Configuration Switching and Hysteresis}
+\label{sec:method:hysteresis}
+% -----------------------------------------------------------------------------
+
+Configuration detection must be numerically robust to avoid chattering near
+transition boundaries.  The following hysteresis scheme is used for Config~B:
+
+\begin{align}
+  \text{A} \to \text{B} &: \quad P_i \le P_{\min,i}(1 - \delta), \\
+  \text{B} \to \text{A} &: \quad P_i >  P_{\min,i}(1 + \delta),
+\end{align}
+with $\delta = 0.01$ (1\%).  The current configuration is stored as instance
+state across RHS calls so that the hysteresis condition can reference the
+previous configuration.
+
+Config~C (venting) has no hysteresis: it activates immediately when
+$P_i \ge P_{\text{vent},i}$ and deactivates when the vent flow brings the
+pressure back below the threshold.
