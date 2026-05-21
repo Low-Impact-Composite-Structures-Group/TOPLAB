@@ -2235,4 +2235,155 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         tank_states = [None]*(max_idx+1)
         tank_states[self.source_idx] = source_state
         tank_states[self.target_idx] = target_state
+
         return self.calculate_flow_rate(t, tank_states)
+
+
+class ProportionalSplitCoupling(InterTankCoupling):
+    """
+    Proportional-split coupling: routes a fixed fraction of the source tank's
+    mission-driven discharge to the target tank via an optional component chain.
+
+    Topology::
+
+        [source] --split_fraction * mdot_mission(t)--> [component chain] --> [target]
+
+    Typical use: divert 5 % of an LH2 discharge through a HEX + compressor
+    into a GH2 buffer tank.
+
+    Parameters
+    ----------
+    source_idx : int   (0-based)
+    target_idx : int   (0-based)
+    split_fraction : float   Fraction of source mission discharge to route to target (0–1).
+    coupling_id : str, optional
+    """
+
+    def __init__(self, source_idx: int, target_idx: int,
+                 split_fraction: float,
+                 coupling_id: str = None):
+        super().__init__(source_idx, target_idx, coupling_id or f"split_{source_idx}→{target_idx}")
+        if not (0.0 < split_fraction <= 1.0):
+            raise ValueError(f"split_fraction must be in (0, 1]; got {split_fraction}")
+        self.split_fraction = split_fraction
+        self.mission_times = None
+        self.mission_flow_rates = None
+        self.main_conditioning_chain = []  # components applied to full Tank 1 outflow (95% path)
+
+    # ------------------------------------------------------------------
+    # Mission profile injection
+    # ------------------------------------------------------------------
+
+    def set_mission_profile(self, mission_data: dict) -> None:
+        """Store mission time/flow arrays for discharge-rate lookup."""
+        times = mission_data.get('time_s', [])
+        flows = mission_data.get('flow_rate_kg_s', mission_data.get('flow_kg_s', []))
+        if times and flows:
+            self.mission_times = list(times)
+            self.mission_flow_rates = list(flows)
+            print(f"   ProportionalSplitCoupling '{self.coupling_id}': "
+                  f"mission loaded ({len(self.mission_times)} pts, "
+                  f"max={max(self.mission_flow_rates):.4f} kg/s)")
+
+    def _get_source_discharge_rate(self, t: float) -> float:
+        """Return the mission discharge rate at time *t* [s].
+
+        The ``(time_s, flow_rate_kg_s)`` arrays built by
+        ``_extract_mission_profile_data`` represent a **step function**:
+        ``flow_rates[i+1]`` is the constant rate during the interval
+        ``[times[i], times[i+1])``.  Returning the interval value (rather
+        than linearly interpolating) avoids an artificial ramp from 0 at t=0.
+        """
+        if not self.mission_times or not self.mission_flow_rates:
+            return 0.0
+        if t >= self.mission_times[-1]:
+            return self.mission_flow_rates[-1]
+        for i in range(len(self.mission_times) - 1):
+            if self.mission_times[i] <= t < self.mission_times[i + 1]:
+                # Step function: rate is the value at the END of the interval
+                return self.mission_flow_rates[i + 1]
+        # Before first time point — use first non-zero rate
+        return self.mission_flow_rates[1] if len(self.mission_flow_rates) > 1 else 0.0
+
+    # ------------------------------------------------------------------
+    # InterTankCoupling interface
+    # ------------------------------------------------------------------
+
+    def calculate_flow_rate(self, t: float, tank_states: list) -> float:
+        return self.split_fraction * self._get_source_discharge_rate(t)
+
+    def calculate_flow(self, source_state, target_state, t: float) -> float:
+        return self.split_fraction * self._get_source_discharge_rate(t)
+
+    def evaluate(self, time_s, source_tank, dest_tank):
+        return self.calculate_flow(source_tank, dest_tank, time_s)
+
+
+class PressureTriggeredDischarge(InterTankCoupling):
+    """
+    Pressure-triggered discharge valve: removes mass from the source tank and
+    routes it to a downstream sink (target_tank = -1) when source pressure
+    exceeds *open_pressure*.  A hysteresis band closes the valve again when
+    pressure falls below *close_pressure*.
+
+    Topology::
+
+        [source] --valve(P_src > P_open)--> [sink / fuel cell]
+
+    This is the "return path" for a GH2 buffer: excess pressure bleeds through
+    the valve toward the merger junction and ultimately the fuel cell.
+
+    Parameters
+    ----------
+    source_idx : int    (0-based index of the source tank)
+    open_pressure : float   [Pa]  Valve opens when source P ≥ this value.
+    close_pressure : float  [Pa]  Valve closes when source P ≤ this value.
+    max_flow_rate : float   [kg/s] Maximum discharge rate when fully open.
+    coupling_id : str, optional
+    """
+
+    def __init__(self, source_idx: int,
+                 open_pressure: float,
+                 close_pressure: float,
+                 max_flow_rate: float = 0.05,
+                 coupling_id: str = None):
+        # target_tank = -1 signals "discharge to sink" in _calculate_coupling_flows
+        super().__init__(source_idx, -1, coupling_id or f"P_discharge_{source_idx}→sink")
+        if close_pressure >= open_pressure:
+            raise ValueError(
+                f"close_pressure ({close_pressure/1e5:.1f} bar) must be < "
+                f"open_pressure ({open_pressure/1e5:.1f} bar)"
+            )
+        self.open_pressure = open_pressure
+        self.close_pressure = close_pressure
+        self.max_flow_rate = max_flow_rate
+        self._valve_open = False
+        self.discharge_conditioning_chain = []  # components applied after discharge (before fuel cell)
+
+    def _update_valve_state(self, source_pressure: float) -> None:
+        if self._valve_open and source_pressure <= self.close_pressure:
+            self._valve_open = False
+        elif not self._valve_open and source_pressure >= self.open_pressure:
+            self._valve_open = True
+
+    def _compute_flow_rate(self, source_pressure: float) -> float:
+        """Linear ramp from 0 at close_pressure to max_flow_rate at open_pressure."""
+        if not self._valve_open:
+            return 0.0
+        band = max(self.open_pressure - self.close_pressure, 1.0)
+        fraction = min(1.0, max(0.0, (source_pressure - self.close_pressure) / band))
+        return self.max_flow_rate * fraction
+
+    def calculate_flow(self, source_state, target_state, t: float) -> float:
+        if hasattr(source_state, 'compute_pressure'):
+            source_state.compute_pressure()
+        p_src = getattr(source_state, 'pressure', None) or 0.0
+        self._update_valve_state(p_src)
+        return self._compute_flow_rate(p_src)
+
+    def calculate_flow_rate(self, t: float, tank_states: list) -> float:
+        src = tank_states[self.source_idx]
+        return self.calculate_flow(src, None, t)
+
+    def evaluate(self, time_s, source_tank, dest_tank):
+        return self.calculate_flow(source_tank, dest_tank, time_s)
