@@ -17,7 +17,7 @@ CM_TO_INCH = 0.393701
 
 # Global font settings
 FONT_SIZE = 16
-FONT_NAME = "Cambria"
+FONT_NAME = "DejaVu Sans"
 LEGEND_FONT_SIZE = 14
 
 DONKERBLAUW = "#0C2340"  # Dark Blue
