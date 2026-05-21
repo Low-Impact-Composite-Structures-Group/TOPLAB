@@ -113,10 +113,8 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
 
         if config == "B" and self.scenario != "REFUEL":
             try:
-                p_constrained = self.p_min
-                dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, 'hydrogen')
                 term1 = (T / rho) * dp_dT_rho
-                dT_drho_p = PropsSI('d(T)/d(D)|P', 'P', p_constrained, 'T', T, 'hydrogen')
+                dT_drho_p = PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, 'hydrogen')
                 term2 = rho * c_v * dT_drho_p
                 qdot_disch_B = mdot_discharge * (term1 - term2) - Q_solid
                 actual_qdot_disch = qdot_disch_B
@@ -126,7 +124,6 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
                 actual_qdot_disch = 0.0
         else:
             dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v)
-            actual_qdot_disch = 0.0
 
         if _heat_flow_data is not None:
             _heat_flow_data['t'].append(time)
@@ -150,13 +147,17 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         p_min_hysteresis = self.p_min * 0.01
         current_config = getattr(self, '_last_config', 'A')
         if pressure >= self.p_vent:
-            return "C"
+            config = "C"
         elif current_config == "B" and pressure <= (self.p_min + p_min_hysteresis):
-            return "B"
+            config = "B"
         elif current_config != "B" and pressure <= (self.p_min - p_min_hysteresis):
-            return "B"
+            config = "B"
         else:
-            return "A"
+            config = "A"
+        # Track whether this model has ever operated in Config A so that the
+        # ode_system throttling only fires for tanks that naturally entered
+        # Config B from above p_min (not via a two-phase → single-phase transition).
+        return config
 
     def _get_vent_flow_rate(self, config: str, p: float) -> float:
         if config == "C":
@@ -167,11 +168,17 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
     def _compute_fuel_enthalpy(self, pressure: float, temperature: float) -> float:
         if self.scenario == "REFUEL":
             return self._compute_cryopump_enthalpy(pressure, temperature)
-        else:
+        try:
+            return PropsSI("Hmass", "P", pressure, "T", temperature, "hydrogen")
+        except ValueError:
+            # (P, T) on the saturation curve — return saturated-vapour enthalpy
+            # (single-phase model represents gas-phase tanks)
             try:
-                return PropsSI("Hmass", "P", pressure, "T", temperature, "hydrogen")
-            except:
-                return 0.0
+                return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+            except Exception:
+                return 14300.0 * temperature
+        except Exception:
+            return 14300.0 * temperature
 
     def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float) -> float:
         P1 = 3e5
@@ -315,13 +322,13 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
     def _compute_fuel_enthalpy(self, pressure: float, temperature: float) -> float:
         if self.scenario == "REFUEL":
             return self._compute_cryopump_enthalpy(pressure, temperature)
-        else:
-            try:
-                return PropsSI("Hmass", "P", pressure, "T", temperature, "hydrogen")
-            except Exception:
-                R_specific = 4124.0
-                cp = 14300.0
-                return cp * temperature
+        # In two-phase equilibrium (P, T) is ambiguous — CoolProp cannot resolve
+        # the phase from that pair alone.  Use saturated-vapour enthalpy instead,
+        # which is the appropriate value for gas leaving a two-phase LH2 tank.
+        try:
+            return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+        except Exception:
+            return 14300.0 * temperature  # ideal-gas fallback
 
     def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float) -> float:
         P1 = 3e5

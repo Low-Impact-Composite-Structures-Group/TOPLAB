@@ -29,9 +29,23 @@ class PeripheralFlowState:
         density = self.density
 
         if enthalpy is None:
-            enthalpy = PropsSI("Hmass", "P", self.pressure, "T", self.temperature, self.fluid)
+            try:
+                enthalpy = PropsSI("Hmass", "P", self.pressure, "T", self.temperature, self.fluid)
+            except ValueError:
+                # (P, T) is on the saturation curve — phase is ambiguous.
+                # Fall back to (Dmass, P) which uniquely resolves the state.
+                if self.density is not None:
+                    enthalpy = PropsSI("Hmass", "Dmass", self.density, "P", self.pressure, self.fluid)
+                else:
+                    raise
         if entropy is None:
-            entropy = PropsSI("Smass", "P", self.pressure, "T", self.temperature, self.fluid)
+            try:
+                entropy = PropsSI("Smass", "P", self.pressure, "T", self.temperature, self.fluid)
+            except ValueError:
+                if self.density is not None:
+                    entropy = PropsSI("Smass", "Dmass", self.density, "P", self.pressure, self.fluid)
+                else:
+                    raise
         if density is None:
             density = PropsSI("Dmass", "P", self.pressure, "T", self.temperature, self.fluid)
 
