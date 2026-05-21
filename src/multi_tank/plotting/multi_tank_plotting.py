@@ -2710,6 +2710,151 @@ class DelftColourPlotter:
         print(f"   Peripheral components plot completed")
         return fig
 
+    def plot_hex_compressor_power(
+        self,
+        stream_history: dict,
+        save_path: Optional[str] = None,
+        xlim: Optional[Tuple[float, float]] = None,
+        ylim_power: Optional[Tuple[float, float]] = None,
+        ylim_energy: Optional[Tuple[float, float]] = None,
+        legend_location: str = 'best',
+    ) -> plt.Figure:
+        """
+        Plot instantaneous power [kW] and cumulative energy [MJ] for the
+        ideal_heat_exchanger and compressor in a peripheral-component chain.
+
+        Power is computed from the per-component inlet/outlet states already
+        stored by ``TankSystem.compute_coupling_stream_history()`` using:
+
+            Qdot / Wdot = mdot * (h_out - h_in)
+
+        where enthalpies are recovered from (T, P) via CoolProp.
+
+        Parameters
+        ----------
+        stream_history : dict
+            One entry from ``compute_coupling_stream_history()`` whose
+            ``stream_type`` is ``'split_chain'``.
+        save_path : str, optional
+        xlim : tuple, optional   (t_min, t_max) in hours.
+        """
+        from CoolProp.CoolProp import PropsSI
+
+        times_h = stream_history['times_h']
+        components = stream_history['components']
+        coupling_id = stream_history['coupling_id']
+
+        # Identify HEX and compressor entries by class name
+        hex_comp = None
+        comp_comp = None
+        for comp in components:
+            name_lc = comp['name'].lower()
+            if 'heatexchanger' in name_lc or 'hex' in name_lc:
+                hex_comp = comp
+            elif 'compressor' in name_lc:
+                comp_comp = comp
+
+        if hex_comp is None and comp_comp is None:
+            raise ValueError(
+                f"No IdealHeatExchanger or Compressor found in stream_history "
+                f"for coupling '{coupling_id}'. Available: "
+                f"{[c['name'] for c in components]}"
+            )
+
+        def _power_kw(comp_data: dict) -> np.ndarray:
+            """Return instantaneous power [kW] at each time step."""
+            n = len(times_h)
+            power = np.full(n, np.nan)
+            mdot_gs = comp_data['inlet']['mdot_gs']
+            T_in    = comp_data['inlet']['temperature_K']
+            P_in    = comp_data['inlet']['pressure_bar']
+            T_out   = comp_data['outlet']['temperature_K']
+            P_out   = comp_data['outlet']['pressure_bar']
+            for i in range(n):
+                mdot = mdot_gs[i] / 1000.0          # g/s → kg/s
+                if np.isnan(mdot) or mdot <= 0.0:
+                    continue
+                if np.isnan(T_in[i]) or np.isnan(T_out[i]):
+                    continue
+                try:
+                    h_in  = PropsSI("Hmass", "P", P_in[i]  * 1e5, "T", T_in[i],  "hydrogen")
+                    h_out = PropsSI("Hmass", "P", P_out[i] * 1e5, "T", T_out[i], "hydrogen")
+                    power[i] = mdot * (h_out - h_in) / 1000.0  # W → kW
+                except Exception:
+                    pass
+            return power
+
+        def _cumulative_energy_mj(power_kw: np.ndarray) -> np.ndarray:
+            """Cumulative energy [MJ] via trapezoidal integration over simulation time."""
+            times_s = times_h * 3600.0
+            n = len(times_s)
+            energy = np.full(n, np.nan)
+            # treat NaN (zero-flow intervals) as zero power for the integral
+            p_w = np.where(np.isnan(power_kw), 0.0, power_kw * 1000.0)  # kW → W
+            dt = np.diff(times_s)
+            increments = 0.5 * (p_w[:-1] + p_w[1:]) * dt
+            energy[0] = 0.0
+            energy[1:] = np.cumsum(increments) / 1e6               # J → MJ
+            return energy
+
+        hex_pwr  = _power_kw(hex_comp)  if hex_comp  is not None else None
+        comp_pwr = _power_kw(comp_comp) if comp_comp is not None else None
+        hex_eng  = _cumulative_energy_mj(hex_pwr)  if hex_pwr  is not None else None
+        comp_eng = _cumulative_energy_mj(comp_pwr) if comp_pwr is not None else None
+
+        fig, (ax_pwr, ax_eng) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+
+        palette   = self.color_palette
+        col_hex   = palette[0]
+        col_comp  = palette[1]
+
+        if hex_pwr is not None:
+            ax_pwr.plot(times_h, hex_pwr,  color=col_hex,  linewidth=2,
+                        label='HEX — heat duty')
+            ax_eng.plot(times_h, hex_eng,  color=col_hex,  linewidth=2,
+                        label='HEX — cumulative heat')
+        if comp_pwr is not None:
+            ax_pwr.plot(times_h, comp_pwr, color=col_comp, linewidth=2,
+                        linestyle='--', label='Compressor — shaft power')
+            ax_eng.plot(times_h, comp_eng, color=col_comp, linewidth=2,
+                        linestyle='--', label='Compressor — cumulative work')
+
+        for ax in (ax_pwr, ax_eng):
+            ax.axhline(y=0, color='black', linestyle='-', alpha=0.2, linewidth=0.6)
+            ax.grid(True, alpha=0.3)
+            if xlim is not None:
+                ax.set_xlim(xlim)
+
+        for ax, ylim, loc in (
+            (ax_pwr, ylim_power,  legend_location),
+            (ax_eng, ylim_energy, legend_location),
+        ):
+            legend = ax.legend(
+                fontsize=plot_style.LEGEND_FONT_SIZE, loc=loc,
+                frameon=True, fancybox=True, shadow=True,
+                framealpha=0.9, edgecolor='black',
+            )
+            legend.get_frame().set_facecolor('white')
+            legend.get_frame().set_linewidth(1.2)
+            if ylim is not None:
+                ax.set_ylim(ylim)
+
+        ax_pwr.set_ylabel('Power [kW]')
+        ax_eng.set_ylabel('Cumulative Energy [MJ]')
+        ax_eng.set_xlabel('Time [hours]')
+
+        plt.suptitle(
+            f"HEX & Compressor Power: {coupling_id}",
+            fontsize=FONT_SIZE + 1, fontweight='bold', y=1.01,
+        )
+        plt.tight_layout()
+
+        if save_path:
+            self._save_figure(fig, save_path, dpi=900)
+
+        print("   HEX/compressor power plot completed")
+        return fig
+
     def plot_fuel_cell_inlet(
         self,
         results: MultiTankResults,
@@ -2718,6 +2863,9 @@ class DelftColourPlotter:
         save_path: Optional[str] = None,
         xlim: Optional[Tuple[float, float]] = None,
         ylim_mdot: Optional[Tuple[float, float]] = None,
+        ylim_temp: Optional[Tuple[float, float]] = None,
+        ylim_pres: Optional[Tuple[float, float]] = None,
+        legend_location: str = 'best',
     ) -> plt.Figure:
         """
         Plot conditions delivered to the fuel cell at the mixer junction.
@@ -2847,7 +2995,7 @@ class DelftColourPlotter:
         for ax in axes:
             ax.grid(True, alpha=0.3)
             ax.axhline(y=0, color='black', linestyle='-', alpha=0.2, linewidth=0.6)
-            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc='best',
+            legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location,
                                frameon=True, fancybox=True, shadow=True,
                                framealpha=0.9, edgecolor='black')
             legend.get_frame().set_facecolor('white')
@@ -2857,6 +3005,10 @@ class DelftColourPlotter:
 
         if ylim_mdot is not None:
             ax_mdot.set_ylim(ylim_mdot)
+        if ylim_temp is not None:
+            ax_temp.set_ylim(ylim_temp)
+        if ylim_pres is not None:
+            ax_pres.set_ylim(ylim_pres)
 
         plt.suptitle(title, fontsize=FONT_SIZE + 1, fontweight='bold', y=1.01)
         plt.tight_layout()

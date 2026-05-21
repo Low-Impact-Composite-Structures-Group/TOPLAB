@@ -1861,6 +1861,34 @@ class SystemOrchestrator:
                         save_path=str(pc_save_path) if pc_save_path else None,
                     )
                     figures.append(pc_fig)
+
+                    # --- HEX / compressor power & energy plot ---
+                    try:
+                        _pwr_cfg = self.scenario_config.config_dict.get(
+                            'output', {}).get('plots', {}).get('hex_compressor_power', {})
+                        if _pwr_cfg.get('enabled', True):
+                            pwr_save_path = None
+                            if save_path:
+                                from pathlib import Path as _Path
+                                _save_dir = _Path(save_path).parent
+                                _save_ext = _Path(save_path).suffix or '.png'
+                                _base_name = figure_prefix if figure_prefix else _Path(save_path).stem
+                                _safe_id = sh['coupling_id'].replace(' ', '_').replace('/', '_').replace('→', '_to_')
+                                _pwr_fname = _pwr_cfg.get('filename', 'power')
+                                pwr_save_path = _save_dir / f"{_base_name}_{_pwr_fname}_{_safe_id}{_save_ext}"
+
+                            pwr_fig = plotter.plot_hex_compressor_power(
+                                stream_history=sh,
+                                save_path=str(pwr_save_path) if pwr_save_path else None,
+                                xlim=_pwr_cfg.get('xlim', None),
+                                ylim_power=_pwr_cfg.get('ylim_power', None),
+                                ylim_energy=_pwr_cfg.get('ylim_energy', None),
+                                legend_location=_pwr_cfg.get('legend_location_power', 'best'),
+                            )
+                            figures.append(pwr_fig)
+                    except Exception as _pwr_e:
+                        print(f"   WARNING: HEX/compressor power plot failed: {_pwr_e}")
+
             except Exception as e:
                 print(f"   WARNING: Peripheral component plots failed: {e}")
                 import traceback
@@ -1875,21 +1903,30 @@ class SystemOrchestrator:
                         break
 
                 if discharge_tank_idx is not None:
-                    fc_save_path = None
-                    if save_path:
-                        from pathlib import Path
-                        save_dir = Path(save_path).parent
-                        save_ext = Path(save_path).suffix or '.png'
-                        base_name = figure_prefix if figure_prefix else Path(save_path).stem
-                        fc_save_path = save_dir / f"{base_name}_fuel_cell_inlet{save_ext}"
+                    _fc_cfg = self.scenario_config.config_dict.get(
+                        'output', {}).get('plots', {}).get('fuel_cell_inlet', {})
+                    if _fc_cfg.get('enabled', True):
+                        fc_save_path = None
+                        if save_path:
+                            from pathlib import Path
+                            save_dir = Path(save_path).parent
+                            save_ext = Path(save_path).suffix or '.png'
+                            base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                            _fc_fname = _fc_cfg.get('filename', 'fuel_cell_inlet')
+                            fc_save_path = save_dir / f"{base_name}_{_fc_fname}{save_ext}"
 
-                    fc_fig = plotter.plot_fuel_cell_inlet(
-                        results=self.results,
-                        source_tank_idx=discharge_tank_idx,
-                        stream_histories=stream_histories,
-                        save_path=str(fc_save_path) if fc_save_path else None,
-                    )
-                    figures.append(fc_fig)
+                        fc_fig = plotter.plot_fuel_cell_inlet(
+                            results=self.results,
+                            source_tank_idx=discharge_tank_idx,
+                            stream_histories=stream_histories,
+                            save_path=str(fc_save_path) if fc_save_path else None,
+                            xlim=_fc_cfg.get('xlim', None),
+                            ylim_mdot=_fc_cfg.get('ylim_mdot', None),
+                            ylim_temp=_fc_cfg.get('ylim_temp', None),
+                            ylim_pres=_fc_cfg.get('ylim_pres', None),
+                            legend_location=_fc_cfg.get('legend_location', 'best'),
+                        )
+                        figures.append(fc_fig)
             except Exception as e:
                 print(f"   WARNING: Fuel cell inlet plot failed: {e}")
                 import traceback
