@@ -154,6 +154,150 @@ class ScenarioConfig:
         else:
             raise ValueError(f"Unknown config_format '{self.config_format}'. Expected 'new' or 'old'.")
 
+    @staticmethod
+    def _edge_participant(edge: Dict[str, Any], key: str) -> Any:
+        participants = edge.get('participants', {}) or {}
+        if key == 'source':
+            return participants.get('source', edge.get('from_node'))
+        if key == 'target':
+            return participants.get('target', edge.get('to_node'))
+        raise ValueError(f"Unknown participant key '{key}'")
+
+    @classmethod
+    def _compile_network_coupling_rules(cls, config_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Compile the declarative network graph into legacy coupling-rule records."""
+        network = config_dict.get('network', {}) or {}
+        nodes = network.get('nodes', []) or []
+        edges = network.get('edges', []) or []
+
+        if not edges:
+            return []
+
+        node_by_id: Dict[Any, Dict[str, Any]] = {}
+        tank_node_ids: List[Any] = []
+        for node in nodes:
+            node_id = node.get('node_id')
+            if node_id is None:
+                continue
+            node_by_id[node_id] = node
+            if node.get('type') == 'tank':
+                tank_node_ids.append(node_id)
+
+        outgoing_edges: Dict[Any, List[Dict[str, Any]]] = {}
+        incoming_edges: Dict[Any, List[Dict[str, Any]]] = {}
+        for edge in edges:
+            source_node = cls._edge_participant(edge, 'source')
+            target_node = cls._edge_participant(edge, 'target')
+            outgoing_edges.setdefault(source_node, []).append(edge)
+            incoming_edges.setdefault(target_node, []).append(edge)
+
+        handled_edges = set()
+        coupling_rules: List[Dict[str, Any]] = []
+
+        def _build_rule(edge: Dict[str, Any], coupling_type: str, source_node: Any, target_node: Any) -> Dict[str, Any]:
+            return {
+                'coupling_id': edge.get('edge_id', f'coupling_{source_node}_{target_node}'),
+                'coupling_type': coupling_type,
+                'description': edge.get('description', ''),
+                'participants': {
+                    'source': source_node,
+                    'target': target_node,
+                },
+                'activation_conditions': edge.get('activation_conditions', {}),
+                'control_parameters': edge.get('control_parameters', {}),
+                'flow_parameters': edge.get('flow_parameters', {}),
+                'flow_physics': edge.get('flow_physics', {}),
+                'discharge_piping': edge.get('discharge_piping', {}),
+                'peripheral_components': edge.get('peripheral_components', edge.get('components', [])),
+                'main_conditioning_components': edge.get('main_conditioning_components', []),
+                'discharge_conditioning': edge.get('discharge_conditioning', []),
+                'split_fraction': edge.get('split_fraction'),
+            }
+
+        def _is_tank(node_id: Any) -> bool:
+            node = node_by_id.get(node_id)
+            return bool(node and node.get('type') == 'tank')
+
+        for node in nodes:
+            if node.get('type') != 'junction':
+                continue
+
+            junction_id = node.get('node_id')
+            if junction_id is None:
+                continue
+
+            junction_incoming = incoming_edges.get(junction_id, [])
+            junction_outgoing = outgoing_edges.get(junction_id, [])
+            if not junction_incoming or not junction_outgoing:
+                continue
+
+            junction_role = node.get('junction_role') or node.get('role') or ''
+            role_normalized = str(junction_role).lower()
+
+            source_edge = next((edge for edge in junction_incoming if _is_tank(cls._edge_participant(edge, 'source'))), None)
+            if source_edge is None:
+                continue
+
+            source_node = cls._edge_participant(source_edge, 'source')
+
+            if role_normalized == 'mixer' or any(edge.get('connection_type') == 'pressure_triggered_discharge' for edge in junction_incoming):
+                discharge_edge = next((edge for edge in junction_incoming if edge.get('connection_type') == 'pressure_triggered_discharge'), source_edge)
+                outlet_edge = next((edge for edge in junction_outgoing if _is_tank(cls._edge_participant(edge, 'target'))), junction_outgoing[0])
+
+                target_node = cls._edge_participant(outlet_edge, 'target')
+                rule = _build_rule(discharge_edge, 'pressure_triggered_discharge', source_node, -1)
+                discharge_conditioning = outlet_edge.get('discharge_conditioning', outlet_edge.get('components', []))
+                if discharge_conditioning:
+                    rule['discharge_conditioning'] = discharge_conditioning
+                coupling_rules.append(rule)
+                handled_edges.update({edge.get('edge_id') for edge in junction_incoming})
+                handled_edges.update({edge.get('edge_id') for edge in junction_outgoing})
+                continue
+
+            split_edges = [edge for edge in junction_outgoing if edge.get('split_fraction') is not None]
+            if not split_edges:
+                continue
+
+            peripheral_edge = min(split_edges, key=lambda edge: float(edge.get('split_fraction', 1.0)))
+            main_edge = next((edge for edge in junction_outgoing if edge is not peripheral_edge), peripheral_edge)
+            target_node = cls._edge_participant(peripheral_edge, 'target')
+            if not _is_tank(target_node):
+                continue
+
+            rule = _build_rule(peripheral_edge, 'proportional_split', source_node, target_node)
+            rule['split_fraction'] = peripheral_edge.get('split_fraction')
+            main_components = main_edge.get('main_conditioning_components', main_edge.get('components', []))
+            peripheral_components = peripheral_edge.get('peripheral_components', peripheral_edge.get('components', []))
+            if main_components:
+                rule['main_conditioning_components'] = main_components
+            if peripheral_components:
+                rule['peripheral_components'] = peripheral_components
+            coupling_rules.append(rule)
+            handled_edges.update({edge.get('edge_id') for edge in junction_incoming})
+            handled_edges.update({edge.get('edge_id') for edge in junction_outgoing})
+
+        for edge in edges:
+            edge_id = edge.get('edge_id')
+            if edge_id in handled_edges:
+                continue
+
+            connection_type = edge.get('connection_type', 'pressure_compensation')
+            source_node = cls._edge_participant(edge, 'source')
+            target_node = cls._edge_participant(edge, 'target')
+
+            if connection_type == 'proportional_split' and _is_tank(source_node) and _is_tank(target_node):
+                coupling_rules.append(_build_rule(edge, connection_type, source_node, target_node))
+                continue
+
+            if connection_type == 'pressure_triggered_discharge' and _is_tank(source_node):
+                coupling_rules.append(_build_rule(edge, connection_type, source_node, -1))
+                continue
+
+            if _is_tank(source_node) and _is_tank(target_node):
+                coupling_rules.append(_build_rule(edge, connection_type, source_node, target_node))
+
+        return coupling_rules
+
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]):
         """
@@ -182,39 +326,7 @@ class ScenarioConfig:
         )
 
         if is_new_format:
-            # Convert network edges to coupling_rules for SystemOrchestrator legacy compatibility
-            if 'edges' in config_dict.get('network', {}):
-                edges = config_dict['network']['edges']
-                coupling_rules = []
-
-                for edge in edges:
-                    connection_type = edge.get('connection_type', 'pressure_compensation')
-                    participants_raw = edge.get('participants', {})
-                    from_node = participants_raw.get('source', edge.get('from_node', 1))
-                    to_node = participants_raw.get('target', edge.get('to_node', 2))
-                    edge_id = edge.get('edge_id', f'coupling_{from_node}_{to_node}')
-
-                    rule = {
-                        'coupling_id': edge_id,
-                        'coupling_type': connection_type,
-                        'description': edge.get('description', ''),
-                        'participants': {
-                            'source': from_node,
-                            'target': to_node,
-                        },
-                        'activation_conditions': edge.get('activation_conditions', {}),
-                        'control_parameters': edge.get('control_parameters', {}),
-                        'flow_parameters': edge.get('flow_parameters', {}),
-                        'flow_physics': edge.get('flow_physics', {}),
-                        'discharge_piping': edge.get('discharge_piping', {}),
-                        'peripheral_components': edge.get('peripheral_components', edge.get('components', [])),
-                        'main_conditioning_components': edge.get('main_conditioning_components', []),
-                        'discharge_conditioning': edge.get('discharge_conditioning', []),
-                        'split_fraction': edge.get('split_fraction'),
-                    }
-                    coupling_rules.append(rule)
-
-                config_dict['coupling_rules'] = coupling_rules
+            config_dict['coupling_rules'] = cls._compile_network_coupling_rules(config_dict)
 
             return cls(config_dict, "new", str(yaml_path))
 
