@@ -96,7 +96,9 @@ The generic interface is
 \end{equation}
 where $\theta$ denotes valve-specific parameters (orifice diameter, opening
 pressure, PID gains, \dots).  The enthalpy of the transferred mass is evaluated
-at the source tank: $h_e = h(T_\text{src}, \rho_\text{src})$.
+at the source node: $h_e = h(T_\text{src}, \rho_\text{src})$.  If a peripheral
+component chain is declared on the edge (\cref{sec:network:peripheral}), the
+chain transforms $h_e$ before it enters the downstream energy balance.
 
 \subsubsection{Discharge edge}
 
@@ -105,8 +107,9 @@ discharge flow rate is prescribed by the mission profile:
 \begin{equation}
   \mdot_e^{\text{disc}} = \mdot_\text{CSV}(t) \quad [\text{Config~A}].
 \end{equation}
-In Configuration~B the rate is reduced to the algebraic pressure-floor limit
-(Section~\ref{sec:dae:configB}).
+In Configuration~B the discharge rate continues at the mission value;
+a compensating heat flux $\dot{Q}_{HX,i}$ is supplied to maintain the
+pressure floor (Section~\ref{sec:dae:configB}).
 
 \subsubsection{Vent edge}
 
@@ -148,7 +151,9 @@ A & $P_{\min,i} < P_i < P_{\text{vent},i}$ &
   Free ODE evolution.  All edge flows as prescribed. \\[4pt]
 B & $P_i \le P_{\min,i}$ &
   Pressure-floor constraint: $\dot{P}_i = 0$.
-  Discharge edge is algebraically throttled
+  Discharge continues at the prescribed mission rate; a compensating heat
+  flux $\dot{Q}_{HX,i}$ is supplied by a heat exchanger to maintain
+  constant pressure
   (Section~\ref{sec:dae:configB}). \\[4pt]
 C & $P_i \ge P_{\text{vent},i}$ &
   Vent edge activated; $\mdot_e^{\text{vent}} > 0$. \\
@@ -162,60 +167,60 @@ the return $\text{B}\to\text{A}$ at $P_i > P_{\min,i}(1+\delta)$, where
 $\delta = 0.01$.
 
 % -----------------------------------------------------------------------------
-\subsection{Configuration~B: Algebraic Pressure-Floor Constraint}
+\subsection{Configuration~B: Compensating Heat Flux}
 \label{sec:dae:configB}
 % -----------------------------------------------------------------------------
 
-When $P_i = P_{\min,i}$, the pressure must not fall further.  Differentiating
-$P_i = P(T_i, \rho_i)$ with respect to time and imposing the constraint:
+When $P_i = P_{\min,i}$, pressure must not fall further while discharge
+continues at the mission-prescribed rate $\mdot_\text{CSV}(t)$.  A compensating
+heat flux $\dot{Q}_{HX,i}$ is supplied to the gas by a heat exchanger coupled
+to the tank (for example, waste heat from the fuel cell, ambient heating, or a
+dedicated heater).  No discharge throttling occurs.
+
+Imposing $\dot{P}_i = 0$ on $P_i = P(T_i, \rho_i)$:
 \begin{equation}
-  \dot{P}_i = \alpha_i\,\dot{T}_i + \frac{\beta_i}{V_i}\,\mdot_i^{\text{net}} = 0,
+  \alpha_i\,\dot{T}_i + \frac{\beta_i}{V_i}\,\mdot_i^{\text{net}} = 0,
   \label{eq:config-b-constraint}
 \end{equation}
-where $\beta_i = \at{\partial P/\partial\rho}{T}$.
-
-Solving \cref{eq:config-b-constraint} for $\dot{T}_i$ and substituting into
-\cref{eq:energy-balance} (noting that $h_e - h_i = 0$ for edges leaving $i$):
+where $\beta_i = \at{\partial P/\partial\rho}{T}$.  Solving for $\dot{T}_i$
+and substituting into the energy balance \cref{eq:energy-balance}:
 \begin{equation}
-  \frac{\alpha_i\, \Phi_i}{m_i c_{v,i}} +
-  \mdot_i^{\text{net}}\!\left(\frac{T_i \alpha_i^2}{\rho_i\, m_i c_{v,i}}
-                              + \frac{\beta_i}{V_i}\right) = 0,
-  \label{eq:config-b-mdot}
+  m_i c_{v,i}
+    \left(-\frac{\beta_i}{\alpha_i}\frac{\mdot_i^{\text{net}}}{V_i}\right)
+  = \sum_{e\in\Edges_i^+}\!\mdot_e(h_e - h_i)
+    + \frac{T_i}{\rho_i}\alpha_i\,\mdot_i^{\text{net}}
+    + \dot{Q}_{s,i} + \dot{Q}_{HX,i}.
+  \label{eq:config-b-energy}
 \end{equation}
-where $\Phi_i$ collects all forcing terms that do \emph{not} depend on the
-discharge rate:
-\begin{equation}
-  \Phi_i = \sum_{e \in \Edges_i^+} \mdot_e (h_e - h_i) + \dot{Q}_{s,i}.
-  \label{eq:phi}
-\end{equation}
-
-Rearranging \cref{eq:config-b-mdot} gives the required net mass-flow rate to
-maintain $\dot{P}_i = 0$:
+Applying the triple-product identity
+$\at{\partial T/\partial\rho}{P} = -\beta_i/\alpha_i$ and rearranging for
+$\dot{Q}_{HX,i}$ (pure-discharge case, $\Edges_i^+ = \varnothing$):
 \begin{equation}
   \boxed{
-  \mdot_i^{\text{net,B}} = -\frac{\alpha_i\,\Phi_i}
-    {\dfrac{T_i \alpha_i^2}{\rho_i} + c_{v,i}\,\beta_i\,\rho_i}
+  \dot{Q}_{HX,i} = \mdot_{\text{out},i}
+    \underbrace{\!\left(
+      \frac{T_i}{\rho_i}\,\alpha_i
+      - \rho_i\,c_{v,i}\at{\frac{\partial T}{\partial\rho}}{P}
+    \right)}_{>0}
+    - \dot{Q}_{s,i}
   }
-  \label{eq:config-b-solution}
+  \label{eq:config-b-qhx}
 \end{equation}
-(using $V_i = m_i / \rho_i$).  The maximum sustainable discharge rate follows
-from the net-flow identity:
-\begin{equation}
-  \mdot_\text{disc}^{\max} =
-    \mdot_i^{\text{in}} - \mdot_i^{\text{vent}} - \mdot_i^{\text{net,B}},
-\end{equation}
-and the actual discharge edge flow rate is clipped to this value:
-\begin{equation}
-  \mdot_e^{\text{disc}} = \min\!\bigl(\mdot_\text{CSV}(t),\;
-                                       \mdot_\text{disc}^{\max}\bigr).
-  \label{eq:config-b-clip}
-\end{equation}
+Both derivatives are evaluated from CoolProp at $(T_i, \rho_i)$:
+$\alpha_i = \texttt{d(P)/d(T)|D}$ and
+$\at{\partial T/\partial\rho}{P} = \texttt{d(T)/d(D)|P}$.
+When inflows are present, the right-hand side acquires an additional
+$-\sum_{e\in\Edges_i^+}\mdot_e(h_e - h_i)$ term.
 
 \paragraph{Physical interpretation.}
-\Cref{eq:config-b-solution} states that the net outflow is limited to whatever
-rate the ambient heat leak can sustain while holding pressure constant.  In a
-pure-discharge scenario with no inflows, $\Phi_i = \dot{Q}_{s,i}$, so any
-discharge must be matched by heat entering the gas.  If the fuel cell demands
-more than $\mdot_\text{disc}^{\max}$, the supply is throttled and the fuel
-cell operates in a starved condition.  No fictitious heat source is introduced.
+\Cref{eq:config-b-qhx} states that the heat exchanger must compensate two
+competing effects: (i)~the thermodynamic pressure--temperature coupling
+$(T/\rho)\alpha_i$ that would cause pressure to fall as gas leaves the tank, and
+(ii)~the isobaric cooling associated with the density change,
+$\rho_i c_{v,i}\at{\partial T/\partial\rho}{P}$.  Because
+$\at{\partial T/\partial\rho}{P} < 0$ for hydrogen under typical cryogenic
+and high-pressure conditions, both terms are positive and $\dot{Q}_{HX,i} > 0$
+(heat is \emph{added}, not removed).  In the limit of negligible ambient heat
+leak ($\dot{Q}_{s,i} \approx 0$) the required heat input is proportional to the
+discharge rate.
 

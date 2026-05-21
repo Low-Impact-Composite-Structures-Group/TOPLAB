@@ -32,13 +32,18 @@ Three node types are recognised:
   cryogenic pump feeding a refuel edge). \\[4pt]
 \texttt{sink}       & \texttt{sink}       &
   Infinite reservoir that absorbs mass with no back-pressure (e.g.\
-  \texttt{atmosphere} for venting, \texttt{fuel\_cell} for mission discharge). \\
+  \texttt{atmosphere} for venting, \texttt{fuel\_cell} for mission discharge). \\[4pt]
+\texttt{junction}   & \texttt{junction}   &
+  Stateless flow-splitting or merging point.  Conserves mass and enthalpy
+  across its incident edges; split fractions are declared on the outflow
+  edges.  Carries no dynamic state. \\
 \bottomrule
 \end{tabularx}
 \end{center}
 
-Only \texttt{tank} nodes carry dynamic states; \texttt{source} and \texttt{sink}
-nodes act as boundary conditions.
+Only \texttt{tank} nodes carry dynamic states; \texttt{source}, \texttt{sink},
+and \texttt{junction} nodes act as boundary conditions or purely algebraic
+routing elements.
 
 % -----------------------------------------------------------------------------
 \subsection{Edges}
@@ -64,7 +69,9 @@ the transferred mass.}
 
 \texttt{discharge} & tank $\to$ sink &
   Flow rate prescribed by a mission CSV file, $\mdot_\text{CSV}(t)$.
-  In Config~B, throttled to the algebraic limit (see \cref{sec:dae:configB}). &
+  In Config~B the rate continues at the mission value; a compensating
+  heat flux is supplied to maintain the pressure floor
+  (see \cref{sec:dae:configB}). &
   $h(T_i,\rho_i)$ \\[6pt]
 
 \texttt{vent}      & tank $\to$ sink &
@@ -81,37 +88,181 @@ the transferred mass.}
 \end{table}
 
 % -----------------------------------------------------------------------------
+\subsection{Junction Nodes}
+\label{sec:network:junctions}
+% -----------------------------------------------------------------------------
+
+A junction node is a stateless routing element that splits or merges mass
+streams.  It carries no dynamic states and requires no thermodynamic model;
+all computations are purely algebraic at each RHS evaluation.
+
+\subsubsection{Splitter (one inflow, multiple outflows)}
+
+Let $e_0$ be the single inflow edge and $e_1,\dots,e_K$ the $K$ outflow edges.
+Each outflow edge declares a dimensionless \texttt{split\_fraction} $f_k \in
+[0,1]$, with $\sum_{k=1}^{K} f_k = 1$.  The outflow rates are
+\begin{equation}
+  \mdot_{e_k} = f_k\,\mdot_{e_0}, \qquad k = 1,\dots,K.
+  \label{eq:junction-split}
+\end{equation}
+Specific enthalpy is conserved at an ideal junction (no heat addition or shaft
+work):
+\begin{equation}
+  h_{e_k} = h_{e_0}, \qquad k = 1,\dots,K.
+  \label{eq:junction-split-h}
+\end{equation}
+
+\subsubsection{Merger (multiple inflows, one outflow)}
+
+Let $e_1,\dots,e_J$ be inflow edges and $e_0$ the single outflow edge.
+Mass conservation gives
+\begin{equation}
+  \mdot_{e_0} = \sum_{j=1}^{J} \mdot_{e_j}.
+  \label{eq:junction-merge}
+\end{equation}
+The mixture enthalpy at the junction outlet is the mass-flow-weighted average:
+\begin{equation}
+  h_{e_0} = \frac{\displaystyle\sum_{j=1}^{J} \mdot_{e_j}\,h_{e_j}}{\mdot_{e_0}}.
+  \label{eq:junction-merge-h}
+\end{equation}
+
+% -----------------------------------------------------------------------------
+\subsection{Peripheral Components on Edges}
+\label{sec:network:peripheral}
+% -----------------------------------------------------------------------------
+
+A \emph{peripheral component chain} can be attached to any edge to condition
+the fluid stream between the source and target nodes.  The chain preserves the
+mass flow rate (steady-state assumption) but transforms the thermodynamic state
+$(P, T, h)$ of the stream.  The outlet enthalpy $h_\text{out}$ from the last
+component in the chain is substituted for $h_\text{src}$ when assembling the
+downstream energy balance \cref{eq:energy-balance}.
+
+\subsubsection{Stream transformation model}
+
+Let the raw stream at the edge source be $s_0 = (P_\text{src},\; T_\text{src},\;
+\mdot_e,\; h_\text{src})$.  Each component $c_k$ maps
+\begin{equation}
+  s_k = c_k(s_{k-1}), \qquad k = 1,\dots,K,
+\end{equation}
+and the outlet state $s_K = (P_\text{out},\; T_\text{out},\; \mdot_e,\;
+h_\text{out})$ is used in the energy balance at the downstream node.
+
+\subsubsection{Implemented component models}
+
+\paragraph{Ideal heat exchanger (\texttt{ideal\_heat\_exchanger}).}
+Sets the stream to a prescribed target temperature $T_\text{tgt}$ with an
+optional pressure drop $\Delta P$:
+\begin{equation}
+  P_\text{out} = P_\text{in} - \Delta P,\qquad
+  T_\text{out} = T_\text{tgt},\qquad
+  h_\text{out} = h(P_\text{out},\, T_\text{tgt}).
+\end{equation}
+
+\paragraph{Compressor (\texttt{compressor}).}
+Raises stream pressure from $P_\text{in}$ to a specified $P_\text{out}$ with
+isentropic efficiency $\eta$:
+\begin{equation}
+  h_\text{out} = h_\text{in} + \frac{h_{2s} - h_\text{in}}{\eta},\quad
+  h_{2s} = h(P_\text{out},\, s_\text{in}).
+  \label{eq:compressor}
+\end{equation}
+The outlet temperature and density are recovered from $(P_\text{out},
+h_\text{out})$ via CoolProp.
+
+\paragraph{Cryopump (\texttt{cryopump}).}
+Pumps liquid hydrogen from a low-pressure reservoir at $P_0 = \SI{3}{\bar}$
+to the downstream tank pressure $P_i$ with isentropic efficiency
+$\eta_p = 0.78$.  Liquid saturation conditions ($x = 0$) are assumed at
+suction:
+\begin{equation}
+  h_\text{out}(P_i)
+  = h(P_0,\,x{=}0)
+    + \frac{h_{2s}(P_i) - h(P_0,\,x{=}0)}{\eta_p},\quad
+  h_{2s}(P_i) = h\!\left(P_i,\, s(P_0,x{=}0)\right).
+  \label{eq:cryopump}
+\end{equation}
+Used on \texttt{refuel} edges.
+
+% -----------------------------------------------------------------------------
 \subsection{YAML Schema Mapping}
 \label{sec:network:yaml}
 % -----------------------------------------------------------------------------
 
 The graph is declared in the \texttt{network} block of the scenario YAML file:
 
-\begin{lstlisting}[language=Python, caption={Excerpt of YAML network declaration.}]
+\begin{lstlisting}[language=Python, caption={Excerpt of YAML network declaration showing all node and edge types.}]
 network:
   nodes:
-    - node_id: 1
-      type: tank          # tank / source / sink
-      fluid: CH2
+    - node_id: lh2_tank
+      type: tank          # tank | source | sink | junction
+      fluid: LH2
       ...
+    - node_id: gh2_buffer
+      type: tank
+      fluid: GH2
+      ...
+    - node_id: cryo_reservoir
+      type: source        # infinite LH2 supply for refuelling
+    - node_id: fuel_cell
+      type: sink          # mission discharge endpoint
     - node_id: atmosphere
-      type: sink
+      type: sink          # venting endpoint
+    - node_id: discharge_splitter
+      type: junction      # splits flow between tank and fuel cell
 
   edges:
-    - edge_id: ch2_cch2_coupling
-      connection_type: coupling     # coupling / discharge / vent / refuel
-      from_node: 1
-      to_node: 2
-      ...
-    - edge_id: discharge_fc
+    # Coupling: LH2 tank feeds GH2 buffer via compressor + HEX chain
+    - edge_id: lh2_to_buffer
+      connection_type: coupling
+      from_node: lh2_tank
+      to_node: gh2_buffer
+      components:
+        - type: compressor
+          parameters: {outlet_pressure: 35e5, efficiency: 0.82}
+        - type: ideal_heat_exchanger
+          parameters: {target_temperature: 293.0, pressure_drop: 0.5e5}
+
+    # Discharge split: 95% to fuel cell, 5% to buffer top-up
+    - edge_id: to_junction
       connection_type: discharge
-      from_node: 2
+      from_node: gh2_buffer
+      to_node: discharge_splitter
+    - edge_id: junction_to_fc
+      connection_type: discharge
+      from_node: discharge_splitter
       to_node: fuel_cell
-      ...
+      split_fraction: 0.95
+    - edge_id: junction_to_buffer
+      connection_type: coupling
+      from_node: discharge_splitter
+      to_node: lh2_tank
+      split_fraction: 0.05
+
+    # Vent edges
+    - edge_id: vent_lh2
+      connection_type: vent
+      from_node: lh2_tank
+      to_node: atmosphere
+    - edge_id: vent_buffer
+      connection_type: vent
+      from_node: gh2_buffer
+      to_node: atmosphere
+
+    # Refuel edge with cryopump
+    - edge_id: refuel_lh2
+      connection_type: refuel
+      from_node: cryo_reservoir
+      to_node: lh2_tank
+      components:
+        - type: cryopump
+          parameters: {reservoir_pressure: 3.0e5, efficiency: 0.78}
 \end{lstlisting}
 
 Mission discharge and venting edges that were previously implicit (hard-coded in
 the dynamic model) are now explicit edges in the \texttt{network.edges} list.
+Peripheral components are declared inline on the edge via the \texttt{components}
+list; split fractions on junction outflow edges must sum to one.
 
 % -----------------------------------------------------------------------------
 \subsection{Example: CH2/CCH2 Two-Tank System}
