@@ -189,8 +189,9 @@ class ScenarioConfig:
 
                 for edge in edges:
                     connection_type = edge.get('connection_type', 'pressure_compensation')
-                    from_node = edge.get('from_node', 1)
-                    to_node = edge.get('to_node', 2)
+                    participants_raw = edge.get('participants', {})
+                    from_node = participants_raw.get('source', edge.get('from_node', 1))
+                    to_node = participants_raw.get('target', edge.get('to_node', 2))
                     edge_id = edge.get('edge_id', f'coupling_{from_node}_{to_node}')
 
                     rule = {
@@ -207,6 +208,9 @@ class ScenarioConfig:
                         'flow_physics': edge.get('flow_physics', {}),
                         'discharge_piping': edge.get('discharge_piping', {}),
                         'peripheral_components': edge.get('peripheral_components', edge.get('components', [])),
+                        'main_conditioning_components': edge.get('main_conditioning_components', []),
+                        'discharge_conditioning': edge.get('discharge_conditioning', []),
+                        'split_fraction': edge.get('split_fraction'),
                     }
                     coupling_rules.append(rule)
 

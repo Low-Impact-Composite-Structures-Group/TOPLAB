@@ -128,6 +128,12 @@ class SystemOrchestrator:
             peripheral_components = rule_config.get('peripheral_components', rule_config.get('components', []))
             if peripheral_components:
                 tank_system_rule['peripheral_components'] = peripheral_components
+            main_cond = rule_config.get('main_conditioning_components', [])
+            if main_cond:
+                tank_system_rule['main_conditioning_components'] = main_cond
+            discharge_cond = rule_config.get('discharge_conditioning', [])
+            if discharge_cond:
+                tank_system_rule['discharge_conditioning'] = discharge_cond
             tank_system_coupling_rules.append(tank_system_rule)
 
         for rule_config in coupling_rules_config:
@@ -350,6 +356,45 @@ class SystemOrchestrator:
                 }
 
                 _append_tank_system_rule(rule_config, tank_system_rule)
+
+            elif coupling_type == 'proportional_split':
+                # Fraction of source tank's mission discharge routed to target via component chain
+                participants = rule_config.get('participants', {})
+                split_fraction = float(rule_config.get('split_fraction', 0.05))
+
+                tank_system_rule = {
+                    'type': 'proportional_split',
+                    'source_tank': participants.get('source', 1) - 1,
+                    'target_tank': participants.get('target', 2) - 1,
+                    'split_fraction': split_fraction,
+                    'coupling_id': rule_config.get('coupling_id', 'proportional_split')
+                }
+
+                _append_tank_system_rule(rule_config, tank_system_rule)
+                print(f"   ✓ Proportional split → ProportionalSplitCoupling ({split_fraction*100:.1f}%)")
+
+            elif coupling_type == 'pressure_triggered_discharge':
+                # Source tank discharges to sink when pressure exceeds threshold
+                participants = rule_config.get('participants', {})
+                activation = rule_config.get('activation_conditions', {})
+                flow_params = rule_config.get('flow_parameters', {})
+
+                open_pressure_bar = float(activation.get('pressure_open_bar', 11.0))
+                close_pressure_bar = float(activation.get('pressure_close_bar', 10.0))
+                max_flow_kg_s = float(flow_params.get('max_flow_rate_kg_s', 0.05))
+
+                tank_system_rule = {
+                    'type': 'pressure_triggered_discharge',
+                    'source_tank': participants.get('source', 2) - 1,
+                    'open_pressure': open_pressure_bar * 1e5,
+                    'close_pressure': close_pressure_bar * 1e5,
+                    'max_flow_rate': max_flow_kg_s,
+                    'coupling_id': rule_config.get('coupling_id', 'pressure_triggered_discharge')
+                }
+
+                _append_tank_system_rule(rule_config, tank_system_rule)
+                print(f"   ✓ Pressure discharge → PressureTriggeredDischarge "
+                      f"({close_pressure_bar}–{open_pressure_bar} bar, max={max_flow_kg_s*1000:.1f} g/s)")
 
             else:
                 print(f"WARNING: Unsupported coupling type '{coupling_type}' - skipping")
@@ -1785,6 +1830,71 @@ class SystemOrchestrator:
         # Count plots generated
         mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
         heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
+
+        # -------------------------------------------------------------------
+        # Peripheral component chain plots (HEX, compressor, pump…)
+        # -------------------------------------------------------------------
+        from src.multi_tank.coupling.inter_tank_coupling import ProportionalSplitCoupling, PressureTriggeredDischarge
+
+        # Only attempt if the tank_system has coupling valves
+        if hasattr(self, 'tank_system') and self.tank_system is not None:
+            # --- Component chain plots (one per coupling with components) ---
+            try:
+                stream_histories = self.tank_system.compute_coupling_stream_history(self.results)
+                for sh in stream_histories:
+                    # Only plot peripheral-component charts for the 5% split chain
+                    if sh.get('stream_type', 'split_chain') != 'split_chain':
+                        continue
+                    if not sh['components']:
+                        continue
+                    pc_save_path = None
+                    if save_path:
+                        from pathlib import Path
+                        save_dir = Path(save_path).parent
+                        save_ext = Path(save_path).suffix or '.png'
+                        base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                        safe_id = sh['coupling_id'].replace(' ', '_').replace('/', '_').replace('→', '_to_')
+                        pc_save_path = save_dir / f"{base_name}_components_{safe_id}{save_ext}"
+
+                    pc_fig = plotter.plot_peripheral_components(
+                        stream_history=sh,
+                        save_path=str(pc_save_path) if pc_save_path else None,
+                    )
+                    figures.append(pc_fig)
+            except Exception as e:
+                print(f"   WARNING: Peripheral component plots failed: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # --- Fuel cell inlet plot: find the PressureTriggeredDischarge sink ---
+            try:
+                discharge_tank_idx = None
+                for valve in self.tank_system.coupling_valves:
+                    if isinstance(valve, PressureTriggeredDischarge):
+                        discharge_tank_idx = valve.source_tank
+                        break
+
+                if discharge_tank_idx is not None:
+                    fc_save_path = None
+                    if save_path:
+                        from pathlib import Path
+                        save_dir = Path(save_path).parent
+                        save_ext = Path(save_path).suffix or '.png'
+                        base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                        fc_save_path = save_dir / f"{base_name}_fuel_cell_inlet{save_ext}"
+
+                    fc_fig = plotter.plot_fuel_cell_inlet(
+                        results=self.results,
+                        source_tank_idx=discharge_tank_idx,
+                        stream_histories=stream_histories,
+                        save_path=str(fc_save_path) if fc_save_path else None,
+                    )
+                    figures.append(fc_fig)
+            except Exception as e:
+                print(f"   WARNING: Fuel cell inlet plot failed: {e}")
+                import traceback
+                traceback.print_exc()
+        # -------------------------------------------------------------------
 
         plots_per_tank = 2  # Always: evolution + density-temperature
         if mass_flows_enabled:
