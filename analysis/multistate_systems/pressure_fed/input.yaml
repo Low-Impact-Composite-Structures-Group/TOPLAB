@@ -1,0 +1,160 @@
+analysis:
+  name: Pressure-Fed LH2-GH2 System
+  description: >-
+    LH2 tank (Tank 1) discharges to fuel cell. 5% of discharge is diverted
+    through HEX + compressor into a GH2 buffer (Tank 2). A pressure-triggered
+    valve on Tank 2 opens at 11 bar to drain excess to sink.
+  version: '1.0'
+
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: LH2 main tank
+    fluid: SLH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 800000.0        # 8 bar (two-phase / near-saturation)
+      temperature: 22.0         # K  (T_sat at ~7.5 bar; slightly compressed at 8 bar)
+      density: 70.0             # kg/m³ (liquid-dominated)
+    operating_limits:
+      minimum_pressure: 500000.0    # 5 bar – Config B floor
+      venting_pressure: 1200000.0   # 12 bar
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.10
+        heat_transfer_coefficient: 0.005   # vacuum-insulated
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+
+  - node_id: 2
+    type: tank
+    description: GH2 buffer tank
+    fluid: CH2
+    geometry:
+      phi: 1.0
+      radius: 0.4            # V ≈ 0.268 m³ spherical; adequate for ~11 kg GH2 buffer
+    initial_conditions:
+      pressure: 1000000.0    # 10 bar (just below pressure_close_bar)
+      temperature: 293.15    # K ambient
+      density: 0.83          # kg/m³ ≈ ideal-gas GH2 at 10 bar, 293 K
+    operating_limits:
+      minimum_pressure: 100000.0    # 1 bar
+      venting_pressure: 2500000.0   # 25 bar
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        thickness: 0.02
+        heat_transfer_coefficient: 50.0   # ambient (no insulation)
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 0.05
+      use_density_stopping_events: false
+      use_duration_stopping: true
+    plotting: {}
+
+  edges:
+  - edge_id: lh2_to_gh2_buffer
+    connection_type: proportional_split
+    description: >-
+      Full Tank 1 outflow → HEX (330 K) → pressure regulator (3 bar).
+      5% continues to compressor (15 bar) → GH2 buffer (Tank 2).
+      95% bypasses compressor and continues to mixer junction → fuel cell.
+    participants:
+      source: 1
+      target: 2
+    split_fraction: 0.05
+    main_conditioning_components:
+    - type: ideal_heat_exchanger
+      target_temperature: 330.0
+      pressure_drop: 0.0
+    - type: pressure_regulator
+      outlet_pressure: 300000.0   # 3 bar
+    peripheral_components:
+    - type: compressor
+      outlet_pressure: 1500000.0   # 15 bar (mid-band target)
+      efficiency: 0.85
+
+  - edge_id: gh2_to_sink
+    connection_type: pressure_triggered_discharge
+    description: >-
+      GH2 buffer → pressure regulator (3 bar) → mixer junction → fuel cell.
+      Valve opens at 15 bar, closes at 11 bar.
+    participants:
+      source: 2
+    activation_conditions:
+      pressure_open_bar: 15.0
+      pressure_close_bar: 11.0
+    flow_parameters:
+      max_flow_rate_kg_s: 0.01   # generous ceiling; actual flow governed by hysteresis band
+    discharge_conditioning:
+    - type: pressure_regulator
+      outlet_pressure: 300000.0   # 3 bar – reduce to match main conditioned stream
+
+mission:
+  type: discharge
+  profile: csv
+  parameters:
+    csv_file: mission.csv
+    cruise_altitude: 0.0
+    standard_temperature: 293.15
+    mach_number: 0.0
+    phase: gas
+  ambient_temperature: 293.15
+  assigned_to_node: 1
+
+physics:
+  fluid_properties:
+    use_coolprop: true
+    coolprop_fluid: H2
+    backup_properties:
+      specific_gas_constant: 4124.0
+      heat_capacity_ratio: 1.4
+      kinematic_viscosity: 1.0e-7
+      speed_of_sound: 1000.0
+  orifice_flow:
+    discharge_coefficient: 0.6
+    flow_coefficient_units: dimensionless
+  choked_flow:
+    enable_choked_flow: false
+  safety_limits:
+    minimum_pressure_pa: 1000.0
+    maximum_velocity_ms: 2000.0
+  numerical:
+    pressure_tolerance_pa: 1000.0
+    flow_rate_tolerance_kg_s: 1.0e-5
+    property_update_frequency: 1
+
+solver:
+  method: LSODA
+  rtol: 1.0e-6
+  atol: 1.0e-9
+  time_step: 1.0
+  max_step: 10.0
+
+output:
+  identifier: pressure_fed
+  save_plots: true
+  plot_formats:
+  - png
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
