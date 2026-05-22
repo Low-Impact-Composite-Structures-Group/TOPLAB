@@ -27,7 +27,7 @@ import matplotlib
 matplotlib.use("pgf")  # Use PGF backend for LaTeX compatibility
 import matplotlib.pyplot as plt
 
-from src.multi_tank.plotting.multi_tank_plotting import DelftColourPlotter
+from src.multistate.plotting.multi_tank_plotting import DelftColourPlotter
 
 # Configure matplotlib for PGF output
 plt.rcParams.update({

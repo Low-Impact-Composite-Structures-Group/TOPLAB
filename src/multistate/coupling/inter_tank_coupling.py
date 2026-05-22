@@ -9,8 +9,8 @@ Author: Dante Raso
 
 import math
 from typing import List, Optional, Dict, Any
-from src.multi_tank.fluids.flow_physics import FlowPhysics
-from src.multi_tank.peripheral_components.base import PeripheralFlowState
+from src.multistate.fluids.flow_physics import FlowPhysics
+from src.multistate.peripheral_components.base import PeripheralFlowState
 from CoolProp.CoolProp import PropsSI
 
 

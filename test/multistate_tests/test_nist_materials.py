@@ -29,8 +29,8 @@ sys.path.insert(0, str(project_root))
 from src.materials.materials_for_multi_tank.nist_material import NISTMaterial, get_material_by_nist_path
 
 # Import multi_tank NIST properties for comparison
-from src.multi_tank.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as al_original_cp
-from src.multi_tank.materials.nist_material_properties.g10_properties import specific_heat as g10_original_cp
+from src.multistate.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as al_original_cp
+from src.multistate.materials.nist_material_properties.g10_properties import specific_heat as g10_original_cp
 
 
 class TestNISTMaterialBasics:

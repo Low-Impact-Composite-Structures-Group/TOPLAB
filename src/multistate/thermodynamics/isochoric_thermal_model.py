@@ -15,7 +15,7 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI
 
 from src.thermodynamics.tank_states import IsochoricTankState
-from src.multi_tank.materials.nist_materials import NISTMetal, NISTComposite
+from src.multistate.materials.nist_materials import NISTMetal, NISTComposite
 
 
 class IsochoricThermalModel(ABC):

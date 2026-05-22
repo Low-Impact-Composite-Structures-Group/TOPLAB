@@ -14,8 +14,8 @@ import numpy as np
 
 from src.mission.mission import Mission
 from src.mission.mission_sections import MissionSection, OutFlow, InFlow
-from src.multi_tank.thermodynamics.isochoric_thermal_model import IsochoricThermalModel
-from src.multi_tank.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
+from src.multistate.thermodynamics.isochoric_thermal_model import IsochoricThermalModel
+from src.multistate.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 from src.multistep_methods.linear_multistep_methods import ScipyMethod
 from src.thermodynamics.tank_states import (
     IsochoricTankState,

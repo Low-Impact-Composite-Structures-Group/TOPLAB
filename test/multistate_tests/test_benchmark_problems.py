@@ -26,7 +26,7 @@ import pytest
 # Add the hydrogen_fuel_tank package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.multi_tank.solver import (
+from src.multistate.solver import (
     RK45Solver,
     RadauSolver,
     DOP853Solver,

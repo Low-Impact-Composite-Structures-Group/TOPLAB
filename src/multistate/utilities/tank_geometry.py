@@ -10,8 +10,8 @@ import CoolProp.CoolProp as CP
 from typing import Tuple
 
 from src.tank_design.tank_shapes import SphericalTank
-from src.multi_tank.materials.nist_materials import NISTMetal, NISTComposite
-from src.multi_tank.missions.isochoric_missions import DischargeMission
+from src.multistate.materials.nist_materials import NISTMetal, NISTComposite
+from src.multistate.missions.isochoric_missions import DischargeMission
 
 
 def create_tank_from_mission(

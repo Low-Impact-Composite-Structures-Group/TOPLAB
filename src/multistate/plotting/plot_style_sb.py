@@ -1,6 +1,6 @@
 """
 Seaborn-based plot styling for hydrogen fuel tank visualization.
-This provides a modernized styling approach, colocated under src/multi_tank/plotting.
+This provides a modernized styling approach, colocated under src/multistate/plotting.
 
 Hydrogen Storage in Civil Aviation PhD
 """

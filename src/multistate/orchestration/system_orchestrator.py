@@ -27,17 +27,17 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Configuration system - enhanced version with migration support
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multistate.configuration.scenario_configuration import ScenarioConfig
 
 # Multi-tank DAE physics engine
-from src.multi_tank.system.tank_system import TankSystem, TankSystemConfig, TankConfig
-from src.multi_tank.utilities.tank_geometry import create_tank_from_fuel_mass
+from src.multistate.system.tank_system import TankSystem, TankSystemConfig, TankConfig
+from src.multistate.utilities.tank_geometry import create_tank_from_fuel_mass
 
 # Mission framework
-from src.multi_tank.missions.isochoric_missions import DischargeMission
+from src.multistate.missions.isochoric_missions import DischargeMission
 
 # Heat flow data collection for iHEX calculation
-from src.multi_tank.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
+from src.multistate.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
 
 # Utilities
 from CoolProp.CoolProp import PropsSI
@@ -1333,7 +1333,7 @@ class SystemOrchestrator:
 
         try:
             # Import the new plotting module
-            from src.multi_tank.plotting.multi_tank_plotting import DelftColourPlotter
+            from src.multistate.plotting.multi_tank_plotting import DelftColourPlotter
 
             # Get plotting configuration from config
             plot_config = self.scenario_config.config_dict.get('output', {}).get('plots', {})
@@ -1350,7 +1350,7 @@ class SystemOrchestrator:
             # Load font configuration and update global font settings
             font_config = style_config.get('font', {})
             if font_config:
-                from src.multi_tank.plotting.plot_style_sb import update_font_settings
+                from src.multistate.plotting.plot_style_sb import update_font_settings
 
                 master_size = font_config.get('master_size')
                 legend_size = font_config.get('legend_size')
@@ -1834,7 +1834,7 @@ class SystemOrchestrator:
         # -------------------------------------------------------------------
         # Peripheral component chain plots (HEX, compressor, pump…)
         # -------------------------------------------------------------------
-        from src.multi_tank.coupling.inter_tank_coupling import ProportionalSplitCoupling, PressureTriggeredDischarge
+        from src.multistate.coupling.inter_tank_coupling import ProportionalSplitCoupling, PressureTriggeredDischarge
 
         # Only attempt if the tank_system has coupling valves
         if hasattr(self, 'tank_system') and self.tank_system is not None:
@@ -2948,7 +2948,7 @@ def main():
     try:
         # Load ScenarioConfig first
         print(f"Loading configuration: {test_config_path}")
-        from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+        from src.multistate.configuration.scenario_configuration import ScenarioConfig
         scenario_config = ScenarioConfig.from_yaml(str(test_config_path))
 
         # Create orchestrator with ScenarioConfig object

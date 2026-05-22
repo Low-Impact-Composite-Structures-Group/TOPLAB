@@ -1,7 +1,7 @@
 import pytest
 
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
-from src.multi_tank.orchestration.system_orchestrator import SystemOrchestrator
+from src.multistate.configuration.scenario_configuration import ScenarioConfig
+from src.multistate.orchestration.system_orchestrator import SystemOrchestrator
 
 
 @pytest.mark.plotting

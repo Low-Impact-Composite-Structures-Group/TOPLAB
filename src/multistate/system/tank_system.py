@@ -16,18 +16,18 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
 from src.tank_design.tank_shapes import SphericalTank
-from src.multi_tank.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
+from src.multistate.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
 )
 from src.thermodynamics.tank_states import IsochoricTankState
-from src.multi_tank.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
-from src.multi_tank.dynamics.edge_flow import EdgeFlow
+from src.multistate.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
+from src.multistate.dynamics.edge_flow import EdgeFlow
 
 from .state_management import MultiTankState, MultiTankResults
-from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
-from src.multi_tank.fluids.flow_physics import FlowPhysics
-from src.multi_tank.peripheral_components.factory import build_peripheral_component_chain
+from src.multistate.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
+from src.multistate.fluids.flow_physics import FlowPhysics
+from src.multistate.peripheral_components.factory import build_peripheral_component_chain
 
 
 @dataclass
@@ -261,7 +261,7 @@ class TankSystem:
 
             elif rule_type == 'mission_adaptive_pressure_valve':
                 # Create mission-adaptive pressure valve with dynamic thresholds
-                from src.multi_tank.coupling.inter_tank_coupling import MissionAdaptivePressureValve
+                from src.multistate.coupling.inter_tank_coupling import MissionAdaptivePressureValve
 
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
@@ -327,7 +327,7 @@ class TankSystem:
 
             elif rule_type == 'pressure_governor':
                 # New margin-free governor mode
-                from src.multi_tank.coupling.inter_tank_coupling import PressureGovernorValve
+                from src.multistate.coupling.inter_tank_coupling import PressureGovernorValve
 
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
@@ -375,7 +375,7 @@ class TankSystem:
 
             elif rule_type == 'feedforward_pressure_enforcer':
                 # Create feedforward pressure enforcer (per-derivative-eval algebraic control)
-                from src.multi_tank.coupling.inter_tank_coupling import FeedforwardPressureEnforcer
+                from src.multistate.coupling.inter_tank_coupling import FeedforwardPressureEnforcer
 
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
@@ -432,7 +432,7 @@ class TankSystem:
 
             elif rule_type == 'mass_flow_pid_valve':
                 # Create mass flow PID controlled valve with direct flow-to-flow control
-                from src.multi_tank.coupling.inter_tank_coupling import MassFlowPIDControlledValve
+                from src.multistate.coupling.inter_tank_coupling import MassFlowPIDControlledValve
 
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
@@ -488,7 +488,7 @@ class TankSystem:
 
             elif rule_type == 'ohex_extraction':
                 # Create OHEX extraction coupling
-                from src.multi_tank.coupling.inter_tank_coupling import OHEXExtractionCoupling
+                from src.multistate.coupling.inter_tank_coupling import OHEXExtractionCoupling
 
                 source_idx = rule.get('source_tank', 1)  # Default to tank 2 (LH2)
 
@@ -518,7 +518,7 @@ class TankSystem:
                 print(f"      Mission profile: {len(rule.get('mission_profile', {}).get('time_s', []))} time points")
 
             elif rule_type == 'proportional_split':
-                from src.multi_tank.coupling.inter_tank_coupling import ProportionalSplitCoupling
+                from src.multistate.coupling.inter_tank_coupling import ProportionalSplitCoupling
 
                 source_idx = rule.get('source_tank', 0)
                 target_idx = rule.get('target_tank', 1)
@@ -543,7 +543,7 @@ class TankSystem:
                 print(f"   🔗 Proportional Split: Tank{source_idx+1} → Tank{target_idx+1} ({split_fraction*100:.1f}%)")
 
             elif rule_type == 'pressure_triggered_discharge':
-                from src.multi_tank.coupling.inter_tank_coupling import PressureTriggeredDischarge
+                from src.multistate.coupling.inter_tank_coupling import PressureTriggeredDischarge
 
                 source_idx = rule.get('source_tank', 1)
                 valve = PressureTriggeredDischarge(
@@ -1165,7 +1165,7 @@ class TankSystem:
 
             elif hasattr(valve, 'update_time_based_control'):
                 # MissionAdaptivePressureValve - special handling for time-based control
-                from src.multi_tank.coupling.inter_tank_coupling import MissionAdaptivePressureValve
+                from src.multistate.coupling.inter_tank_coupling import MissionAdaptivePressureValve
                 if isinstance(valve, MissionAdaptivePressureValve):
                     source_state = multi_state.tank_states[valve.source_tank]
                     target_state = multi_state.tank_states[valve.target_tank]
@@ -1198,7 +1198,7 @@ class TankSystem:
                         coupling_flows[valve.target_tank] += flow_rate
 
                 # Check for MassFlowPIDControlledValve
-                from src.multi_tank.coupling.inter_tank_coupling import MassFlowPIDControlledValve
+                from src.multistate.coupling.inter_tank_coupling import MassFlowPIDControlledValve
                 if isinstance(valve, MassFlowPIDControlledValve):
                     source_state = multi_state.tank_states[valve.source_tank]
                     target_state = multi_state.tank_states[valve.target_tank]
@@ -1508,8 +1508,8 @@ class TankSystem:
         """
         import numpy as np
         from CoolProp.CoolProp import PropsSI
-        from src.multi_tank.peripheral_components.base import PeripheralFlowState
-        from src.multi_tank.coupling.inter_tank_coupling import (
+        from src.multistate.peripheral_components.base import PeripheralFlowState
+        from src.multistate.coupling.inter_tank_coupling import (
             ProportionalSplitCoupling,
             PressureTriggeredDischarge,
         )

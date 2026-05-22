@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.materials.materials import Material, Metal, Composite
-from src.multi_tank.materials.nist_material_properties.aluminum5083_properties import specific_heat as aluminum_cp_nist, thermal_conductivity as aluminum_k_nist
-from src.multi_tank.materials.nist_material_properties.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
-from src.multi_tank.materials.nist_material_properties.aluminum3003f_properties import specific_heat as aluminum3003f_cp_nist, thermal_conductivity as aluminum3003f_k_nist
-from src.multi_tank.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as aluminum6061t6_cp_nist, thermal_conductivity as aluminum6061t6_k_nist
+from src.multistate.materials.nist_material_properties.aluminum5083_properties import specific_heat as aluminum_cp_nist, thermal_conductivity as aluminum_k_nist
+from src.multistate.materials.nist_material_properties.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
+from src.multistate.materials.nist_material_properties.aluminum3003f_properties import specific_heat as aluminum3003f_cp_nist, thermal_conductivity as aluminum3003f_k_nist
+from src.multistate.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as aluminum6061t6_cp_nist, thermal_conductivity as aluminum6061t6_k_nist
 
 
 @dataclass
