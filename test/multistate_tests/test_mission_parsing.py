@@ -1,7 +1,7 @@
 import pytest
 import yaml
 
-from src.multi_tank.configuration.scenario_configuration import ScenarioConfig
+from src.multistate.configuration.scenario_configuration import ScenarioConfig
 
 
 @pytest.mark.config

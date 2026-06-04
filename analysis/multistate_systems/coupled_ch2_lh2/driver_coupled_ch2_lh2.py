@@ -16,7 +16,7 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent.parent))
 
 # Import common driver function
-from src.multi_tank.orchestration.run_analysis import run_analysis
+from src.multistate.orchestration.run_analysis import run_analysis
 
 
 def main():

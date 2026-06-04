@@ -1,6 +1,6 @@
 """Compatibility shim for the relocated cryopump implementation."""
 
-from src.multi_tank.peripheral_components.cryopump import (
+from src.multistate.peripheral_components.cryopump import (
     CryoPumpModel,
     CryopumpParameters,
     compute_pump_outlet_hydrogen,

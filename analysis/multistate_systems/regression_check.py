@@ -101,7 +101,7 @@ def extract_metrics(result: dict) -> dict:
 # ── Run one analysis ──────────────────────────────────────────────────────────
 
 def run_one(entry: dict) -> dict:
-    from src.multi_tank.orchestration.run_analysis import run_analysis
+    from src.multistate.orchestration.run_analysis import run_analysis
 
     print(f"\n{'─'*60}")
     print(f"Running: {entry['name']}")
