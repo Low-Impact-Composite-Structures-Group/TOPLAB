@@ -40,6 +40,10 @@ class Primitive(ABC):
     def bounding_box_local(self) -> tuple[Point3D, Point3D]:
         pass
 
+    @abstractmethod
+    def volume(self) -> float:
+        pass
+
     def sample_points_local(self, step: float, margin: float = 0.0) -> list[Point3D]:
         if step <= 0.0:
             raise ValueError("step must be > 0")
@@ -106,6 +110,11 @@ class CapsulePrimitive(Primitive):
             return Point3D(-r, -d, -r), Point3D(r, d, r)
         return Point3D(-r, -r, -d), Point3D(r, r, d)
 
+    def volume(self) -> float:
+        cyl = math.pi * self.radius * self.radius * self.cylinder_length
+        sphere = (4.0 / 3.0) * math.pi * self.radius ** 3
+        return cyl + sphere
+
 
 @dataclass(frozen=True)
 class SpherePrimitive(Primitive):
@@ -131,6 +140,9 @@ class SpherePrimitive(Primitive):
     def bounding_box_local(self) -> tuple[Point3D, Point3D]:
         r = self.radius
         return Point3D(-r, -r, -r), Point3D(r, r, r)
+
+    def volume(self) -> float:
+        return (4.0 / 3.0) * math.pi * self.radius ** 3
 
 
 @dataclass(frozen=True)
@@ -164,3 +176,6 @@ class RegularPrismPrimitive(Primitive):
             Point3D(-0.5 * self.width, -0.5 * self.depth, -0.5 * self.height),
             Point3D(0.5 * self.width, 0.5 * self.depth, 0.5 * self.height),
         )
+
+    def volume(self) -> float:
+        return self.width * self.depth * self.height

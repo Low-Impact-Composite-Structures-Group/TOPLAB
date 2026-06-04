@@ -18,6 +18,10 @@ class AxisymmetricVolume(Protocol):
     def max_radius(self) -> float:
         ...
 
+    @property
+    def volume(self) -> float:
+        ...
+
     def radius_at(self, z: float) -> float:
         ...
 
@@ -63,6 +67,13 @@ class TruncatedConeVolume:
     @property
     def max_radius(self) -> float:
         return max(self.radius_z0, self.radius_z1)
+
+    @property
+    def volume(self) -> float:
+        """Exact frustum volume: V = pi*L*(r0^2 + r0*r1 + r1^2)/3."""
+        r0 = self.radius_z0
+        r1 = self.radius_z1
+        return math.pi * self.length * (r0 * r0 + r0 * r1 + r1 * r1) / 3.0
 
     def radius_at(self, z: float) -> float:
         if z < 0.0 or z > self.length:
@@ -130,6 +141,15 @@ class CompositeAxisymmetricVolume:
     @property
     def max_radius(self) -> float:
         return max(max(seg.radius_start, seg.radius_end) for seg in self.segments)
+
+    @property
+    def volume(self) -> float:
+        total = 0.0
+        for seg in self.segments:
+            r0 = seg.radius_start
+            r1 = seg.radius_end
+            total += math.pi * seg.length * (r0 * r0 + r0 * r1 + r1 * r1) / 3.0
+        return total
 
     def radius_at(self, z: float) -> float:
         if z < 0.0 or z > self.length:

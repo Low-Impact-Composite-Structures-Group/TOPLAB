@@ -139,6 +139,7 @@ def plot_layout(
     sample_step: float = 0.08,
     route_points: list[Point3D] | None = None,
     route_point_sets: list[list[Point3D]] | None = None,
+    show_labels: bool = True,
     show_quadrants: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     """Create a 3D visualization for a packaging layout and optional route."""
@@ -169,11 +170,30 @@ def plot_layout(
         c0, c1 = placed.connection_points()
         ax.scatter([c0.x, c1.x], [c0.y, c1.y], [c0.z, c1.z], s=40.0, c=color, marker="x")
 
-        if show_quadrants:
-            q = layout.volume.classify_quadrant(placed.center)
-            ax.text(placed.center.x, placed.center.y, placed.center.z, f"{component_id}\n{q}", fontsize=9)
-        else:
-            ax.text(placed.center.x, placed.center.y, placed.center.z, component_id, fontsize=9)
+        if show_labels:
+            label_text = component_id
+            if show_quadrants:
+                q = layout.volume.classify_quadrant(placed.center)
+                label_text = f"{component_id}\n{q}"
+
+            ax.text(
+                placed.center.x,
+                placed.center.y,
+                placed.center.z,
+                label_text,
+                fontsize=10,
+                color="#1a1a1a",
+                ha="center",
+                va="center",
+                bbox={
+                    "boxstyle": "round,pad=0.22",
+                    "facecolor": "white",
+                    "edgecolor": "#444444",
+                    "linewidth": 0.7,
+                    "alpha": 0.88,
+                },
+                zorder=20,
+            )
 
     all_routes: list[list[Point3D]] = []
     if route_point_sets:
