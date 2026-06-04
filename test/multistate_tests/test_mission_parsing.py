@@ -1,5 +1,4 @@
 import pytest
-import yaml
 
 from src.multistate.configuration.scenario_configuration import ScenarioConfig
 
@@ -37,10 +36,10 @@ def test_assigned_to_node_is_present_and_valid(main_analysis_configs):
 @pytest.mark.unit
 def test_csv_mission_file_exists(main_analysis_configs):
     for name, path in main_analysis_configs.items():
-        with open(path, "r") as f:
-            raw = yaml.safe_load(f)
+        config = ScenarioConfig.from_yaml(path)
+        mission = config.mission_sequence.missions[0]
 
-        csv_file = raw.get("mission", {}).get("parameters", {}).get("csv_file")
+        csv_file = mission.parameters.get("csv_file")
         assert csv_file, f"No mission.parameters.csv_file for {name}"
 
         csv_path = (path.parent / csv_file).resolve()

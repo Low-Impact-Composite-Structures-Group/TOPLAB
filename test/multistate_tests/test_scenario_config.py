@@ -5,10 +5,10 @@ Tests the ScenarioConfig class which integrates:
 - NIST materials framework
 - Mission sequence configuration
 - Tank geometry parsing
-- YAML file validation
+- Configuration file validation
 
 Usage:
-    pytest test/multi_tank_tests/test_scenario_config.py -v
+    pytest test/multistate_tests/test_scenario_config.py -v
 """
 
 import pytest
@@ -26,8 +26,8 @@ from src.multistate.configuration.scenario_configuration import ScenarioConfig
 class TestScenarioConfig:
     """Test suite for ScenarioConfig unified parser."""
 
-    def test_scenario_config_from_yaml(self):
-        """Test ScenarioConfig can parse single_tank_cch2_config.yaml"""
+    def test_scenario_config_from_file(self):
+        """Test ScenarioConfig can parse and expose a valid scenario config."""
         config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         assert config_path.exists(), f"Test config file not found: {config_path}"
