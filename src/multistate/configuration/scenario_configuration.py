@@ -335,6 +335,57 @@ class ScenarioConfig:
 
         raise ValueError(f"Unrecognized configuration format in {yaml_path}")
 
+    # TODO(DR): HDF5 config support is currently on hold; production analyses
+    # should continue to use YAML via `ScenarioConfig.from_yaml()` until the full
+    # orchestration stack is made file-format-agnostic.
+
+    @classmethod
+    def from_hdf5(cls, hdf5_path: Union[str, Path]):
+        """
+        Load configuration from an HDF5 file written by
+        ``src.multistate.configuration.hdf5_io.write_config_to_hdf5``.
+
+        The HDF5 file must encode a *new-format* config dict (i.e. it must
+        contain a ``network`` group).  Use
+        ``ScenarioConfig.to_hdf5`` / ``write_config_to_hdf5`` to create one.
+
+        Args:
+            hdf5_path: Path to the ``.h5`` configuration file.
+
+        Returns:
+            ScenarioConfig instance (identical to what ``from_yaml`` would
+            produce for the equivalent YAML config).
+        """
+        from src.multistate.configuration.hdf5_io import read_config_from_hdf5
+
+        hdf5_path = Path(hdf5_path)
+        config_dict = read_config_from_hdf5(hdf5_path)
+
+        if 'network' not in config_dict:
+            raise ValueError(
+                f"HDF5 config at {hdf5_path} does not contain a 'network' group. "
+                "Only new-format configs are supported via from_hdf5()."
+            )
+
+        config_dict['coupling_rules'] = cls._compile_network_coupling_rules(config_dict)
+        return cls(config_dict, "new", str(hdf5_path))
+
+    def to_hdf5(self, hdf5_path: Union[str, Path]) -> None:
+        """Serialise this config's ``config_dict`` to an HDF5 file.
+
+        This is the inverse of :meth:`from_hdf5`.  The ``coupling_rules``
+        injected by :meth:`from_yaml` are *not* persisted — they are always
+        recomputed on load from the ``network`` section.
+
+        Args:
+            hdf5_path: Destination path for the ``.h5`` file.
+        """
+        from src.multistate.configuration.hdf5_io import write_config_to_hdf5
+
+        # Omit the compiled coupling_rules; they are derived from network
+        storable = {k: v for k, v in self.config_dict.items() if k != 'coupling_rules'}
+        write_config_to_hdf5(storable, hdf5_path)
+
     def _parse_materials_new_format(self) -> Dict[str, NISTMaterial]:
         """Parse materials from new format (from physics section)."""
         materials = {}
