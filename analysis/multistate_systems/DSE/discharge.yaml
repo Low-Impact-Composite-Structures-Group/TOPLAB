@@ -1,0 +1,100 @@
+analysis:
+  name: DSE — LH2 Composite Tank — Discharge
+  description: >-
+    Single LH2 tank with a 3-segment discharge mission profile.
+    Tank radius is explicitly configured (no mission-based sizing) and was
+    sized to cover 192 kg mission fuel at rho=70 kg/m^3 and 90% fill:
+    r ≈ 0.899 m (set to 0.90 m).
+  version: '1.0'
+
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: LH2 tank (composite wall)
+    fluid: SLH2
+    geometry:
+      phi: 3.0
+      radius: 0.90
+    initial_conditions:
+      pressure: 800000.0
+      temperature: 22.0
+      density: 70.0
+    operating_limits:
+      minimum_pressure: 500000.0
+      venting_pressure: 1200000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+        thickness: calculated
+      insulation:
+        thickness: 0.10
+        heat_transfer_coefficient: 0.005
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.0
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+
+  - node_id: fuel_recipient
+    type: sink
+    description: Mission demand endpoint
+
+  - node_id: atmosphere
+    type: sink
+    description: Vent / ambient environment
+
+  edges:
+  - edge_id: tank_to_fuel_recipient
+    connection_type: discharge
+    description: Primary discharge line to demand sink.
+    participants:
+      source: 1
+      target: fuel_recipient
+
+  - edge_id: tank_to_atmosphere
+    connection_type: discharge
+    description: Vent connection to atmosphere sink (pressure relief).
+    participants:
+      source: 1
+      target: atmosphere
+
+  - edge_id: refuel_stub
+    connection_type: coupling
+    description: >-
+      Refuel edge stub (not exercised in this discharge analysis).
+    participants:
+      source: fuel_recipient
+      target: 1
+
+mission:
+  type: discharge
+  profile: csv
+  parameters:
+    csv_file: mission_discharge.csv
+    cruise_altitude: 0.0
+    standard_temperature: 293.15
+    mach_number: 0.0
+    phase: gas
+  ambient_temperature: 293.15
+  assigned_to_node: 1
+
+solver:
+  method: LSODA
+  rtol: 1.0e-6
+  atol: 1.0e-9
+  time_step: 1.0
+  max_step: 10.0
+
+output:
+  identifier: dse_lh2_composite_discharge
+  save_plots: false
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
