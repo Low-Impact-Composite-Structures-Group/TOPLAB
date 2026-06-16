@@ -45,7 +45,7 @@ def detect_python_environment():
         result = subprocess.run(['micromamba', 'info'],
                               capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
-            return ['micromamba', 'run', '-n', 'python-h2-dev', 'python']
+            return ['micromamba', 'run', '-n', 'hython', 'python']
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
@@ -54,7 +54,7 @@ def detect_python_environment():
         result = subprocess.run(['conda', 'info'],
                               capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
-            return ['conda', 'run', '-n', 'python-h2-dev', 'python']
+            return ['conda', 'run', '-n', 'hython', 'python']
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 

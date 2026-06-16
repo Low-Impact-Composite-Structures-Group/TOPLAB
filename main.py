@@ -3,6 +3,7 @@ import yaml
 import pickle
 import inspect
 import sys
+import warnings
 
 from typing import Protocol
 
@@ -203,9 +204,14 @@ def run_analysis(module_name: str, config_file: str, data_dir: str = "data"):
 
 if __name__ == "__main__":
     import sys
+    warnings.warn(
+        "main.py is a compatibility entrypoint. Prefer the driver + YAML workflow under analysis/multistate_systems/.",
+        DeprecationWarning,
+        stacklevel=1,
+    )
     if len(sys.argv) != 3:
         print("Usage: python main.py <analysis_module> <config_file>")
-        print("Example: python main.py analysis.compare_dynamic_models examples/compare_dynamic_models/main.yaml")
-        print("Shorthand: python main.py compare_dynamic_models examples/compare_dynamic_models/main.yaml")
+        print("Compatibility example: python main.py analysis.compare_dynamic_models examples/compare_dynamic_models/main.yaml")
+        print("Preferred workflow: python analysis/multistate_systems/DSE/driver_discharge.py")
     else:
         run_analysis(sys.argv[1], sys.argv[2])
