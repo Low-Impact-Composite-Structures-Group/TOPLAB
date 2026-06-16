@@ -14,7 +14,7 @@ import numpy as np
 
 from CoolProp.CoolProp import PropsSI
 
-from src.thermodynamics.tank_states import IsochoricTankState
+from src.multistate.thermodynamics.tank_states import IsochoricTankState
 from src.multistate.materials.nist_materials import NISTMetal, NISTComposite
 
 

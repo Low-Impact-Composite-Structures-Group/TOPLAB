@@ -20,7 +20,7 @@ from src.multistate.thermodynamics.isochoric_thermal_model import StopsModelTher
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
 )
-from src.thermodynamics.tank_states import IsochoricTankState
+from src.multistate.thermodynamics.tank_states import IsochoricTankState
 from src.multistate.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 from src.multistate.dynamics.edge_flow import EdgeFlow
 
@@ -185,7 +185,7 @@ class TankSystem:
 
         try:
             # Import flow types
-            from src.mission.mission_sections import OutFlow
+            from src.multistate.missions.mission_sections import OutFlow
 
             # Extract time points and flow rates from mission sections
             times = [0.0]
@@ -1370,7 +1370,7 @@ class TankSystem:
 
         try:
             # Import flow types
-            from src.mission.mission_sections import InFlow, OutFlow
+            from src.multistate.missions.mission_sections import InFlow, OutFlow
 
             # Find which mission section we're in
             current_time = 0.0

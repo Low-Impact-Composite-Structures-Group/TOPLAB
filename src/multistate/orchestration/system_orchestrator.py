@@ -594,7 +594,8 @@ class SystemOrchestrator:
 
     def _get_mission_profile(self, profile_name: str):
         """Get mission profile object from profile name."""
-        from src.mission.mission import Mission, MissionSection, OutFlow, InFlow
+        from src.multistate.missions.mission import Mission
+        from src.multistate.missions.mission_sections import MissionSection, OutFlow, InFlow
 
         name = (profile_name or "").strip().lower()
 
@@ -622,7 +623,8 @@ class SystemOrchestrator:
 
     def _create_constant_flow_mission(self):
         """Create constant flow mission from scenario config parameters."""
-        from src.mission.mission import Mission, MissionSection, OutFlow, InFlow
+        from src.multistate.missions.mission import Mission
+        from src.multistate.missions.mission_sections import MissionSection, OutFlow, InFlow
         import yaml
 
         # Handle both old mission format and new mission section format
@@ -705,7 +707,7 @@ class SystemOrchestrator:
 
     def _create_csv_mission(self):
         """Create mission from CSV file with parameters from config."""
-        from src.mission.mission import Mission
+        from src.multistate.missions.mission import Mission
         import yaml
         from pathlib import Path
 

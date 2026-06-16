@@ -12,12 +12,12 @@ from dataclasses import dataclass
 from typing import Optional, Callable
 import numpy as np
 
-from src.mission.mission import Mission
-from src.mission.mission_sections import MissionSection, OutFlow, InFlow
+from src.multistate.missions.mission import Mission
+from src.multistate.missions.mission_sections import MissionSection, OutFlow, InFlow
 from src.multistate.thermodynamics.isochoric_thermal_model import IsochoricThermalModel
 from src.multistate.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
-from src.multistep_methods.linear_multistep_methods import ScipyMethod
-from src.thermodynamics.tank_states import (
+from src.multistate.solver import ScipyMethod
+from src.multistate.thermodynamics.tank_states import (
     IsochoricTankState,
     IsochoricInitialState,
     IsochoricTankStates,

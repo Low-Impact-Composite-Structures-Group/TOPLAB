@@ -2434,7 +2434,7 @@ class DelftColourPlotter:
         print("Plotting ATR72 mission mass flow...")
 
         # Import mission here to avoid circular imports
-        from src.mission.mission import Mission
+        from src.multistate.missions.mission import Mission
 
         # Get ATR72 mission
         atr72_mission = Mission.atr72()

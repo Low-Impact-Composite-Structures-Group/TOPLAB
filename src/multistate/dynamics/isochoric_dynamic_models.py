@@ -16,7 +16,7 @@ from .edge_flow import EdgeFlow
 
 from CoolProp.CoolProp import PropsSI
 
-from src.thermodynamics.tank_states import (
+from src.multistate.thermodynamics.tank_states import (
     IsochoricTankState,
     IsochoricStateDerivatives,
     IsochoricTankStates,
