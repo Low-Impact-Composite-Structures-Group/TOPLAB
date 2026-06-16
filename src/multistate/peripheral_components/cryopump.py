@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 
 from CoolProp.CoolProp import PropsSI
 
-from src.fluids.hydrogen_retrievers import HydrogenRetriever
+from src.multistate.fluids.hydrogen_retrievers import HydrogenRetriever
 
 from .base import PeripheralComponent, PeripheralFlowState
 

@@ -4,7 +4,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
+from src.multistate.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
 
 
 class Tank(Protocol):
@@ -81,7 +81,7 @@ class IsochoricTankState:
     def compute_pressure(self):
         if self.pressure is None:
             try:
-                from src.fluids.coolprop_safe import safe_pressure_from_T_rho
+                from src.multistate.fluids.coolprop_safe import safe_pressure_from_T_rho
 
                 if self.temperature <= 0:
                     self.pressure = 1e5

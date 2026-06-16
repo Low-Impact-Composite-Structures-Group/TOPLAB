@@ -682,7 +682,7 @@ class SystemOrchestrator:
             fuel_flow = OutFlow(-abs(flow_rate), "gas")
         elif mission_type.lower() == 'refuel':
             # Positive flow for refuel (inflow) - need proper hydrogen object for cryopump physics
-            from src.fluids.hydrogen_retrievers import SinglePhaseRequester
+            from src.multistate.fluids.hydrogen_retrievers import SinglePhaseRequester
             # Create a dummy hydrogen object - the actual cryopump enthalpy will be calculated dynamically
             dummy_hydrogen = SinglePhaseRequester().get_hydrogen_properties(3e5, 20.4)  # 3 bar, 20.4K (dewar conditions)
             fuel_flow = InFlow(abs(flow_rate), dummy_hydrogen)
@@ -1207,7 +1207,7 @@ class SystemOrchestrator:
                 if T_current > 0 and rho_current > 0 and mass_rate > 0:
                     # Calculate current pressure and enthalpy with saturation-aware helpers
                     try:
-                        from src.fluids.coolprop_safe import safe_pressure_from_T_rho, safe_enthalpy
+                        from src.multistate.fluids.coolprop_safe import safe_pressure_from_T_rho, safe_enthalpy
                         p_current = safe_pressure_from_T_rho(T_current, rho_current, "hydrogen")
                         # Assume gas enthalpy for outlet stream when in two-phase
                         h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="hydrogen")

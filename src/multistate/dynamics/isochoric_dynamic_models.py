@@ -21,8 +21,8 @@ from src.multistate.thermodynamics.tank_states import (
     IsochoricStateDerivatives,
     IsochoricTankStates,
 )
-from src.fluids.convective_mediums import IsochoricHydrogen
-from src.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
+from src.multistate.fluids.convective_mediums import IsochoricHydrogen
+from src.multistate.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
 
 _heat_flow_data = None
 

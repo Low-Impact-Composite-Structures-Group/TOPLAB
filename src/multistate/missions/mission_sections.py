@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol, Union
 import math
 
-from src.fluids.international_standard_atmosphere import get_ISA_air_properties
+from src.multistate.fluids.international_standard_atmosphere import get_ISA_air_properties
 
 
 class Hydrogen(Protocol):

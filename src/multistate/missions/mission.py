@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.fluids.international_standard_atmosphere import get_ISA_air_properties
+from src.multistate.fluids.international_standard_atmosphere import get_ISA_air_properties
 
 from src.multistate.missions.mission_sections import InFlow, MissionSection, OutFlow
 

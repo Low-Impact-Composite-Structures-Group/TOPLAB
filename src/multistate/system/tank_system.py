@@ -890,7 +890,7 @@ class TankSystem:
                 density = m_i / max(vol, 1e-9)
                 # Quick pressure estimate using saturation-aware helper to avoid warnings
                 try:
-                    from src.fluids.coolprop_safe import safe_pressure_from_T_rho
+                    from src.multistate.fluids.coolprop_safe import safe_pressure_from_T_rho
                     P_i = safe_pressure_from_T_rho(max(T_i, 1.0), max(density, 1e-9), "hydrogen")
                 except Exception:
                     from CoolProp.CoolProp import PropsSI
