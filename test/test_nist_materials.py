@@ -26,7 +26,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import the new NIST materials framework
-from src.materials.materials_for_multi_tank.nist_material import NISTMaterial, get_material_by_nist_path
+from src.multistate.materials.nist_materials import NISTMaterial, get_material_by_nist_path
 
 # Import multi_tank NIST properties for comparison
 from src.multistate.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as al_original_cp

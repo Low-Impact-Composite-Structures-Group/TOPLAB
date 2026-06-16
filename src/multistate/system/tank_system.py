@@ -15,7 +15,7 @@ from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
-from src.tank_design.tank_shapes import SphericalTank
+from src.multistate.tank_design.tank_shapes import SphericalTank
 from src.multistate.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
@@ -637,7 +637,7 @@ class TankSystem:
         inner_radius = tank.radius  # Tank internal radius
 
         # Calculate thicknesses using proper netting analysis and NIST materials FROM CONFIG
-        from src.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
+        from src.multistate.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
         import math
 
         # Get materials from configuration - NO HARDCODED VALUES

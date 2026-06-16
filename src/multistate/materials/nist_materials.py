@@ -1,137 +1,173 @@
-"""
-NIST-backed materials colocated under multi_tank.
+"""Self-contained NIST-backed materials used by the multistate solver."""
 
-Copied from `src/materials/nist_materials.py` and updated to import
-property polynomials from `src.multi_tank.materials.nist_material_properties`.
-
-Author: Dante Raso
-"""
+from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable
 
-from src.materials.materials import Material, Metal, Composite
-from src.multistate.materials.nist_material_properties.aluminum5083_properties import specific_heat as aluminum_cp_nist, thermal_conductivity as aluminum_k_nist
-from src.multistate.materials.nist_material_properties.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
 from src.multistate.materials.nist_material_properties.aluminum3003f_properties import specific_heat as aluminum3003f_cp_nist, thermal_conductivity as aluminum3003f_k_nist
+from src.multistate.materials.nist_material_properties.aluminum5083_properties import specific_heat as aluminum5083_cp_nist, thermal_conductivity as aluminum5083_k_nist
 from src.multistate.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as aluminum6061t6_cp_nist, thermal_conductivity as aluminum6061t6_k_nist
+from src.multistate.materials.nist_material_properties.carbon_epoxy_properties import specific_heat as carbon_epoxy_cp_nist, thermal_conductivity as carbon_epoxy_k_nist
+from src.multistate.materials.nist_material_properties.g10_properties import specific_heat as g10_cp_nist, thermal_conductivity_normal as g10_k_normal_nist
+
+
+def _clamp_temperature(temperature: float, minimum: float = 10.0, maximum: float = 400.0) -> float:
+    return min(max(float(temperature), minimum), maximum)
+
+
+@dataclass
+class Material:
+    failure_stress: float
+    density: float
+    type: str
 
 
 @dataclass
 class NISTMaterial(Material):
-    _nist_cp_func: Optional[callable] = None
-    _nist_k_func: Optional[callable] = None
-    _temperature_range: tuple = (4, 300)
+    nist_path: str
+    specific_heat_func: Callable[[float], float]
+    name: str
+    thermal_conductivity_func: Callable[[float], float] | None = None
+    winding_angle: float | None = None
 
-    def __post_init__(self):
-        if not hasattr(self, '_nist_cp_func'):
-            self._nist_cp_func = None
-        if not hasattr(self, '_nist_k_func'):
-            self._nist_k_func = None
-        if not hasattr(self, '_temperature_range'):
-            self._temperature_range = (4, 300)
+    def get_specific_heat(self, temperature: float) -> float:
+        return float(self.specific_heat_func(_clamp_temperature(temperature)))
 
     def determine_specific_heat(self, temperature: float) -> float:
-        if self._nist_cp_func is not None:
-            min_temp, max_temp = self._temperature_range
-            if min_temp <= temperature <= max_temp:
-                return float(self._nist_cp_func(temperature))
-            elif temperature < min_temp:
-                raise ValueError(f"Temperature {temperature}K below NIST range {min_temp}-{max_temp}K")
-            elif temperature > max_temp:
-                raise ValueError(f"Temperature {temperature}K above NIST range {min_temp}-{max_temp}K")
+        return self.get_specific_heat(temperature)
+
+    def determine_thermal_capacity(self, temperature: float, mass: float) -> float:
+        return self.get_specific_heat(temperature) * mass
 
     def determine_thermal_conductivity(self, temperature: float) -> float:
-        if self._nist_k_func is not None:
-            min_temp, max_temp = self._temperature_range
-            if min_temp <= temperature <= max_temp:
-                return float(self._nist_k_func(temperature))
-            else:
-                raise ValueError(f"Temperature {temperature}K outside NIST range {min_temp}-{max_temp}K for thermal conductivity")
-        raise RuntimeError(f"No NIST thermal conductivity data available at {temperature}K - simulation cannot continue")
-
-    def set_temperature_range(self, min_temp: float, max_temp: float):
-        self._temperature_range = (min_temp, max_temp)
-
-    def set_nist_function(self, nist_func: callable):
-        self._nist_cp_func = nist_func
-
-    def set_nist_thermal_conductivity_function(self, nist_k_func: callable):
-        self._nist_k_func = nist_k_func
-
-
-@dataclass
-class NISTMetal(NISTMaterial, Metal):
-    def __post_init__(self):
-        super().__post_init__()
-        self.type = "metal"
+        if self.thermal_conductivity_func is None:
+            raise RuntimeError(
+                f"No NIST thermal conductivity data available for {self.nist_path}"
+            )
+        return float(
+            self.thermal_conductivity_func(
+                _clamp_temperature(temperature, minimum=4.0)
+            )
+        )
 
     @classmethod
-    def aluminum_5083_nist(cls):
-        failure_stress = 185e6
-        density = 2650
-        characteristic_temperature = 1500
-        molecular_weight = 26.981539
-        material = cls(failure_stress=failure_stress, density=density, characteristic_temperature=characteristic_temperature, molecular_weight=molecular_weight)
-        material.set_nist_function(aluminum_cp_nist)
-        material.set_nist_thermal_conductivity_function(aluminum_k_nist)
-        material.set_temperature_range(4, 300)
-        return material
+    def aluminum_6061T6_nist(cls) -> "NISTMaterial":
+        return NISTMetal.aluminum_6061T6_nist()
 
     @classmethod
-    def aluminum_3003F_nist(cls):
-        failure_stress = 110e6
-        density = 2730
-        characteristic_temperature = 1500
-        molecular_weight = 26.981539
-        material = cls(failure_stress=failure_stress, density=density, characteristic_temperature=characteristic_temperature, molecular_weight=molecular_weight)
-        material.set_nist_function(aluminum3003f_cp_nist)
-        material.set_nist_thermal_conductivity_function(aluminum3003f_k_nist)
-        material.set_temperature_range(4, 300)
-        return material
+    def g10_nist(cls, winding_angle: float | None = None) -> "NISTMaterial":
+        return NISTComposite.g10_nist(winding_angle=winding_angle)
 
     @classmethod
-    def aluminum_6061T6_nist(cls):
-        failure_stress = 310e6
-        density = 2700
-        characteristic_temperature = 1500
-        molecular_weight = 26.981539
-        material = cls(failure_stress=failure_stress, density=density, characteristic_temperature=characteristic_temperature, molecular_weight=molecular_weight)
-        material.set_nist_function(aluminum6061t6_cp_nist)
-        material.set_nist_thermal_conductivity_function(aluminum6061t6_k_nist)
-        material.set_temperature_range(4, 300)
-        return material
+    def carbon_epoxy_nist(cls, winding_angle: float | None = None) -> "NISTMaterial":
+        return NISTComposite.carbon_epoxy_nist(winding_angle=winding_angle)
+
+    def __str__(self) -> str:
+        return (
+            f"{self.name}: ρ={self.density:.0f} kg/m³, "
+            f"σ_fail={self.failure_stress / 1e6:.0f} MPa, "
+            f"path={self.nist_path}"
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"NISTMaterial(name='{self.name}', "
+            f"density={self.density}, "
+            f"failure_stress={self.failure_stress}, "
+            f"nist_path='{self.nist_path}')"
+        )
 
 
-@dataclass
-class NISTComposite(NISTMaterial, Composite):
-    winding_angle: float
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.type = "composite"
-
-    def determine_specific_heat(self, temperature: float) -> float:
-        if self._nist_cp_func is not None:
-            min_temp, max_temp = self._temperature_range
-            if min_temp <= temperature <= max_temp:
-                return float(self._nist_cp_func(temperature))
-            else:
-                if temperature < min_temp:
-                    raise ValueError(f"Temperature {temperature}K below NIST range {min_temp}-{max_temp}K for composite material")
-                else:
-                    raise ValueError(f"Temperature {temperature}K above NIST range {min_temp}-{max_temp}K for composite material")
-        raise RuntimeError(f"No NIST data available for composite at {temperature}K - simulation cannot continue")
+@dataclass(repr=False)
+class NISTMetal(NISTMaterial):
+    @classmethod
+    def aluminum_5083_nist(cls) -> "NISTMetal":
+        return cls(
+            failure_stress=185e6,
+            density=2650.0,
+            type="metal",
+            nist_path="aluminum_5083_nist",
+            specific_heat_func=aluminum5083_cp_nist,
+            thermal_conductivity_func=aluminum5083_k_nist,
+            name="Aluminum 5083 (NIST)",
+        )
 
     @classmethod
-    def g10_nist(cls, winding_angle: float):
-        failure_stress = 2000e6
-        density = 1800
-        characteristic_temperature = 1500.0
-        molecular_weight = 12.01
-        material = cls(failure_stress=failure_stress, density=density, characteristic_temperature=characteristic_temperature, molecular_weight=molecular_weight, winding_angle=winding_angle)
-        material.set_nist_function(g10_cp_nist)
-        material.set_nist_thermal_conductivity_function(g10_k_normal_nist)
-        material.set_temperature_range(4, 300)
-        return material
+    def aluminum_3003F_nist(cls) -> "NISTMetal":
+        return cls(
+            failure_stress=110e6,
+            density=2730.0,
+            type="metal",
+            nist_path="aluminum_3003F_nist",
+            specific_heat_func=aluminum3003f_cp_nist,
+            thermal_conductivity_func=aluminum3003f_k_nist,
+            name="Aluminum 3003-F (NIST)",
+        )
+
+    @classmethod
+    def aluminum_6061T6_nist(cls) -> "NISTMetal":
+        return cls(
+            failure_stress=276e6,
+            density=2700.0,
+            type="metal",
+            nist_path="aluminum_6061T6_nist",
+            specific_heat_func=aluminum6061t6_cp_nist,
+            thermal_conductivity_func=aluminum6061t6_k_nist,
+            name="Aluminum 6061-T6 (NIST)",
+        )
+
+
+@dataclass(repr=False)
+class NISTComposite(NISTMaterial):
+    @classmethod
+    def g10_nist(cls, winding_angle: float | None = None) -> "NISTComposite":
+        return cls(
+            failure_stress=310e6,
+            density=1800.0,
+            type="composite",
+            nist_path="g10_nist",
+            specific_heat_func=g10_cp_nist,
+            thermal_conductivity_func=g10_k_normal_nist,
+            name="G10 Composite (NIST)",
+            winding_angle=math.radians(54.7) if winding_angle is None else winding_angle,
+        )
+
+    @classmethod
+    def carbon_epoxy_nist(cls, winding_angle: float | None = None) -> "NISTComposite":
+        return cls(
+            failure_stress=5000e6,
+            density=1500.0,
+            type="composite",
+            nist_path="carbon_epoxy_nist",
+            specific_heat_func=carbon_epoxy_cp_nist,
+            thermal_conductivity_func=carbon_epoxy_k_nist,
+            name="Carbon-Epoxy Composite (NIST)",
+            winding_angle=0.0 if winding_angle is None else winding_angle,
+        )
+
+
+def get_material_by_nist_path(nist_path: str) -> NISTMaterial:
+    material_registry = {
+        "aluminum_5083_nist": NISTMetal.aluminum_5083_nist,
+        "aluminum_3003F_nist": NISTMetal.aluminum_3003F_nist,
+        "aluminum_6061T6_nist": NISTMetal.aluminum_6061T6_nist,
+        "g10_nist": NISTComposite.g10_nist,
+        "carbon_epoxy_nist": NISTComposite.carbon_epoxy_nist,
+    }
+
+    if nist_path not in material_registry:
+        available = ", ".join(material_registry.keys())
+        raise ValueError(f"Unknown NIST path '{nist_path}'. Available: {available}")
+
+    return material_registry[nist_path]()
+
+
+__all__ = [
+    "Material",
+    "NISTComposite",
+    "NISTMaterial",
+    "NISTMetal",
+    "get_material_by_nist_path",
+]

@@ -9,7 +9,7 @@ import math
 import CoolProp.CoolProp as CP
 from typing import Tuple
 
-from src.tank_design.tank_shapes import SphericalTank
+from src.multistate.tank_design.tank_shapes import SphericalTank
 from src.multistate.materials.nist_materials import NISTMetal, NISTComposite
 from src.multistate.missions.isochoric_missions import DischargeMission
 
@@ -90,8 +90,6 @@ def create_tank_from_mission(
 
     # Create materials
     liner_material = NISTMetal.aluminum_6061T6_nist()
-    wall_material = NISTComposite.g10_nist(winding_angle=0.0)  # Use normal direction
-
     # For SphericalTank, we use the external radius and the liner material
     # (the wall/insulation will be handled by the thermal model)
 
@@ -165,8 +163,6 @@ def create_tank_from_fuel_mass(
 
     # Create materials
     liner_material = NISTMetal.aluminum_6061T6_nist()
-    wall_material = NISTComposite.g10_nist(winding_angle=0.0)  # Use normal direction
-
     # Create SphericalTank with operating pressure (P_VENT) for wall design
     tank = SphericalTank(
         radius=external_radius,
