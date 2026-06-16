@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.multistate.orchestration.run_analysis import run_analysis
+from src.orchestration.run_analysis import run_analysis
 
 # Ensure output directories exist (paths are relative to cwd when invoked)
 for _d in ["output/plots", "output/results"]:

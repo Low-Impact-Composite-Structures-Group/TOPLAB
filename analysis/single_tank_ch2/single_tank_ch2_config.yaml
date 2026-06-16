@@ -39,7 +39,7 @@ mission:
   type: discharge
   profile: csv
   parameters:
-    csv_file: ../../src/multistate/missions/atr72_fuel_flows.csv
+    csv_file: ../../src/missions/atr72_fuel_flows.csv
     cruise_altitude: 7010.0
     standard_temperature: 273.15
     mach_number: 0.0

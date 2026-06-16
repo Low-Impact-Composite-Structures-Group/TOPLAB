@@ -26,7 +26,7 @@ micromamba activate hython
 
 ## Source Code Context (Very Brief)
 
-- `src/multistate/`: active multistate solver, orchestration, coupling, and retained support code.
+- `src/`: active multistate solver, orchestration, coupling, and retained support code.
 - `analysis/`: supported runnable analyses (drivers + YAML scenarios).
 - `analysis/DSE/`: Design Study Environment (DSE) cases, including dormancy and discharge.
 - `output/` (and analysis-local `output/` folders): generated results and plots.

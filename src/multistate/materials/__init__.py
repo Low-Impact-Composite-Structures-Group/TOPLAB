@@ -1,1 +1,0 @@
-"""Multi-tank materials package."""

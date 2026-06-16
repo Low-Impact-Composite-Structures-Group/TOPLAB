@@ -1,6 +1,6 @@
 import pytest
 
-from src.multistate.configuration.scenario_configuration import ScenarioConfig
+from src.configuration.scenario_configuration import ScenarioConfig
 
 
 @pytest.mark.config

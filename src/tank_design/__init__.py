@@ -1,22 +1,10 @@
-"""Tank design package.
+"""Minimal tank geometry and structural models used by the multistate solver."""
 
-This package provides classes for designing and modeling hydrogen fuel tanks.
-"""
-
-from src.tank_design.tank_shapes import (
-    TankSection, CylindricalBody, SphericalEndCap, Tank, CylindricalTankSphericalCaps, SphericalTank,
-    TankFactory
-)
+from src.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
+from src.tank_design.tank_shapes import SphericalTank
 
 __all__ = [
-    'TankSection',
-    'CylindricalBody',
-    'SphericalEndCap',
-    'EllipticCylinderBody',
-    'EllipsoidalEndCap',
-    'Tank',
-    'CylindricalTankSphericalCaps',
-    'SphericalTank',
-    'WinnefeldTank',
-    'TankFactory'
+    "CompositeCylinder",
+    "CompositeSphericalEndCap",
+    "SphericalTank",
 ]

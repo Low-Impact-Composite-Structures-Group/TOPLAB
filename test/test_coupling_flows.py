@@ -14,10 +14,10 @@ import yaml
 import numpy as np
 from pathlib import Path
 
-from src.multistate.configuration.scenario_configuration import ScenarioConfig
-from src.multistate.orchestration.system_orchestrator import SystemOrchestrator
-from src.multistate.coupling.inter_tank_coupling import PressureTriggeredValve
-from src.multistate.fluids.flow_physics import FlowPhysics
+from src.configuration.scenario_configuration import ScenarioConfig
+from src.orchestration.system_orchestrator import SystemOrchestrator
+from src.coupling.inter_tank_coupling import PressureTriggeredValve
+from src.fluids.flow_physics import FlowPhysics
 # from multi_tank.system.multi_tank_state import MultiTankState  # Not needed for these tests
 
 

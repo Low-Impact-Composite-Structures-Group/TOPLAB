@@ -7,9 +7,9 @@ from tempfile import NamedTemporaryFile
 import yaml
 from CoolProp.CoolProp import PropsSI
 
-from src.multistate.coupling.inter_tank_coupling import InterTankCoupling
-from src.multistate.configuration.scenario_configuration import ScenarioConfig
-from src.multistate.orchestration.system_orchestrator import SystemOrchestrator
+from src.coupling.inter_tank_coupling import InterTankCoupling
+from src.configuration.scenario_configuration import ScenarioConfig
+from src.orchestration.system_orchestrator import SystemOrchestrator
 
 
 class ConstantFlowBenchmarkCoupling(InterTankCoupling):

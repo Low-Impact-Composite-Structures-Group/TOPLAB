@@ -1,7 +1,7 @@
 import pytest
 
-from src.multistate.configuration.scenario_configuration import ScenarioConfig
-from src.multistate.orchestration.system_orchestrator import SystemOrchestrator
+from src.configuration.scenario_configuration import ScenarioConfig
+from src.orchestration.system_orchestrator import SystemOrchestrator
 
 
 @pytest.mark.orchestrator

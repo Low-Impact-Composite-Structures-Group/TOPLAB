@@ -16,7 +16,7 @@ def _add_repo_root_to_syspath() -> Path:
 
 _REPO_ROOT = _add_repo_root_to_syspath()
 
-from src.multistate.orchestration.run_analysis import run_analysis
+from src.orchestration.run_analysis import run_analysis
 
 
 def main() -> None:

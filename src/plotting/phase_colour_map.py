@@ -1,0 +1,144 @@
+"""
+Standalone script to generate a hydrogen density–temperature phase colour map
+using the DelftColourPlotter utilities and CoolProp saturation data.
+
+Configure values below (no CLI args needed). Set SAVE=True to write to disk; otherwise, the plot will be shown interactively.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Optional
+
+# Establish directories
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Ensure project root is on path (same pattern as other plotting utilities) for imports
+# Keep this for reliable imports when running script directly
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+except Exception:
+    PROJECT_ROOT = Path(__file__).parent.parent.parent  # best-effort fallback
+sys.path.insert(0, str(PROJECT_ROOT))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+import matplotlib
+matplotlib.use("pgf")  # Use PGF backend for LaTeX compatibility
+import matplotlib.pyplot as plt
+
+from src.plotting.multi_tank_plotting import DelftColourPlotter
+
+# Configure matplotlib for PGF output
+plt.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+    "font.family": "serif",
+    "text.usetex": True,
+    "pgf.rcfonts": False,
+    "pgf.preamble": r"\usepackage{graphicx}",
+})
+
+
+# ====== Configurable values ======
+# Appearance
+GREYSCALE: bool = False
+DPI: int = 300  # Lower DPI for PGF (vector format)
+
+# Save options
+SAVE: bool = True
+OUTDIR: str = "output/"
+FILENAME: Optional[str] = None  # e.g., "phase_map_custom.pgf" (if None, a default is used)
+FORMAT: str = "pgf"  # one of: "pgf", "png", "pdf", "svg"
+
+# Axes and resolution
+TMIN: float = 15.0
+TMAX: float = 300.0
+RHOMIN: float = 0.0
+RHOMAX: float = 90.0
+NX: int = 1000  # Reduced resolution for smaller PGF file
+NY: int = 1000  # Reduced resolution for smaller PGF file
+# ====== End config ======
+
+# Legend configuration
+LEGEND_LOC: str = 'upper right'
+LEGEND_NCOLS: int = 2
+
+# Isobar and marker size configuration
+ISOBAR_PRESSURES: list[float] = [15, 100, 200, 400, 600, 700]  # bar
+CRITICAL_MARKER_SIZE: float = 70.0
+DEFAULT_MARKER_SIZE: float = 150.0
+# Marker definitions (labels support mathtext for H$_2$)
+MARKERS = [
+    {"label": r"CcH$_2$", "T": 53.25, "rho": 78.0, "marker": "*", "size": DEFAULT_MARKER_SIZE},  # black star
+    {"label": r"sLH$_2$", "T": 28.2,  "rho": 62.07, "marker": "^", "size": DEFAULT_MARKER_SIZE},  # black triangle
+    {"label": r"CH$_2$",  "T": 288.0, "rho": 40.0,  "marker": "s", "size": DEFAULT_MARKER_SIZE},  # black square
+    {"label": r"LH$_2$",  "T": 20.7,  "rho": 70.0,  "marker": "x", "size": DEFAULT_MARKER_SIZE},  # black cross
+]
+
+
+def _compute_save_path(use_greyscale: bool) -> Optional[Path]:
+    """Compute save path from the config variables above; create directories as needed.
+
+    Defaults to saving in the same directory where this script lives when paths are relative.
+    Absolute paths (either FILENAME or OUTDIR) are respected.
+    """
+    if not SAVE:
+        return None
+
+    # If FILENAME is an absolute path, use it directly
+    if FILENAME:
+        file_path = Path(FILENAME)
+        if file_path.is_absolute():
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure extension matches requested format
+            if file_path.suffix.lower() not in (f".{FORMAT}", ".png", ".pdf", ".svg"):
+                file_path = file_path.with_suffix(f".{FORMAT}")
+            return file_path
+
+    # Otherwise, resolve OUTDIR (absolute respected; relative -> script directory)
+    outdir = Path(OUTDIR)
+    if not outdir.is_absolute():
+        outdir = SCRIPT_DIR / outdir
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # Default filename if not provided
+    default_name = f"phase_map_{'greyscale' if use_greyscale else 'colour'}.{FORMAT}"
+    filename = FILENAME or default_name
+    # Ensure extension matches requested format if user omitted it
+    if Path(filename).suffix.lower() not in (f".{FORMAT}", ".png", ".pdf", ".svg", ".pgf"):
+        filename = f"{filename}.{FORMAT}"
+    return outdir / filename
+
+
+def main():
+    plotter = DelftColourPlotter(
+        analysis_name="Hydrogen Phase Map",
+        use_greyscale=GREYSCALE,
+        enable_multi_tank_overlay=False,
+    )
+
+    save_path = _compute_save_path(GREYSCALE)
+
+    fig = plotter.plot_phase_colour_map(
+        temperature_range=(TMIN, TMAX),
+        density_range=(RHOMIN, RHOMAX),
+        resolution=(NX, NY),
+        save_path=str(save_path) if save_path else None,
+        dpi=DPI,
+        marker_points=MARKERS,
+        legend_location=LEGEND_LOC,
+        legend_ncols=LEGEND_NCOLS,
+        isobar_pressures_bar=ISOBAR_PRESSURES,
+        critical_marker_size=CRITICAL_MARKER_SIZE,
+        default_marker_size=DEFAULT_MARKER_SIZE,
+    )
+
+    if save_path is None:
+        plt.show()
+    else:
+        print(f"PGF file saved to: {save_path}")
+        print(f"Include in LaTeX with: \\input{{{save_path}}}")
+
+
+if __name__ == "__main__":
+    main()

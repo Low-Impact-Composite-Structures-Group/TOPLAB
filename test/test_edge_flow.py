@@ -1,6 +1,6 @@
 import pytest
 
-from src.multistate.dynamics.edge_flow import EdgeFlow
+from src.dynamics.edge_flow import EdgeFlow
 
 
 @pytest.mark.unit

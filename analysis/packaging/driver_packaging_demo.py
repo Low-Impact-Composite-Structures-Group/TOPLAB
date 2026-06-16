@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.multistate.packaging import (
+from src.packaging import (
     AxialSegment,
     CapsulePrimitive,
     CompositeAxisymmetricVolume,
