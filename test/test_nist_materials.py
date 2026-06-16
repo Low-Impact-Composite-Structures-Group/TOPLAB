@@ -14,7 +14,7 @@ Test Coverage:
 - Comparison with original NIST data
 
 Usage:
-    pytest test/multi_tank_tests/test_nist_materials.py -v
+    pytest test/test_nist_materials.py -v
 """
 
 import pytest
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import the new NIST materials framework

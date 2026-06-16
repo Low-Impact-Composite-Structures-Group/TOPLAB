@@ -8,7 +8,7 @@ Tests the ScenarioConfig class which integrates:
 - Configuration file validation
 
 Usage:
-    pytest test/multistate_tests/test_scenario_config.py -v
+    pytest test/test_scenario_config.py -v
 """
 
 import pytest
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.append(str(project_root / "src"))
 
@@ -28,7 +28,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_from_file(self):
         """Test ScenarioConfig can parse and expose a valid scenario config."""
-        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         assert config_path.exists(), f"Test config file not found: {config_path}"
 
@@ -71,7 +71,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_validation(self):
         """Test ScenarioConfig validation catches errors"""
-        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         # Should not raise for valid config
         scenario = ScenarioConfig.from_yaml(config_path)
@@ -79,7 +79,7 @@ class TestScenarioConfig:
 
     def test_scenario_config_summary(self):
         """Test ScenarioConfig summary generation"""
-        config_path = project_root / "analysis" / "multistate_systems" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
+        config_path = project_root / "analysis" / "single_tank_cch2" / "single_tank_cch2_config.yaml"
 
         scenario = ScenarioConfig.from_yaml(config_path)
         summary = scenario.summary()

@@ -24,7 +24,7 @@ import time
 import pytest
 
 # Add the hydrogen_fuel_tank package to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.multistate.solver import (
     RK45Solver,

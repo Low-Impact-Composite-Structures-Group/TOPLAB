@@ -4,7 +4,7 @@ import pytest
 
 from src.multistate.configuration.scenario_configuration import ScenarioConfig
 from src.multistate.orchestration.system_orchestrator import SystemOrchestrator
-from test.multistate_tests.peripheral_component_test_utils import (
+from test.peripheral_component_test_utils import (
     run_component_benchmark,
     write_yaml_smoke_config,
 )

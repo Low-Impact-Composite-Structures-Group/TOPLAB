@@ -7,16 +7,16 @@ Uses pytest for test discovery and execution with coverage reporting.
 
 Usage:
     # Run all tests
-    python test/multistate_tests/run_tests.py
+    python test/run_tests.py
 
     # Run with specific options
-    python test/multistate_tests/run_tests.py --verbose
-    python test/multistate_tests/run_tests.py --coverage
-    python test/multistate_tests/run_tests.py --fast
-    python test/multistate_tests/run_tests.py --include-slow  # Include solver benchmarks
+    python test/run_tests.py --verbose
+    python test/run_tests.py --coverage
+    python test/run_tests.py --fast
+    python test/run_tests.py --include-slow  # Include solver benchmarks
 
     # Run specific test module
-    python test/multistate_tests/run_tests.py --module nist_materials
+    python test/run_tests.py --module nist_materials
 
 Features:
 - Automatic environment detection (micromamba/conda)
@@ -35,7 +35,7 @@ from pathlib import Path
 
 def get_project_root():
     """Get the project root directory."""
-    return Path(__file__).parent.parent.parent
+    return Path(__file__).resolve().parent.parent
 
 
 def detect_python_environment():
@@ -97,8 +97,7 @@ def install_pytest_if_needed(python_cmd):
 def run_tests(args):
     """Run the test suite with specified options."""
     project_root = get_project_root()
-    # Folder was renamed from multi_tank_tests -> multistate_tests
-    test_dir = project_root / "test" / "multistate_tests"
+    test_dir = project_root / "test"
 
     # Detect Python environment
     python_cmd = detect_python_environment()
@@ -192,13 +191,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python test/multistate_tests/run_tests.py                    # Run all tests
-    python test/multistate_tests/run_tests.py --verbose          # Verbose output
-    python test/multistate_tests/run_tests.py --coverage         # With coverage
-    python test/multistate_tests/run_tests.py --module nist_materials  # Specific module
-    python test/multistate_tests/run_tests.py --fast             # Fast mode (stop on first failure)
-    python test/multistate_tests/run_tests.py --include-slow     # Include solver benchmarks
-    python test/multistate_tests/run_tests.py --ci               # CI mode
+    python test/run_tests.py                    # Run all tests
+    python test/run_tests.py --verbose          # Verbose output
+    python test/run_tests.py --coverage         # With coverage
+    python test/run_tests.py --module nist_materials  # Specific module
+    python test/run_tests.py --fast             # Fast mode (stop on first failure)
+    python test/run_tests.py --include-slow     # Include solver benchmarks
+    python test/run_tests.py --ci               # CI mode
         """
     )
 

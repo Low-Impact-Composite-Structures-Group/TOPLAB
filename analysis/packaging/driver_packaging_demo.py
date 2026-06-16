@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 # Ensure project root is importable when running directly.
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.multistate.packaging import (

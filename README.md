@@ -1,7 +1,7 @@
 # Hydrogen Fuel Tank: Student Quickstart
 
 This repository models cryogenic hydrogen tank behavior for mission-oriented studies.
-The supported workflow is the multistate driver plus YAML configuration pattern under `analysis/multistate_systems/`.
+The supported workflow is the multistate driver plus YAML configuration pattern under `analysis/`.
 
 ## Important Disclaimer
 
@@ -27,8 +27,8 @@ micromamba activate hython
 ## Source Code Context (Very Brief)
 
 - `src/multistate/`: active multistate solver, orchestration, coupling, and retained support code.
-- `analysis/multistate_systems/`: supported runnable analyses (drivers + YAML scenarios).
-- `analysis/multistate_systems/DSE/`: Design Study Environment (DSE) cases, including dormancy and discharge.
+- `analysis/`: supported runnable analyses (drivers + YAML scenarios).
+- `analysis/DSE/`: Design Study Environment (DSE) cases, including dormancy and discharge.
 - `output/` (and analysis-local `output/` folders): generated results and plots.
 
 ## Supported Entrypoint Pattern
@@ -40,7 +40,7 @@ Use the analysis-local driver scripts directly. The legacy top-level `main.py` l
 You can find the DSE folder here:
 
 ```bash
-cd analysis/multistate_systems/DSE
+cd analysis/DSE
 ```
 
 ### 1. Discharge Analysis
@@ -71,12 +71,12 @@ python driver_dormancy_24h.py
 
 Both analyses write outputs under:
 
-- `analysis/multistate_systems/DSE/output/results/`
-- `analysis/multistate_systems/DSE/output/plots/`
+- `analysis/DSE/output/results/`
+- `analysis/DSE/output/plots/`
 
 ## Notes for Students
 
 - Start from the existing YAML files and modify only one parameter group at a time.
 - Keep your own branch/fork for experiments and documentation.
 - If results look non-physical, first confirm you are using the `hython` environment.
-- When adding new studies, follow the existing `driver_*.py` plus `*.yaml` pattern inside `analysis/multistate_systems/`.
+- When adding new studies, follow the existing `driver_*.py` plus `*.yaml` pattern inside `analysis/`.

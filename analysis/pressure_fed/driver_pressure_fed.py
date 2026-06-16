@@ -9,13 +9,13 @@ Tank 2 (GH2) -- pressure valve (open at 11 bar, close at 10 bar) --> sink
 
 Run
 ---
-    micromamba run -n hython python analysis/multistate_systems/pressure_fed/driver_pressure_fed.py
+    micromamba run -n hython python analysis/pressure_fed/driver_pressure_fed.py
 """
 import sys
 from pathlib import Path
 
 # Ensure project root is on sys.path regardless of working directory
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.multistate.orchestration.run_analysis import run_analysis

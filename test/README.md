@@ -7,31 +7,31 @@ Comprehensive testing framework for the orchestrated multi-tank hydrogen storage
 ### Run All Tests
 ```bash
 # Simple run
-python test/multi_tank_tests/run_tests.py
+python test/run_tests.py
 
 # Verbose output
-python test/multi_tank_tests/run_tests.py --verbose
+python test/run_tests.py --verbose
 
 # With coverage reporting
-python test/multi_tank_tests/run_tests.py --coverage
+python test/run_tests.py --coverage
 ```
 
 ### Run Specific Tests
 ```bash
 # Run only NIST materials tests
-python test/multi_tank_tests/run_tests.py --module nist_materials
+python test/run_tests.py --module nist_materials
 
 # Fast mode (stop on first failure)
-python test/multi_tank_tests/run_tests.py --fast
+python test/run_tests.py --fast
 
 # CI mode (quiet output, XML results)
-python test/multi_tank_tests/run_tests.py --ci
+python test/run_tests.py --ci
 ```
 
 ## 📁 Test Structure
 
 ```
-test/multi_tank_tests/
+test/
 ├── run_tests.py              # Main test runner
 ├── pytest.ini               # pytest configuration
 ├── __init__.py              # Package initialization
@@ -104,25 +104,25 @@ Tests are organized using pytest markers:
 
 ```bash
 # Run only unit tests
-pytest test/multi_tank_tests/ -m unit
+pytest test/ -m unit
 
 # Run only integration tests
-pytest test/multi_tank_tests/ -m integration
+pytest test/ -m integration
 
 # Run coupling-related tests
-pytest test/multi_tank_tests/ -m coupling
+pytest test/ -m coupling
 
 # Run plotting framework tests
-pytest test/multi_tank_tests/ -m plotting
+pytest test/ -m plotting
 
 # Run NIST-related tests
-pytest test/multi_tank_tests/ -m nist
+pytest test/ -m nist
 
 # Run performance tests
-pytest test/multi_tank_tests/ -m performance
+pytest test/ -m performance
 
 # Skip slow tests
-pytest test/multi_tank_tests/ -m "not slow"
+pytest test/ -m "not slow"
 ```
 
 ## 🔍 Environment Detection
@@ -139,7 +139,7 @@ Generate coverage reports to ensure comprehensive testing:
 
 ```bash
 # Generate HTML coverage report
-python test/multi_tank_tests/run_tests.py --coverage
+python test/run_tests.py --coverage
 
 # View coverage report
 open test/coverage_html/index.html
@@ -156,7 +156,7 @@ For CI/CD pipelines:
 
 ```bash
 # CI mode - quiet output, XML results, no coverage HTML
-python test/multi_tank_tests/run_tests.py --ci
+python test/run_tests.py --ci
 
 # Results saved to: test/results.xml
 ```
