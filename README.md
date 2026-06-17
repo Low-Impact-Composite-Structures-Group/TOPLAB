@@ -1,82 +1,66 @@
-# Hydrogen Fuel Tank: Student Quickstart
+# Thermomechanical OPtimization LAB (TOPLAB)
 
-This repository models cryogenic hydrogen tank behavior for mission-oriented studies.
-The supported workflow is the multistate driver plus YAML configuration pattern under `analysis/`.
+TOPLAB is a modular analysis tool for the design of composite hydrogen storage tanks for aviation, capable of capturing interactions between tanks and other fuel system components.
 
-## Important Disclaimer
+This repository hosts the official implementation accompanying the paper:
 
-- This project is still under construction.
-- You do not have permission to share this repository, its data, or outputs outside the authorized group.
-- For your own development, create a private fork and work there.
+> *"A thermomechanical model of on-board multi-state hydrogen fuel systems in aviation"*
+> Proceedings of the 2nd Vienna Aviation Days 2025.
 
-## Environment Setup
+## Repository Scope
 
-Use the provided Conda/Mamba environment file:
+TOPLAB provides a configuration-driven workflow for running hydrogen fuel system analyses and studying thermomechanical behavior under mission-relevant conditions.
 
-```bash
-micromamba env create -f hython.yaml
-micromamba activate hython
+## General Spirit of the Code
+
+TOPLAB is designed around a few core ideas:
+
+- Physics-first, architecture-second: governing equations and thermodynamic consistency are treated as primary design constraints, and software structure is built to preserve them.
+- Graph-based system modelling: fuel systems are represented as directed networks of nodes and edges, so topology changes are handled in configuration rather than by rewriting solver code.
+- Modular components: tanks, couplings, valves, peripheral conditioning elements, and thermal models are implemented as composable building blocks.
+- Configuration-driven studies: scenarios are expressed in YAML and executed through common orchestration paths, enabling reproducible comparisons across missions and architectures.
+- Extensibility with control: new mechanisms (for example, edge models or component chains) are intended to be added as explicit modules, not ad hoc special cases.
+
+In practice, this means the codebase aims to make it easy to:
+
+1. Encode a new multi-tank architecture from configuration.
+2. Run the same numerical machinery across different mission profiles.
+3. Compare physical assumptions and design choices without duplicating solver logic.
+
+## Documentation
+
+The repository-level technical documentation now lives in:
+
+- `documentation/`
+
+This folder contains the model and solution description in LaTeX form, including:
+
+- network graph representation
+- governing equations (mass/energy/solid thermal state)
+- operating configurations and switching behavior
+- numerical method and integration strategy
+- legacy vs graph-based paradigm comparison
+
+Start from `documentation/main.tex`.
+
+## Contact
+
+For questions related to the paper or early access inquiries:
+
+- d.raso@tudelft.nl
+
+---
+
+## Citation
+
+If you use this work, please cite:
+
+```bibtex
+@article{raso2026,
+	title     = {A thermomechanical model of on-board multi-state hydrogen fuel systems in aviation},
+	author    = {Dante Raso and Nils Wieja and Jan Conde-Wolter and Lukas Hauser and Christoph Ebert and Bianca Giovanardi and Maik Gude and Julien van Campen},
+	journal   = {Proceedings of the 2nd Vienna Aviation Days},
+	publisher = {Springer Nature},
+	year      = {2026}
+}
 ```
-
-If the environment already exists:
-
-```bash
-micromamba activate hython
-```
-
-## Source Code Context (Very Brief)
-
-- `src/`: active multistate solver, orchestration, coupling, and retained support code.
-- `analysis/`: supported runnable analyses (drivers + YAML scenarios).
-- `analysis/DSE/`: Design Study Environment (DSE) cases, including dormancy and discharge.
-- `output/` (and analysis-local `output/` folders): generated results and plots.
-
-## Supported Entrypoint Pattern
-
-Use the analysis-local driver scripts directly. The legacy top-level `main.py` loader is now compatibility-only and should not be the default workflow for new analyses.
-
-## The example analysis you can base your work off
-
-You can find the DSE folder here:
-
-```bash
-cd analysis/DSE
-```
-
-### 1. Discharge Analysis
-
-- Purpose: simulate tank depletion under a commanded mission outflow profile.
-- Driver: `driver_discharge.py`
-- Config: `discharge.yaml`
-
-Run:
-
-```bash
-python driver_discharge.py
-```
-
-### 2. Dormancy (24h) Analysis
-
-- Purpose: simulate tank behavior during idle storage (no commanded fuel demand), including pressure/thermal evolution and vent behavior.
-- Driver: `driver_dormancy_24h.py`
-- Config: `dormancy_24h.yaml`
-
-Run:
-
-```bash
-python driver_dormancy_24h.py
-```
-
-## Outputs
-
-Both analyses write outputs under:
-
-- `analysis/DSE/output/results/`
-- `analysis/DSE/output/plots/`
-
-## Notes for Students
-
-- Start from the existing YAML files and modify only one parameter group at a time.
-- Keep your own branch/fork for experiments and documentation.
-- If results look non-physical, first confirm you are using the `hython` environment.
-- When adding new studies, follow the existing `driver_*.py` plus `*.yaml` pattern inside `analysis/`.
