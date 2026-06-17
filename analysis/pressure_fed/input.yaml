@@ -190,6 +190,7 @@ solver:
   max_step: 10.0
 
 output:
+  silent: false
   identifier: pressure_fed
   save_plots: true
   plot_formats:

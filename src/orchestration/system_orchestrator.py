@@ -58,7 +58,9 @@ class SystemOrchestrator:
     _cached_tank_geometries = {}
     _sizing_mission_key = None
 
-    def __init__(self, scenario_config: ScenarioConfig = None, config_path: str = None):
+    def __init__(self, scenario_config: ScenarioConfig = None, config_path: str = None, verbosity: str = "summary"):
+        self.verbosity = self._normalize_verbosity(verbosity)
+
         # Initialize scenario configuration
         if scenario_config is not None:
             self.scenario_config = scenario_config
@@ -405,7 +407,8 @@ class SystemOrchestrator:
             tank_geometries=self.tank_geometries,
             config=self.tank_system_config,
             coupling_rules=tank_system_coupling_rules,  # Pass converted config
-            scenario_config=self.scenario_config  # Pass full scenario config for materials
+            scenario_config=self.scenario_config,  # Pass full scenario config for materials
+            verbosity=self.verbosity,
         )
         print(f"   TankSystem DAE engine initialised")
 
@@ -433,6 +436,13 @@ class SystemOrchestrator:
         print(f"   Missions: {self.scenario_config.get_mission_count()}")
         print(f"   Materials: {list(self.scenario_config.materials.keys())}")
         print(f"   Analysis type: {self.scenario_config.analysis_name}")
+
+    @staticmethod
+    def _normalize_verbosity(verbosity: str) -> str:
+        level = (verbosity or "summary").strip().lower()
+        if level not in {"quiet", "summary", "debug"}:
+            return "summary"
+        return level
 
     def _create_tank_geometries(self) -> List[Any]:
         """Create tank geometries from scenario configuration."""
@@ -2020,6 +2030,21 @@ class SystemOrchestrator:
         import numpy as np
 
         try:
+            def _scalarize(value, default: float = 0.0) -> float:
+                if value is None:
+                    return default
+                if isinstance(value, np.ndarray):
+                    if value.size == 0:
+                        return default
+                    return float(value.flat[0])
+                if isinstance(value, (list, tuple)):
+                    if len(value) == 0:
+                        return default
+                    return float(value[0])
+                if value == "":
+                    return default
+                return float(value)
+
             # Initialize summary structure
             summary = {
                 'analysis_name': self.scenario_config.analysis_name,
@@ -2048,12 +2073,12 @@ class SystemOrchestrator:
 
                 # Initial conditions from tank config (handle None and string values safely)
                 initial_pressure_pa = tank_config.get('initial_pressure', 0)
-                initial_pressure_bar = float(initial_pressure_pa) / 1e5 if initial_pressure_pa else 0.0
+                initial_pressure_bar = _scalarize(initial_pressure_pa, 0.0) / 1e5
 
                 # Try different temperature keys - it might be calculated vs configured
                 initial_temperature = tank_config.get('initial_temperature',
                                    tank_config.get('calculated_temperature', 0))
-                initial_temperature = float(initial_temperature) if initial_temperature else 0.0
+                initial_temperature = _scalarize(initial_temperature, 0.0)
 
                 # Try to get the temperature from tank system if available and temperature is still 0
                 if initial_temperature == 0 and hasattr(self, 'tank_system') and self.tank_system:
@@ -2067,24 +2092,26 @@ class SystemOrchestrator:
                         pass
 
                 # Also try to get the calculated temperature from results if available
-                if initial_temperature == 0 and initial_state:
-                    initial_temperature = initial_state.temperature
+                if initial_temperature == 0 and initial_state is not None:
+                    initial_temperature = _scalarize(getattr(initial_state, 'temperature', 0.0), 0.0)
 
                 initial_density = tank_config.get('initial_density', 0)
-                initial_density = float(initial_density) if initial_density else 0.0
+                initial_density = _scalarize(initial_density, 0.0)
 
                 # Pressure limits - try different key names used in config
-                vent_pressure_pa = (tank_config.get('vent_pressure', 0) or
-                                   tank_config.get('venting_pressure', 0))
-                vent_pressure_bar = float(vent_pressure_pa) / 1e5 if vent_pressure_pa else 0.0
+                vent_pressure_pa = tank_config.get('vent_pressure', None)
+                if vent_pressure_pa in (None, ""):
+                    vent_pressure_pa = tank_config.get('venting_pressure', 0)
+                vent_pressure_bar = _scalarize(vent_pressure_pa, 0.0) / 1e5
 
                 min_pressure_pa = tank_config.get('minimum_pressure', 0)
-                min_pressure_bar = float(min_pressure_pa) / 1e5 if min_pressure_pa else 0.0
+                min_pressure_bar = _scalarize(min_pressure_pa, 0.0) / 1e5
 
                 # Stopping criteria - check both config locations
-                min_density = (tank_config.get('minimum_density', 0) or
-                              self.scenario_config.config_dict.get('stopping_criteria', {}).get('minimum_density', 0))
-                min_density = float(min_density) if min_density else 0.0
+                min_density = tank_config.get('minimum_density', None)
+                if min_density in (None, ""):
+                    min_density = self.scenario_config.config_dict.get('stopping_criteria', {}).get('minimum_density', 0)
+                min_density = _scalarize(min_density, 0.0)
 
                 # Material thicknesses from config
                 liner_thickness_m = 0.005  # Default 5mm
@@ -2093,9 +2120,9 @@ class SystemOrchestrator:
                 # Try to get actual thicknesses from materials config
                 materials_config = self.scenario_config.config_dict.get('materials', {})
                 if 'liner' in materials_config:
-                    liner_thickness_m = float(materials_config['liner'].get('thickness', 0.005))
+                    liner_thickness_m = _scalarize(materials_config['liner'].get('thickness', 0.005), 0.005)
                 if 'insulation' in materials_config:
-                    insulation_thickness_m = float(materials_config['insulation'].get('thickness', 0.050))
+                    insulation_thickness_m = _scalarize(materials_config['insulation'].get('thickness', 0.050), 0.050)
 
                 direct_inputs.update({
                     'initial_pressure_bar': initial_pressure_bar,
@@ -2148,12 +2175,12 @@ class SystemOrchestrator:
                 direct_outputs = {}
 
                 # Tank dimensions
-                tank_volume = tank_geometry.volume
-                tank_radius = getattr(tank_geometry, 'radius', 0)
-                tank_diameter = 2 * tank_radius if np.any(tank_radius > 0) else 0
+                tank_volume = _scalarize(getattr(tank_geometry, 'volume', 0.0), 0.0)
+                tank_radius = _scalarize(getattr(tank_geometry, 'radius', 0.0), 0.0)
+                tank_diameter = 2 * tank_radius if tank_radius > 0 else 0.0
 
                 # Surface area (spherical approximation)
-                surface_area = 4 * np.pi * tank_radius**2 if np.any(tank_radius > 0) else 0
+                surface_area = 4 * np.pi * tank_radius**2 if tank_radius > 0 else 0.0
 
                 # Calculate tank masses (using typical structural mass ratios)
                 liner_mass = 0.0
@@ -2163,8 +2190,8 @@ class SystemOrchestrator:
                 if hasattr(self, 'tank_system') and self.tank_system:
                     try:
                         tank_props = self.tank_system._get_tank_properties(tank_geometry, f"Tank{tank_idx+1}", tank_idx)
-                        liner_mass = tank_props.get('liner_mass', 0)
-                        wall_mass = tank_props.get('wall_mass', 0)
+                        liner_mass = _scalarize(tank_props.get('liner_mass', 0.0), 0.0)
+                        wall_mass = _scalarize(tank_props.get('wall_mass', 0.0), 0.0)
                     except:
                         # Fallback calculations
                         liner_mass = tank_volume * 5.0  # ~5 kg/m³ typical
@@ -2201,11 +2228,11 @@ class SystemOrchestrator:
                 })
 
                 # Initial fuel mass
-                if initial_state:
-                    fuel_mass = initial_state.fuel_mass
+                if initial_state is not None:
+                    fuel_mass = _scalarize(getattr(initial_state, 'fuel_mass', 0.0), 0.0)
                 else:
                     # Calculate from initial conditions
-                    fuel_mass = initial_density * tank_volume if np.any(initial_density > 0) else 0
+                    fuel_mass = initial_density * tank_volume if initial_density > 0 else 0.0
 
                 direct_outputs['fuel_mass_kg'] = fuel_mass
 
@@ -2225,7 +2252,8 @@ class SystemOrchestrator:
                         vent_pressure_pa = vent_pressure_bar * 1e5
 
                         for i, state in enumerate(tank_series.states):
-                            if state.pressure and state.pressure >= vent_pressure_pa:
+                            state_pressure = _scalarize(getattr(state, 'pressure', 0.0), 0.0)
+                            if state_pressure >= vent_pressure_pa:
                                 time_to_vent_hours = self.results.times[i] / 3600
                                 break
 
@@ -2238,7 +2266,7 @@ class SystemOrchestrator:
                 # Structure mass = liner mass + wall mass (insulation neglected per definition)
                 structure_mass = liner_mass + wall_mass
                 total_system_mass = fuel_mass + structure_mass
-                mass_efficiency = (fuel_mass / total_system_mass) if np.any(total_system_mass > 0) else 0
+                mass_efficiency = (fuel_mass / total_system_mass) if total_system_mass > 0 else 0.0
 
                 # Volumetric efficiency = hydrogen volume / (hydrogen volume + structure volume)
                 # Structure volume = liner volume + wall volume + insulation volume
@@ -2246,11 +2274,7 @@ class SystemOrchestrator:
 
                 # Calculate structure volumes
                 # Liner volume (spherical shell): V = 4π * [(r_outer)³ - (r_inner)³] / 3
-                # Handle array/scalar tank_radius safely
-                if hasattr(tank_radius, '__len__'):  # Array case
-                    inner_radius = tank_radius - liner_thickness_m
-                else:  # Scalar case
-                    inner_radius = tank_radius - liner_thickness_m if tank_radius > liner_thickness_m else tank_radius * 0.95
+                inner_radius = tank_radius - liner_thickness_m if tank_radius > liner_thickness_m else tank_radius * 0.95
                 liner_outer_radius = tank_radius
                 liner_volume = (4/3) * np.pi * (liner_outer_radius**3 - inner_radius**3)
 
@@ -2260,10 +2284,10 @@ class SystemOrchestrator:
 
                 # Total volume = hydrogen volume + structure volumes
                 total_volume = hydrogen_volume + liner_volume + wall_volume
-                volumetric_efficiency = (hydrogen_volume / total_volume) if np.any(total_volume > 0) else 0
+                volumetric_efficiency = (hydrogen_volume / total_volume) if total_volume > 0 else 0.0
 
                 # Energy calculations
-                fuel_energy_mj = fuel_mass * 120.0 if np.any(fuel_mass > 0) else 0  # H2 LHV ~120 MJ/kg
+                fuel_energy_mj = fuel_mass * 120.0 if fuel_mass > 0 else 0.0  # H2 LHV ~120 MJ/kg
 
                 # Calculate energy requirements (placeholder - would need actual heat exchanger calculations)
                 ohex_energy_mj = 0.0
@@ -2274,7 +2298,7 @@ class SystemOrchestrator:
                     try:
                         # Calculate OHEX energy
                         qdot_ohex = self._calculate_ohex_requirements(tank_idx)
-                        if qdot_ohex and self.results.times:
+                        if qdot_ohex is not None and len(qdot_ohex) > 0 and self.results.times:
                             dt = np.diff(self.results.times)  # Time steps in seconds
                             if len(dt) == len(qdot_ohex) - 1:
                                 # Integrate power to get energy
@@ -2282,7 +2306,7 @@ class SystemOrchestrator:
 
                         # Calculate iHEX energy
                         qdot_ihex = self._calculate_ihex_requirements(tank_idx)
-                        if qdot_ihex and self.results.times:
+                        if qdot_ihex is not None and len(qdot_ihex) > 0 and self.results.times:
                             dt = np.diff(self.results.times)
                             if len(dt) == len(qdot_ihex) - 1:
                                 ihex_energy_mj = np.sum(np.array(qdot_ihex[:-1]) * dt) / 1e6
@@ -2616,299 +2640,192 @@ class SystemOrchestrator:
         Returns:
             str: Path to the saved results file
         """
-        import numpy as np
         from datetime import datetime
         from pathlib import Path
 
         if not self.results:
             raise RuntimeError("No simulation results available. Run simulation first.")
 
-        # === EXTRACT DATA FROM YAML CONFIG ===
         config_dict = self.scenario_config.config_dict
-
-        # Extract geometry from new network format
-        network = config_dict.get('network', {})
-        nodes = network.get('nodes', [])
-
-        if not nodes:
-            raise RuntimeError("Problem accessing parameter: no nodes in network section of YAML config")
-
-        # Get first tank (node_id=1 or first node)
-        tank_node = None
-        for node in nodes:
-            if node.get('node_id') == 1 or not tank_node:
-                tank_node = node
-                break
-
-        if not tank_node:
-            raise RuntimeError("Problem accessing parameter: no tank node found in configuration")
-
-        # Extract from new format structure
-        geometry = tank_node.get('geometry', {})
-        initial_conditions = tank_node.get('initial_conditions', {})
-        operating_limits = tank_node.get('operating_limits', {})
-
-        def _float_or_default(value, default: float = 0.0) -> float:
-            if value is None or value == "":
-                return default
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
-        # Convert values, handling both numeric and string inputs
-        p_init_pa = initial_conditions.get('pressure', 0)
-        p_init_bar = _float_or_default(p_init_pa, 0.0) / 1e5  # Pa to bar
-
-        rho_raw = initial_conditions.get('density', None)
-        rho_init = _float_or_default(rho_raw, np.nan)  # kg/m³ (may be omitted)
-        lr_ratio = _float_or_default(geometry.get('phi', 3.0), 3.0)  # L/R ratio (phi in YAML)
-
-        p_min_pa = operating_limits.get('minimum_pressure', 0)
-        p_min_bar = _float_or_default(p_min_pa, 0.0) / 1e5  # Pa to bar
-
-        p_vent_pa = operating_limits.get('venting_pressure', 0)
-        p_vent_bar = _float_or_default(p_vent_pa, 0.0) / 1e5  # Pa to bar
-
-
-        # Extract from materials section
+        output_config = config_dict.get('output', {})
         materials_config = config_dict.get('materials', {})
-        liner_config = materials_config.get('liner', {})
-        liner_thickness = _float_or_default(liner_config.get('thickness', 0.005), 0.005)  # m
-        insulation_config = materials_config.get('insulation', {})
-        insulation_thickness = _float_or_default(insulation_config.get('thickness', 0.05), 0.05)  # m
-
-        # Extract from mission section
-        mission_config = config_dict.get('mission', {})
-        ambient_temp = _float_or_default(mission_config.get('ambient_temperature', 288.15), 288.15)  # K
-        ambient_htc = _float_or_default(insulation_config.get('heat_transfer_coefficient', 30), 30.0)  # W/m²K from insulation
-
-        # Material names
-        liner_material = config_dict.get('materials', {}).get('liner', {}).get('name', 'aluminum')
-        wall_material = config_dict.get('materials', {}).get('composite', {}).get('name', 'carbon-epoxy')
-
-        # === COMPUTED AT START OF SIMULATION ===
-        # T_init is computed at start of simulation - get from initial state
-        initial_state = self.results.multi_tank_states[0].get_tank_state(0)
-        t_init = initial_state.temperature  # K
-
-        # R (radius) - computed at start based on mission fuel requirement
-        tank_geometry = self.tank_geometries[0]
-        radius = tank_geometry.radius  # m
-
-        # H2 mass - computed at start of sim (initial fuel mass)
-        h2_mass = initial_state.fuel_mass  # kg
-
-        # If density was omitted/blank in YAML, fall back to simulation-derived value.
-        if np.isnan(rho_init):
-            rho_init = _float_or_default(getattr(initial_state, 'density', None), np.nan)
-        if np.isnan(rho_init):
-            volume = getattr(tank_geometry, 'volume', None)
-            rho_init = (h2_mass / volume) if volume else 0.0
-
-        # === FROM MISSION PROFILE ===
-        # Calculate discharge rate from actual simulation results (more accurate than mission config)
-        if not (hasattr(self.scenario_config, 'mission_sequence') and
-                self.scenario_config.mission_sequence.missions):
-            raise RuntimeError("Problem accessing parameter: mission_sequence not available")
-
-        # Get mission duration data from mission profile
-        if not hasattr(self, 'mission_profile') or not self.mission_profile:
-            raise RuntimeError("Problem accessing parameter: no mission_profile loaded in orchestrator")
-
-        mission = self.mission_profile
-        mission_durations = []
-
-        for section in mission.sections:
-            mission_durations.append(section.duration)  # s
-
-        # Calculate average discharge rate from simulation results (most accurate)
-        initial_mass = self.results.multi_tank_states[0].get_tank_state(0).fuel_mass
-        final_mass = self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass
-        total_duration = self.results.times[-1]
-        fuel_consumed = initial_mass - final_mass
-
-        if total_duration <= 0:
-            raise RuntimeError("Problem accessing parameter: invalid simulation duration for discharge rate calculation")
-
-        avg_discharge_rate = fuel_consumed / total_duration  # kg/s
-
-        # === FROM GEOMETRY (TANK ATTRIBUTES) ===
-        # These should be tank attributes already computed
-        tank_volume = tank_geometry.volume  # m³
-        cylindrical_length = lr_ratio * radius  # m (L/R * R = L, length of cylindrical section only)
-
-        # Get liner mass from tank system properties - NO FALLBACKS
-        if not (hasattr(self, 'tank_system') and self.tank_system):
-            raise RuntimeError("Problem accessing parameter: tank_system not available for liner_mass extraction")
-
-        try:
-            tank_props = self.tank_system._get_tank_properties(tank_geometry, "Tank1", 0)
-            if 'liner_mass' not in tank_props:
-                raise KeyError("liner_mass not found in tank properties")
-            liner_mass = tank_props['liner_mass']
-        except Exception as e:
-            raise RuntimeError(f"Problem accessing parameter: liner_mass - {e}")
-
-        # Inner area - get from thermal model, NO geometric fallback
-        if not (hasattr(self, 'tank_system') and hasattr(self.tank_system, 'thermal_models')):
-            raise RuntimeError("Problem accessing parameter: thermal_models not available for inner_area extraction")
-
-        try:
-            thermal_model = self.tank_system.thermal_models[0]
-            if not hasattr(thermal_model, 'A_in'):
-                raise AttributeError("A_in not found in thermal model")
-            inner_area = thermal_model.A_in
-        except Exception as e:
-            raise RuntimeError(f"Problem accessing parameter: inner_area (A_in) - {e}")
-
-        # === FROM STRUCTURAL MODEL ===
-        # Composite thickness and mass - computed in structural model, NO FALLBACKS
-        if not (hasattr(self, 'tank_system') and self.tank_system):
-            raise RuntimeError("Problem accessing parameter: tank_system not available for structural model data")
-
-        try:
-            tank_props = self.tank_system._get_tank_properties(tank_geometry, "Tank1", 0)
-            if 'wall_mass' not in tank_props:
-                raise KeyError("wall_mass not found in tank properties")
-            composite_mass = tank_props['wall_mass']
-
-            # Use the calculated thickness from netting analysis instead of recalculating
-            if 'wall_thickness' in tank_props:
-                composite_thickness = tank_props['wall_thickness']
-                print(f"   ✓ Using netting analysis thickness: {composite_thickness*1000:.2f} mm")
-            else:
-                # Fallback: Calculate thickness from mass and geometry
-                if radius <= 0:
-                    raise ValueError("Invalid radius for composite thickness calculation")
-
-                # Use actual composite density from tank properties if available
-                composite_density = tank_props.get('composite_density', 1800)  # NIST G10 density
-                # Estimate thickness from mass (simplified spherical shell approximation)
-                composite_thickness = composite_mass / (4 * np.pi * radius**2 * composite_density)
-                print(f"   WARNING: Fallback thickness calculation: {composite_thickness*1000:.2f} mm")
-
-            if composite_thickness <= 0:
-                raise ValueError("Calculated composite thickness is invalid")
-
-        except Exception as e:
-            raise RuntimeError(f"Problem accessing parameter: composite structural data - {e}")
-
-        # === CALCULATED VALUES ===
-        total_structural_mass = liner_mass + composite_mass  # kg
-
-        # Outer area - get from thermal model, NO geometric fallback
-        if not (hasattr(self, 'tank_system') and hasattr(self.tank_system, 'thermal_models')):
-            raise RuntimeError("Problem accessing parameter: thermal_models not available for outer_area extraction")
-
-        try:
-            thermal_model = self.tank_system.thermal_models[0]
-            if not hasattr(thermal_model, 'A_out'):
-                raise AttributeError("A_out not found in thermal model")
-            outer_area = thermal_model.A_out
-        except Exception as e:
-            raise RuntimeError(f"Problem accessing parameter: outer_area (A_out) - {e}")
-
-        # Structural volume = outer volume - inner volume (tank volume)
-        # Calculate r_total from known thicknesses
-        r_total = radius + liner_thickness + composite_thickness + insulation_thickness
-        outer_volume = (4/3) * np.pi * r_total**3
-        structural_volume = outer_volume - tank_volume  # m³
-
-        # Efficiencies
-        gravimetric_efficiency = h2_mass / (h2_mass + total_structural_mass)
-        volumetric_efficiency = tank_volume / (tank_volume + structural_volume)
-
-        # === ENERGY CALCULATIONS (POST-SIMULATION) ===
-        times = np.array(self.results.times)
-
-        # iHEX energy - trapezoidal integration of ihex data
-        qdot_ihex = self._calculate_ihex_requirements(0)
-        ihex_energy_mj = np.trapz(np.abs(qdot_ihex), times) / 1e6  # W·s to MJ
-        ihex_energy_kwh = ihex_energy_mj * 1000 / 3600  # MJ to kWh
-
-        # OHEX energy - trapezoidal integration of ohex data
-        qdot_ohex = self._calculate_ohex_requirements(0)
-        ohex_energy_mj = np.trapz(qdot_ohex, times) / 1e6  # W·s to MJ
-        ohex_energy_kwh = ohex_energy_mj * 1000 / 3600  # MJ to kWh
-
-        # Total HEX energy
-        total_hex_energy_kwh = ihex_energy_kwh + ohex_energy_kwh
-
-        # === CREATE COMPREHENSIVE REPORT ===
+        couplings = config_dict.get('coupling_rules', [])
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        report_text = f"""Single Tank CCH2 Benchmark - Comprehensive Analysis Report
-Generated: {timestamp}
-Analysis: {self.scenario_config.description}
+        mission_sections = []
+        if getattr(self, 'mission_profile', None) and getattr(self.mission_profile, 'sections', None):
+            mission_sections = [section.duration for section in self.mission_profile.sections]
 
-CONFIGURATION PARAMETERS (from YAML)
-================================================================================
-P_init [bar]:               {p_init_bar:.1f}
-rho_init [kg/m³]:           {rho_init:.1f}
-L/R [-]:                    {lr_ratio:.2f}
-Liner thickness [m]:        {liner_thickness:.4f}
-Ambient HTC [W/m²·K]:       {ambient_htc:.2f}
-P_min [bar]:                {p_min_bar:.1f}
-P_vent [bar]:               {p_vent_bar:.1f}
-Ambient temp [K]:           {ambient_temp:.1f}
-Insulation thickness [m]:   {insulation_thickness:.3f}
-Liner material:             {liner_material}
-Wall material:              {wall_material}
+        times_array = np.asarray(self.results.times, dtype=float)
+        total_duration_s = float(times_array[-1]) if times_array.size > 0 else 0.0
+        data_points = int(times_array.size)
 
-COMPUTED VALUES (at start of simulation)
-================================================================================
-T_init [K]:                 {t_init:.1f}
-R [m]:                      {radius:.3f}
-H2 mass [kg]:               {h2_mass:.1f}
+        def _fmt(value: Any, decimals: int = 2, default: str = "N/A") -> str:
+            if value is None:
+                return default
+            if isinstance(value, np.ndarray):
+                if value.size == 0:
+                    return default
+                value = value.flat[0]
+            elif isinstance(value, (list, tuple)):
+                if len(value) == 0:
+                    return default
+                value = value[0]
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return str(value)
+            if np.isnan(value):
+                return default
+            return f"{value:.{decimals}f}"
 
-MISSION PROFILE DATA
-================================================================================
-Discharge rate [kg/s]:      {avg_discharge_rate:.6f} (calculated from simulation)
-Mission sections:           {len(mission_durations)}
-Mission durations [s]:      {mission_durations}
+        def _line(label: str, value: Any) -> str:
+            return f"{label:<32} {value}\n"
 
-GEOMETRY (tank attributes)
-================================================================================
-Liner mass [kg]:            {liner_mass:.1f}
-Inner area [m²]:            {inner_area:.2f}
-Tank volume [m³]:           {tank_volume:.3f}
-Length of cylindrical section [m]: {cylindrical_length:.2f}
+        def _get_tank_props(tank_geometry: Any, tank_index: int) -> Dict[str, Any]:
+            if hasattr(self, 'tank_system') and self.tank_system:
+                try:
+                    return self.tank_system._get_tank_properties(tank_geometry, f"Tank{tank_index + 1}", tank_index)
+                except Exception:
+                    return {}
+            return {}
 
-STRUCTURAL MODEL RESULTS
-================================================================================
-Composite thickness [m]:    {composite_thickness:.4f}
-Composite mass [kg]:        {composite_mass:.1f}
+        total_initial_mass = 0.0
+        total_final_mass = 0.0
+        total_fuel_consumed = 0.0
+        total_structural_mass = 0.0
+        total_ihex_kwh = 0.0
+        total_ohex_kwh = 0.0
+        total_hex_kwh = 0.0
 
-CALCULATED VALUES
-================================================================================
-Total structural mass [kg]: {total_structural_mass:.1f}
-Outer area [m²]:            {outer_area:.2f}
-Structural volume [m³]:     {structural_volume:.3f}
-Gravimetric efficiency:     {gravimetric_efficiency:.3f}
-Volumetric efficiency:      {volumetric_efficiency:.3f}
+        per_tank_blocks = []
+        tank_config_items = list(self.scenario_config.tank_geometries.items())
+        for tank_index, tank_geometry in enumerate(self.tank_geometries):
+            tank_name = f"Tank_{tank_index + 1}"
+            _, tank_config = tank_config_items[tank_index] if tank_index < len(tank_config_items) else (tank_name, {})
+            initial_state = self.results.multi_tank_states[0].get_tank_state(tank_index)
+            final_state = self.results.multi_tank_states[-1].get_tank_state(tank_index)
+            tank_props = _get_tank_props(tank_geometry, tank_index)
 
-ENERGY REQUIREMENTS (post-simulation integration)
-================================================================================
-Required iHEX energy [kWh]: {ihex_energy_kwh:.1f}
-Required OHEX energy [kWh]: {ohex_energy_kwh:.1f}
-Total required HEX energy [kWh]: {total_hex_energy_kwh:.1f}
+            initial_mass = float(initial_state.fuel_mass)
+            final_mass = float(final_state.fuel_mass)
+            fuel_consumed = initial_mass - final_mass
 
-SIMULATION SUMMARY
-================================================================================
-Mission Duration:           {times[-1]/3600:.2f} hours ({times[-1]:.1f} seconds)
-Data Points:                {len(times)}
-Final Mass:                 {self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass:.1f} kg
-Fuel Consumed:              {h2_mass - self.results.multi_tank_states[-1].get_tank_state(0).fuel_mass:.1f} kg
+            try:
+                qdot_ihex = self._calculate_ihex_requirements(tank_index)
+                ihex_kwh = np.trapz(np.abs(np.asarray(qdot_ihex, dtype=float)), times_array) / 3.6e6 if len(qdot_ihex) == data_points else 0.0
+            except Exception:
+                ihex_kwh = 0.0
 
-================================================================================
-Analysis completed successfully using trapezoidal integration
-All values extracted from specified data sources as per requirements table
-================================================================================
-"""
+            try:
+                qdot_ohex = self._calculate_ohex_requirements(tank_index)
+                ohex_kwh = np.trapz(np.asarray(qdot_ohex, dtype=float), times_array) / 3.6e6 if len(qdot_ohex) == data_points else 0.0
+            except Exception:
+                ohex_kwh = 0.0
+
+            hex_kwh = ihex_kwh + ohex_kwh
+            structure_mass = float(tank_props.get('liner_mass', 0.0)) + float(tank_props.get('wall_mass', 0.0))
+
+            total_initial_mass += initial_mass
+            total_final_mass += final_mass
+            total_fuel_consumed += fuel_consumed
+            total_structural_mass += structure_mass
+            total_ihex_kwh += ihex_kwh
+            total_ohex_kwh += ohex_kwh
+            total_hex_kwh += hex_kwh
+
+            block = []
+            block.append(f"{tank_name.upper()}\n")
+            block.append("-" * 80 + "\n")
+            block.append(_line("Configured pressure [bar]:", _fmt(tank_config.get('initial_pressure', 0.0) / 1e5, 1)))
+            block.append(_line("Configured temperature [K]:", _fmt(tank_config.get('initial_temperature', tank_config.get('calculated_initial_temperature')), 2)))
+            block.append(_line("Configured density [kg/m^3]:", _fmt(tank_config.get('initial_density', tank_config.get('calculated_initial_density')), 2)))
+            block.append(_line("Minimum pressure [bar]:", _fmt(tank_config.get('minimum_pressure', 0.0) / 1e5, 1)))
+            block.append(_line("Venting pressure [bar]:", _fmt(tank_config.get('venting_pressure', 0.0) / 1e5, 1)))
+            block.append(_line("Tank volume [m^3]:", _fmt(getattr(tank_geometry, 'volume', 0.0), 4)))
+            block.append(_line("Tank radius [m]:", _fmt(getattr(tank_geometry, 'radius', 0.0), 3)))
+            block.append(_line("Inner area [m^2]:", _fmt(tank_props.get('inner_surface_area', 0.0), 3)))
+            block.append(_line("Outer area [m^2]:", _fmt(tank_props.get('outer_surface_area', 0.0), 3)))
+            block.append(_line("Wall thickness [m]:", _fmt(tank_props.get('wall_thickness', 0.0), 4)))
+            block.append(_line("Liner mass [kg]:", _fmt(tank_props.get('liner_mass', 0.0), 2)))
+            block.append(_line("Wall mass [kg]:", _fmt(tank_props.get('wall_mass', 0.0), 2)))
+            block.append(_line("Structural mass [kg]:", _fmt(structure_mass, 2)))
+            block.append(_line("Initial fuel mass [kg]:", _fmt(initial_mass, 2)))
+            block.append(_line("Final fuel mass [kg]:", _fmt(final_mass, 2)))
+            block.append(_line("Fuel consumed [kg]:", _fmt(fuel_consumed, 2)))
+            block.append(_line("Initial pressure actual [bar]:", _fmt(initial_state.pressure / 1e5, 2)))
+            block.append(_line("Initial temperature actual [K]:", _fmt(initial_state.temperature, 2)))
+            block.append(_line("Initial density actual [kg/m^3]:", _fmt(initial_state.density, 2)))
+            block.append(_line("Final temperature [K]:", _fmt(final_state.temperature, 2)))
+            block.append(_line("Final pressure [bar]:", _fmt(final_state.pressure / 1e5, 2)))
+            block.append(_line("Final density [kg/m^3]:", _fmt(final_state.density, 2)))
+            block.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))
+            block.append(_line("iHEX energy [kWh]:", _fmt(ihex_kwh, 3)))
+            block.append(_line("OHEX energy [kWh]:", _fmt(ohex_kwh, 3)))
+            block.append(_line("Total HEX energy [kWh]:", _fmt(hex_kwh, 3)))
+            per_tank_blocks.append("".join(block))
+
+        report_lines = []
+        report_lines.append(f"{self.scenario_config.analysis_name} - Results Report\n")
+        report_lines.append(f"Generated: {timestamp}\n")
+        report_lines.append(f"Description: {self.scenario_config.description}\n\n")
+
+        report_lines.append("SYSTEM OVERVIEW\n")
+        report_lines.append("=" * 80 + "\n")
+        report_lines.append(_line("Tank count:", len(self.tank_geometries)))
+        report_lines.append(_line("Coupling rule count:", len(couplings)))
+        report_lines.append(_line("Mission count:", self.scenario_config.get_mission_count()))
+        report_lines.append(_line("Mission sections:", len(mission_sections)))
+        report_lines.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))
+        report_lines.append(_line("Data points:", data_points))
+        report_lines.append(_line("Liner material:", materials_config.get('liner', {}).get('name', 'N/A')))
+        report_lines.append(_line("Composite material:", materials_config.get('composite', {}).get('name', 'N/A')))
+        report_lines.append(_line("Insulation material:", materials_config.get('insulation', {}).get('name', 'N/A')))
+        if mission_sections:
+            mission_duration_str = ", ".join(_fmt(duration, 1) for duration in mission_sections)
+            report_lines.append(_line("Mission section durations [s]:", mission_duration_str))
+        report_lines.append("\n")
+
+        report_lines.append("SYSTEM TOTALS\n")
+        report_lines.append("=" * 80 + "\n")
+        report_lines.append(_line("Initial fuel mass [kg]:", _fmt(total_initial_mass, 2)))
+        report_lines.append(_line("Final fuel mass [kg]:", _fmt(total_final_mass, 2)))
+        report_lines.append(_line("Fuel consumed [kg]:", _fmt(total_fuel_consumed, 2)))
+        report_lines.append(_line("Structural mass [kg]:", _fmt(total_structural_mass, 2)))
+        report_lines.append(_line("Total iHEX energy [kWh]:", _fmt(total_ihex_kwh, 3)))
+        report_lines.append(_line("Total OHEX energy [kWh]:", _fmt(total_ohex_kwh, 3)))
+        report_lines.append(_line("Total HEX energy [kWh]:", _fmt(total_hex_kwh, 3)))
+        if total_duration_s > 0:
+            report_lines.append(_line("Average net fuel use [kg/s]:", _fmt(total_fuel_consumed / total_duration_s, 6)))
+        report_lines.append("\n")
+
+        report_lines.append("COUPLING SUMMARY\n")
+        report_lines.append("=" * 80 + "\n")
+        if couplings:
+            for idx, coupling in enumerate(couplings, start=1):
+                participants = coupling.get('participants', {})
+                source = participants.get('source', 'N/A')
+                target = participants.get('target', 'N/A')
+                coupling_id = coupling.get('coupling_id', f'coupling_{idx}')
+                coupling_type = coupling.get('coupling_type', 'unknown')
+                report_lines.append(
+                    f"{idx}. {coupling_id}: {coupling_type} (source={source}, target={target})\n"
+                )
+        else:
+            report_lines.append("No coupling rules configured.\n")
+        report_lines.append("\n")
+
+        report_lines.append("PER-TANK DETAILS\n")
+        report_lines.append("=" * 80 + "\n\n")
+        report_lines.append("\n".join(per_tank_blocks))
+        report_lines.append("\n")
+        report_lines.append("=" * 80 + "\n")
+        report_lines.append("Report generated from SystemOrchestrator summary data and simulation results.\n")
+
+        report_text = "".join(report_lines)
 
         # Create output directory and save file
-        output_dir = Path("output/results")
+        output_dir = Path(output_config.get('results_directory', 'output/results'))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         analysis_name = self.scenario_config.analysis_name.replace(' ', '_').lower()
@@ -2918,12 +2835,11 @@ All values extracted from specified data sources as per requirements table
         with open(output_file, 'w') as f:
             f.write(report_text)
 
-        # Print summary to console
         print(f"COMPREHENSIVE RESULTS SUMMARY:")
-        print(f"   OHEX Energy: {ohex_energy_kwh:.1f} kWh")
-        print(f"   iHEX Energy: {ihex_energy_kwh:.1f} kWh")
-        print(f"   Total HEX Energy: {total_hex_energy_kwh:.1f} kWh")
-        print(f"   Gravimetric Efficiency: {gravimetric_efficiency:.1%}")
-        print(f"   Volumetric Efficiency: {volumetric_efficiency:.1%}")
+        print(f"   Tanks: {len(self.tank_geometries)}")
+        print(f"   Fuel consumed: {total_fuel_consumed:.2f} kg")
+        print(f"   Total iHEX Energy: {total_ihex_kwh:.3f} kWh")
+        print(f"   Total OHEX Energy: {total_ohex_kwh:.3f} kWh")
+        print(f"   Total HEX Energy: {total_hex_kwh:.3f} kWh")
 
         return str(output_file)

@@ -72,7 +72,8 @@ class TankSystem:
                  tank_geometries: List[SphericalTank],
                  config: TankSystemConfig,
                  coupling_rules: List[Dict] = None,
-                 scenario_config=None):
+                 scenario_config=None,
+                 verbosity: str = "summary"):
         """
         Initialize tank system.
 
@@ -81,6 +82,9 @@ class TankSystem:
             config: TankSystemConfig with tank parameters and scenarios
             coupling_rules: List of inter-tank coupling rules (optional)
         """
+        self.verbosity = self._normalize_verbosity(verbosity)
+        self._ode_progress_interval_s = 60.0
+        self._ode_progress_bucket = -1
         print("Initializing TankSystem...")
 
         self.tank_geometries = tank_geometries
@@ -141,6 +145,31 @@ class TankSystem:
         self._setup_coupling_rules()
 
         print(f"Tank system initialized with {len(self.tanks)} tanks and {len(self.coupling_valves)} coupling rules")
+
+    @staticmethod
+    def _normalize_verbosity(verbosity: str) -> str:
+        level = (verbosity or "summary").strip().lower()
+        if level not in {"quiet", "summary", "debug"}:
+            return "summary"
+        return level
+
+    def _is_quiet(self) -> bool:
+        return self.verbosity == "quiet"
+
+    def _is_debug(self) -> bool:
+        return self.verbosity == "debug"
+
+    def _log_summary(self, message: str) -> None:
+        if not self._is_quiet():
+            print(message)
+
+    def _log_debug(self, message: str) -> None:
+        if self._is_debug():
+            print(message)
+
+    def _log_warning(self, message: str) -> None:
+        # Keep warnings visible even in quiet mode.
+        print(message)
 
     def _setup_tanks(self):
         """Setup tanks from provided geometries and configurations."""
@@ -863,7 +892,7 @@ class TankSystem:
         """
         # --- Debug heartbeat and stuck-step detection ---
         import os
-        debug_enabled = os.environ.get("H2_DEBUG", "0") == "1"
+        debug_enabled = self._is_debug() or os.environ.get("H2_DEBUG", "0") == "1"
 
         # Detect potential stuck integration (solver calling RHS without advancing time)
         if not hasattr(self, '_last_ode_t'):
@@ -874,13 +903,22 @@ class TankSystem:
         if dt_sim <= 1e-12:
             self._ode_stuck_count = getattr(self, '_ode_stuck_count', 0) + 1
             if debug_enabled and self._ode_stuck_count in (100, 1000, 5000):
-                print(f"[ODE DEBUG] Potential stuck integration near t={t:.6f}s (no progress for {self._ode_stuck_count} calls)")
+                self._log_debug(
+                    f"[ODE DEBUG] Potential stuck integration near t={t:.6f}s "
+                    f"(no progress for {self._ode_stuck_count} calls)"
+                )
         else:
             self._ode_stuck_count = 0
         self._last_ode_t = t
 
-        # Heartbeat: print state summary at start, then every 60s of simulated time or when debug enabled
-        if debug_enabled or (t - getattr(self, '_ode_heartbeat_last_t', -1e9) >= 60.0) or (t <= 1.0):
+        # Heartbeat: avoid repeated logs from solver callback retries at same timestamps.
+        if debug_enabled:
+            heartbeat_due = (t - getattr(self, '_ode_heartbeat_last_t', -1e9) >= self._ode_progress_interval_s) or (t <= 1e-9)
+        else:
+            progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
+            heartbeat_due = progress_bucket > getattr(self, '_ode_progress_bucket', -1)
+
+        if heartbeat_due:
             tank_summaries = []
             for i in range(len(self.tanks)):
                 idx = i * 3
@@ -898,8 +936,10 @@ class TankSystem:
                 tank_summaries.append((P_i / 1e5, m_i))
             press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
             mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
-            print(f"t={t:.1f}s | {press_str} | {mass_str}")
+            self._log_summary(f"t={t:.1f}s | {press_str} | {mass_str}")
             self._ode_heartbeat_last_t = t
+            if not debug_enabled:
+                self._ode_progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
         try:
             # Check if we've already flagged stopping
             if hasattr(self, '_stop_requested') and self._stop_requested:
@@ -927,7 +967,10 @@ class TankSystem:
                 per_tank_min_density = self._min_densities.get(i, self.config.minimum_density)
                 if current_density <= per_tank_min_density:
                     if not hasattr(self, '_min_density_stop_printed'):
-                        print(f"   Tank {i+1} reached minimum density: {current_density:.2f} ≤ {per_tank_min_density:.2f} kg/m³")
+                        self._log_summary(
+                            f"   Tank {i+1} reached minimum density: "
+                            f"{current_density:.2f} ≤ {per_tank_min_density:.2f} kg/m³"
+                        )
                         self._min_density_stop_printed = True
                     # Set very small derivatives instead of zero to allow graceful termination
                     dydt = np.ones(len(y)) * 1e-12
@@ -936,7 +979,10 @@ class TankSystem:
                 # Check for target density (refuel missions) - just log, don't terminate here
                 if self.config.target_density is not None and current_density >= self.config.target_density:
                     if not hasattr(self, '_target_density_stop_printed'):
-                        print(f"   Tank {i+1} reached target density: {current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³")
+                        self._log_summary(
+                            f"   Tank {i+1} reached target density: "
+                            f"{current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³"
+                        )
                         self._target_density_stop_printed = True
                         # Set a flag to indicate stopping should occur
                         self._stop_requested = True
@@ -944,7 +990,7 @@ class TankSystem:
                 # Prevent numerical instability near empty tank
                 if tank_state.fuel_mass <= 1.0:  # 1 kg minimum
                     if not hasattr(self, '_empty_warn_printed'):
-                        print(f"   WARNING: Tank {i+1} approaching empty: {tank_state.fuel_mass:.2f} kg")
+                        self._log_warning(f"   WARNING: Tank {i+1} approaching empty: {tank_state.fuel_mass:.2f} kg")
                         self._empty_warn_printed = True
                     tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
 
@@ -1024,13 +1070,13 @@ class TankSystem:
                 dydt[idx + 1] = state_derivatives.temperature_derivative  # Temperature derivative includes coupling enthalpy
                 dydt[idx + 2] = state_derivatives.solid_temperature_derivative  # Solid temperature derivative
 
-            # print some debug info (throttled to avoid performance issues)
+            # Optional debug-only heartbeat for detailed mass trends.
             if hasattr(self, '_last_debug_time'):
-                if t - self._last_debug_time > 100:  # Print every 100 seconds
+                if self._is_debug() and t - self._last_debug_time > 100:
                     if len(self.tanks) >= 2:
-                        print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
+                        self._log_debug(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
                     else:
-                        print(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg")
+                        self._log_debug(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg")
                     self._last_debug_time = t
             else:
                 self._last_debug_time = t
@@ -1040,7 +1086,7 @@ class TankSystem:
         except Exception as e:
             # Print richer diagnostics to locate type/units issues without crashing the solver
             import traceback
-            print(f"ERROR: Failed to create tank system state at t={t:.6f}s: {e}")
+            self._log_warning(f"ERROR: Failed to create tank system state at t={t:.6f}s: {e}")
             traceback.print_exc()
             # Return zero derivatives to prevent integration failure
             return np.zeros(len(y))
@@ -1805,10 +1851,10 @@ class TankSystem:
         Returns:
             MultiTankResults with time series data
         """
-        print(f"\nStarting TankSystem-based simulation...")
-        print(f"   Analysis: {getattr(self.config, 'analysis_name', 'Tank System Analysis')}")
-        print(f"   Tanks: {len(self.tanks)}")
-        print(f"   Solver: {solver_method}")
+        self._log_summary(f"\nStarting TankSystem-based simulation...")
+        self._log_summary(f"   Analysis: {getattr(self.config, 'analysis_name', 'Tank System Analysis')}")
+        self._log_summary(f"   Tanks: {len(self.tanks)}")
+        self._log_summary(f"   Solver: {solver_method}")
 
         # Reset per-run history dicts so re-runs on the same object start clean
         self.coupling_flow_history = {}
@@ -1834,7 +1880,7 @@ class TankSystem:
         if max_step is not None:
             solver_params['max_step'] = max_step
 
-        print(f"   Solver parameters: timestep={timestep}s, rtol={rtol:.0e}, atol={atol:.0e}, max_step={max_step}")
+        self._log_summary(f"   Solver parameters: timestep={timestep}s, rtol={rtol:.0e}, atol={atol:.0e}, max_step={max_step}")
 
         if solver_method == "LSODA":
             self.solver = LSODASolver(**solver_params)
@@ -1868,13 +1914,13 @@ class TankSystem:
         duration_hours = duration_seconds / 3600.0
         t_span = (0.0, duration_seconds)
 
-        print("Integration setup:")
-        print(f"   • Duration: {duration_hours:.3f} hours ({duration_seconds:.0f} seconds)")
-        print(f"   • Time step: {timestep:.3f}s")
-        print(f"   • Expected points: {int(duration_seconds / timestep) + 1 if timestep > 0 else 'unknown'}")
+        self._log_summary("Integration setup:")
+        self._log_summary(f"   • Duration: {duration_hours:.3f} hours ({duration_seconds:.0f} seconds)")
+        self._log_summary(f"   • Time step: {timestep:.3f}s")
+        self._log_summary(f"   • Expected points: {int(duration_seconds / timestep) + 1 if timestep > 0 else 'unknown'}")
 
         # Run integration
-        print("Starting ODE integration...")
+        self._log_summary("Starting ODE integration...")
         start_time = time.time()
 
         # Reset any stopping flags
@@ -1900,21 +1946,21 @@ class TankSystem:
         # Add density stopping events if target density is specified
         if self.config.target_density is not None:
             integration_params['events'] = self._create_density_event()
-            print(f"   Added target density event: {self.config.target_density:.1f} kg/m³")
+            self._log_summary(f"   Added target density event: {self.config.target_density:.1f} kg/m³")
 
-        print(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
+        self._log_debug(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
         solution = self.solver.integrate_full(**integration_params)
 
         elapsed_time = time.time() - start_time
-        print(f"Integration completed in {elapsed_time:.1f}s")
-        print(f"   Final time: {solution.t[-1]/3600:.2f} hours")
-        print(f"   Data points: {len(solution.t)}")
+        self._log_summary(f"Integration completed in {elapsed_time:.1f}s")
+        self._log_summary(f"   Final time: {solution.t[-1]/3600:.2f} hours")
+        self._log_summary(f"   Data points: {len(solution.t)}")
 
         # Check if stopped due to event
         if hasattr(solution, 't_events') and solution.t_events and len(solution.t_events[0]) > 0:
             event_time = solution.t_events[0][0]
-            print(f"   Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
+            self._log_summary(f"   Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []

@@ -54,6 +54,7 @@ solver:
   max_step: 10.0
   custom_config: false
 output:
+  silent: false
   identifier: single_tank_ch2
   save_plots: true
   plot_formats:

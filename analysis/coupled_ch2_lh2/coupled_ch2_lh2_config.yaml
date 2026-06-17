@@ -147,6 +147,7 @@ solver:
   custom_config: true
 
 output:
+  silent: false
   identifier: coupled_ch2_lh2_feedforward
   save_plots: true
   plot_formats: [png, pgf]
