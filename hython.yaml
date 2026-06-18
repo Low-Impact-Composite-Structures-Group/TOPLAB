@@ -6,15 +6,20 @@ dependencies:
   - pybind11
   - jupyter
   - matplotlib==3.5.1
+  - seaborn
+  - texlive-core
+  - latexmk
   - pandas
   - meshio
   - numpy
   - pylint
   - pytest
+  - pytest-cov
+  - pytest-xdist
   - regex
   - rich
   - scipy
-  - yaml
+  - pyyaml
   - coolprop
   - optuna
   - networkx

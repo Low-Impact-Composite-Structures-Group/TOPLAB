@@ -11,6 +11,46 @@ This repository hosts the official implementation accompanying the paper:
 
 TOPLAB provides a configuration-driven workflow for running hydrogen fuel system analyses and studying thermomechanical behavior under mission-relevant conditions.
 
+## Environment Setup
+
+The repository includes a micromamba / conda environment definition at `hython.yaml`.
+
+Create the environment from the repository root with:
+
+```bash
+micromamba env create -f hython.yaml
+micromamba activate hython
+```
+
+If the environment already exists and you want to sync it to the current dependency set:
+
+```bash
+micromamba env update -f hython.yaml --prune
+micromamba activate hython
+```
+
+Equivalent conda commands also work:
+
+```bash
+conda env create -f hython.yaml
+conda activate hython
+```
+
+After activation, a quick sanity check is:
+
+```bash
+python -c "import yaml, seaborn, CoolProp, numpy, scipy, matplotlib, pytest"
+```
+
+For workflows that generate PGF figures or build the LaTeX documentation, the same environment also carries the required TeX tooling (`pdflatex` via `texlive-core` and `latexmk`). You can verify that with:
+
+```bash
+which pdflatex
+which latexmk
+```
+
+The audited environment definition includes runtime, plotting, test, and documentation dependencies used across the repository, including plotting support (`seaborn`), YAML parsing (`pyyaml`), and LaTeX tooling for PGF/document builds.
+
 ## General Spirit of the Code
 
 TOPLAB is designed around a few core ideas:
@@ -42,6 +82,13 @@ This folder contains the model and solution description in LaTeX form, including
 - legacy vs graph-based paradigm comparison
 
 Start from `documentation/main.tex`.
+
+To build the documentation PDF after activating the environment:
+
+```bash
+cd documentation
+make
+```
 
 ## Analyses
 
