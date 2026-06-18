@@ -456,7 +456,7 @@ class SystemOrchestrator:
             print(f"   Creating Tank {tank_id} geometry...")
 
             # Extract geometry parameters
-            phi = geometry_data.get('phi', 3.0)
+            phi = geometry_data.get('phi', 0.0)
             initial_pressure = float(geometry_data['initial_pressure'])
 
             # Determine geometry creation method
@@ -943,7 +943,7 @@ class SystemOrchestrator:
         fill_fraction = geometry_data.get('fill_fraction', 0.90)  # 90% fill default
         required_volume = required_fuel_mass / (target_density * fill_fraction)
 
-        phi = float(geometry_data.get('phi', 3.0))
+        phi = float(geometry_data.get('phi', 0.0))
 
         # Calculate tank radius for the configured capsule geometry.
         # V = πr³(φ + 4/3), where φ = L/r and L is cylindrical section length.

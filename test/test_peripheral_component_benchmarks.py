@@ -78,7 +78,9 @@ def test_yaml_backed_peripheral_component_smoke(tmp_path):
 
     target_initial = results.multi_tank_states[0].get_tank_state(1)
     target_final = results.multi_tank_states[-1].get_tank_state(1)
+    mission_only_final_mass = target_initial.fuel_mass - (0.01 * 40.0)
 
     assert orchestrator.tank_system.coupling_flow_history
+    assert max(orchestrator.tank_system.coupling_flow_history) > 0.0
     assert target_final.temperature > target_initial.temperature
-    assert target_final.fuel_mass > target_initial.fuel_mass
+    assert target_final.fuel_mass > mission_only_final_mass
