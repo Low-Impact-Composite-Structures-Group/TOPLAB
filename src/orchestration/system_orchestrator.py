@@ -471,6 +471,7 @@ class SystemOrchestrator:
                     initial_pressure=initial_pressure,
                     initial_temperature=initial_temperature,
                     operating_pressure=initial_pressure * 1.125,  # 12.5% margin
+                    phi=phi,
                     safety_margin=1.1,
                     liner_thickness=0.005,
                     insulation_thickness=0.05
@@ -485,7 +486,7 @@ class SystemOrchestrator:
                 radius = float(geometry_data['radius'])
                 material = NISTMaterial.aluminum_6061T6_nist()
                 operating_pressure = geometry_data.get('venting_pressure', geometry_data['initial_pressure'])
-                tank_geom = SphericalTank(radius=radius, material=material, operating_pressure=operating_pressure)
+                tank_geom = SphericalTank(radius=radius, material=material, operating_pressure=operating_pressure, phi=phi)
                 print(f"     From radius: {radius}m → V={tank_geom.volume:.4f}m³")
 
             else:
@@ -942,14 +943,18 @@ class SystemOrchestrator:
         fill_fraction = geometry_data.get('fill_fraction', 0.90)  # 90% fill default
         required_volume = required_fuel_mass / (target_density * fill_fraction)
 
-        # Calculate tank radius for spherical tank
-        # V = (4/3) * π * r³  =>  r = (3V / 4π)^(1/3)
-        tank_radius = ((3 * required_volume) / (4 * math.pi)) ** (1/3)
+        phi = float(geometry_data.get('phi', 3.0))
+
+        # Calculate tank radius for the configured capsule geometry.
+        # V = πr³(φ + 4/3), where φ = L/r and L is cylindrical section length.
+        volume_factor = math.pi * (max(phi, 0.0) + 4.0 / 3.0)
+        tank_radius = (required_volume / volume_factor) ** (1/3)
 
         print(f"     Mission fuel required: {required_fuel_mass:.2f} kg")
         print(f"     Fill fraction: {fill_fraction:.0%}")
         print(f"     Required volume: {required_volume:.4f} m³")
         print(f"     Tank radius: {tank_radius:.3f} m")
+        print(f"     Tank phi (L/R): {phi:.3f}")
 
         # Store calculated temperature in geometry_data for later use
         geometry_data['calculated_initial_temperature'] = initial_temp
@@ -957,7 +962,7 @@ class SystemOrchestrator:
 
         # Create spherical tank
         from src.tank_design.tank_shapes import SphericalTank
-        tank = SphericalTank(radius=tank_radius, material=material, operating_pressure=operating_pressure)
+        tank = SphericalTank(radius=tank_radius, material=material, operating_pressure=operating_pressure, phi=phi)
 
         # Cache tank geometry for sequential missions if this is the sizing mission
         if hasattr(SystemOrchestrator, '_sizing_mission_key') and SystemOrchestrator._sizing_mission_key:

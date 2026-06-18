@@ -19,6 +19,7 @@ def create_tank_from_mission(
     initial_pressure: float,
     initial_temperature: float,
     operating_pressure: float,
+    phi: float = 0.0,
     safety_margin: float = 1.2,
     liner_thickness: float = 0.005,
     insulation_thickness: float = 0.05,
@@ -81,9 +82,10 @@ def create_tank_from_mission(
     ullage_factor = 1.1
     internal_volume_required = fuel_volume_required * ullage_factor
 
-    # Calculate internal radius needed for this volume
-    # V = (4/3)πr³ → r = (3V/4π)^(1/3)
-    internal_radius = (3 * internal_volume_required / (4 * math.pi)) ** (1/3)
+    # Calculate internal radius for the configured capsule geometry.
+    # V = πr³(φ + 4/3), where φ = L/r and L is cylindrical section length.
+    volume_factor = math.pi * (max(phi, 0.0) + 4.0 / 3.0)
+    internal_radius = (internal_volume_required / volume_factor) ** (1/3)
 
     # Account for liner thickness - external radius includes liner
     external_radius = internal_radius + liner_thickness
@@ -96,7 +98,8 @@ def create_tank_from_mission(
     tank = SphericalTank(
         radius=external_radius,
         material=liner_material,
-        operating_pressure=operating_pressure
+        operating_pressure=operating_pressure,
+        phi=phi,
     )
 
     print(f"Tank sizing from mission requirements:")
@@ -107,6 +110,7 @@ def create_tank_from_mission(
     print(f"  Internal volume (with ullage): {internal_volume_required:.4f} m³")
     print(f"  Internal radius: {internal_radius:.3f} m")
     print(f"  External radius (with liner): {external_radius:.3f} m")
+    print(f"  Tank phi (L/R): {phi:.3f}")
     print(f"  Tank volume: {tank.volume:.4f} m³")
     print(f"  Operating pressure: {operating_pressure/1e5:.1f} bar")
 
@@ -118,6 +122,7 @@ def create_tank_from_fuel_mass(
     initial_pressure: float,
     initial_temperature: float,
     operating_pressure: float,
+    phi: float = 0.0,
     safety_margin: float = 1.1,
     liner_thickness: float = 0.005,
     insulation_thickness: float = 0.05,
@@ -154,9 +159,10 @@ def create_tank_from_fuel_mass(
     # Add ullage space
     internal_volume_required = fuel_volume_required * safety_margin
 
-    # Calculate internal radius needed for this volume
-    # V = (4/3)πr³ → r = (3V/4π)^(1/3)
-    internal_radius = (3 * internal_volume_required / (4 * math.pi)) ** (1/3)
+    # Calculate internal radius for the configured capsule geometry.
+    # V = πr³(φ + 4/3), where φ = L/r and L is cylindrical section length.
+    volume_factor = math.pi * (max(phi, 0.0) + 4.0 / 3.0)
+    internal_radius = (internal_volume_required / volume_factor) ** (1/3)
 
     # Account for liner thickness - external radius includes liner
     external_radius = internal_radius + liner_thickness
@@ -167,7 +173,8 @@ def create_tank_from_fuel_mass(
     tank = SphericalTank(
         radius=external_radius,
         material=liner_material,
-        operating_pressure=operating_pressure  # Use P_VENT for structural design
+        operating_pressure=operating_pressure,  # Use P_VENT for structural design
+        phi=phi,
     )
 
     print(f"Tank sizing from fuel mass:")
@@ -177,6 +184,7 @@ def create_tank_from_fuel_mass(
     print(f"  Internal volume (with ullage): {internal_volume_required:.4f} m³")
     print(f"  Internal radius: {internal_radius:.3f} m")
     print(f"  External radius (with liner): {external_radius:.3f} m")
+    print(f"  Tank phi (L/R): {phi:.3f}")
     print(f"  Tank volume: {tank.volume:.4f} m³")
     print(f"  Operating pressure: {operating_pressure/1e5:.1f} bar")
 

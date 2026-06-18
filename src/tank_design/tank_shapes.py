@@ -14,14 +14,19 @@ class SphericalTank:
     radius: float
     material: object
     operating_pressure: float
+    phi: float = 0.0
 
     @property
     def volume(self) -> float:
-        return 4.0 / 3.0 * math.pi * self.radius ** 3
+        sphere_volume = 4.0 / 3.0 * math.pi * self.radius ** 3
+        cylinder_volume = math.pi * self.radius ** 2 * self.cylindrical_section_length
+        return sphere_volume + cylinder_volume
 
     @property
     def surface_area(self) -> float:
-        return 4.0 * math.pi * self.radius ** 2
+        sphere_area = 4.0 * math.pi * self.radius ** 2
+        cylinder_area = 2.0 * math.pi * self.radius * self.cylindrical_section_length
+        return sphere_area + cylinder_area
 
     @property
     def diameter(self) -> float:
@@ -33,15 +38,19 @@ class SphericalTank:
 
     @property
     def characteristic_length(self) -> float:
-        return 0.0
+        return self.cylindrical_section_length
 
     @property
     def exposed_surface(self) -> float:
-        return 0.0
+        return 2.0 * math.pi * self.radius * self.cylindrical_section_length
 
     @property
     def body_length(self) -> float:
-        return 0.0
+        return self.cylindrical_section_length
+
+    @property
+    def cylindrical_section_length(self) -> float:
+        return max(self.phi, 0.0) * self.radius
 
     def compute_fuel_volume(self, fuel_height: float) -> float:
         bounded_height = min(max(fuel_height, 0.0), self.diameter)

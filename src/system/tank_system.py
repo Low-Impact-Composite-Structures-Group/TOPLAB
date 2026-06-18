@@ -763,14 +763,14 @@ class TankSystem:
         wall_outer_radius = liner_outer_radius + thickness_wall
         external_radius = wall_outer_radius + thickness_insulation
 
-        # Calculate areas and volume
-        volume = (4/3) * math.pi * inner_radius**3
-        inner_surface_area = 4 * math.pi * inner_radius**2
-        outer_surface_area = 4 * math.pi * external_radius**2
+        # Calculate areas and volume using the configured capsule geometry.
+        volume = tank.volume
+        inner_surface_area = tank.surface_area
+        cylinder_length = tank.cylindrical_section_length
+        outer_surface_area = 4 * math.pi * external_radius**2 + 2 * math.pi * external_radius * cylinder_length
 
         # Calculate masses using proper cylindrical+spherical geometry and NIST densities
-        # Geometry: Cylindrical section (L = 3R) + 2 spherical endcaps (R)
-        cylinder_length = 3 * inner_radius  # L/R = 3.0
+        # Geometry: Cylindrical section (L = φR) + 2 hemispherical endcaps
 
         # Liner mass (aluminum, inner shell)
         liner_inner_radius = inner_radius
@@ -790,7 +790,7 @@ class TankSystem:
         wall_total_volume = wall_cyl_volume + wall_sphere_volume
         wall_mass = composite_material.density * wall_total_volume
 
-        print(f"      Geometry: Cylinder (L={cylinder_length:.2f}m) + 2 spherical endcaps")
+        print(f"      Geometry: Cylinder (L={cylinder_length:.2f}m, φ={tank.phi:.3f}) + 2 spherical endcaps")
         print(f"      Liner mass: {liner_mass:.1f} kg (ρ={liner_material.density} kg/m³)")
         print(f"      Wall mass: {wall_mass:.1f} kg (ρ={composite_material.density} kg/m³)")
 
@@ -800,7 +800,8 @@ class TankSystem:
             'cylinder_thickness': cylinder_thickness,
             'endcap_thickness': endcap_thickness,
             'composite_density': composite_material.density,
-            'cylindrical_section_length': cylinder_length
+            'cylindrical_section_length': cylinder_length,
+            'phi': tank.phi,
         }
 
         # Only print properties during initialization, not during simulation
