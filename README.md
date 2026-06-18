@@ -43,6 +43,35 @@ This folder contains the model and solution description in LaTeX form, including
 
 Start from `documentation/main.tex`.
 
+## Analyses
+
+The runnable simulation cases live under `analysis/`.
+
+Each analysis case is intended to follow a common pattern:
+
+- one local driver script
+- one or more YAML scenario files
+- one local `output/` directory for generated plots and reports
+
+These cases are thin entrypoints into the shared orchestration and solver stack under `src/`.
+
+For the analysis-layer conventions and workflow, see:
+
+- `analysis/README.md`
+
+## Optimization Studies
+
+The runnable design studies live under `optimization/`.
+
+This layer mirrors the spirit of `analysis/`, but separates study-specific entrypoints from shared optimization machinery:
+
+- `optimization/<study>/` contains the study-local driver, YAML study definition, and outputs
+- `src/optimization/` contains the reusable sweep / optimization runtime
+
+For the optimization-layer conventions and workflow, see:
+
+- `optimization/README.md`
+
 ## Contact
 
 For questions related to the paper or early access inquiries:
