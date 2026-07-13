@@ -62,17 +62,51 @@ NY: int = 1000  # Reduced resolution for smaller PGF file
 # Legend configuration
 LEGEND_LOC: str = 'upper right'
 LEGEND_NCOLS: int = 2
+CALLOUT_FONT_SIZE: float = 17.0
+ISOBAR_LABEL_FONT_SIZE: float = 12.0
 
 # Isobar and marker size configuration
-ISOBAR_PRESSURES: list[float] = [15, 100, 200, 400, 600, 700]  # bar
+ISOBAR_PRESSURES: list[float] = [13, 100, 200, 400, 700]  # bar
 CRITICAL_MARKER_SIZE: float = 70.0
 DEFAULT_MARKER_SIZE: float = 150.0
 # Marker definitions (labels support mathtext for H$_2$)
 MARKERS = [
-    {"label": r"CcH$_2$", "T": 53.25, "rho": 78.0, "marker": "*", "size": DEFAULT_MARKER_SIZE},  # black star
-    {"label": r"sLH$_2$", "T": 28.2,  "rho": 62.07, "marker": "^", "size": DEFAULT_MARKER_SIZE},  # black triangle
-    {"label": r"CH$_2$",  "T": 288.0, "rho": 40.0,  "marker": "s", "size": DEFAULT_MARKER_SIZE},  # black square
-    {"label": r"LH$_2$",  "T": 20.7,  "rho": 70.0,  "marker": "x", "size": DEFAULT_MARKER_SIZE},  # black cross
+    {
+        "T": 53.25,
+        "rho": 78.0,
+        "marker": "s",
+        "size": DEFAULT_MARKER_SIZE,
+        "callout": r"CcH$_2$ (40-60 K, 250-350 bar)",
+        "callout_offset": (10, 18),
+        "callout_ha": "left",
+    },
+    {
+        "T": 28.2,
+        "rho": 62.07,
+        "marker": "s",
+        "size": DEFAULT_MARKER_SIZE,
+        "callout": r"sLH$_2$ (25-30 K, 5-10 bar)",
+        "callout_offset": (12, 0),
+        "callout_ha": "left",
+    },
+    {
+        "T": 288.0,
+        "rho": 40.0,
+        "marker": "s",
+        "size": DEFAULT_MARKER_SIZE,
+        "callout": r"CH$_2$ (300 K, 350-700 bar)",
+        "callout_offset": (-12, 12),
+        "callout_ha": "right",
+    },
+    {
+        "T": 20.7,
+        "rho": 70.0,
+        "marker": "s",
+        "size": DEFAULT_MARKER_SIZE,
+        "callout": r"LH$_2$ (20 K, 1-5 bar)",
+        "callout_offset": (14, 20),
+        "callout_ha": "left",
+    },
 ]
 
 
@@ -131,6 +165,8 @@ def main():
         isobar_pressures_bar=ISOBAR_PRESSURES,
         critical_marker_size=CRITICAL_MARKER_SIZE,
         default_marker_size=DEFAULT_MARKER_SIZE,
+        isobar_label_font_size=ISOBAR_LABEL_FONT_SIZE,
+        callout_font_size=CALLOUT_FONT_SIZE,
     )
 
     if save_path is None:

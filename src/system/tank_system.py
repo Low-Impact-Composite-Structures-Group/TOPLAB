@@ -973,9 +973,11 @@ class TankSystem:
                             f"{current_density:.2f} ≤ {per_tank_min_density:.2f} kg/m³"
                         )
                         self._min_density_stop_printed = True
-                    # Set very small derivatives instead of zero to allow graceful termination
-                    dydt = np.ones(len(y)) * 1e-12
-                    return dydt
+                    # Signal the stop so every *subsequent* ODE call hits the
+                    # fast-path zero return at the top of ode_system instead of
+                    # re-running CoolProp, coupling flows, and valve evaluate.
+                    self._stop_requested = True
+                    return np.zeros(len(y))
 
                 # Check for target density (refuel missions) - just log, don't terminate here
                 if self.config.target_density is not None and current_density >= self.config.target_density:

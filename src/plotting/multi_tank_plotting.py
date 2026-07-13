@@ -175,7 +175,9 @@ class DelftColourPlotter:
                               marker_points: Optional[List[Dict[str, Any]]] = None,
                               isobar_pressures_bar: Optional[List[float]] = None,
                               critical_marker_size: float = 50.0,
-                              default_marker_size: float = 80.0) -> plt.Figure:
+                              default_marker_size: float = 80.0,
+                              isobar_label_font_size: Optional[float] = None,
+                              callout_font_size: Optional[float] = None) -> plt.Figure:
         """
         Plot a hydrogen density–temperature phase map (no trajectory), using a discrete
         colour map for regions and overlaying saturation lines.
@@ -202,6 +204,17 @@ class DelftColourPlotter:
             matplotlib Figure object
         """
         print("Plotting hydrogen phase colour map...")
+
+        resolved_isobar_label_font_size = (
+            float(isobar_label_font_size)
+            if isobar_label_font_size is not None
+            else max(plot_style.LEGEND_FONT_SIZE - 2, 10)
+        )
+        resolved_callout_font_size = (
+            float(callout_font_size)
+            if callout_font_size is not None
+            else max(plot_style.LEGEND_FONT_SIZE - 1, 10)
+        )
 
         # Late import to avoid hard dependency at module import-time
         try:
@@ -396,7 +409,7 @@ class DelftColourPlotter:
                         x0, y0,
                         f"{pbar:g} bar",
                         color='black',
-                        fontsize=max(plot_style.LEGEND_FONT_SIZE - 2, 10),
+                        fontsize=resolved_isobar_label_font_size,
                         rotation=angle,
                         rotation_mode='anchor',
                         ha='left', va='center',
@@ -448,7 +461,8 @@ class DelftColourPlotter:
                 if not (T_min <= Tm <= T_max and rho_min <= rhom <= rho_max):
                     # Still plot; axis limits may be expanded later
                     pass
-                label = mp.get('label', None)
+                include_in_legend = bool(mp.get('include_in_legend', False))
+                label = mp.get('label', None) if include_in_legend else None
                 marker = mp.get('marker', 'o')
                 size = float(mp.get('size', default_marker_size))
                 # Use black markers by request
@@ -457,6 +471,39 @@ class DelftColourPlotter:
                 else:
                     ax.scatter([Tm], [rhom], marker=marker, facecolors='black', edgecolors='black',
                                s=size, zorder=7, label=label)
+
+                callout_text = mp.get('callout')
+                if callout_text:
+                    callout_offset = mp.get('callout_offset', (10, 10))
+                    if not isinstance(callout_offset, (list, tuple)) or len(callout_offset) != 2:
+                        callout_offset = (10, 10)
+                    callout_ha = mp.get('callout_ha', 'left')
+                    callout_va = mp.get('callout_va', 'center')
+                    ax.annotate(
+                        callout_text,
+                        xy=(Tm, rhom),
+                        xytext=(float(callout_offset[0]), float(callout_offset[1])),
+                        textcoords='offset points',
+                        ha=callout_ha,
+                        va=callout_va,
+                        fontsize=resolved_callout_font_size,
+                        color='black',
+                        bbox=dict(
+                            boxstyle='round,pad=0.25',
+                            facecolor='white',
+                            edgecolor='black',
+                            linewidth=0.8,
+                            alpha=0.98,
+                        ),
+                        arrowprops=dict(
+                            arrowstyle='-',
+                            color='black',
+                            linewidth=0.8,
+                            shrinkA=4,
+                            shrinkB=4,
+                        ),
+                        zorder=8,
+                    )
 
         # Labels and grid
         ax.set_xlabel('Temperature [K]')
@@ -472,7 +519,7 @@ class DelftColourPlotter:
         import matplotlib.patches as mpatches
         from matplotlib.lines import Line2D
 
-        region_labels = ['Superheated vapour', 'Two-phase', 'Subcooled liquid', 'Supercritical']
+        region_labels = ['Superheated vapour', 'Two-phase', 'Compressed liquid', 'Supercritical']
         if self.use_greyscale:
             # Legend proxies that display the same hatch pattern per region
             hatch_patterns = ['|||', '++', '---', '..']
