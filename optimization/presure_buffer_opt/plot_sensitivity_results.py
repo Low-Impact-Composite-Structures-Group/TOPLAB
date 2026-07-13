@@ -15,10 +15,23 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# import src.plotting.plot_style_sb as plot_style
+# ---------------------------------------------------------------------------
+# Project root on path so src imports resolve
+# ---------------------------------------------------------------------------
+_HERE = Path(__file__).resolve()
+PROJECT_ROOT = _HERE.parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.plotting.plot_style_sb import (
+    configure_plot_style,
+    DONKERBLAUW,
+    KONINGSBLAUW,
+    BOSGROEN,
+    DONKERGRIJS,
+    TURKOOIS,
+)
 
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
@@ -26,7 +39,6 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = Path(__file__).parent / "output"
 SUMMARY_CSV = OUTPUT_DIR / "pressure_buffer_sensitivity_summary.csv"
 FIGURE_PATH = OUTPUT_DIR / "pressure_buffer_sensitivity_results.png"
@@ -57,21 +69,16 @@ def _ints(series: list[str]) -> np.ndarray:
     return np.array([int(v) for v in series])
 
 OBJECTIVE_LABELS = {
-    "gravimetric_efficiency":    ("Gravimetric efficiency [−]",  "Maximize",   "#333333"),
-    "volumetric_efficiency":     ("Volumetric efficiency [−]",   "Maximize",   "#777777"),
-    "vent_time_after_mission_s": ("Time to vent after mission [h]", "Maximize",   "#aaaaaa"),
+    "gravimetric_efficiency":    ("Gravimetric efficiency [−]",      "Maximize", DONKERBLAUW),
+    "volumetric_efficiency":     ("Volumetric efficiency [−]",       "Maximize", KONINGSBLAUW),
+    "vent_time_after_mission_s": ("Time to vent after mission [h]", "Maximize", BOSGROEN),
 }
 
 # ---------------------------------------------------------------------------
 # Build figure
 # ---------------------------------------------------------------------------
 def plot(data: dict[str, dict[str, list]]) -> plt.Figure:
-    matplotlib.rcParams.update({
-        "font.family": "serif",
-        "font.size": 10,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-    })
+    configure_plot_style(palette="delft", style="white", context="paper")
 
     objective_order = [
         "gravimetric_efficiency",
@@ -118,7 +125,7 @@ def plot(data: dict[str, dict[str, list]]) -> plt.Figure:
         ax.annotate(f"{display_vals[0]:.4f}",
                     xy=(iters[0], display_vals[0]),
                     xytext=(8, 6), textcoords="offset points",
-                    fontsize=8, color="#555555")
+                    fontsize=8, color=DONKERGRIJS)
         if not np.all(np.isnan(display_vals)):
             ax.annotate(f"{display_vals[-1]:.4f}",
                         xy=(iters[-1], display_vals[-1]),
@@ -170,9 +177,9 @@ def plot(data: dict[str, dict[str, list]]) -> plt.Figure:
     ax_traj.set_ylabel("Length scale [−]")
     ax_traj.set_title("Design-space trajectory", fontsize=10, fontweight="bold")
     ax_traj.legend(fontsize=7, framealpha=0.8)
-    ax_traj.axvline(1.0, color="#aaaaaa", linestyle=":", linewidth=1)
-    ax_traj.axhline(1.0, color="#aaaaaa", linestyle=":", linewidth=1)
-    ax_traj.text(1.002, 1.002, "baseline", fontsize=7, color="#888888")
+    ax_traj.axvline(1.0, color=DONKERGRIJS, linestyle=":", linewidth=1)
+    ax_traj.axhline(1.0, color=DONKERGRIJS, linestyle=":", linewidth=1)
+    ax_traj.text(1.002, 1.002, "baseline", fontsize=7, color=DONKERGRIJS)
     ax_traj.grid(linestyle=":", alpha=0.3)
 
     # Add colourbar for iteration
@@ -201,7 +208,7 @@ def plot(data: dict[str, dict[str, list]]) -> plt.Figure:
     width = 0.22
     offsets = [-1.5 * width, -0.5 * width, 0.5 * width, 1.5 * width]
     bar_labels = ["Baseline"] + [OBJECTIVE_LABELS[o][0].split("[")[0].strip() for o in objective_order]
-    bar_colours = ["#dddddd"] + [OBJECTIVE_LABELS[o][2] for o in objective_order]
+    bar_colours = [DONKERGRIJS] + [OBJECTIVE_LABELS[o][2] for o in objective_order]
 
     # Baseline values from first row of any objective
     baseline_vals = []
@@ -272,7 +279,7 @@ def plot(data: dict[str, dict[str, list]]) -> plt.Figure:
     # ------------------------------------------------------------------
     fig.suptitle(
         "Pressure Buffer System — Sensitivity-Step Optimisation (First Results)\n"
-        "Base: CH2 (80 bar) + CCH2 (40 bar) · Valve 16/30 bar · Vent = 1.5 × P_init",
+        "Base: CH2 (800 bar) + CCH2 (400 bar) · Valve 16/30 bar · Vent = 1.5 × P_init",
         fontsize=11, fontweight="bold", y=0.98,
     )
 

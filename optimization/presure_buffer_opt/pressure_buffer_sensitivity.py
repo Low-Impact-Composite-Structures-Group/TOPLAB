@@ -130,6 +130,7 @@ class PressureBufferSensitivityStudy:
             "insulation_scale": float(min_step_cfg.get("insulation_scale", 0.02)),
         }
         self.max_backtracks = int(bt_cfg.get("max_backtracks", 5))
+        self.stop_on_convergence = bool(bt_cfg.get("stop_on_convergence", False))
 
         bounds_cfg = study_cfg.get("bounds", {})
         radius_bounds    = bounds_cfg.get("radius_scale",    [0.5, 2.0])
@@ -214,7 +215,11 @@ class PressureBufferSensitivityStudy:
                     break
 
             if not found:
-                break  # Converged — no improvement at any step size.
+                if self.stop_on_convergence:
+                    break  # Converged — no improvement at any step size.
+                # Bound reached or landscape flat: record the unchanged point so
+                # the iteration still appears in the CSV/plot as a flat section.
+                history.append(current_eval)
 
         return history
 

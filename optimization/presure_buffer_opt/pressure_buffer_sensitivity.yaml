@@ -15,11 +15,16 @@ study:
   # actual iteration count can be lower than the limit set here.
   steps_per_objective:
     default:                   10
-    gravimetric_efficiency:    10
+    gravimetric_efficiency:    15
     vent_time_after_mission_s:  8
     volumetric_efficiency:     10
 
   backtracking:
+    # stop_on_convergence: true exits early when backtracking exhausts all
+    # step sizes with no improvement (efficient but may give fewer iterations
+    # than configured).  false continues for all configured steps (matching
+    # the iteration count in steps_per_objective).
+    stop_on_convergence: false
     initial_step:
       radius_scale: 0.20
       length_scale: 0.20
