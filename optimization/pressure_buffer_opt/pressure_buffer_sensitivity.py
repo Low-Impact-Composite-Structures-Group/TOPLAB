@@ -29,7 +29,7 @@ from optimization.pressure_buffer_sweep.pressure_buffer_sweep import (
 )
 
 
-DEFAULT_SENSITIVITY_CONFIG_PATH = PROJECT_ROOT / "optimization" / "presure_buffer_opt" / "pressure_buffer_sensitivity.yaml"
+DEFAULT_SENSITIVITY_CONFIG_PATH = PROJECT_ROOT / "optimization" / "pressure_buffer_opt" / "pressure_buffer_sensitivity.yaml"
 
 
 OBJECTIVE_DEFS: dict[str, dict[str, str]] = {
@@ -89,7 +89,7 @@ class PressureBufferSensitivityStudy:
         if not Path(base_config).is_absolute():
             base_config = (PROJECT_ROOT / base_config).resolve()
 
-        report_directory = study_cfg.get("report_directory", "optimization/presure_buffer_opt/output")
+        report_directory = study_cfg.get("report_directory", "optimization/pressure_buffer_opt/output")
         if not Path(report_directory).is_absolute():
             report_directory = (PROJECT_ROOT / report_directory).resolve()
         self.report_directory = Path(report_directory)

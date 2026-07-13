@@ -22,8 +22,8 @@ from src.orchestration.system_orchestrator import SystemOrchestrator
 
 
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "analysis" / "coupled_ch2_cch2" / "coupled_ch2_cch2_config.yaml"
-DEFAULT_REPORT_PATH = PROJECT_ROOT / "optimization" / "presure_buffer_opt" / "output" / "pressure_buffer_sweep.txt"
-DEFAULT_SWEEP_CONFIG_PATH = PROJECT_ROOT / "optimization" / "presure_buffer_opt" / "pressure_buffer_sweep.yaml"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "optimization" / "pressure_buffer_opt" / "output" / "pressure_buffer_sweep.txt"
+DEFAULT_SWEEP_CONFIG_PATH = PROJECT_ROOT / "optimization" / "pressure_buffer_opt" / "pressure_buffer_sweep.yaml"
 
 
 @dataclass(frozen=True)

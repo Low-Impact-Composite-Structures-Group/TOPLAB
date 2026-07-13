@@ -33,7 +33,7 @@ Each study is expected to follow a pattern like:
 - `*.yaml`: study definition and runtime options
 - `output/`: generated reports and results
 
-The pressure-buffer example under `optimization/presure_buffer_opt/` is the reference case for this pattern.
+The pressure-buffer example under `optimization/pressure_buffer_opt/` is the reference case for this pattern.
 
 ## Shared Runtime Responsibilities
 

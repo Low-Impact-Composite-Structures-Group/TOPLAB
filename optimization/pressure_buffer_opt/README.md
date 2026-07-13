@@ -117,14 +117,14 @@ dormancy window     : 30 days (2 592 000 s); vent time measured from a
 
 ```bash
 # Sensitivity optimisation (all three objectives)
-python optimization/presure_buffer_opt/driver_pressure_buffer_sensitivity.py
+python optimization/pressure_buffer_opt/driver_pressure_buffer_sensitivity.py
 
 # Custom config path (optional)
-python optimization/presure_buffer_opt/driver_pressure_buffer_sensitivity.py \
-    optimization/presure_buffer_opt/pressure_buffer_sensitivity.yaml
+python optimization/pressure_buffer_opt/driver_pressure_buffer_sensitivity.py \
+    optimization/pressure_buffer_opt/pressure_buffer_sensitivity.yaml
 
 # Visualise results
-python optimization/presure_buffer_opt/plot_sensitivity_results.py
+python optimization/pressure_buffer_opt/plot_sensitivity_results.py
 ```
 
 ---
@@ -346,7 +346,7 @@ feasibility at each design point.
 ## File Structure
 
 ```
-presure_buffer_opt/                  ← this directory
+pressure_buffer_opt/                  ← this directory
 ├── README.md                        ← this file
 ├── __init__.py                      ← exports sensitivity API
 ├── driver_pressure_buffer_sensitivity.py

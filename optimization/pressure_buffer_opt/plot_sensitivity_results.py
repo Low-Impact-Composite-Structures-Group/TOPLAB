@@ -5,7 +5,7 @@ Quick visualisation of pressure-buffer sensitivity study results.
 Produces a single figure saved to the output directory (and shown interactively
 if a display is available).  Run from any directory:
 
-    python optimization/presure_buffer_opt/plot_sensitivity_results.py
+    python optimization/pressure_buffer_opt/plot_sensitivity_results.py
 """
 
 from __future__ import annotations

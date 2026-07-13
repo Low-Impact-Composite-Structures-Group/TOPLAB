@@ -1,8 +1,8 @@
 base_config: analysis/coupled_ch2_cch2/coupled_ch2_cch2_config.yaml
 
 study:
-  sweep_config: optimization/presure_buffer_opt/pressure_buffer_sweep.yaml
-  report_directory: optimization/presure_buffer_opt/output
+  sweep_config: optimization/pressure_buffer_opt/pressure_buffer_sweep.yaml
+  report_directory: optimization/pressure_buffer_opt/output
 
   objective_sequence:
     - gravimetric_efficiency

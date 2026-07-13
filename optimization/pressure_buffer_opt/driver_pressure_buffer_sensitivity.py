@@ -9,7 +9,7 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir.parent.parent))
 
 try:
-    from optimization.presure_buffer_opt.pressure_buffer_sensitivity import main
+    from optimization.pressure_buffer_opt.pressure_buffer_sensitivity import main
 except ModuleNotFoundError:
     from pressure_buffer_sensitivity import main
 
