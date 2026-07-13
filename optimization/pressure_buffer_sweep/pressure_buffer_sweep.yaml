@@ -1,0 +1,41 @@
+base_config: analysis/coupled_ch2_cch2/coupled_ch2_cch2_config.yaml
+
+design_variables:
+  tank_1_radius: [0.5, 0.525]
+  tank_1_phi: [2.5, 3.5]
+  tank_2_radius: [0.5571, 0.6158]
+  tank_2_phi: [2.5, 3.5]
+
+sweep:
+  mode: cartesian
+  max_points: 10
+
+# Alternative hand-picked mode:
+# sweep:
+#   mode: explicit
+# design_points:
+#   - tank_1_radius: 0.475
+#     tank_1_phi: 2.5
+#     tank_2_radius: 0.5571
+#     tank_2_phi: 2.5
+#   - tank_1_radius: 0.525
+#     tank_1_phi: 3.5
+#     tank_2_radius: 0.6158
+#     tank_2_phi: 3.5
+
+constraints:
+  require_mission_completion: true
+  max_case_wall_time_s: 60
+
+ranking:
+  - mission_completed
+  - gravimetric_efficiency
+  - volumetric_efficiency
+  - mission_completion_ratio
+
+output:
+  report_path: optimization/pressure_buffer_sweep/output/pressure_buffer_sweep.txt
+  silent: false
+  verbosity: quiet
+  save_plots: false
+  save_data: false
