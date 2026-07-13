@@ -1,0 +1,47 @@
+base_config: analysis/coupled_ch2_cch2/coupled_ch2_cch2_config.yaml
+
+study:
+  sweep_config: optimization/presure_buffer_opt/pressure_buffer_sweep.yaml
+  report_directory: optimization/presure_buffer_opt/output
+
+  objective_sequence:
+    - gravimetric_efficiency
+    - vent_time_after_mission_s
+    - volumetric_efficiency
+
+  # Maximum accepted steps per objective.  Use a mapping for per-objective control,
+  # or a plain integer to apply the same limit to all three.  The backtracking
+  # search exits early when no improvement is found at any step size, so the
+  # actual iteration count can be lower than the limit set here.
+  steps_per_objective:
+    default:                   10
+    gravimetric_efficiency:    10
+    vent_time_after_mission_s:  8
+    volumetric_efficiency:     10
+
+  backtracking:
+    initial_step:
+      radius_scale: 0.20
+      length_scale: 0.20
+      insulation_scale: 0.30
+    min_step:
+      radius_scale: 0.01
+      length_scale: 0.01
+      insulation_scale: 0.02
+    max_backtracks: 5
+
+  phi_max: 8.0
+
+  bounds:
+    radius_scale: [0.50, 2.00]
+    length_scale: [0.50, 2.50]
+    insulation_scale: [0.10, 4.00]
+
+  dormancy:
+    duration_s: 2592000
+
+output:
+  verbosity: quiet
+  silent: false
+  save_plots: false
+  save_data: false
