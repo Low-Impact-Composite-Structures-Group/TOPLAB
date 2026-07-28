@@ -79,15 +79,20 @@ class SystemOrchestrator:
 
         # Load mission profile first (needed for tank sizing)
         # Respect the actual profile specified in the configuration
+        raw_config = {}
         try:
             import yaml
             with open(self.scenario_config._config_path, 'r') as f:
-                raw_config = yaml.safe_load(f)
+                raw_config = yaml.safe_load(f) or {}
 
             if 'mission' in raw_config and 'profile' in raw_config['mission']:
                 # Use the profile specified in the mission section
                 mission_profile = raw_config['mission']['profile']
                 print(f"   Using mission section profile: {mission_profile}")
+            elif isinstance(raw_config.get('missions'), list) and raw_config['missions']:
+                # Multi-node missions list: primary profile from first entry
+                mission_profile = raw_config['missions'][0].get('profile', 'csv')
+                print(f"   Using first entry from 'missions' list profile: {mission_profile}")
             else:
                 # Fallback to mission_sequence
                 mission = self.scenario_config.mission_sequence.missions[0]
@@ -98,7 +103,15 @@ class SystemOrchestrator:
             mission_profile = "atr72"  # Default to atr72 instead of constant flow
             print(f"   WARNING: Using fallback profile: {mission_profile} (error: {e})")
 
-        self.mission_profile = self._get_mission_profile(mission_profile)
+        # For multi-node 'missions:' list, load per-tank profiles and set primary profile
+        raw_missions_list = raw_config.get('missions') if isinstance(raw_config, dict) else None
+        if isinstance(raw_missions_list, list) and len(raw_missions_list) > 1:
+            self.per_tank_mission_profiles = self._load_per_tank_mission_profiles_from_raw(raw_missions_list)
+            # Primary profile for sizing/duration: first tank's profile
+            self.mission_profile = self.per_tank_mission_profiles.get(0) or self._get_mission_profile(mission_profile)
+        else:
+            self.per_tank_mission_profiles = None
+            self.mission_profile = self._get_mission_profile(mission_profile)
         print(f"   Mission profile loaded: {mission_profile}")
 
         # Create tank geometries from scenario configuration (now with mission profile available)
@@ -499,8 +512,19 @@ class SystemOrchestrator:
                 if 'venting_pressure' not in geometry_data:
                     print(f"WARNING: Using fallback: venting_pressure = {operating_pressure/1e5:.0f} bar for Tank {tank_id} (consider adding to YAML config)")
 
-                # Calculate tank geometry from mission requirements
-                tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure)
+                # When per-tank mission profiles are active, size each tank from its
+                # own mission (not the shared primary profile which defaults to Tank 1).
+                tank_index = int(tank_id) - 1
+                per_tank = getattr(self, 'per_tank_mission_profiles', None)
+                if per_tank and tank_index in per_tank:
+                    _orig_profile = self.mission_profile
+                    self.mission_profile = per_tank[tank_index]
+                    try:
+                        tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure)
+                    finally:
+                        self.mission_profile = _orig_profile
+                else:
+                    tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure)
                 print(f"     Mission-sized geometry: V={tank_geom.volume:.4f}m³")
 
             tank_geometries.append(tank_geom)
@@ -583,7 +607,8 @@ class SystemOrchestrator:
             tanks=tank_configs,
             mission_profile=self.mission_profile,
             minimum_density=minimum_density,
-            target_density=target_density
+            target_density=target_density,
+            per_tank_mission_profiles=getattr(self, 'per_tank_mission_profiles', None),
         )
 
         return system_config
@@ -630,6 +655,106 @@ class SystemOrchestrator:
         supported = ["atr72", "triathlon", "rompokos", "csv", "constant_flow"]
         raise ValueError(
             f"Unknown mission profile: '{profile_name}'. Supported profiles: {', '.join(supported)}."
+        )
+
+    def _load_per_tank_mission_profiles_from_raw(self, raw_missions_list: list) -> Dict[int, Any]:
+        """
+        Load per-tank mission profiles from the raw 'missions:' YAML list.
+
+        Args:
+            raw_missions_list: List of raw mission dicts from the YAML 'missions:' key.
+
+        Returns:
+            Dict mapping 0-based tank index to Mission profile object.
+        """
+        from src.configuration.scenario_configuration import MissionConfig
+
+        per_tank: Dict[int, Any] = {}
+        for m_data in raw_missions_list:
+            assigned_node = m_data.get('assigned_to_node')
+            if assigned_node is None:
+                print(f"   WARNING: 'missions' entry missing 'assigned_to_node', skipping: {m_data}")
+                continue
+            tank_index = int(assigned_node) - 1  # 1-based → 0-based
+
+            # Build a MissionConfig from the raw dict
+            mc = MissionConfig(
+                type=m_data.get('type', 'discharge'),
+                profile=m_data.get('profile', 'csv'),
+                ambient_temperature=m_data.get('ambient_temperature', 288.15),
+                parameters=m_data.get('parameters', {}),
+                assigned_to=assigned_node,
+            )
+            profile = self._get_mission_profile_for_node(mc)
+            per_tank[tank_index] = profile
+            print(f"   Per-tank mission: node {assigned_node} (tank index {tank_index}) → profile={mc.profile}")
+
+        return per_tank
+
+    def _get_mission_profile_for_node(self, mission_config) -> Any:
+        """
+        Load mission profile for a specific node's MissionConfig.
+
+        Args:
+            mission_config: MissionConfig instance with profile and parameters.
+
+        Returns:
+            Mission profile object.
+        """
+        profile_name = (mission_config.profile or "").strip().lower()
+
+        if profile_name == "csv":
+            return self._create_csv_mission_from_config(mission_config)
+        else:
+            return self._get_mission_profile(profile_name)
+
+    def _create_csv_mission_from_config(self, mission_config) -> Any:
+        """
+        Create a CSV-based Mission from a MissionConfig.
+
+        Supports the optional 'column_name' parameter for selecting a specific
+        flow column from a multi-column CSV (dual-flow mission files).
+
+        Args:
+            mission_config: MissionConfig with parameters dict containing 'csv_file'
+                            and optionally 'column_name'.
+
+        Returns:
+            Mission object.
+        """
+        from src.missions.mission import Mission
+        from pathlib import Path
+
+        params = mission_config.parameters or {}
+        csv_file = params.get('csv_file')
+        if not csv_file:
+            raise ValueError(
+                "CSV mission profile requires 'csv_file' in the parameters block. "
+                "Check your YAML configuration."
+            )
+
+        csv_path = Path(csv_file)
+        if not csv_path.is_absolute():
+            config_dir = Path(self.scenario_config._config_path).parent
+            csv_path = config_dir / csv_file
+
+        column_name = params.get('column_name')  # None → fall back to default column
+        cruise_altitude = params.get('cruise_altitude', 7010.0)
+        standard_temperature = params.get('standard_temperature', 273.15)
+        mach_number = params.get('mach_number', 0.0)
+        phase = params.get('phase', 'gas')
+
+        print(f"   Loading CSV mission from {csv_path.name}"
+              + (f" (column: '{column_name}')" if column_name else ""))
+
+        return Mission.from_csv(
+            csv_path=str(csv_path),
+            cruise_altitude=cruise_altitude,
+            standard_temperature=standard_temperature,
+            mach_number=mach_number,
+            phase=phase,
+            ambient_temperature=mission_config.ambient_temperature,
+            column_name=column_name,
         )
 
     def _create_constant_flow_mission(self):
@@ -981,16 +1106,16 @@ class SystemOrchestrator:
         mission_count = self.scenario_config.get_mission_count()
         if mission_count > 1:
             print(f"     Multi-mission sequences detected ({mission_count} missions)")
-            print(f"     TODO: Implement mission chaining")
+
+        # Apply mission assignment logic only when a single shared profile is used.
+        # When per-tank profiles are already in TankSystemConfig, dispatch is handled
+        # transparently by TankSystem._get_flow_rate — no monkey-patching needed.
+        if getattr(self, 'per_tank_mission_profiles', None):
+            print(f"     Multi-node mission dispatch active: "
+                  f"{len(self.per_tank_mission_profiles)} per-tank profiles configured")
         else:
-            mission = self.scenario_config.mission_sequence.missions[0]
-            print(f"     Single mission: {mission.type} - {mission.profile}")
+            self._apply_mission_assignment()
 
-        # Apply mission assignment logic if assigned_to is specified
-        self._apply_mission_assignment()
-
-        # Mission profile is already stored in self.mission_profile during initialization
-        # and passed to TankSystemConfig in _create_tank_system_config
         print(f"   ✓ Mission flow profile configured for DAE system")
 
     def _apply_mission_assignment(self):

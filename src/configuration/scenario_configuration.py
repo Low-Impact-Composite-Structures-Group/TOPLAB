@@ -101,6 +101,19 @@ class MissionSequenceConfig:
                 missions.append(MissionConfig.from_dict(mission_config, config_format))
             return cls(missions=missions)
 
+        # New format: top-level 'missions' list (multi-node parallel dispatch)
+        if isinstance(config_dict.get('missions'), list):
+            missions: List[MissionConfig] = []
+            for m in config_dict['missions']:
+                missions.append(MissionConfig(
+                    type=m.get('type'),
+                    profile=m.get('profile'),
+                    ambient_temperature=m.get('ambient_temperature', 288.15),
+                    parameters=m.get('parameters', {}),
+                    assigned_to=m.get('assigned_to_node'),
+                ))
+            return cls(missions=missions)
+
         # Single mission
         single_mission = MissionConfig.from_dict(config_dict, config_format)
         return cls(missions=[single_mission])

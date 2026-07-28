@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from src.fluids.international_standard_atmosphere import get_ISA_air_properties
 
@@ -36,6 +37,7 @@ class Mission:
         mach_number: float = 0.0,
         phase: str = "gas",
         ambient_temperature: float = 288.15,
+        column_name: Optional[str] = None,
     ) -> "Mission":
         import csv
         from pathlib import Path
@@ -56,11 +58,21 @@ class Mission:
 
             header_map = {_norm(header): idx for idx, header in enumerate(headers)}
             time_idx = header_map.get(_norm("Time [hr]"))
-            flow_idx = header_map.get(_norm("Mass flow rate [kg/s]"))
+
+            if column_name is not None:
+                flow_idx = header_map.get(_norm(column_name))
+                if flow_idx is None:
+                    raise ValueError(
+                        f"Column '{column_name}' not found in CSV. "
+                        f"Found headers: {headers}"
+                    )
+            else:
+                flow_idx = header_map.get(_norm("Mass flow rate [kg/s]"))
 
             if time_idx is None or flow_idx is None:
                 raise ValueError(
-                    "CSV must contain columns 'Time [hr]' and 'Mass flow rate [kg/s]'. "
+                    "CSV must contain columns 'Time [hr]' and 'Mass flow rate [kg/s]' "
+                    "(or specify column_name). "
                     f"Found headers: {headers}"
                 )
 

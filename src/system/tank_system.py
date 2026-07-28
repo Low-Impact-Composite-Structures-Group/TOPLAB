@@ -51,6 +51,7 @@ class TankSystemConfig:
     mission_profile: Any = None          # Mission profile for flow calculations
     minimum_density: float = 5.8         # Stopping density [kg/m³]
     target_density: float = None         # Target density for refuel missions [kg/m³]
+    per_tank_mission_profiles: Optional[Dict[int, Any]] = None  # tank_index (0-based) → Mission
 
     def __post_init__(self):
         if self.tanks is None:
@@ -1402,20 +1403,28 @@ class TankSystem:
         Returns:
             Flow rate [kg/s] (positive)
         """
-        if self.config.mission_profile is None:
+        if self.config.mission_profile is None and not self.config.per_tank_mission_profiles:
             return 0.0
 
-        # For single tank scenarios, the only tank gets the mission flow
-        # For multi-tank scenarios, check mission assignment
-        if len(self.tanks) == 1:
-            # Single tank case: the only tank gets all mission flows
-            pass  # Continue to flow calculation
+        # Resolve which mission profile to use for this tank
+        per_tank = self.config.per_tank_mission_profiles
+        if per_tank and tank_index in per_tank:
+            active_profile = per_tank[tank_index]
+        elif self.config.mission_profile is not None:
+            # For single tank scenarios, the only tank gets the mission flow
+            # For multi-tank scenarios, check mission assignment
+            if len(self.tanks) == 1:
+                # Single tank case: the only tank gets all mission flows
+                active_profile = self.config.mission_profile
+            else:
+                # Multi-tank case: orchestrator handles mission assignment via method override
+                # This code path should not be reached when orchestrator is used
+                # Default fallback: only first tank gets mission flows
+                if tank_index != 0:
+                    return 0.0
+                active_profile = self.config.mission_profile
         else:
-            # Multi-tank case: orchestrator handles mission assignment via method override
-            # This code path should not be reached when orchestrator is used
-            # Default fallback: only first tank gets mission flows
-            if tank_index != 0:
-                return 0.0
+            return 0.0
 
         try:
             # Import flow types
@@ -1424,7 +1433,7 @@ class TankSystem:
             # Find which mission section we're in
             current_time = 0.0
 
-            for section in self.config.mission_profile.sections:
+            for section in active_profile.sections:
                 section_end_time = current_time + section.duration
 
                 if time <= section_end_time:

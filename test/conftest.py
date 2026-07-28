@@ -47,3 +47,15 @@ def main_analysis_configs(repo_root: Path) -> dict[str, Path]:
 @pytest.fixture(scope="session")
 def coupled_configs(main_analysis_configs: dict[str, Path]) -> dict[str, Path]:
     return {k: v for k, v in main_analysis_configs.items() if k.startswith("coupled_")}
+
+
+@pytest.fixture(scope="session")
+def dual_flow_config(repo_root: Path) -> Path:
+    """Config for the cch2_cch2_parallel dual-flow analysis."""
+    return (
+        repo_root
+        / "analysis"
+        / "dual_flow"
+        / "cch2_cch2_parallel"
+        / "cch2_cch2_parallel.yaml"
+    )

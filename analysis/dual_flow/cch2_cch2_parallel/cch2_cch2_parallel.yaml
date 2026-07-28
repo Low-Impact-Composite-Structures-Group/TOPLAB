@@ -1,0 +1,171 @@
+analysis:
+  name: CCH2-CCH2 Parallel Dual Flow
+  description: >
+    Two independent cryo-compressed hydrogen tanks operating in parallel.
+    Tank 1 supplies the fuel cell (FC); Tank 2 supplies the gas turbine (GT).
+    Both discharge simultaneously according to the triathlon_dual_flow mission profile.
+    No inter-tank coupling — each tank sees only its own sink demand.
+  version: '1.0'
+
+network:
+  nodes:
+    - node_id: 1
+      type: tank
+      description: CCH2 Tank – Fuel Cell supply
+      fluid: CcH2
+      geometry:
+        phi: 3.0
+        mission_based_sizing: true
+      initial_conditions:
+        pressure: 40000000.0
+        density: 80.0
+        temperature: 45.0
+      operating_limits:
+        minimum_pressure: 1500000.0
+        venting_pressure: 45000000.0
+      materials:
+        liner:
+          nist_path: aluminum_6061T6_nist
+          thickness: 0.001
+        composite:
+          nist_path: carbon_epoxy_nist
+          winding_angle: 54.7
+          thickness: calculated
+        insulation:
+          thickness: 0.05
+          heat_transfer_coefficient: 0.025
+        safety_margin: 1.25
+      stopping_criteria:
+        minimum_density: 5.8
+        use_density_stopping_events: false
+      plotting: {}
+
+    - node_id: 2
+      type: tank
+      description: CCH2 Tank – Gas Turbine supply
+      fluid: CcH2
+      geometry:
+        phi: 3.0
+        mission_based_sizing: true
+      initial_conditions:
+        pressure: 40000000.0
+        density: 80.0
+        temperature: 45.0
+      operating_limits:
+        minimum_pressure: 1500000.0
+        venting_pressure: 45000000.0
+      materials:
+        liner:
+          nist_path: aluminum_6061T6_nist
+          thickness: 0.001
+        composite:
+          nist_path: carbon_epoxy_nist
+          winding_angle: 54.7
+          thickness: calculated
+        insulation:
+          thickness: 0.05
+          heat_transfer_coefficient: 0.025
+        safety_margin: 1.25
+      stopping_criteria:
+        minimum_density: 5.8
+        use_density_stopping_events: false
+      plotting: {}
+
+  edges: []
+
+# Multi-node mission dispatch: each entry is assigned to a specific tank node.
+# Both missions share the same time axis from triathlon_dual_flow.csv but read
+# different mass-flow columns, ensuring synchronous simulation.
+missions:
+  - type: discharge
+    profile: csv
+    assigned_to_node: 1
+    parameters:
+      csv_file: ../../../src/missions/triathlon_dual_flow.csv
+      column_name: "Mass flow FC [kg/s]"
+      cruise_altitude: 0.0
+      standard_temperature: 288.15
+      mach_number: 0.0
+      phase: gas
+    ambient_temperature: 288.15
+
+  - type: discharge
+    profile: csv
+    assigned_to_node: 2
+    parameters:
+      csv_file: ../../../src/missions/triathlon_dual_flow.csv
+      column_name: "Mass flow rate GT [kg/s]"
+      cruise_altitude: 0.0
+      standard_temperature: 288.15
+      mach_number: 0.0
+      phase: gas
+    ambient_temperature: 288.15
+
+solver:
+  method: LSODA
+  rtol: 1e-6
+  atol: 1e-9
+  time_step: 1.0
+  max_step: 30.0
+  custom_config: false
+
+output:
+  silent: false
+  identifier: cch2_cch2_parallel
+  save_plots: true
+  plot_formats:
+    - png
+    - pdf
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
+  plots:
+    figure_prefix: cch2_cch2_parallel
+    style:
+      use_greyscale: false
+      font:
+        master_size: 14
+        legend_size: 12
+        font_name: Cambria
+    reference_lines:
+      pressure:
+        show_p_min: true
+        show_p_vent: true
+      temperature:
+        show_t_ambient: false
+      density:
+        show_stopping_density: true
+    tank_states:
+      enabled: true
+      figsize:
+        - 12
+        - 10
+      filename: evolution
+      event_lines: []
+      xlim: null
+      ylim_pressure: null
+      ylim_temperature: null
+      ylim_density: null
+      legend_locations:
+        pressure: best
+        temperature: best
+        density: best
+    fuel_flow_profile:
+      enabled: true
+      figsize:
+        - 14
+        - 6
+      filename: fuel_flow_profile
+    density_temperature:
+      enabled: true
+      figsize:
+        - 12
+        - 8
+      filename: density_temperature
+      isobar_pressures:
+        - 400
+        - 200
+        - 15
+        - 5
+      show_reference_pressures: true
