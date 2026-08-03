@@ -1,8 +1,5 @@
 """
-Isochoric Dynamic Models for stops_model integration within multi_tank.
-
-This module mirrors the functionality of `src/dynamics/isochoric_dynamic_models.py`
-but is colocated under `src/` to keep multi-state code self-contained.
+Isochoric Dynamic Models adapted from Stops framework (see 10.1016/j.cryogenics.2024.103826)
 
 Author: Dante Raso
 """

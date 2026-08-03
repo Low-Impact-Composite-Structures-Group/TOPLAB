@@ -1,8 +1,6 @@
 """
-Isochoric Thermal Model colocated under multi_tank.
 
-Copied from `src/thermodynamics/isochoric_thermal_model.py` and adjusted
-to import NIST materials from `src.multi_tank.materials`.
+Thermal models for isochoric tanks adapted from Stops framework (see 10.1016/j.cryogenics.2024.103826)
 
 Author: Dante Raso
 """
