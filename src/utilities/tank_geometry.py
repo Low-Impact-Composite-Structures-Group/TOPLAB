@@ -9,7 +9,7 @@ import math
 import CoolProp.CoolProp as CP
 from typing import Tuple
 
-from src.tank_design.tank_shapes import SphericalTank
+from src.tank_design.tank_shapes import CapsuleTank
 from src.materials.nist_materials import NISTMetal, NISTComposite
 from src.missions.isochoric_missions import DischargeMission
 
@@ -23,7 +23,7 @@ def create_tank_from_mission(
     safety_margin: float = 1.2,
     liner_thickness: float = 0.005,
     insulation_thickness: float = 0.05,
-) -> tuple[SphericalTank, float]:
+) -> tuple[CapsuleTank, float]:
     """
     Create tank geometry based on mission fuel requirements.
 
@@ -95,7 +95,7 @@ def create_tank_from_mission(
     # For SphericalTank, we use the external radius and the liner material
     # (the wall/insulation will be handled by the thermal model)
 
-    tank = SphericalTank(
+    tank = CapsuleTank(
         radius=external_radius,
         material=liner_material,
         operating_pressure=operating_pressure,
@@ -126,7 +126,7 @@ def create_tank_from_fuel_mass(
     safety_margin: float = 1.1,
     liner_thickness: float = 0.005,
     insulation_thickness: float = 0.05,
-) -> SphericalTank:
+) -> CapsuleTank:
     """
     Create tank geometry based on required fuel mass.
 
@@ -170,7 +170,7 @@ def create_tank_from_fuel_mass(
     # Create materials
     liner_material = NISTMetal.aluminum_6061T6_nist()
     # Create SphericalTank with operating pressure (P_VENT) for wall design
-    tank = SphericalTank(
+    tank = CapsuleTank(
         radius=external_radius,
         material=liner_material,
         operating_pressure=operating_pressure,  # Use P_VENT for structural design

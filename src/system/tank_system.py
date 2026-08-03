@@ -15,7 +15,7 @@ from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
-from src.tank_design.tank_shapes import SphericalTank
+from src.tank_design.tank_shapes import CapsuleTank
 from src.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
@@ -70,7 +70,7 @@ class TankSystem:
     """
 
     def __init__(self,
-                 tank_geometries: List[SphericalTank],
+                 tank_geometries: List[CapsuleTank],
                  config: TankSystemConfig,
                  coupling_rules: List[Dict] = None,
                  scenario_config=None,
@@ -651,7 +651,7 @@ class TankSystem:
 
         return enthalpy_flow / total_inflow
 
-    def _get_tank_properties(self, tank: SphericalTank, tank_id: str = "Unknown", tank_index: int = -1):
+    def _get_tank_properties(self, tank: CapsuleTank, tank_id: str = "Unknown", tank_index: int = -1):
         """Calculate tank properties from SphericalTank geometry.
 
         Raises:

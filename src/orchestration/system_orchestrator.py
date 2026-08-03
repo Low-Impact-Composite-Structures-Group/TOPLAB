@@ -493,18 +493,18 @@ class SystemOrchestrator:
 
             elif 'radius' in geometry_data:
                 # Method 2: Create from specified radius (fallback to simple spherical)
-                from src.tank_design.tank_shapes import SphericalTank
+                from src.tank_design.tank_shapes import CapsuleTank
                 from src.materials.nist_materials import NISTMaterial
 
                 radius = float(geometry_data['radius'])
                 material = NISTMaterial.aluminum_6061T6_nist()
                 operating_pressure = geometry_data.get('venting_pressure', geometry_data['initial_pressure'])
-                tank_geom = SphericalTank(radius=radius, material=material, operating_pressure=operating_pressure, phi=phi)
+                tank_geom = CapsuleTank(radius=radius, material=material, operating_pressure=operating_pressure, phi=phi)
                 print(f"     From radius: {radius}m → V={tank_geom.volume:.4f}m³")
 
             else:
                 # Method 3: Create tank sized for mission requirements
-                from src.tank_design.tank_shapes import SphericalTank
+                from src.tank_design.tank_shapes import CapsuleTank
                 from src.materials.nist_materials import NISTMaterial
 
                 material = NISTMaterial.aluminum_6061T6_nist()
@@ -1086,8 +1086,8 @@ class SystemOrchestrator:
         geometry_data['calculated_initial_density'] = target_density
 
         # Create spherical tank
-        from src.tank_design.tank_shapes import SphericalTank
-        tank = SphericalTank(radius=tank_radius, material=material, operating_pressure=operating_pressure, phi=phi)
+        from src.tank_design.tank_shapes import CapsuleTank
+        tank = CapsuleTank(radius=tank_radius, material=material, operating_pressure=operating_pressure, phi=phi)
 
         # Cache tank geometry for sequential missions if this is the sizing mission
         if hasattr(SystemOrchestrator, '_sizing_mission_key') and SystemOrchestrator._sizing_mission_key:

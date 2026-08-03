@@ -10,7 +10,7 @@ FUEL_HEIGHT_TOLERANCE = 1e-8
 
 
 @dataclass
-class SphericalTank:
+class CapsuleTank:
     radius: float
     material: object
     operating_pressure: float
@@ -52,19 +52,32 @@ class SphericalTank:
     def cylindrical_section_length(self) -> float:
         return max(self.phi, 0.0) * self.radius
 
+    @property
+    def total_height(self) -> float:
+        return self.diameter + self.cylindrical_section_length
+
     def compute_fuel_volume(self, fuel_height: float) -> float:
-        bounded_height = min(max(fuel_height, 0.0), self.diameter)
-        return math.pi * bounded_height ** 2 * (self.radius - bounded_height / 3.0)
+        # Capsule oriented upright: bottom hemisphere → cylinder → top hemisphere
+        r = self.radius
+        L = self.cylindrical_section_length
+        h = min(max(fuel_height, 0.0), self.total_height)
+        if h <= r:
+            return math.pi * h ** 2 * (r - h / 3.0)
+        elif h <= r + L:
+            return (2.0 / 3.0) * math.pi * r ** 3 + math.pi * r ** 2 * (h - r)
+        else:
+            hc = h - (r + L)
+            return (2.0 / 3.0) * math.pi * r ** 3 + math.pi * r ** 2 * L + math.pi * hc ** 2 * (r - hc / 3.0)
 
     def compute_fuel_height(self, fuel_volume: float) -> float:
         if fuel_volume <= 0.0:
             return 0.0
         if fuel_volume >= self.volume:
-            return self.diameter
+            return self.total_height
         return brentq(
             lambda height: self.compute_fuel_volume(height) - fuel_volume,
             a=0.0,
-            b=self.diameter,
+            b=self.total_height,
             xtol=FUEL_HEIGHT_TOLERANCE,
             maxiter=100,
         )
