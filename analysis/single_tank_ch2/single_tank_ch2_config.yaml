@@ -9,7 +9,7 @@ network:
     description: Tank 1
     fluid: CH2
     geometry:
-      phi: 3.0
+      phi: 1.0
       mission_based_sizing: true
     initial_conditions:
       pressure: 70000000.0
