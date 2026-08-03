@@ -693,9 +693,13 @@ class TankSystem:
         if thickness_liner is None:
             raise RuntimeError("Liner thickness not specified in configuration")
 
-        thickness_insulation = materials_config.get('insulation', {}).get('thickness', None)
+        insulation_config = materials_config.get('insulation', {})
+        thickness_insulation = insulation_config.get('thickness', None)
         if thickness_insulation is None:
             raise RuntimeError("Insulation thickness not specified in configuration")
+        if 'heat_transfer_coefficient' not in insulation_config:
+            raise RuntimeError("Insulation heat_transfer_coefficient not specified in configuration")
+        ambient_htc = float(insulation_config['heat_transfer_coefficient'])
 
         # Get design parameters from configuration - NO HARDCODED VALUES
         safety_factor = materials_config.get('safety_margin', None)
@@ -827,6 +831,7 @@ class TankSystem:
             'wall_mass': wall_mass,
             'radius': inner_radius,
             'inner_radius': inner_radius,
+            'ambient_htc': ambient_htc,
             # Add netting analysis results
             **thickness_info
         }
@@ -840,7 +845,8 @@ class TankSystem:
             inner_diameter=tank_properties['inner_diameter'],
             liner_mass=tank_properties['liner_mass'],
             wall_mass=tank_properties['wall_mass'],
-            ambient_temperature=self.config.AMBIENT_TEMPERATURE
+            ambient_temperature=self.config.AMBIENT_TEMPERATURE,
+            ambient_htc=tank_properties['ambient_htc']
         )
 
     def create_initial_state(self) -> np.ndarray:
