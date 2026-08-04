@@ -1140,13 +1140,14 @@ class TankSystem:
                         'flow_rate': flow_rate,
                     })
 
-        # Store net and gross coupling flows for post-processing
+        # Always store gross flows (including zero entries) so that the nearest-neighbour
+        # post-processing lookup never inherits a non-zero entry from a distant active period.
+        self.coupling_gross_flow_history[t] = {
+            i: {'inflow': gross_inflow[i], 'outflow': gross_outflow[i]}
+            for i in range(len(self.tanks))
+        }
         if any(abs(flow) > 1e-9 for flow in coupling_flows.values()):
             self.coupling_flow_history[t] = coupling_flows.copy()
-            self.coupling_gross_flow_history[t] = {
-                i: {'inflow': gross_inflow[i], 'outflow': gross_outflow[i]}
-                for i in range(len(self.tanks))
-            }
 
         return coupling_flows
 
@@ -2034,8 +2035,6 @@ class TankSystem:
                 gross_flows = {i: {'inflow': 0.0, 'outflow': 0.0} for i in range(len(tank_states))}
 
                 if self.coupling_gross_flow_history:
-                    # Use nearest-neighbour lookup — no hard tolerance, LSODA internal steps
-                    # can be large (100+ s) so a strict 1-second window drops most entries.
                     closest_time = min(self.coupling_gross_flow_history.keys(),
                                        key=lambda t: abs(t - current_time))
                     gross_flows = self.coupling_gross_flow_history[closest_time].copy()
