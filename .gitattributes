@@ -1,5 +1,5 @@
 # Encrypt proprietary mission CSV files (only triathlon)
-src/multistate/missions/triathlon_fuel_flows.csv filter=git-crypt diff=git-crypt
+src/missions/triathlon_fuel_flows.csv filter=git-crypt diff=git-crypt
 src/missions/triathlon_dual_flow.csv filter=git-crypt diff=git-crypt
 
 *.pkl filter=lfs diff=lfs merge=lfs -text
