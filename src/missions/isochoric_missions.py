@@ -174,41 +174,6 @@ class DischargeMission(IsochoricMission):
             discharge_sections.append(discharge_section)
         return cls(sections=discharge_sections, parameters=parameters)
 
-
-class RefuelMission(IsochoricMission):
-    def __init__(self, refuel_rate: float, duration: float, parameters: IsochoricMissionParameters = None, dewar_pressure: float = 3e5, pump_efficiency: float = 0.78):
-        if parameters is None:
-            parameters = IsochoricMissionParameters()
-        class DummyHydrogen:
-            pass
-        refuel_section = MissionSection(duration=duration, fuel_flows=[InFlow(refuel_rate, DummyHydrogen())], altitude=0.0, mach_number=0.0)
-        super().__init__([refuel_section], parameters, "REFUEL")
-        self.refuel_rate = refuel_rate
-        self.dewar_pressure = dewar_pressure
-        self.pump_efficiency = pump_efficiency
-
-    @classmethod
-    def constant_refuel(cls, refuel_rate: float, duration: float, target_mass: float = 20.0, initial_temperature: float = 20.0) -> "RefuelMission":
-        initial_mass = max(1.0, target_mass - refuel_rate * duration)
-        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_temperature=initial_temperature)
-        return cls(refuel_rate, duration, parameters)
-
-
-class DormancyMission(IsochoricMission):
-    def __init__(self, duration: float, parameters: IsochoricMissionParameters = None, ambient_temperature: float = 288.15):
-        if parameters is None:
-            parameters = IsochoricMissionParameters()
-        parameters.ambient_temperature = ambient_temperature
-        dormancy_section = MissionSection(duration=duration, fuel_flows=[], altitude=0.0, mach_number=0.0)
-        super().__init__([dormancy_section], parameters, "DORMANCY")
-
-    @classmethod
-    def long_term_storage(cls, duration: float, initial_mass: float = 10.0, initial_temperature: float = 20.0, ambient_temperature: float = 288.15) -> "DormancyMission":
-        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_temperature=initial_temperature, ambient_temperature=ambient_temperature)
-        return cls(duration, parameters, ambient_temperature)
-
-
-class IsochoricMissionAnalysis:
     def __init__(self, mission: IsochoricMission, thermal_model: IsochoricThermalModel):
         self.mission = mission
         self.thermal_model = thermal_model
