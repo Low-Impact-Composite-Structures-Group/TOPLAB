@@ -6,9 +6,6 @@ Author: Dante Raso
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
-import numpy as np
 
 from CoolProp.CoolProp import PropsSI
 
@@ -24,76 +21,6 @@ class IsochoricThermalModel(ABC):
     @abstractmethod
     def compute_heat_flux(self, time: float, state: IsochoricTankState, **kwargs) -> float:
         pass
-
-
-@dataclass
-class AlphaSParameters:
-    k_s: float = 237.0
-    rho_s: float = 2700.0
-    c_s: float = 900.0
-
-    @property
-    def alpha_s(self) -> float:
-        return self.k_s / (self.rho_s * self.c_s)
-
-
-@dataclass
-class TankGeometry:
-    volume: float = 0.5
-    radius: float = None
-    wall_thickness: float = 0.01
-    surface_area: float = None
-
-    def __post_init__(self):
-        if self.radius is None:
-            self.radius = (3.0 * self.volume / (4.0 * np.pi)) ** (1.0 / 3.0)
-        if self.surface_area is None:
-            self.surface_area = 4.0 * np.pi * self.radius ** 2
-
-
-class CoupledSolidFluidThermalModel(IsochoricThermalModel):
-    def __init__(self, alpha_s_params: AlphaSParameters = None, tank_geometry: TankGeometry = None, ambient_temperature: float = 288.15, heat_transfer_coefficient: float = 100.0):
-        self.alpha_s_params = alpha_s_params if alpha_s_params else AlphaSParameters()
-        self.tank_geometry = tank_geometry if tank_geometry else TankGeometry()
-        self.ambient_temperature = ambient_temperature
-        self.h_sf = heat_transfer_coefficient
-        self.heat_flux_history = []
-        self.temperature_history = []
-
-    def compute_solid_temperature_derivative(self, time: float, state: IsochoricTankState, **kwargs) -> float:
-        Q_sf = self.compute_heat_flux(time, state, **kwargs)
-        Q_amb = self._compute_ambient_heat_flux(state.solid_temperature, **kwargs)
-        solid_mass = self._compute_solid_mass()
-        thermal_capacity = solid_mass * self.alpha_s_params.c_s
-        return (Q_amb - Q_sf) / thermal_capacity
-
-    def compute_heat_flux(self, time: float, state: IsochoricTankState, **kwargs) -> float:
-        T_fluid = state.temperature
-        T_solid = state.solid_temperature
-        Q_sf = self.h_sf * self.tank_geometry.surface_area * (T_solid - T_fluid)
-        self.heat_flux_history.append({'time': time, 'Q_sf': Q_sf, 'T_solid': T_solid, 'T_fluid': T_fluid})
-        return Q_sf
-
-    def _compute_ambient_heat_flux(self, T_solid: float, **kwargs) -> float:
-        ambient_htc = kwargs.get('ambient_htc', 1.0)
-        return ambient_htc * self.tank_geometry.surface_area * (self.ambient_temperature - T_solid)
-
-    def _compute_solid_mass(self) -> float:
-        r_outer = self.tank_geometry.radius
-        r_inner = r_outer - self.tank_geometry.wall_thickness
-        volume_shell = (4.0 / 3.0) * np.pi * (r_outer ** 3 - r_inner ** 3)
-        return self.alpha_s_params.rho_s * volume_shell
-
-    def get_thermal_properties(self) -> dict:
-        return {
-            'alpha_s': self.alpha_s_params.alpha_s,
-            'k_s': self.alpha_s_params.k_s,
-            'rho_s': self.alpha_s_params.rho_s,
-            'c_s': self.alpha_s_params.c_s,
-            'solid_mass': self._compute_solid_mass(),
-            'surface_area': self.tank_geometry.surface_area,
-            'h_sf': self.h_sf,
-        }
 
 
 class StopsModelThermalModel(IsochoricThermalModel):
@@ -149,14 +76,3 @@ class StopsModelThermalModel(IsochoricThermalModel):
         numerator = self.k_amb * self.A_out * self.T_amb + alpha_s_approx * self.A_in * T_fluid
         denominator = self.k_amb * self.A_out + alpha_s_approx * self.A_in
         return numerator / denominator
-
-
-def create_default_coupled_thermal_model(tank_volume: float = 0.5, ambient_temperature: float = 288.15, wall_material: str = "aluminum") -> CoupledSolidFluidThermalModel:
-    if wall_material.lower() == "aluminum":
-        alpha_s_params = AlphaSParameters(k_s=237.0, rho_s=2700.0, c_s=900.0)
-    elif wall_material.lower() == "steel":
-        alpha_s_params = AlphaSParameters(k_s=50.0, rho_s=7850.0, c_s=450.0)
-    else:
-        alpha_s_params = AlphaSParameters()
-    tank_geometry = TankGeometry(volume=tank_volume)
-    return CoupledSolidFluidThermalModel(alpha_s_params=alpha_s_params, tank_geometry=tank_geometry, ambient_temperature=ambient_temperature, heat_transfer_coefficient=100.0)
