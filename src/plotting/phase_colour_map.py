@@ -1,6 +1,6 @@
 """
 Standalone script to generate a hydrogen density–temperature phase colour map
-using the DelftColourPlotter utilities and CoolProp saturation data.
+using the DelftColourPlotter utilities and CoolProp saturation data. It is not used as a module in the main project.
 
 Configure values below (no CLI args needed). Set SAVE=True to write to disk; otherwise, the plot will be shown interactively.
 """

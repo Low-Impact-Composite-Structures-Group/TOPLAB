@@ -7,10 +7,8 @@ of their L/R ratio (phi). The tanks are shown for phi = 0, 1, 2, 3 where:
 - phi = 0 corresponds to a sphere
 - R = 1 for all tanks (normalized)
 
-Uses the Delft color palette for consistent styling.
+This is a standalone script that can be run directly to generate and display the visualizations. It is not used as module in the main project.
 
-Hydrogen Storage in Civil Aviation PhD
-Victor Kees Poorte, 2022
 """
 
 import numpy as np
