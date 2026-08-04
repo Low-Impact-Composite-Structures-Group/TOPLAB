@@ -29,7 +29,7 @@ network:
       insulation:
         nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
+        heat_transfer_coefficient: 50
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.8
@@ -159,13 +159,13 @@ output:
       separate_figures: false
       # DPI to use when saving separate figures (and combined evolution if applicable)
       dpi: 1000
-      event_lines:
-      - time: 0.53
-        label: First valve opening event
-        y_position: 0.15
-      - time: 2.11
-        label: Last valve closing event
-        y_position: 0.65
+      # event_lines:
+      # - time: 0.53
+      #   label: First valve opening event
+      #   y_position: 0.15
+      # - time: 2.11
+      #   label: Last valve closing event
+      #   y_position: 0.65
       xlim: null  # [0, 1.2] or null for autofit
       ylim_pressure: null  # [0, 800] or null for autofit
       ylim_temperature: null  # [200, 300] or null for autofit
