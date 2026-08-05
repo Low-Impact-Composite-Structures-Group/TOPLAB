@@ -1,0 +1,225 @@
+analysis:
+  name: Coupled CH2-CCH2 Multi-Tank System
+  description: 'Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K)
+    with pressure compensation coupling and Triathlon mission profile'
+  version: '1.0'
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: CH2
+    geometry:
+      phi: 3.0
+      radius: 0.5
+    initial_conditions:
+      pressure: 80000000
+      temperature: 288.0
+      density:
+    operating_limits:
+      minimum_pressure: 1500000
+      venting_pressure: 85000000
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        # nist_path: g10_nist
+        thickness: 0.05
+        heat_transfer_coefficient: 50
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+  - node_id: 2
+    type: tank
+    description: Tank 2
+    fluid: CcH2
+    geometry:
+      phi: 3.0
+      mission_based_sizing: true
+    initial_conditions:
+      pressure: 40000000
+      temperature: 53.25
+      density: 80.0
+    operating_limits:
+      minimum_pressure: 1500000
+      venting_pressure: 45000000
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+      insulation:
+        nist_path: g10_nist
+        thickness: 0.05
+        heat_transfer_coefficient: 0.01
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: true
+      use_duration_stopping: true
+    plotting: {}
+  edges:
+  - edge_id: ch2_cch2_pressure_compensation
+    connection_type: pressure_compensation
+    from_node: 1
+    to_node: 2
+    activation_conditions:
+      pressure_open_bar: 16.0
+      pressure_close_bar: 30.0
+      valve_time_constant_s: 0.5
+    flow_physics:
+      orifice_flow:
+        orifice_diameter_m: 0.005
+      safety_limits:
+        max_flow_rate_kg_s: 0.056
+mission:
+  type: discharge
+  profile: csv
+  parameters:
+    csv_file: ../../src/missions/atr72_fuel_flows.csv
+    cruise_altitude: 7010.0
+    standard_temperature: 273.15
+    mach_number: 0.0
+    phase: gas
+  ambient_temperature: 288.15
+  assigned_to_node: 2
+physics:
+  fluid_properties:
+    use_coolprop: true
+    coolprop_fluid: H2
+    backup_properties:
+      specific_gas_constant: 4124.0
+      heat_capacity_ratio: 1.4
+      kinematic_viscosity: 1.55e-06
+      speed_of_sound: 1354.0
+  choked_flow:
+    enable_choked_flow: true
+    critical_pressure_ratio_override: null
+    sonic_velocity_factor: 1.0
+    choked_flow_pressure_factor: 2.0
+  safety_limits:
+    max_mass_transfer_fraction: 0.1
+    minimum_pressure_pa: 1000.0
+    maximum_velocity_ms: 2000.0
+  numerical:
+    pressure_tolerance_pa: 100.0
+    flow_rate_tolerance_kg_s: 1e-8
+    property_update_frequency: 1
+solver:
+  method: LSODA
+  rtol: 1e-4
+  atol: 1e-7
+  time_step: 5.0
+  max_step: 10.0
+  custom_config: true
+output:
+  silent: false
+  identifier: coupled_ch2_cch2_multi_tank
+  save_plots: true
+  plot_formats:
+  - png
+  - pgf
+  save_data: true
+  data_format: csv
+  results_directory: output/results
+  plots_directory: output/plots
+  plots:
+    figure_prefix: coupled_ch2_cch2
+    style:
+      use_greyscale: true
+      enable_multi_tank_overlay: false
+      font:
+        master_size: 16
+        legend_size: 16
+        font_name: Cambria
+    reference_lines:
+      pressure:
+        show_p_min: true
+        show_p_vent: false
+      temperature:
+        show_t_ambient: false
+      density:
+        show_stopping_density: false
+    tank_states:
+      enabled: true
+      figsize:
+      - 12
+      - 10
+      filename: evolution
+      # When true, also produce three separate figures per tank (pressure, temperature, density)
+      separate_figures: false
+      # DPI to use when saving separate figures (and combined evolution if applicable)
+      dpi: 1000
+      # event_lines:
+      # - time: 0.53
+      #   label: First valve opening event
+      #   y_position: 0.15
+      # - time: 2.11
+      #   label: Last valve closing event
+      #   y_position: 0.65
+      xlim: null  # [0, 1.2] or null for autofit
+      ylim_pressure: null  # [0, 800] or null for autofit
+      ylim_temperature: null  # [200, 300] or null for autofit
+      ylim_density: null  # [0, 90] or null for autofit
+      legend_locations:
+        pressure: best
+        temperature: best
+        density: best
+    fuel_flow_profile:
+      enabled: true
+      figsize:
+      - 14
+      - 10
+      filename: fuel_flow_profile
+    density_temperature:
+      enabled: true
+      figsize:
+      - 12
+      - 8
+      filename: density_temperature
+      isobar_pressures:
+      - 15
+      - 400
+      show_reference_pressures: false
+      include_saturation_line: true
+      include_isobars: true
+      arrow_position: 0.94
+      arrow_size: 1.0
+      valve_marker_size: 8.0
+      legend_location: center right
+      xlim: null  # [280, 330] or null for autofit
+      ylim: [0, 90]  # [min_density, max_density] or null for default (0, 85)
+    mass_flows:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: mass_flows
+      include_venting_flow: true
+      include_coupling_flows: true
+      xlim: null  # [0, 1.2] or null for autofit
+      ylim: null  # [-50, 100] or null for autofit
+      legend_location: lower left
+    heat_exchanger_requirements:
+      enabled: true
+      figsize:
+      - 12
+      - 6
+      filename: hex
+      include_ihex: true
+      include_ohex: true
+      ohex_target_temperature: 200.0
+      ohex_target_pressure: 20e5
+      include_total: true
+      xlim: null
+      ylim: null
+      legend_location: lower right
