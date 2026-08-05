@@ -179,22 +179,6 @@ the improvement.
 phi stays constant because radius and length scale together equally
 (length\_scale = radius\_scale throughout), leaving phi = L/r unchanged.
 
-### Vent time  (maximize dormancy before first vent)
-
-| | Baseline | Best (iter 3 → bound) | Change |
-|-|---------|----------------------|--------|
-| Vent time | 139.7 h | 155.3 h | **+11.2 %** |
-| Insulation scale | 1.00 (50 mm) | 0.10 (5 mm) | −90 % |
-
-The optimizer reduces insulation thickness toward the lower bound (0.10×, 5 mm)
-and vent time increases at each step.  The result is consistent and reproducible
-across runs.  However, the direction is **physically counterintuitive**: thinner
-insulation means faster heat ingress, which should raise tank pressure sooner
-and produce a *shorter* dormancy — not a longer one.  The finding is noted as a
-known anomaly (see Known Limitations §4) pending verification of how
-`heat_transfer_coefficient` feeds into the thermal solver.  The sensitivity
-slope is approximately **5.3 h per 10 % insulation reduction** across the
-linear portion (iterations 0–3).
 
 ---
 
