@@ -99,9 +99,7 @@ class SystemOrchestrator:
                 mission_profile = mission.profile
                 print(f"   Using mission_sequence profile: {mission_profile}")
         except Exception as e:
-            # Ultimate fallback
-            mission_profile = "atr72"  # Default to atr72 instead of constant flow
-            print(f"   WARNING: Using fallback profile: {mission_profile} (error: {e})")
+            raise RuntimeError(f"Failed to load mission profile from scenario config: {e}") from e
 
         # For multi-node 'missions:' list, load per-tank profiles and set primary profile
         raw_missions_list = raw_config.get('missions') if isinstance(raw_config, dict) else None
@@ -161,14 +159,19 @@ class SystemOrchestrator:
                 hysteresis = rule_config.get('hysteresis', {})
 
                 # Map our config format to TankSystem expected format
-                activation_threshold = hysteresis.get('activation_threshold_bar', 20.0)    # Open valve when Tank 2 ≤ this pressure
-                deactivation_threshold = hysteresis.get('deactivation_threshold_bar', 21.0)  # Close valve when Tank 2 ≥ this pressure
-
-                # Log fallback usage for transparency
                 if 'activation_threshold_bar' not in hysteresis:
-                    print(f"WARNING: Using fallback: activation_threshold_bar = {activation_threshold} bar (consider adding to YAML config)")
+                    raise RuntimeError(
+                        "Missing required hysteresis field 'activation_threshold_bar' "
+                        f"for flow_controlled_pressurization coupling '{rule_config.get('coupling_id', 'unknown')}'."
+                    )
                 if 'deactivation_threshold_bar' not in hysteresis:
-                    print(f"WARNING: Using fallback: deactivation_threshold_bar = {deactivation_threshold} bar (consider adding to YAML config)")
+                    raise RuntimeError(
+                        "Missing required hysteresis field 'deactivation_threshold_bar' "
+                        f"for flow_controlled_pressurization coupling '{rule_config.get('coupling_id', 'unknown')}'."
+                    )
+
+                activation_threshold = hysteresis['activation_threshold_bar']    # Open valve when Tank 2 ≤ this pressure
+                deactivation_threshold = hysteresis['deactivation_threshold_bar']  # Close valve when Tank 2 ≥ this pressure
 
                 tank_system_rule = {
                     'type': 'pressure_triggered_valve',
