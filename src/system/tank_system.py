@@ -193,12 +193,24 @@ class TankSystem:
                 tank_volume=tank_properties['volume']
             )
 
-            # Compute per-tank minimum density from P_MIN and T_INIT using CoolProp
-            try:
-                tank_min_density = PropsSI("D", "P", tank_config.P_MIN, "T", tank_config.T_INIT, "hydrogen") * 0.9
-                tank_min_density = min(tank_min_density, self.config.minimum_density)
-            except Exception:
-                tank_min_density = self.config.minimum_density
+            # Compute per-tank minimum density.
+            per_tank_min = None
+            if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
+                tank_geom_list = list(self.scenario_config.tank_geometries.values())
+                if i < len(tank_geom_list):
+                    raw = tank_geom_list[i].get('minimum_density')
+                    if raw is not None:
+                        try:
+                            per_tank_min = float(raw)
+                        except (TypeError, ValueError):
+                            pass
+
+            if per_tank_min is None:
+                raise ValueError(
+                    f"Tank {i + 1}: 'minimum_density' must be set in the node's stopping_criteria. "
+                    "Add 'minimum_density: <value>' under the node's stopping_criteria in your YAML config."
+                )
+            tank_min_density = per_tank_min
             self._min_densities[i] = tank_min_density
             tank_properties['minimum_density'] = tank_min_density
 
@@ -949,10 +961,6 @@ class TankSystem:
             if not debug_enabled:
                 self._ode_progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
         try:
-            # Check if we've already flagged stopping
-            if hasattr(self, '_stop_requested') and self._stop_requested:
-                return np.zeros(len(y))
-
             # Create multi-tank state from current state vector
             multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
 
@@ -966,36 +974,6 @@ class TankSystem:
             # Calculate derivatives for each tank
             for i in range(n_tanks):
                 tank_state = multi_state.tank_states[i]
-
-                # Check stopping criteria: density-based stopping
-                tank_volume = self._cached_tank_properties[i]['volume']
-                current_density = tank_state.fuel_mass / tank_volume
-
-                # Check for minimum density (discharge/dormancy missions) — per-tank threshold
-                per_tank_min_density = self._min_densities.get(i, self.config.minimum_density)
-                if current_density <= per_tank_min_density:
-                    if not hasattr(self, '_min_density_stop_printed'):
-                        self._log_summary(
-                            f"   Tank {i+1} reached minimum density: "
-                            f"{current_density:.2f} ≤ {per_tank_min_density:.2f} kg/m³"
-                        )
-                        self._min_density_stop_printed = True
-                    # Signal the stop so every *subsequent* ODE call hits the
-                    # fast-path zero return at the top of ode_system instead of
-                    # re-running CoolProp, coupling flows, and valve evaluate.
-                    self._stop_requested = True
-                    return np.zeros(len(y))
-
-                # Check for target density (refuel missions) - just log, don't terminate here
-                if self.config.target_density is not None and current_density >= self.config.target_density:
-                    if not hasattr(self, '_target_density_stop_printed'):
-                        self._log_summary(
-                            f"   Tank {i+1} reached target density: "
-                            f"{current_density:.2f} ≥ {self.config.target_density:.2f} kg/m³"
-                        )
-                        self._target_density_stop_printed = True
-                        # Set a flag to indicate stopping should occur
-                        self._stop_requested = True
 
                 # Prevent numerical instability near empty tank
                 if tank_state.fuel_mass <= 1.0:  # 1 kg minimum
@@ -1505,6 +1483,23 @@ class TankSystem:
             print(f"WARNING: Error calculating discharge flow at t={time:.1f}s: {e}")
             return 0.0
 
+    def _create_min_density_events(self) -> list:
+        """Create one terminal event per tank that fires when density drops to its minimum."""
+        events = []
+        for tank_idx in range(len(self.tanks)):
+            min_rho = self._min_densities[tank_idx]
+            vol = self._cached_tank_properties[tank_idx]['volume']
+
+            def make_event(idx, minimum, volume):
+                def event(t, y):
+                    return y[idx * 3] / volume - minimum
+                event.terminal = True
+                event.direction = -1  # density decreasing
+                return event
+
+            events.append(make_event(tank_idx, min_rho, vol))
+        return events
+
     def _create_density_event(self):
         """Create density stopping event for refuel missions."""
         def density_event(t, y):
@@ -1943,10 +1938,6 @@ class TankSystem:
         start_time = time.time()
 
         # Reset any stopping flags
-        if hasattr(self, '_stop_requested'):
-            delattr(self, '_stop_requested')
-        if hasattr(self, '_density_stop_printed'):
-            delattr(self, '_density_stop_printed')
         if hasattr(self, '_empty_warn_printed'):
             delattr(self, '_empty_warn_printed')
 
@@ -1962,10 +1953,13 @@ class TankSystem:
         if max_step is not None:
             integration_params['max_step'] = max_step
 
-        # Add density stopping events if target density is specified
+        # Build event list: one terminal event per tank (min density) + optional target density
+        all_events = self._create_min_density_events()
         if self.config.target_density is not None:
-            integration_params['events'] = self._create_density_event()
+            all_events.append(self._create_density_event())
             self._log_summary(f"   Added target density event: {self.config.target_density:.1f} kg/m³")
+        integration_params['events'] = all_events
+        self._log_summary(f"   Added {len(self.tanks)} minimum-density stopping event(s)")
 
         self._log_debug(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
@@ -1976,10 +1970,30 @@ class TankSystem:
         self._log_summary(f"   Final time: {solution.t[-1]/3600:.2f} hours")
         self._log_summary(f"   Data points: {len(solution.t)}")
 
-        # Check if stopped due to event
-        if hasattr(solution, 't_events') and solution.t_events and len(solution.t_events[0]) > 0:
-            event_time = solution.t_events[0][0]
-            self._log_summary(f"   Stopped by density event at t={event_time:.1f}s ({event_time/3600:.3f}h)")
+        # Report stop reason
+        n_tanks = len(self.tanks)
+        stopped_early = False
+        if hasattr(solution, 't_events') and solution.t_events:
+            for tank_idx in range(n_tanks):
+                if tank_idx < len(solution.t_events) and len(solution.t_events[tank_idx]) > 0:
+                    event_time = solution.t_events[tank_idx][0]
+                    self._log_summary(
+                        f"   Tank {tank_idx + 1} reached its minimum density before completing the mission "
+                        f"(t={event_time:.1f}s, {event_time / 3600:.3f}h)."
+                    )
+                    stopped_early = True
+            # Check target density event (appended after per-tank events)
+            target_idx = n_tanks
+            if (self.config.target_density is not None
+                    and target_idx < len(solution.t_events)
+                    and len(solution.t_events[target_idx]) > 0):
+                event_time = solution.t_events[target_idx][0]
+                self._log_summary(
+                    f"   Target density reached at t={event_time:.1f}s ({event_time / 3600:.3f}h)."
+                )
+                stopped_early = True
+        if not stopped_early:
+            self._log_summary("   Mission completed: all tanks ran to the end of the mission profile.")
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []
@@ -2051,7 +2065,7 @@ class TankSystem:
                         out = gross_flows[i]['outflow']
                         if inf > 1e-6 or out > 1e-6:
                             parts.append(f"T{i}: +{inf*1000:.1f}/-{out*1000:.1f}g/s")
-                    print(f"  Post-processing t={current_time:.1f}s: {', '.join(parts)} (from history)")
+                    # print(f"  Post-processing t={current_time:.1f}s: {', '.join(parts)} (from history)")
                 else:
                     if i < 5 or i % 200 == 0:
                         print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
