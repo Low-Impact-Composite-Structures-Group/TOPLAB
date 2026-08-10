@@ -165,8 +165,8 @@ class PressureTriggeredValve(InterTankCoupling):
         self._valve_coefficient = max(0.0, min(1.0, self._valve_coefficient))
 
         # Debug: Show valve state periodically
-        if abs(t % 60) < 0.1:  # Every 60 seconds
-            print(f"  Valve state at t={t/3600:.3f}h: coeff={self._valve_coefficient:.3f}, P_target={target_pressure/1e5:.1f}bar")
+        # if abs(t % 60) < 0.1:  # Every 60 seconds
+        #     print(f"  Valve state at t={t/3600:.3f}h: coeff={self._valve_coefficient:.3f}, P_target={target_pressure/1e5:.1f}bar")
 
         return self._valve_coefficient > 1e-6  # Active if any opening
 
@@ -245,11 +245,11 @@ class PressureTriggeredValve(InterTankCoupling):
         tank_states[self.source_idx] = source_state
         tank_states[self.target_idx] = target_state
 
-        # Always drive the hysteresis state machine explicitly
+        # Always drive the hysteresis state machine and update _valve_coefficient
         self.evaluate(t, tank_states)
 
-        # If closed, no flow
-        if not self.is_active:
+        # Gate on coefficient (not is_active) so the closing ramp is also applied
+        if self._valve_coefficient <= 1e-6:
             return 0.0
 
         # Otherwise, compute flow with the selected physics and capacity limits

@@ -10,7 +10,7 @@ network:
     description: Tank 1
     fluid: CH2
     geometry:
-      phi: 3.0
+      phi: 2.0
       radius: 0.5
     initial_conditions:
       pressure: 80000000
@@ -30,7 +30,7 @@ network:
         # nist_path: g10_nist
         thickness: 0.05
         heat_transfer_coefficient: 50
-      safety_margin: 1.25
+      safety_margin: 2.0
     stopping_criteria:
       minimum_density: 5.8
       use_density_stopping_events: true
@@ -42,14 +42,14 @@ network:
     fluid: CcH2
     geometry:
       phi: 3.0
-      mission_based_sizing: true
+      radius: 0.6
     initial_conditions:
       pressure: 40000000
       temperature: 53.25
       density: 80.0
     operating_limits:
       minimum_pressure: 1500000
-      venting_pressure: 45000000
+      venting_pressure: 4010000
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -60,8 +60,8 @@ network:
       insulation:
         nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
-      safety_margin: 1.25
+        heat_transfer_coefficient: 0.0025
+      safety_margin: 2.0
     stopping_criteria:
       minimum_density: 5.8
       use_density_stopping_events: true
@@ -127,7 +127,7 @@ output:
   save_plots: true
   plot_formats:
   - png
-  - pgf
+  # - pgf
   save_data: true
   data_format: csv
   results_directory: output/results
@@ -135,7 +135,7 @@ output:
   plots:
     figure_prefix: coupled_ch2_cch2
     style:
-      use_greyscale: true
+      use_greyscale: false
       enable_multi_tank_overlay: false
       font:
         master_size: 16
@@ -223,3 +223,7 @@ output:
       xlim: null
       ylim: null
       legend_location: lower right
+
+dormancy_check:
+  enabled: true
+  duration_h: 24.0
