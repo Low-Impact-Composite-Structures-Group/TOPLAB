@@ -11,13 +11,13 @@ network:
     fluid: CH2
     geometry:
       phi: 2.0
-      radius: 0.5
+      radius: 0.35
     initial_conditions:
       pressure: 80000000
       temperature: 288.0
       density:
     operating_limits:
-      minimum_pressure: 1500000
+      minimum_pressure: 7500000
       venting_pressure: 85000000
     materials:
       liner:
@@ -27,13 +27,10 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        # nist_path: g10_nist
         thickness: 0.05
         heat_transfer_coefficient: 50
       safety_margin: 2.0
     stopping_criteria:
-      minimum_density: 5.8
-      use_density_stopping_events: true
       use_duration_stopping: true
     plotting: {}
   - node_id: 2
@@ -42,14 +39,14 @@ network:
     fluid: CcH2
     geometry:
       phi: 3.0
-      radius: 0.6
+      radius: 0.55
     initial_conditions:
       pressure: 40000000
       temperature: 53.25
       density: 80.0
     operating_limits:
       minimum_pressure: 1500000
-      venting_pressure: 4010000
+      venting_pressure: 45000000
     materials:
       liner:
         nist_path: aluminum_6061T6_nist
@@ -58,7 +55,6 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
         heat_transfer_coefficient: 0.0025
       safety_margin: 2.0
