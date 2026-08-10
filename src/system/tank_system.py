@@ -759,15 +759,18 @@ class TankSystem:
         cylinder_model = CompositeCylinder()
         endcap_model = CompositeSphericalEndCap()
 
+        # Burst pressure FS scales the design pressure for wall thickness
+        design_pressure_structural = working_pressure * safety_factor
+
         # Calculate thickness for both sections
-        cylinder_thickness = cylinder_model.compute_thickness(tank_section, working_pressure)
-        endcap_thickness = endcap_model.compute_thickness(tank_section, working_pressure)
+        cylinder_thickness = cylinder_model.compute_thickness(tank_section, design_pressure_structural)
+        endcap_thickness = endcap_model.compute_thickness(tank_section, design_pressure_structural)
         thickness_wall = max(cylinder_thickness, endcap_thickness)  # Governing thickness
 
         print(f"   Netting Analysis Results for {tank_id}:")
         print(f"      Radius: {inner_radius:.3f} m")
-        print(f"      Design pressure: {design_pressure/1e5:.0f} bar, Working: {working_pressure/1e5:.0f} bar")
-        print(f"      Safety factor: {safety_factor:.2f} (from config)")
+        print(f"      Working pressure: {working_pressure/1e5:.0f} bar, Safety factor: {safety_factor:.2f}")
+        print(f"      Structural design pressure: {design_pressure_structural/1e5:.0f} bar")
         print(f"      Liner: {type(liner_material).__name__}, thickness: {thickness_liner*1000:.1f}mm")
         print(f"      Composite: {type(composite_material).__name__}, σ_failure = {composite_material.failure_stress/1e6:.0f} MPa")
         print(f"      Winding angle: {math.degrees(composite_material.winding_angle):.1f}°")
