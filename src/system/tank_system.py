@@ -139,7 +139,9 @@ class TankSystem:
         # Initialize caching system
         self._cached_tank_properties = {}
         self._properties_printed = set()  # Track which tanks have printed properties
-        self._min_densities = {}  # Per-tank minimum densities
+        self._min_densities = {}   # Per-tank minimum densities (non-CH2 tanks)
+        self._min_pressures = {}   # Per-tank minimum pressures (CH2 tanks)
+        self._tank_fluids = {}     # Per-tank fluid type string (upper-cased)
 
         # Setup tanks and coupling
         self._setup_tanks()
@@ -193,32 +195,53 @@ class TankSystem:
                 tank_volume=tank_properties['volume']
             )
 
-            # Compute per-tank minimum density.
-            per_tank_min = None
+            # Determine fluid type and choose the appropriate stopping criterion.
+            fluid_type = ''
             if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
                 tank_geom_list = list(self.scenario_config.tank_geometries.values())
                 if i < len(tank_geom_list):
-                    raw = tank_geom_list[i].get('minimum_density')
-                    if raw is not None:
-                        try:
-                            per_tank_min = float(raw)
-                        except (TypeError, ValueError):
-                            pass
+                    fluid_type = str(tank_geom_list[i].get('fluid', '')).upper()
+            self._tank_fluids[i] = fluid_type
 
-            if per_tank_min is None:
-                raise ValueError(
-                    f"Tank {i + 1}: 'minimum_density' must be set in the node's stopping_criteria. "
-                    "Add 'minimum_density: <value>' under the node's stopping_criteria in your YAML config."
-                )
-            tank_min_density = per_tank_min
-            self._min_densities[i] = tank_min_density
-            tank_properties['minimum_density'] = tank_min_density
+            if fluid_type == 'CH2':
+                # CH2: stop when pressure drops to minimum_pressure
+                raw_p_min = None
+                if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
+                    tank_geom_list = list(self.scenario_config.tank_geometries.values())
+                    if i < len(tank_geom_list):
+                        raw_p_min = tank_geom_list[i].get('minimum_pressure')
+                if raw_p_min is None:
+                    raise ValueError(
+                        f"Tank {i + 1} (CH2): 'minimum_pressure' must be set in operating_limits."
+                    )
+                self._min_pressures[i] = float(raw_p_min)
+                self._min_densities[i] = 0.0  # unused for CH2; keep dict consistent
+                tank_properties['minimum_density'] = 0.0
+                print(f"   Tank {i+1} (CH2): pressure-based stopping at {float(raw_p_min)/1e5:.1f} bar")
+            else:
+                # All other fluid types: stop on minimum density
+                per_tank_min = None
+                if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
+                    tank_geom_list = list(self.scenario_config.tank_geometries.values())
+                    if i < len(tank_geom_list):
+                        raw = tank_geom_list[i].get('minimum_density')
+                        if raw is not None:
+                            try:
+                                per_tank_min = float(raw)
+                            except (TypeError, ValueError):
+                                pass
+                if per_tank_min is None:
+                    raise ValueError(
+                        f"Tank {i + 1}: 'minimum_density' must be set in the node's stopping_criteria. "
+                        "Add 'minimum_density: <value>' under the node's stopping_criteria in your YAML config."
+                    )
+                self._min_densities[i] = per_tank_min
+                tank_properties['minimum_density'] = per_tank_min
+                print(f"   Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m², rho_min={per_tank_min:.3f} kg/m³")
 
             self.tanks.append(tank_geom)
             self.thermal_models.append(thermal_model)
             self.dynamic_models.append(dynamic_model)
-
-            print(f"   Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m², rho_min={tank_min_density:.3f} kg/m³")
 
     def _extract_mission_profile_data(self) -> dict:
         """Extract mission profile data from system configuration."""
@@ -1492,20 +1515,43 @@ class TankSystem:
             return 0.0
 
     def _create_min_density_events(self) -> list:
-        """Create one terminal event per tank that fires when density drops to its minimum."""
+        """Create one terminal event per tank: pressure-based for CH2, density-based for all others."""
         events = []
         for tank_idx in range(len(self.tanks)):
-            min_rho = self._min_densities[tank_idx]
             vol = self._cached_tank_properties[tank_idx]['volume']
 
-            def make_event(idx, minimum, volume):
-                def event(t, y):
-                    return y[idx * 3] / volume - minimum
-                event.terminal = True
-                event.direction = -1  # density decreasing
-                return event
+            if self._tank_fluids.get(tank_idx, '') == 'CH2':
+                p_min = self._min_pressures[tank_idx]
 
-            events.append(make_event(tank_idx, min_rho, vol))
+                def make_pressure_event(idx, p_min_pa, volume):
+                    from CoolProp.CoolProp import PropsSI as _PropsSI
+
+                    def event(t, y):
+                        m = float(y[idx * 3])
+                        T = float(y[idx * 3 + 1])
+                        rho = m / max(float(volume), 1e-9)
+                        try:
+                            P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "hydrogen")
+                            return P - p_min_pa
+                        except Exception:
+                            return 1.0  # stay positive so a CoolProp error does not falsely trigger
+
+                    event.terminal = True
+                    event.direction = -1  # fire when pressure falls through p_min
+                    return event
+
+                events.append(make_pressure_event(tank_idx, p_min, vol))
+            else:
+                min_rho = self._min_densities[tank_idx]
+
+                def make_event(idx, minimum, volume):
+                    def event(t, y):
+                        return y[idx * 3] / volume - minimum
+                    event.terminal = True
+                    event.direction = -1  # density decreasing
+                    return event
+
+                events.append(make_event(tank_idx, min_rho, vol))
         return events
 
     def _create_density_event(self):
@@ -1972,6 +2018,54 @@ class TankSystem:
         self._log_debug(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
         solution = self.solver.integrate_full(**integration_params)
+
+        # Fallback stopping check: if events were missed (e.g. due to ODE exceptions
+        # corrupting LSODA's internal step), truncate at the first minimum-density
+        # crossing so results are never past the intended stop point.
+        _n = len(self.tanks)
+        events_already_fired = (
+            hasattr(solution, 't_events')
+            and solution.t_events
+            and any(len(te) > 0 for te in solution.t_events[:_n])
+        )
+        if not events_already_fired:
+            truncate_step = None
+            truncate_tank = None
+            for step_i in range(len(solution.t)):
+                for tank_i in range(_n):
+                    if self._tank_fluids.get(tank_i, '') == 'CH2':
+                        # Pressure-based check for CH2 tanks
+                        m_val = float(solution.y[tank_i * 3, step_i])
+                        T_val = float(solution.y[tank_i * 3 + 1, step_i])
+                        vol_val = self._cached_tank_properties[tank_i]['volume']
+                        rho_val = m_val / max(vol_val, 1e-9)
+                        try:
+                            from CoolProp.CoolProp import PropsSI as _P
+                            P_val = _P("P", "T", max(T_val, 14.0), "Dmass", max(rho_val, 1e-9), "hydrogen")
+                        except Exception:
+                            continue
+                        if P_val < self._min_pressures[tank_i]:
+                            truncate_step = step_i
+                            truncate_tank = tank_i
+                            break
+                    else:
+                        mass_val = float(solution.y[tank_i * 3, step_i])
+                        vol_val = self._cached_tank_properties[tank_i]['volume']
+                        if mass_val / max(vol_val, 1e-9) < self._min_densities[tank_i]:
+                            truncate_step = step_i
+                            truncate_tank = tank_i
+                            break
+                if truncate_step is not None:
+                    break
+            if truncate_step is not None:
+                t_stop = solution.t[truncate_step]
+                self._log_summary(
+                    f"   WARNING: stopping event was not caught by solver; "
+                    f"truncating solution at Tank {truncate_tank + 1} stopping criterion "
+                    f"(t={t_stop:.1f}s, {t_stop / 3600:.3f}h)."
+                )
+                solution.t = solution.t[:truncate_step + 1]
+                solution.y = solution.y[:, :truncate_step + 1]
 
         elapsed_time = time.time() - start_time
         self._log_summary(f"Integration completed in {elapsed_time:.1f}s")

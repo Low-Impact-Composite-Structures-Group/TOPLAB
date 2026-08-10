@@ -466,8 +466,10 @@ class ScenarioConfig:
                         try:
                             geometry['minimum_density'] = float(stopping_criteria['minimum_density'])
                         except Exception:
-                            # Keep raw value if it cannot be converted cleanly
                             geometry['minimum_density'] = stopping_criteria['minimum_density']
+
+                    # Preserve fluid type so TankSystem can choose the correct stopping rule
+                    geometry['fluid'] = node.get('fluid', '').upper()
 
                     geometries[tank_id] = geometry
 

@@ -2938,6 +2938,11 @@ class SystemOrchestrator:
         report_lines.append(_line("Structural mass [kg]:", _fmt(total_structural_mass, 2)))
         report_lines.append(_line("Total inner volume [m^3]:", _fmt(total_inner_volume, 4)))
         report_lines.append(_line("Total outer volume [m^3]:", _fmt(total_outer_volume, 4)))
+        total_system_mass = total_initial_mass + total_structural_mass
+        gravimetric_efficiency = total_initial_mass / total_system_mass if total_system_mass > 0 else 0.0
+        volumetric_efficiency = total_inner_volume / total_outer_volume if total_outer_volume > 0 else 0.0
+        report_lines.append(_line("Gravimetric efficiency [-]:", _fmt(gravimetric_efficiency, 4)))
+        report_lines.append(_line("Volumetric efficiency [-]:", _fmt(volumetric_efficiency, 4)))
         report_lines.append(_line("Total iHEX energy [kWh]:", _fmt(total_ihex_kwh, 3)))
         report_lines.append(_line("Total OHEX energy [kWh]:", _fmt(total_ohex_kwh, 3)))
         report_lines.append(_line("Total HEX energy [kWh]:", _fmt(total_hex_kwh, 3)))
