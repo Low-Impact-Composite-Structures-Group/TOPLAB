@@ -1,0 +1,70 @@
+optimization:
+  name: CH2-CCH2 Gravimetric Efficiency Maximization
+  description: >
+    Single-objective SQP optimisation of the CH2+CCH2 coupled tank system.
+    Maximise gravimetric efficiency by varying tank radii and aspect ratios (phi).
+  base_config: ../../analysis/sized_ch2_cch2/sized_ch2_cch2_config.yaml
+
+# Design vector: [r1, r2, phi1, phi2] — set enabled: false to fix a variable at its baseline
+design_variables:
+  r1:
+    description: Tank 1 (CH2) inner radius [m]
+    node_id: 1
+    enabled: false
+    min: 0.36
+    max: 0.50
+    baseline: 0.4
+  r2:
+    description: Tank 2 (CCH2) inner radius [m]
+    node_id: 2
+    enabled: true
+    min: 0.56
+    max: 2.00
+    baseline: 0.6
+  phi1:
+    description: Tank 1 (CH2) aspect ratio [-]
+    node_id: 1
+    enabled: false
+    min: 1.0
+    max: 4.0
+    baseline: 3.0
+  phi2:
+    description: Tank 2 (CCH2) aspect ratio [-]
+    node_id: 2
+    enabled: false
+    min: 1.0
+    max: 4.0
+    baseline: 2.0
+
+constraints:
+  total_length_m:
+    description: >
+      Sum of each tank's total capsule length = r*(2+phi).
+      Computed analytically; no simulation needed.
+    max: 5.5
+  total_outer_volume_m3:
+    description: >
+      Sum of both tanks' outer volumes (liner + composite wall + insulation).
+      Extracted from _cached_tank_properties after orchestrator init.
+    max: 12.8
+  mission_completion:
+    description: >
+      The simulation must run to the full mission duration.
+      Designs that stop early (Tank 1 pressure floor or Tank 2 density floor)
+      are treated as infeasible: eta_g is forced to 0.0 as a penalty.
+    require: true
+
+# Set enabled: true once the baseline is working to add a venting hard constraint.
+dormancy_check:
+  enabled: false
+  duration_h: 24.0
+
+solver:
+  method: SLSQP
+  max_iter: 100
+  tol: 1.0e-4
+  # Per-variable FD steps: [r1_step_m, r2_step_m, phi1_step, phi2_step]
+  finite_diff_step: [0.001, 0.01, 0.1, 0.1]
+
+output:
+  results_dir: output
