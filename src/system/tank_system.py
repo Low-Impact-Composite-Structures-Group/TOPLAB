@@ -780,11 +780,13 @@ class TankSystem:
         wall_outer_radius = liner_outer_radius + thickness_wall
         external_radius = wall_outer_radius + thickness_insulation
 
-        # Calculate areas and volume using the configured capsule geometry.
+        # Calculate areas and volumes using the configured capsule geometry.
         volume = tank.volume
         inner_surface_area = tank.surface_area
         cylinder_length = tank.cylindrical_section_length
         outer_surface_area = 4 * math.pi * external_radius**2 + 2 * math.pi * external_radius * cylinder_length
+        # Outer volume: two hemispherical endcaps (= one full sphere) + cylindrical section
+        outer_volume = (4/3) * math.pi * external_radius**3 + math.pi * external_radius**2 * cylinder_length
 
         # Calculate masses using proper cylindrical+spherical geometry and NIST densities
         # Geometry: Cylindrical section (L = φR) + 2 hemispherical endcaps
@@ -827,6 +829,8 @@ class TankSystem:
             print(f"      Volume: {volume:.6f} m³")
             print(f"      Inner surface area: {inner_surface_area:.4f} m²")
             print(f"      Outer surface area: {outer_surface_area:.4f} m²")
+            print(f"      Inner volume: {volume:.6f} m³")
+            print(f"      Outer volume: {outer_volume:.6f} m³")
             print(f"      Inner radius: {inner_radius:.3f} m")
             print(f"      External radius: {external_radius:.3f} m")
             print(f"      Liner mass: {liner_mass:.2f} kg")
@@ -835,6 +839,7 @@ class TankSystem:
 
         return {
             'volume': volume,
+            'outer_volume': outer_volume,
             'inner_surface_area': inner_surface_area,
             'outer_surface_area': outer_surface_area,
             'inner_diameter': 2 * inner_radius,
@@ -2058,17 +2063,17 @@ class TankSystem:
                     gross_flows[i]['inflow'] > 1e-6 or gross_flows[i]['outflow'] > 1e-6
                     for i in gross_flows
                 )
-                if any_nonzero:
-                    parts = []
-                    for i in gross_flows:
-                        inf = gross_flows[i]['inflow']
-                        out = gross_flows[i]['outflow']
-                        if inf > 1e-6 or out > 1e-6:
-                            parts.append(f"T{i}: +{inf*1000:.1f}/-{out*1000:.1f}g/s")
-                    # print(f"  Post-processing t={current_time:.1f}s: {', '.join(parts)} (from history)")
-                else:
-                    if i < 5 or i % 200 == 0:
-                        print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
+                # if any_nonzero:
+                #     parts = []
+                #     for i in gross_flows:
+                #         inf = gross_flows[i]['inflow']
+                #         out = gross_flows[i]['outflow']
+                #         if inf > 1e-6 or out > 1e-6:
+                #             parts.append(f"T{i}: +{inf*1000:.1f}/-{out*1000:.1f}g/s")
+                #     # print(f"  Post-processing t={current_time:.1f}s: {', '.join(parts)} (from history)")
+                # else:
+                    # if i < 5 or i % 200 == 0:
+                        # print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
 
                 # Update flow data with gross coupling flows and set tank state attributes
                 for tank_idx in range(len(tank_states)):

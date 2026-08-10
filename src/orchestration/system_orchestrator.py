@@ -2827,6 +2827,8 @@ class SystemOrchestrator:
         total_final_mass = 0.0
         total_fuel_consumed = 0.0
         total_structural_mass = 0.0
+        total_inner_volume = 0.0
+        total_outer_volume = 0.0
         total_ihex_kwh = 0.0
         total_ohex_kwh = 0.0
         total_hex_kwh = 0.0
@@ -2859,10 +2861,15 @@ class SystemOrchestrator:
             hex_kwh = ihex_kwh + ohex_kwh
             structure_mass = float(tank_props.get('liner_mass', 0.0)) + float(tank_props.get('wall_mass', 0.0))
 
+            inner_volume = float(getattr(tank_geometry, 'volume', tank_props.get('volume', 0.0)))
+            outer_volume = float(tank_props.get('outer_volume', 0.0))
+
             total_initial_mass += initial_mass
             total_final_mass += final_mass
             total_fuel_consumed += fuel_consumed
             total_structural_mass += structure_mass
+            total_inner_volume += inner_volume
+            total_outer_volume += outer_volume
             total_ihex_kwh += ihex_kwh
             total_ohex_kwh += ohex_kwh
             total_hex_kwh += hex_kwh
@@ -2875,7 +2882,8 @@ class SystemOrchestrator:
             block.append(_line("Configured density [kg/m^3]:", _fmt(tank_config.get('initial_density', tank_config.get('calculated_initial_density')), 2)))
             block.append(_line("Minimum pressure [bar]:", _fmt(tank_config.get('minimum_pressure', 0.0) / 1e5, 1)))
             block.append(_line("Venting pressure [bar]:", _fmt(tank_config.get('venting_pressure', 0.0) / 1e5, 1)))
-            block.append(_line("Tank volume [m^3]:", _fmt(getattr(tank_geometry, 'volume', 0.0), 4)))
+            block.append(_line("Inner volume [m^3]:", _fmt(inner_volume, 4)))
+            block.append(_line("Outer volume [m^3]:", _fmt(outer_volume, 4)))
             block.append(_line("Tank radius [m]:", _fmt(getattr(tank_geometry, 'radius', 0.0), 3)))
             block.append(_line("Tank phi (L/R) [-]:", _fmt(getattr(tank_geometry, 'phi', 0.0), 3)))
             block.append(_line("Cylindrical length [m]:", _fmt(getattr(tank_geometry, 'cylindrical_section_length', 0.0), 3)))
@@ -2928,6 +2936,8 @@ class SystemOrchestrator:
         report_lines.append(_line("Final fuel mass [kg]:", _fmt(total_final_mass, 2)))
         report_lines.append(_line("Fuel consumed [kg]:", _fmt(total_fuel_consumed, 2)))
         report_lines.append(_line("Structural mass [kg]:", _fmt(total_structural_mass, 2)))
+        report_lines.append(_line("Total inner volume [m^3]:", _fmt(total_inner_volume, 4)))
+        report_lines.append(_line("Total outer volume [m^3]:", _fmt(total_outer_volume, 4)))
         report_lines.append(_line("Total iHEX energy [kWh]:", _fmt(total_ihex_kwh, 3)))
         report_lines.append(_line("Total OHEX energy [kWh]:", _fmt(total_ohex_kwh, 3)))
         report_lines.append(_line("Total HEX energy [kWh]:", _fmt(total_hex_kwh, 3)))
