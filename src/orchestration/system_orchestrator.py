@@ -579,7 +579,12 @@ class SystemOrchestrator:
 
             tank_configs.append(tank_config)
 
-            print(f"   Tank {tank_id} config: P_init={initial_pressure/1e5:.0f}bar, T_init={initial_temp:.1f}K, ρ_stop={geometry_data.get('minimum_density', 5.8):.1f}kg/m³")
+            fluid_type = geometry_data.get('fluid', '').upper()
+            if fluid_type == 'CH2':
+                p_stop_bar = float(geometry_data.get('minimum_pressure', 0)) / 1e5
+                print(f"   Tank {tank_id} config: P_init={initial_pressure/1e5:.0f}bar, T_init={initial_temp:.1f}K, P_stop={p_stop_bar:.1f}bar (CH2 pressure-based)")
+            else:
+                print(f"   Tank {tank_id} config: P_init={initial_pressure/1e5:.0f}bar, T_init={initial_temp:.1f}K, ρ_stop={geometry_data.get('minimum_density', 5.8):.1f}kg/m³")
 
         # Calculate mission duration based on profile
         mission_duration = self._calculate_mission_duration()
@@ -587,13 +592,16 @@ class SystemOrchestrator:
         # Get stopping criteria from configuration (prioritize stopping_criteria over tank geometry)
         stopping_criteria = self.scenario_config.config_dict.get('stopping_criteria', {})
 
-        # Get minimum density (prioritize stopping_criteria, fallback to tank geometry)
+        # Get minimum density for the global TankSystemConfig field.
+        # CH2 tanks use pressure-based stopping and have no minimum_density; skip them.
         if 'minimum_density' in stopping_criteria:
             minimum_density = float(stopping_criteria['minimum_density'])
         else:
-            first_tank_data = list(self.scenario_config.tank_geometries.values())[0]
-            minimum_density = float(first_tank_data.get('minimum_density', 5.8))  # Default 5.8 kg/m³
-            if 'minimum_density' not in first_tank_data:
+            tank_data_list = list(self.scenario_config.tank_geometries.values())
+            non_ch2 = [td for td in tank_data_list if td.get('fluid', '').upper() != 'CH2']
+            ref_tank = non_ch2[0] if non_ch2 else tank_data_list[0]
+            minimum_density = float(ref_tank.get('minimum_density', 5.8))
+            if 'minimum_density' not in ref_tank and non_ch2:
                 print(f"WARNING: Using fallback: minimum_density = {minimum_density} kg/m³ for stopping criteria (consider adding to YAML config)")
 
         # Get target density from stopping criteria configuration
