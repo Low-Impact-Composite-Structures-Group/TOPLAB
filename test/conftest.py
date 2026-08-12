@@ -19,26 +19,26 @@ def _ensure_import_paths(repo_root: Path) -> None:
 
 @pytest.fixture(scope="session")
 def main_analysis_configs(repo_root: Path) -> dict[str, Path]:
-    """The main analyses under analysis/."""
+    """The main analyses under examples/."""
     return {
         "single_tank_ch2": repo_root
-        / "analysis"
+        / "examples"
         / "single_tank_ch2"
         / "single_tank_ch2_config.yaml",
         "single_tank_slh2": repo_root
-        / "analysis"
+        / "examples"
         / "single_tank_slh2"
         / "single_tank_slh2_config.yaml",
         "single_tank_cch2": repo_root
-        / "analysis"
+        / "examples"
         / "single_tank_cch2"
         / "single_tank_cch2_config.yaml",
         "coupled_ch2_cch2": repo_root
-        / "analysis"
+        / "examples"
         / "coupled_ch2_cch2"
         / "coupled_ch2_cch2_config.yaml",
         "coupled_ch2_lh2": repo_root
-        / "analysis"
+        / "examples"
         / "coupled_ch2_lh2"
         / "coupled_ch2_lh2_config.yaml",
     }
@@ -48,14 +48,3 @@ def main_analysis_configs(repo_root: Path) -> dict[str, Path]:
 def coupled_configs(main_analysis_configs: dict[str, Path]) -> dict[str, Path]:
     return {k: v for k, v in main_analysis_configs.items() if k.startswith("coupled_")}
 
-
-@pytest.fixture(scope="session")
-def dual_flow_config(repo_root: Path) -> Path:
-    """Config for the cch2_cch2_parallel dual-flow analysis."""
-    return (
-        repo_root
-        / "analysis"
-        / "dual_flow"
-        / "cch2_cch2_parallel"
-        / "cch2_cch2_parallel.yaml"
-    )

@@ -28,7 +28,7 @@ class TestCouplingFlows:
     def setup_paths(self):
         """Setup paths for all test methods."""
         self.repo_root = Path(__file__).resolve().parent.parent
-        self.coupled_config = self.repo_root / 'analysis' / 'coupled_ch2_cch2' / 'coupled_ch2_cch2_config.yaml'
+        self.coupled_config = self.repo_root / 'examples' / 'coupled_ch2_cch2' / 'coupled_ch2_cch2_config.yaml'
 
         assert self.coupled_config.exists(), f"Coupled config not found: {self.coupled_config}"
 
