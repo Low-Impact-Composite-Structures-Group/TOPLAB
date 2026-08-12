@@ -31,6 +31,8 @@ class EvalResult:
     phi1: float = 0.0
     phi2: float = 0.0
     eta_g: float = 0.0
+    eta_v: float = 0.0
+    v_inner_m3: float = 0.0
     v_outer_m3: float = 0.0
     total_length_m: float = 0.0
     mission_completed: bool = False
@@ -90,6 +92,7 @@ def evaluate_design(
         # Outer volume is available from _cached_tank_properties after __init__ — no ODE needed.
         n_tanks = len(orch.tank_geometries)
         v_outer = 0.0
+        v_inner = 0.0
         for i in range(n_tanks):
             props = orch.tank_system._cached_tank_properties[i]
             outer_vol = props.get("outer_volume")
@@ -98,7 +101,9 @@ def evaluate_design(
                 cyl_len = float(props.get("cylindrical_section_length", 0.0))
                 outer_vol = (4.0 / 3.0) * math.pi * outer_r ** 3 + math.pi * outer_r ** 2 * cyl_len
             v_outer += float(outer_vol)
+            v_inner += float(getattr(orch.tank_geometries[i], 'volume', props.get('volume', 0.0)))
         result.v_outer_m3 = v_outer
+        result.v_inner_m3 = v_inner
 
         sim = orch.run_simulation()
 
@@ -116,6 +121,7 @@ def evaluate_design(
                 total_struct += float(props["liner_mass"]) + float(props["wall_mass"])
             total_mass = total_fuel + total_struct
             result.eta_g = total_fuel / total_mass if total_mass > 0.0 else 0.0
+            result.eta_v = result.v_inner_m3 / result.v_outer_m3 if result.v_outer_m3 > 0.0 else 0.0
 
     except Exception as exc:
         result.error = str(exc)
@@ -183,15 +189,15 @@ class SQPOptimizer:
             res = evaluate_design(r1, r2, phi1, phi2, self.base_raw, self.base_config_path)
             elapsed = time.perf_counter() - t0
             tag = "OK" if res.feasible else ("INFEASIBLE" if not res.mission_completed else "ERROR")
-            print(f"η_g={res.eta_g:.4f}  V={res.v_outer_m3:.3f}m³  "
+            print(f"η_v={res.eta_v:.4f}  η_g={res.eta_g:.4f}  V={res.v_outer_m3:.3f}m³  "
                   f"L={res.total_length_m:.2f}m  {tag}  ({elapsed:.1f}s)")
             self._cache[key] = res
         return self._cache[key]
 
-    # ── objective (minimise −η_g; infeasible → 0, i.e. worst possible) ───────
+    # ── objective (minimise −η_v; infeasible → 0, i.e. worst possible) ───────
 
     def objective(self, x: np.ndarray) -> float:
-        return -self._get(x).eta_g
+        return -self._get(x).eta_v
 
     # ── inequality constraints (SLSQP: value ≥ 0) ────────────────────────────
 
@@ -214,7 +220,9 @@ class SQPOptimizer:
         self._history.append({
             "iter":           len(self._history),
             "r1": r1, "r2": r2, "phi1": phi1, "phi2": phi2,
+            "eta_v":          res.eta_v,
             "eta_g":          res.eta_g,
+            "v_inner_m3":     res.v_inner_m3,
             "v_outer_m3":     res.v_outer_m3,
             "total_length_m": res.total_length_m,
             "feasible":       res.feasible,
@@ -251,7 +259,7 @@ class SQPOptimizer:
         # header
         bar = "=" * 72
         print(f"\n{bar}")
-        print(f"  CH2-CCH2 SQP — Maximise Gravimetric Efficiency")
+        print(f"  CH2-CCH2 SQP — Maximise Volumetric Efficiency")
         print(f"{bar}")
         print(f"  Active variables ({len(self._active)}):")
         for v in self._active:
@@ -276,7 +284,8 @@ class SQPOptimizer:
         m0 = self._get(x0)
         self._history.append({
             "iter": -1, "r1": r1_0, "r2": r2_0, "phi1": phi1_0, "phi2": phi2_0,
-            "eta_g": m0.eta_g, "v_outer_m3": m0.v_outer_m3,
+            "eta_v": m0.eta_v, "eta_g": m0.eta_g,
+            "v_inner_m3": m0.v_inner_m3, "v_outer_m3": m0.v_outer_m3,
             "total_length_m": m0.total_length_m,
             "feasible": m0.feasible, "mission_ratio": m0.mission_ratio,
         })
@@ -302,6 +311,8 @@ class SQPOptimizer:
         print(f"  scipy status : {opt.message}")
         print(f"  Optimum      : r1={r1_opt:.4f} m   r2={r2_opt:.4f} m   "
               f"phi1={phi1_opt:.3f}   phi2={phi2_opt:.3f}")
+        print(f"  η_v          : {m_opt.eta_v:.4f}   "
+              f"(Δ = {m_opt.eta_v - m0.eta_v:+.4f} vs baseline {m0.eta_v:.4f})")
         print(f"  η_g          : {m_opt.eta_g:.4f}   "
               f"(Δ = {m_opt.eta_g - m0.eta_g:+.4f} vs baseline {m0.eta_g:.4f})")
         print(f"  Total length : {l_opt:.3f} m   "
@@ -336,7 +347,8 @@ class SQPOptimizer:
         cache_rows = [
             {
                 "r1": res.r1, "r2": res.r2, "phi1": res.phi1, "phi2": res.phi2,
-                "eta_g": res.eta_g, "v_outer_m3": res.v_outer_m3,
+                "eta_v": res.eta_v, "eta_g": res.eta_g,
+                "v_inner_m3": res.v_inner_m3, "v_outer_m3": res.v_outer_m3,
                 "total_length_m": res.total_length_m,
                 "feasible": res.feasible, "mission_ratio": res.mission_ratio,
                 "error": res.error or "",
@@ -363,10 +375,11 @@ class SQPOptimizer:
             fh.write(f"Fixed vars  : {', '.join(self._fixed) if self._fixed else 'none'}\n\n")
             fh.write(f"Baseline : r1={m0.r1:.4f} m  r2={m0.r2:.4f} m  "
                      f"phi1={m0.phi1:.3f}  phi2={m0.phi2:.3f}  "
-                     f"η_g={m0.eta_g:.4f}  V={m0.v_outer_m3:.3f} m³\n")
+                     f"η_v={m0.eta_v:.4f}  η_g={m0.eta_g:.4f}  V={m0.v_outer_m3:.3f} m³\n")
             fh.write(f"Optimum  : r1={r1_opt:.4f} m  r2={r2_opt:.4f} m  "
                      f"phi1={phi1_opt:.3f}  phi2={phi2_opt:.3f}  "
-                     f"η_g={m_opt.eta_g:.4f}  V={m_opt.v_outer_m3:.3f} m³  "
+                     f"η_v={m_opt.eta_v:.4f}  η_g={m_opt.eta_g:.4f}  V={m_opt.v_outer_m3:.3f} m³  "
                      f"L={l_opt:.3f} m\n")
+            fh.write(f"Δη_v     : {m_opt.eta_v - m0.eta_v:+.4f}\n")
             fh.write(f"Δη_g     : {m_opt.eta_g - m0.eta_g:+.4f}\n")
         print(f"  Summary  → {summary_path}")

@@ -2,7 +2,7 @@ optimization:
   name: CH2-CCH2 Gravimetric Efficiency Maximization
   description: >
     Single-objective SQP optimisation of the CH2+CCH2 coupled tank system.
-    Maximise gravimetric efficiency by varying tank radii and aspect ratios (phi).
+    Maximise volumetric efficiency (V_inner / V_outer) by varying tank radii and aspect ratios (phi).
   base_config: ../../analysis/sized_ch2_cch2/sized_ch2_cch2_config.yaml
 
 # Design vector: [r1, r2, phi1, phi2] — set enabled: false to fix a variable at its baseline
@@ -11,30 +11,30 @@ design_variables:
     description: Tank 1 (CH2) inner radius [m]
     node_id: 1
     enabled: false
-    min: 0.36
+    min: 0.35
     max: 0.50
     baseline: 0.4
   r2:
     description: Tank 2 (CCH2) inner radius [m]
     node_id: 2
-    enabled: true
-    min: 0.56
+    enabled: false
+    min: 0.6
     max: 2.00
     baseline: 0.6
   phi1:
     description: Tank 1 (CH2) aspect ratio [-]
     node_id: 1
-    enabled: false
+    enabled: true
     min: 1.0
     max: 4.0
-    baseline: 3.0
+    baseline: 2.0
   phi2:
     description: Tank 2 (CCH2) aspect ratio [-]
     node_id: 2
     enabled: false
     min: 1.0
     max: 4.0
-    baseline: 2.0
+    baseline: 3.0
 
 constraints:
   total_length_m:
@@ -64,7 +64,7 @@ solver:
   max_iter: 100
   tol: 1.0e-4
   # Per-variable FD steps: [r1_step_m, r2_step_m, phi1_step, phi2_step]
-  finite_diff_step: [0.001, 0.01, 0.1, 0.1]
+  finite_diff_step: [0.01, 0.01, 0.01, 0.01]
 
 output:
   results_dir: output
