@@ -13,7 +13,7 @@ def repo_root() -> Path:
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_import_paths(repo_root: Path) -> None:
-    # Ensure `from src...` imports work when pytest is run from repo root.
+    # Ensure `from toplab...` imports work when pytest is run from repo root.
     sys.path.insert(0, str(repo_root))
 
 

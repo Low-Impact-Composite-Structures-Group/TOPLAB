@@ -1,6 +1,6 @@
 import pytest
 
-from src.dynamics.edge_flow import EdgeFlow
+from toplab.dynamics.edge_flow import EdgeFlow
 
 
 @pytest.mark.unit

@@ -26,11 +26,11 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import the new NIST materials framework
-from src.materials.nist_materials import NISTMaterial, get_material_by_nist_path
+from toplab.materials.nist_materials import NISTMaterial, get_material_by_nist_path
 
 # Import multi_tank NIST properties for comparison
-from src.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as al_original_cp
-from src.materials.nist_material_properties.g10_properties import specific_heat as g10_original_cp
+from toplab.materials.nist_material_properties.aluminum6061t6_properties import specific_heat as al_original_cp
+from toplab.materials.nist_material_properties.g10_properties import specific_heat as g10_original_cp
 
 
 class TestNISTMaterialBasics:

@@ -1,7 +1,7 @@
 import pytest
 
-from src.configuration.scenario_configuration import ScenarioConfig
-from src.orchestration.system_orchestrator import SystemOrchestrator
+from toplab.configuration.scenario_configuration import ScenarioConfig
+from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
 
 @pytest.mark.plotting

@@ -18,9 +18,9 @@ from pathlib import Path
 # Add project root to Python path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
-sys.path.append(str(project_root / "src"))
+# sys.path manipulation removed: install toplab with `pip install -e .` from repo root
 
-from src.configuration.scenario_configuration import ScenarioConfig
+from toplab.configuration.scenario_configuration import ScenarioConfig
 
 
 class TestScenarioConfig:

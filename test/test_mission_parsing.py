@@ -1,6 +1,6 @@
 import pytest
 
-from src.configuration.scenario_configuration import ScenarioConfig
+from toplab.configuration.scenario_configuration import ScenarioConfig
 
 
 @pytest.mark.config
@@ -121,7 +121,7 @@ def test_dual_flow_assigned_nodes_exist_in_network(dual_flow_config):
 @pytest.mark.unit
 def test_from_csv_with_column_name_produces_sections(dual_flow_config):
     """Mission.from_csv with column_name returns a non-empty section list."""
-    from src.missions.mission import Mission
+    from toplab.missions.mission import Mission
 
     config = ScenarioConfig.from_yaml(dual_flow_config)
     missions_cfg = config.mission_sequence.missions
@@ -137,7 +137,7 @@ def test_from_csv_with_column_name_produces_sections(dual_flow_config):
 @pytest.mark.unit
 def test_from_csv_column_name_produces_independent_missions(dual_flow_config):
     """FC and GT missions loaded from the same CSV produce different fuel totals."""
-    from src.missions.mission import Mission
+    from toplab.missions.mission import Mission
 
     config = ScenarioConfig.from_yaml(dual_flow_config)
     missions_cfg = config.mission_sequence.missions
@@ -164,7 +164,7 @@ def test_from_csv_column_name_produces_independent_missions(dual_flow_config):
 @pytest.mark.unit
 def test_from_csv_unknown_column_name_raises(dual_flow_config):
     """from_csv raises ValueError for a non-existent column_name."""
-    from src.missions.mission import Mission
+    from toplab.missions.mission import Mission
 
     config = ScenarioConfig.from_yaml(dual_flow_config)
     csv_file = config.mission_sequence.missions[0].parameters["csv_file"]
@@ -177,7 +177,7 @@ def test_from_csv_unknown_column_name_raises(dual_flow_config):
 @pytest.mark.unit
 def test_dual_flow_missions_share_time_axis_length(dual_flow_config):
     """Both missions are built from the same CSV rows and have the same section count."""
-    from src.missions.mission import Mission
+    from toplab.missions.mission import Mission
 
     config = ScenarioConfig.from_yaml(dual_flow_config)
     missions_cfg = config.mission_sequence.missions

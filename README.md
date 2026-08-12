@@ -9,7 +9,23 @@ This repository hosts the official implementation accompanying the paper:
 
 ## Repository Scope
 
-TOPLAB provides a configuration-driven workflow for running hydrogen fuel system analyses and studying thermomechanical behavior under mission-relevant conditions.
+TOPLAB is the **library**. All runnable analyses and optimisation studies have
+moved to the companion repository **toplab-apps** (private). This repository
+provides the installable `toplab` Python package and a set of worked examples
+in `examples/`.
+
+The main package lives under `toplab/`.
+
+## Installation
+
+TOPLAB is a standard Python package. Install it in editable mode with pip:
+
+```bash
+pip install -e .
+```
+
+After installation, `import toplab` resolves from anywhere in the active
+environment without any `sys.path` manipulation.
 
 ## Environment Setup
 
@@ -90,34 +106,33 @@ cd documentation
 make
 ```
 
-## Analyses
+## Examples
 
-The runnable simulation cases live under `analysis/`.
+A selection of ready-to-run analyses lives under `examples/`. Each example
+follows the same pattern as toplab-apps studies: a driver script, a YAML
+configuration, and shared mission CSVs read from `missions/`.
 
-Each analysis case is intended to follow a common pattern:
+Run from the repository root after installing the package:
 
-- one local driver script
-- one or more YAML scenario files
-- one local `output/` directory for generated plots and reports
+```bash
+python examples/single_tank_cch2/driver_single_tank_cch2.py
+```
 
-These cases are thin entrypoints into the shared orchestration and solver stack under `src/`.
+Available examples:
 
-For the analysis-layer conventions and workflow, see:
+| Directory | Description |
+|-----------|-------------|
+| `single_tank_ch2` | Gaseous hydrogen single-tank discharge |
+| `single_tank_cch2` | Cryo-compressed hydrogen single-tank discharge |
+| `single_tank_slh2` | Subcooled liquid hydrogen single-tank discharge |
+| `coupled_ch2_cch2` | CH2–CCH2 coupled system with pressure compensation |
+| `coupled_ch2_lh2` | CH2–LH2 coupled system with flow-controlled pressurisation |
 
-- `analysis/README.md`
+## Analyses and Optimisation Studies
 
-## Optimization Studies
-
-The runnable design studies live under `optimization/`.
-
-This layer mirrors the spirit of `analysis/`, but separates study-specific entrypoints from shared optimization machinery:
-
-- `optimization/<study>/` contains the study-local driver, YAML study definition, and outputs
-- `src/optimization/` contains the reusable sweep / optimization runtime
-
-For the optimization-layer conventions and workflow, see:
-
-- `optimization/README.md`
+Full analysis and optimisation case sets live in the companion repository
+**toplab-apps**. See that repository for the complete study suite and its
+own environment setup instructions.
 
 ## Contact
 
