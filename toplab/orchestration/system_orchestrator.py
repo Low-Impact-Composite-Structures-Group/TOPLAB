@@ -101,8 +101,9 @@ class SystemOrchestrator:
         raw_missions_list = raw_config.get('missions') if isinstance(raw_config, dict) else None
         if isinstance(raw_missions_list, list) and len(raw_missions_list) > 1:
             self.per_tank_mission_profiles = self._load_per_tank_mission_profiles_from_raw(raw_missions_list)
-            # Primary profile for sizing/duration: first tank's profile
-            self.mission_profile = self.per_tank_mission_profiles.get(0) or self._get_mission_profile(mission_profile)
+            # Primary profile for sizing/duration: first tank's profile (unwrap list if multi-stream)
+            primary = self.per_tank_mission_profiles.get(0) or self._get_mission_profile(mission_profile)
+            self.mission_profile = primary[0] if isinstance(primary, list) else primary
         else:
             self.per_tank_mission_profiles = None
             self.mission_profile = self._get_mission_profile(mission_profile)
@@ -677,6 +678,7 @@ class SystemOrchestrator:
         from toplab.configuration.scenario_configuration import MissionConfig
 
         per_tank: Dict[int, Any] = {}
+        stream_labels: Dict[int, List[str]] = {}
         for m_data in raw_missions_list:
             assigned_node = m_data.get('assigned_to_node')
             if assigned_node is None:
@@ -693,9 +695,23 @@ class SystemOrchestrator:
                 assigned_to=assigned_node,
             )
             profile = self._get_mission_profile_for_node(mc)
-            per_tank[tank_index] = profile
-            print(f"   Per-tank mission: node {assigned_node} (tank index {tank_index}) → profile={mc.profile}")
+            label = mc.parameters.get('column_name', f"Stream {len(stream_labels.get(tank_index, [])) + 1}")
 
+            if tank_index in per_tank:
+                # Multiple missions target the same node → accumulate into a list
+                existing = per_tank[tank_index]
+                if not isinstance(existing, list):
+                    per_tank[tank_index] = [existing]
+                    stream_labels[tank_index] = [stream_labels[tank_index][0]]
+                per_tank[tank_index].append(profile)
+                stream_labels[tank_index].append(label)
+            else:
+                per_tank[tank_index] = profile
+                stream_labels[tank_index] = [label]
+
+            print(f"   Per-tank mission: node {assigned_node} (tank index {tank_index}) → profile={mc.profile}, label='{label}'")
+
+        self._per_tank_stream_labels = stream_labels
         return per_tank
 
     def _get_mission_profile_for_node(self, mission_config) -> Any:
@@ -1440,6 +1456,34 @@ class SystemOrchestrator:
         print(f"   iHEX extracted from DAE: {valid_points}/{len(qdot_ihex)} points, max = {max_q_ihex:.0f}W")
         return qdot_ihex
 
+    def _compute_per_stream_outflows(self, tank_index: int) -> Optional[Dict[str, np.ndarray]]:
+        """
+        For tanks with multiple discharge streams (e.g. FC + GT dual-flow), return a dict
+        mapping each stream label → outflow array [g/s, negative convention] at simulation times.
+        Returns None when only a single stream is present.
+        """
+        if not self.results:
+            return None
+        per_tank = getattr(self, 'per_tank_mission_profiles', None)
+        if per_tank is None:
+            return None
+        profiles = per_tank.get(tank_index)
+        if not isinstance(profiles, list) or len(profiles) < 2:
+            return None
+        stream_labels = getattr(self, '_per_tank_stream_labels', {})
+        labels = stream_labels.get(tank_index, [f"Stream {i+1}" for i in range(len(profiles))])
+
+        from toplab.system.tank_system import TankSystem
+        times = self.results.times
+        result = {}
+        for profile, label in zip(profiles, labels):
+            flows_gs = np.array([
+                -TankSystem._eval_single_profile_flow(profile, t, 'OutFlow') * 1000.0
+                for t in times
+            ])
+            result[label] = flows_gs
+        return result
+
     def _get_mission_flow_rate_at_time(self, time_s: float) -> float:
         """
         Get mass flow rate from mission profile at specified time.
@@ -1890,6 +1934,8 @@ class SystemOrchestrator:
                 ylim = mf_config.get('ylim', None)
                 legend_location = mf_config.get('legend_location', 'best')
 
+                per_stream = self._compute_per_stream_outflows(tank_idx)
+
                 mf_fig = plotter.plot_mass_flows(
                     results=self.results,
                     tank_index=tank_idx,
@@ -1898,7 +1944,8 @@ class SystemOrchestrator:
                     save_path=str(mf_save_path) if mf_save_path else None,
                     xlim=xlim,
                     ylim=ylim,
-                    legend_location=legend_location
+                    legend_location=legend_location,
+                    per_stream_outflows=per_stream,
                 )
                 figures.append(mf_fig)
 

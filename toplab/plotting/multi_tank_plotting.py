@@ -1465,7 +1465,8 @@ class DelftColourPlotter:
                        save_path: Optional[str] = None,
                        xlim: Optional[Tuple[float, float]] = None,
                        ylim: Optional[Tuple[float, float]] = None,
-                       legend_location: str = 'best') -> plt.Figure:
+                       legend_location: str = 'best',
+                       per_stream_outflows: Optional[Dict[str, Any]] = None) -> plt.Figure:
         """
         Plot mass flow rates for a single tank using the proven working pattern from multi_tank_analysis.
 
@@ -1478,6 +1479,9 @@ class DelftColourPlotter:
             xlim: Optional tuple (xmin, xmax) for x-axis range [hours]
             ylim: Optional tuple (ymin, ymax) for y-axis range [g/s]
             legend_location: Location string for legend (e.g., 'best', 'upper left')
+            per_stream_outflows: Optional dict mapping stream label → outflow array [g/s, negative].
+                                 When provided, individual stream curves are plotted instead of a
+                                 single combined outflow, e.g. {'FC': array, 'GT': array}.
 
         Returns:
             matplotlib Figure object
@@ -1496,12 +1500,6 @@ class DelftColourPlotter:
 
         # Get flow data for the specific tank using the exact same pattern as working multi_tank_analysis
         tank_data = results._extract_tank_arrays(tank_index)
-
-        # Get flow data - coupling flows are incorporated into inflow/outflow
-        # For multi-tank systems:
-        # - Tank 1 (source): coupling appears as additional outflow
-        # - Tank 2 (target): coupling appears as additional inflow
-        # This correctly represents the mass transfer between tanks
 
         coupling_inflow_rates = tank_data['coupling_inflow_rates']
         coupling_outflow_rates = tank_data['coupling_outflow_rates']
@@ -1527,16 +1525,28 @@ class DelftColourPlotter:
         outflow_color = self.color_palette[1 % len(self.color_palette)]
         vent_color = self.color_palette[2 % len(self.color_palette)]
 
-        # Plot with different line styles for greyscale distinction
         inflow_linestyle = '-'
         outflow_linestyle = '--' if self.use_greyscale else '-'
-        vent_linestyle = '-.' if self.use_greyscale else '--'  # dash-dot pattern
+        vent_linestyle = '-.' if self.use_greyscale else '--'
 
-        # Plot only inflow, outflow, and vent (coupling flows are incorporated into inflow/outflow)
         ax.plot(times_hours, total_inflow, color=inflow_color, linewidth=2,
                 linestyle=inflow_linestyle, label='Inflow')
-        ax.plot(times_hours, total_outflow, color=outflow_color, linewidth=2,
-                linestyle=outflow_linestyle, label='Outflow')
+
+        if per_stream_outflows:
+            # Plot each discharge stream separately, then the total as a dashed sum
+            stream_items = list(per_stream_outflows.items())
+            for stream_idx, (stream_label, stream_flows) in enumerate(stream_items):
+                color = self.color_palette[(stream_idx + 1) % len(self.color_palette)]
+                linestyle = self.line_styles[stream_idx % len(self.line_styles)] if self.use_greyscale else '-'
+                ax.plot(times_hours, stream_flows, color=color, linewidth=2,
+                        linestyle=linestyle, label=stream_label)
+            # Total outflow as dashed reference
+            ax.plot(times_hours, total_outflow, color='black', linewidth=1.5,
+                    linestyle='--', alpha=0.6, label='Total outflow')
+        else:
+            ax.plot(times_hours, total_outflow, color=outflow_color, linewidth=2,
+                    linestyle=outflow_linestyle, label='Outflow')
+
         ax.plot(times_hours, vent, color=vent_color, linewidth=2,
                 linestyle=vent_linestyle, label='Vent')
 
@@ -1546,7 +1556,6 @@ class DelftColourPlotter:
         # Set up plot formatting to match other plots
         ax.set_xlabel('Time [hours]')
         ax.set_ylabel('Flow Rate [g/s]')
-        # ax.set_title(f'Tank {tank_index + 1} Flow Rates')
         ax.grid(True, alpha=0.3)
 
         # Apply custom axis limits if provided
@@ -1559,7 +1568,6 @@ class DelftColourPlotter:
         # Add legend with 3D shadow effect (same styling as other plots)
         legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location, frameon=True, fancybox=True,
                           shadow=True, framealpha=0.9, edgecolor='black')
-        # Additional styling for 3D effect to match tank evolution plots
         legend.get_frame().set_facecolor('white')
         legend.get_frame().set_linewidth(1.2)
 
