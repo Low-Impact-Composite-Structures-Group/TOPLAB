@@ -875,6 +875,7 @@ class TankSystem:
             'radius': inner_radius,
             'inner_radius': inner_radius,
             'ambient_htc': ambient_htc,
+            'thickness_wall': thickness_wall,
             # Add netting analysis results
             **thickness_info
         }
