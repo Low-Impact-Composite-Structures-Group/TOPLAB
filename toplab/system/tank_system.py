@@ -46,7 +46,7 @@ class TankConfig:
 class TankSystemConfig:
     """Configuration parameters for the tank system."""
     AMBIENT_TEMPERATURE: float = 298.15  # K
-    MISSION_DURATION: float = 3600.0     # Mission duration in seconds (default 1 hour)
+    MISSION_DURATION: float = NotImplementedError  # complain
     tanks: List[TankConfig] = None       # Tank configurations
     mission_profile: Any = None          # Mission profile for flow calculations
     minimum_density: float = 5.8         # Stopping density [kg/m³]
