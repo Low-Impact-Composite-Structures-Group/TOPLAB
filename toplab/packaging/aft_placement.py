@@ -368,97 +368,333 @@ def _raw_radius_at(x: float, dims: AftFuselageDimensions) -> float:
         + dims.d3 / 2.0
     )
 
-
-def _plot_fuselage_surface(ax, dims: AftFuselageDimensions, n_theta: int = 64, n_x: int = 80) -> None:
-    """Surface plot of the aft fuselage with its axis along Matplotlib x."""
+def _plot_fuselage_surface(
+    fig,
+    dims: AftFuselageDimensions,
+    n_theta: int = 64,
+    n_x: int = 80,
+) -> None:
+    """Add the aft-fuselage surface to a Plotly 3-D figure."""
     import numpy as np
+    import plotly.graph_objects as go
 
     x_vals = np.linspace(0.0, dims.total_length, n_x)
     theta = np.linspace(0.0, 2.0 * np.pi, n_theta)
+
     xx, tt = np.meshgrid(x_vals, theta)
-    rr = np.vectorize(lambda x: _raw_radius_at(x, dims))(xx)
-    ax.plot_surface(
-        xx, rr * np.cos(tt), rr * np.sin(tt),
-        alpha=0.12, linewidth=0.0, color="#8fbcd4",
+
+    rr = np.vectorize(
+        lambda x: _raw_radius_at(x, dims)
+    )(xx)
+
+    fig.add_trace(
+        go.Surface(
+            x=xx,
+            y=rr * np.cos(tt),
+            z=rr * np.sin(tt),
+            surfacecolor=np.zeros_like(xx),
+            colorscale=[
+                [0.0, "#8fbcd4"],
+                [1.0, "#8fbcd4"],
+            ],
+            showscale=False,
+            opacity=0.12,
+            hoverinfo="skip",
+            name="Fuselage",
+            showlegend=False,
+        )
     )
 
 
 def _plot_capsule_along_x(
-    ax, x_center: float, outer_radius: float, half_cyl: float, color: str
+    fig,
+    x_center: float,
+    outer_radius: float,
+    half_cyl: float,
+    color: str,
+    name: str,
 ) -> None:
-    """Surface plot of a capsule with its axis along Matplotlib x."""
+    """Add a capsule surface with its longitudinal axis along x."""
     import numpy as np
+    import plotly.graph_objects as go
 
     theta = np.linspace(0.0, 2.0 * np.pi, 48)
 
+    # ------------------------------------------------------------------
     # Cylindrical section
-    x_cyl = np.linspace(x_center - half_cyl, x_center + half_cyl, 22)
-    tt, xx = np.meshgrid(theta, x_cyl)
-    ax.plot_surface(
-        xx, outer_radius * np.cos(tt), outer_radius * np.sin(tt),
-        color=color, alpha=0.7, linewidth=0.15, edgecolor="#333333",
+    # ------------------------------------------------------------------
+
+    x_cyl = np.linspace(
+        x_center - half_cyl,
+        x_center + half_cyl,
+        22,
     )
 
+    tt, xx = np.meshgrid(theta, x_cyl)
+
+    yy = outer_radius * np.cos(tt)
+    zz = outer_radius * np.sin(tt)
+
+    fig.add_trace(
+        go.Surface(
+            x=xx,
+            y=yy,
+            z=zz,
+            surfacecolor=np.zeros_like(xx),
+            colorscale=[
+                [0.0, color],
+                [1.0, color],
+            ],
+            showscale=False,
+            opacity=0.7,
+            hovertemplate=(
+                f"{name}"
+                "<br>x: %{x:.3f} m"
+                "<br>y: %{y:.3f} m"
+                "<br>z: %{z:.3f} m"
+                "<extra></extra>"
+            ),
+            name=name,
+            showlegend=False,
+        )
+    )
+
+    # ------------------------------------------------------------------
     # Hemispherical caps
-    phi = np.linspace(0.0, math.pi / 2.0, 20)
+    # ------------------------------------------------------------------
+
+    phi = np.linspace(0.0, np.pi / 2.0, 20)
+
+    pp, tt2 = np.meshgrid(phi, theta)
+
+    radial = outer_radius * np.cos(pp)
+
+    yy_cap = radial * np.cos(tt2)
+    zz_cap = radial * np.sin(tt2)
+
     for sign in (-1.0, +1.0):
-        pp, tt2 = np.meshgrid(phi, theta)
-        radial = outer_radius * np.cos(pp)
-        ax.plot_surface(
-            x_center + sign * (half_cyl + outer_radius * np.sin(pp)),
-            radial * np.cos(tt2),
-            radial * np.sin(tt2),
-            color=color, alpha=0.7, linewidth=0.15, edgecolor="#333333",
+
+        xx_cap = (
+            x_center
+            + sign * (
+                half_cyl
+                + outer_radius * np.sin(pp)
+            )
+        )
+
+        fig.add_trace(
+            go.Surface(
+                x=xx_cap,
+                y=yy_cap,
+                z=zz_cap,
+                surfacecolor=np.zeros_like(xx_cap),
+                colorscale=[
+                    [0.0, color],
+                    [1.0, color],
+                ],
+                showscale=False,
+                opacity=0.7,
+                hovertemplate=(
+                    f"{name}"
+                    "<br>x: %{x:.3f} m"
+                    "<br>y: %{y:.3f} m"
+                    "<br>z: %{z:.3f} m"
+                    "<extra></extra>"
+                ),
+                name=name,
+                showlegend=False,
+            )
         )
 
 
-def _set_equal_axes_xyz(ax) -> None:
-    """Force equal scale in x, y, z."""
-    x_min, x_max = ax.get_xlim3d()
-    y_min, y_max = ax.get_ylim3d()
-    z_min, z_max = ax.get_zlim3d()
-    mid = (0.5 * (x_min + x_max), 0.5 * (y_min + y_max), 0.5 * (z_min + z_max))
-    half = 0.5 * max(x_max - x_min, y_max - y_min, z_max - z_min)
-    ax.set_xlim3d(mid[0] - half, mid[0] + half)
-    ax.set_ylim3d(mid[1] - half, mid[1] + half)
-    ax.set_zlim3d(mid[2] - half, mid[2] + half)
-    ax.set_box_aspect((1.0, 1.0, 1.0))
+def _set_equal_axes(
+    fig,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
+) -> None:
+    """Set equal numerical ranges on all three Plotly axes."""
 
+    mid_x = 0.5 * (x_min + x_max)
+    mid_y = 0.5 * (y_min + y_max)
+    mid_z = 0.5 * (z_min + z_max)
 
-def plot_aft_placement(result: AftPlacementResult) -> tuple:
-    """Render a 3-D view of the aft fuselage with the placed tanks.
+    half = 0.5 * max(
+        x_max - x_min,
+        y_max - y_min,
+        z_max - z_min,
+    )
 
-    The fuselage axis runs along Matplotlib's x-axis so the aft section
-    appears horizontal in the default view (elev=20, azim=-90).  The plot
-    is generated even for infeasible placements so violations are visible.
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(
+                range=[mid_x - half, mid_x + half],
+            ),
+            yaxis=dict(
+                range=[mid_y - half, mid_y + half],
+            ),
+            zaxis=dict(
+                range=[mid_z - half, mid_z + half],
+            ),
+            aspectmode="cube",
+        )
+    )
+
+def plot_aft_placement(result: AftPlacementResult):
+    """Render an interactive 3-D view of the aft fuselage with placed tanks.
+
+    The fuselage axis runs along the Plotly x-axis. The plot is generated
+    even for infeasible placements so violations remain visible.
 
     Returns:
-        (fig, ax) Matplotlib figure and 3-D axes.
+        Plotly Figure.
     """
-    import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
 
-    _COLORS = ["#2d6a4f", "#1e3a5f", "#7b2d2d", "#6b4c11", "#4a1060"]
+    _COLORS = [
+        "#2d6a4f",
+        "#1e3a5f",
+        "#7b2d2d",
+        "#6b4c11",
+        "#4a1060",
+    ]
 
     dims = result.dims
-    fig = plt.figure(figsize=(13, 6))
-    ax = fig.add_subplot(111, projection="3d")
 
-    _plot_fuselage_surface(ax, dims)
+    fig = go.Figure()
+
+    # ------------------------------------------------------------------
+    # Fuselage
+    # ------------------------------------------------------------------
+
+    _plot_fuselage_surface(fig, dims)
+
+    # ------------------------------------------------------------------
+    # Tanks
+    # ------------------------------------------------------------------
 
     for p in result.placements:
+
         i = p.tank_index
         R = result.outer_radii[i]
         half_cyl = result.half_outer_lengths[i] - R
         color = _COLORS[i % len(_COLORS)]
-        _plot_capsule_along_x(ax, p.x_center, R, half_cyl, color)
-        status = "OK" if p.feasible else f"INFEAS {p.max_violation:.3f} m"
-        ax.text(p.x_center, 0.0, R * 1.05, f"Tank_{i + 1}\n{status}", fontsize=8, ha="center")
 
-    ax.set_xlabel("x – from aft bulkhead [m]")
-    ax.set_ylabel("y [m]")
-    ax.set_zlabel("z [m]")
-    ax.set_title("Aft Fuselage Packaging")
-    _set_equal_axes_xyz(ax)
-    ax.view_init(elev=20, azim=-90)
+        tank_name = f"Tank_{i + 1}"
 
-    return fig, ax
+        _plot_capsule_along_x(
+            fig,
+            p.x_center,
+            R,
+            half_cyl,
+            color,
+            tank_name,
+        )
+
+        status = (
+            "OK"
+            if p.feasible
+            else f"INFEAS {p.max_violation:.3f} m"
+        )
+
+        # --------------------------------------------------------------
+        # Tank label
+        # --------------------------------------------------------------
+
+        fig.add_trace(
+            go.Scatter3d(
+                x=[p.x_center],
+                y=[0.0],
+                z=[R * 1.05],
+                mode="text",
+                text=[f"{tank_name}<br>{status}"],
+                textfont=dict(size=11),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Axis limits
+    # ------------------------------------------------------------------
+
+    # Determine the complete extent of the geometry.
+    x_min = 0.0
+    x_max = dims.total_length
+
+    max_radius = max(
+        [
+            _raw_radius_at(x, dims)
+            for x in (
+                0.0,
+                dims.l1,
+                dims.l1 + dims.l2,
+                dims.total_length,
+            )
+        ]
+        + result.outer_radii
+    )
+
+    y_min = -max_radius
+    y_max = max_radius
+    z_min = -max_radius
+    z_max = max_radius
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
+
+    fig.update_layout(
+        title="Aft Fuselage Packaging",
+        width=1300,
+        height=600,
+        margin=dict(
+            l=0,
+            r=0,
+            b=0,
+            t=50,
+        ),
+        scene=dict(
+            xaxis_title="x – from aft bulkhead [m]",
+            yaxis_title="y [m]",
+            zaxis_title="z [m]",
+
+            # Equivalent to the equal-scale Matplotlib setup
+            aspectmode="cube",
+
+            # Approximate equivalent of:
+            # ax.view_init(elev=20, azim=-90)
+            camera=dict(
+                eye=dict(
+                    x=0.0,
+                    y=-2.2,
+                    z=0.8,
+                ),
+                center=dict(
+                    x=0.0,
+                    y=0.0,
+                    z=0.0,
+                ),
+                up=dict(
+                    x=0.0,
+                    y=0.0,
+                    z=1.0,
+                ),
+            ),
+        ),
+    )
+
+    _set_equal_axes(
+        fig,
+        x_min,
+        x_max,
+        y_min,
+        y_max,
+        z_min,
+        z_max,
+    )
+
+    return fig

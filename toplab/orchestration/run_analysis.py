@@ -348,22 +348,22 @@ def _run_aft_packaging(
     # --- Optional 3-D plot ---
     if generate_3d_plot:
         try:
-            fig, _ = plot_aft_placement(result)
+            fig = plot_aft_placement(result)
+
             plot_dir = Path(config_path).parent / "output" / "plots"
             plot_dir.mkdir(parents=True, exist_ok=True)
-            plot_path = plot_dir / "aft_placement_3d.png"
-            fig.savefig(plot_path, dpi=150, bbox_inches="tight")
 
-            if save_pickle:
-                import pickle
-                pkl_path = plot_path.with_suffix(".pkl")
-                try:
-                    with open(pkl_path, "wb") as fh:
-                        pickle.dump(fig, fh)
-                except Exception as pkl_exc:
-                    if not silent:
-                        print(f"  WARNING: Pickle save failed: {pkl_exc}")
-            plt.close(fig)
+            # Static image
+            png_path = plot_dir / "aft_placement_3d.png"
+            fig.write_image(png_path, scale=2)
+
+            # Interactive HTML
+            html_path = plot_dir / "aft_placement_3d.html"
+            fig.write_html(html_path)
+
+            if not silent:
+                print(f"  Saved 3-D plot: {html_path}")
+
         except Exception as exc:
             if not silent:
                 print(f"  WARNING: 3-D plot generation failed: {exc}")
