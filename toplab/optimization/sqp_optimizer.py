@@ -232,13 +232,14 @@ class SQPOptimizer:
     # ── main entry point ──────────────────────────────────────────────────────
 
     def run(self) -> dict:
+        # load config and build active vector, bounds, and finite-difference step sizes
         dv = self.cfg["design_variables"]
 
         # Build x0, bounds, and eps only over active variables
         x0     = np.array([dv[v]["baseline"] for v in self._active], dtype=float)
         bounds = [(dv[v]["min"], dv[v]["max"])  for v in self._active]
 
-        raw_eps = self.cfg.get("solver", {}).get("finite_diff_step", [0.01, 0.01, 0.1, 0.1])
+        raw_eps = self.cfg.get("solver", {}).get("finite_diff_step")
         if isinstance(raw_eps, list):
             all_eps = dict(zip(_ALL_VARS, raw_eps))
             eps = np.array([all_eps[v] for v in self._active], dtype=float)
@@ -250,8 +251,8 @@ class SQPOptimizer:
             {"type": "ineq", "fun": self.con_volume},
         ]
         slsqp_opts = {
-            "maxiter": int(self.cfg.get("solver", {}).get("max_iter", 100)),
-            "ftol":    float(self.cfg.get("solver", {}).get("tol", 1e-4)),
+            "maxiter": int(self.cfg.get("solver", {}).get("max_iter")),
+            "ftol":    float(self.cfg.get("solver", {}).get("tol")),
             "eps":     eps,
             "disp":    True,
         }
