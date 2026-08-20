@@ -83,6 +83,8 @@ def run_analysis(
     if silent_output:
         effective_verbosity = "quiet"
 
+    packaging_result = None  # populated below if 'packaging:' block is present
+
     if not silent_output:
         print("=" * 80)
         if analysis_name:
@@ -192,6 +194,21 @@ def run_analysis(
                 if not silent_output:
                     print(f"  SUCCESS: Report saved to {report_file}")
 
+                # --- Optional: aft fuselage packaging ---
+                packaging_cfg = config.config_dict.get('packaging')
+                packaging_result = None
+                if packaging_cfg:
+                    if not silent_output:
+                        print(f"\nAFT FUSELAGE PACKAGING")
+                        print("-" * 60)
+                    packaging_result = _run_aft_packaging(
+                        orchestrator=orchestrator,
+                        packaging_cfg=packaging_cfg,
+                        report_file=report_file,
+                        config_path=config_path,
+                        silent=silent_output,
+                    )
+
     except Exception as e:
         error_msg = f"ERROR: Analysis execution failed: {e}"
         print(error_msg)
@@ -211,5 +228,205 @@ def run_analysis(
         'success': True,
         'results': results,
         'validation': validation,
-        'execution_time': execution_time
+        'execution_time': execution_time,
+        'packaging': packaging_result,
     }
+
+
+# ---------------------------------------------------------------------------
+# Aft fuselage packaging helper
+# ---------------------------------------------------------------------------
+
+def _run_aft_packaging(
+    orchestrator: SystemOrchestrator,
+    packaging_cfg: dict,
+    report_file: str | None,
+    config_path: Path,
+    *,
+    silent: bool = False,
+) -> dict:
+    """Run the aft fuselage packaging step and append results to the report.
+
+    Returns a dict with keys ``feasible``, ``placements``, and ``result``.
+    """
+    import matplotlib
+    matplotlib.use("Agg")  # non-interactive backend for file output
+    import matplotlib.pyplot as plt
+
+    from toplab.packaging.aft_placement import (
+        AftFuselageDimensions,
+        place_tanks_in_aft,
+        plot_aft_placement,
+    )
+
+    # --- Parse aft fuselage dimensions ---
+    dims_cfg = packaging_cfg.get("aft_fuselage_dimensions", {})
+    try:
+        dims = AftFuselageDimensions(
+            d1=float(dims_cfg["d1"]),
+            d2=float(dims_cfg["d2"]),
+            d3=float(dims_cfg["d3"]),
+            l1=float(dims_cfg["l1"]),
+            l2=float(dims_cfg["l2"]),
+            l3=float(dims_cfg["l3"]),
+            epsilon=float(dims_cfg.get("epsilon", 0.05)),
+        )
+    except KeyError as exc:
+        print(f"  ERROR: Missing required aft_fuselage_dimensions key: {exc}")
+        return {"feasible": False, "placements": [], "result": None}
+
+    generate_3d_plot = bool(packaging_cfg.get("generate_3d_plot", False))
+    save_pickle = bool(packaging_cfg.get("save_pickle", False))
+
+    # --- Gather outer tank dimensions ---
+    outer_radii: list[float] = []
+    half_cyl_lengths: list[float] = []
+
+    for i, tank_geom in enumerate(orchestrator.tank_geometries):
+        try:
+            tank_props = orchestrator.tank_system._get_tank_properties(
+                tank_geom, f"Tank{i + 1}", i
+            )
+            outer_radius = float(tank_props["outer_diameter"]) / 2.0
+        except Exception:
+            outer_radius = float(tank_geom.radius)
+            if not silent:
+                print(
+                    f"  WARNING: Could not compute outer radius for tank {i + 1}; "
+                    "using inner radius as fallback."
+                )
+        outer_radii.append(outer_radius)
+        half_cyl_lengths.append(tank_geom.cylindrical_section_length / 2.0)
+
+    n_tanks = len(outer_radii)
+
+    if not silent:
+        for i in range(n_tanks):
+            total_outer_length = 2.0 * (outer_radii[i] + half_cyl_lengths[i])
+            print(
+                f"  Tank {i + 1}: outer radius = {outer_radii[i]:.3f} m, "
+                f"total outer length = {total_outer_length:.3f} m"
+            )
+        print(
+            f"  Aft dimensions: d1={dims.d1} m, d2={dims.d2} m, d3={dims.d3} m, "
+            f"l1={dims.l1} m, l2={dims.l2} m, l3={dims.l3} m, ε={dims.epsilon} m"
+        )
+
+    # --- Run placement ---
+    result = place_tanks_in_aft(
+        outer_radii=outer_radii,
+        half_cyl_lengths=half_cyl_lengths,
+        dims=dims,
+    )
+
+    if not silent:
+        status = "FEASIBLE" if result.feasible else "INFEASIBLE"
+        print(f"\n  Placement result: {status}")
+        print(f"  {result.message}")
+        for p in result.placements:
+            half_total = result.half_outer_lengths[p.tank_index]
+            x_start = p.x_center - half_total
+            x_end = p.x_center + half_total
+            viol_str = (
+                f"violation = {p.max_violation:.4f} m" if not p.feasible else "OK"
+            )
+            print(
+                f"    Tank {p.tank_index + 1}: x_centre = {p.x_center:.3f} m  "
+                f"[{x_start:.3f}, {x_end:.3f}]  {viol_str}"
+            )
+
+    # --- Append packaging section to the results report ---
+    if report_file:
+        try:
+            _append_packaging_report(result, report_file)
+            if not silent:
+                print(f"\n  Packaging summary appended to: {report_file}")
+        except Exception as exc:
+            if not silent:
+                print(f"  WARNING: Could not append packaging report: {exc}")
+
+    # --- Optional 3-D plot ---
+    if generate_3d_plot:
+        try:
+            fig, _ = plot_aft_placement(result)
+            plot_dir = Path(config_path).parent / "output" / "plots"
+            plot_dir.mkdir(parents=True, exist_ok=True)
+            plot_path = plot_dir / "aft_placement_3d.png"
+            fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+
+            if save_pickle:
+                import pickle
+                pkl_path = plot_path.with_suffix(".pkl")
+                try:
+                    with open(pkl_path, "wb") as fh:
+                        pickle.dump(fig, fh)
+                except Exception as pkl_exc:
+                    if not silent:
+                        print(f"  WARNING: Pickle save failed: {pkl_exc}")
+            plt.close(fig)
+        except Exception as exc:
+            if not silent:
+                print(f"  WARNING: 3-D plot generation failed: {exc}")
+
+    return {
+        "feasible": result.feasible,
+        "placements": [
+            {"tank_index": p.tank_index, "x_center": p.x_center, "feasible": p.feasible}
+            for p in result.placements
+        ],
+        "result": result,
+    }
+
+
+def _append_packaging_report(result, report_file: str) -> None:
+    """Append a packaging summary block to an existing results text report."""
+    from toplab.packaging.aft_placement import AftFuselageDimensions
+
+    dims = result.dims
+    sep = "=" * 80
+
+    lines = [
+        "",
+        sep,
+        "AFT FUSELAGE PACKAGING",
+        sep,
+        "",
+        "Aft Fuselage Dimensions",
+        "-" * 40,
+        f"  d1 (aft bulkhead diameter)  : {dims.d1:.4f} m",
+        f"  d2 (intermediate diameter)  : {dims.d2:.4f} m",
+        f"  d3 (forward tip diameter)   : {dims.d3:.4f} m",
+        f"  l1 (cylinder length)        : {dims.l1:.4f} m",
+        f"  l2 (first cone length)      : {dims.l2:.4f} m",
+        f"  l3 (second cone length)     : {dims.l3:.4f} m",
+        f"  epsilon (clearance margin)  : {dims.epsilon:.4f} m",
+        f"  Total aft length            : {dims.total_length:.4f} m",
+        "",
+        "Tank Placement",
+        "-" * 40,
+    ]
+
+    for p in result.placements:
+        half_total = result.half_outer_lengths[p.tank_index]
+        x_start = p.x_center - half_total
+        x_end = p.x_center + half_total
+        R_out = result.outer_radii[p.tank_index]
+        status = "FEASIBLE" if p.feasible else f"INFEASIBLE (violation = {p.max_violation:.4f} m)"
+        lines += [
+            f"  Tank {p.tank_index + 1}:",
+            f"    Outer radius              : {R_out:.4f} m",
+            f"    Total outer length        : {2.0 * half_total:.4f} m",
+            f"    x_centre (from aft datum) : {p.x_center:.4f} m",
+            f"    x extent                  : [{x_start:.4f}, {x_end:.4f}] m",
+            f"    Status                    : {status}",
+        ]
+
+    lines += [
+        "",
+        f"Overall result: {'FEASIBLE' if result.feasible else 'INFEASIBLE'}",
+        f"Message: {result.message}",
+        "",
+    ]
+
+    with open(report_file, "a") as fh:
+        fh.write("\n".join(lines) + "\n")

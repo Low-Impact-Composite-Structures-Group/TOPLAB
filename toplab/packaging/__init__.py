@@ -17,6 +17,14 @@ from .metrics import (
     route_length,
 )
 from .visualization import plot_layout
+from .aft_placement import (
+    AftFuselageDimensions,
+    AftPlacementResult,
+    TankPlacement,
+    allowed_radius_at,
+    place_tanks_in_aft,
+    plot_aft_placement,
+)
 
 __all__ = [
     "Point3D",
@@ -37,4 +45,10 @@ __all__ = [
     "packaged_volume",
     "packaging_efficiency",
     "plot_layout",
+    "AftFuselageDimensions",
+    "AftPlacementResult",
+    "TankPlacement",
+    "allowed_radius_at",
+    "place_tanks_in_aft",
+    "plot_aft_placement",
 ]
