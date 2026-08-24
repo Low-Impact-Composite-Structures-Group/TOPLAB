@@ -14,6 +14,7 @@ Author: Multi-Tank Framework
 Date: October 2025
 """
 
+import math
 import yaml
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
@@ -422,7 +423,9 @@ class ScenarioConfig:
                         nist_path = material_data.get('nist_path')
                         if nist_path:
                             try:
-                                tank_materials[tank_id][material_name] = get_material_by_nist_path(nist_path)
+                                winding_angle_deg = material_data.get('winding_angle')
+                                winding_angle_rad = math.radians(winding_angle_deg) if winding_angle_deg is not None else None
+                                tank_materials[tank_id][material_name] = get_material_by_nist_path(nist_path, winding_angle=winding_angle_rad)
                             except ValueError as e:
                                 print(f"Warning: Could not load NIST material {nist_path} for tank {tank_id}: {e}")
 
@@ -482,7 +485,9 @@ class ScenarioConfig:
             nist_path = material_data.get('nist_path')
             if nist_path:
                 try:
-                    materials[material_name] = get_material_by_nist_path(nist_path)
+                    winding_angle_deg = material_data.get('winding_angle')
+                    winding_angle_rad = math.radians(winding_angle_deg) if winding_angle_deg is not None else None
+                    materials[material_name] = get_material_by_nist_path(nist_path, winding_angle=winding_angle_rad)
                 except ValueError as e:
                     print(f"Warning: Could not load NIST material {nist_path}: {e}")
 
@@ -504,7 +509,9 @@ class ScenarioConfig:
                 nist_path = material_data.get('nist_path')
                 if nist_path:
                     try:
-                        tank_materials[tank_id_int][material_name] = get_material_by_nist_path(nist_path)
+                        winding_angle_deg = material_data.get('winding_angle')
+                        winding_angle_rad = math.radians(winding_angle_deg) if winding_angle_deg is not None else None
+                        tank_materials[tank_id_int][material_name] = get_material_by_nist_path(nist_path, winding_angle=winding_angle_rad)
                     except ValueError as e:
                         print(f"Warning: Could not load NIST material {nist_path} for tank {tank_id}: {e}")
 

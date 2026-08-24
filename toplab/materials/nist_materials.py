@@ -148,20 +148,26 @@ class NISTComposite(NISTMaterial):
         )
 
 
-def get_material_by_nist_path(nist_path: str) -> NISTMaterial:
-    material_registry = {
+def get_material_by_nist_path(nist_path: str, winding_angle: float | None = None) -> NISTMaterial:
+    """Return a material instance. *winding_angle* is in radians and applies to composites only."""
+    metal_registry = {
         "aluminum_5083_nist": NISTMetal.aluminum_5083_nist,
         "aluminum_3003F_nist": NISTMetal.aluminum_3003F_nist,
         "aluminum_6061T6_nist": NISTMetal.aluminum_6061T6_nist,
+    }
+    composite_registry = {
         "g10_nist": NISTComposite.g10_nist,
         "carbon_epoxy_nist": NISTComposite.carbon_epoxy_nist,
     }
+    all_keys = set(metal_registry) | set(composite_registry)
 
-    if nist_path not in material_registry:
-        available = ", ".join(material_registry.keys())
+    if nist_path not in all_keys:
+        available = ", ".join(sorted(all_keys))
         raise ValueError(f"Unknown NIST path '{nist_path}'. Available: {available}")
 
-    return material_registry[nist_path]()
+    if nist_path in metal_registry:
+        return metal_registry[nist_path]()
+    return composite_registry[nist_path](winding_angle=winding_angle)
 
 
 __all__ = [
