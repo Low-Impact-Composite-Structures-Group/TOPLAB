@@ -276,7 +276,6 @@ def _run_aft_packaging(
         return {"feasible": False, "placements": [], "result": None}
 
     generate_3d_plot = bool(packaging_cfg.get("generate_3d_plot", False))
-    save_pickle = bool(packaging_cfg.get("save_pickle", False))
 
     # --- Gather outer tank dimensions ---
     outer_radii: list[float] = []
