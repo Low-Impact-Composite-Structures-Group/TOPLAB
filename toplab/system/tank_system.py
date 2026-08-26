@@ -942,7 +942,7 @@ class TankSystem:
         State vector y = [m1, T1, Ts1, m2, T2, Ts2, ..., mN, TN, TsN]
         Each tank has 3 state variables: mass, temperature, solid temperature
         """
-        # --- Debug heartbeat and stuck-step detection ---
+        #TODO: clean up this mess
         import os
         debug_enabled = self._is_debug() or os.environ.get("H2_DEBUG", "0") == "1"
 
