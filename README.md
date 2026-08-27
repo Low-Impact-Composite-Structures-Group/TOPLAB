@@ -83,28 +83,6 @@ In practice, this means the codebase aims to make it easy to:
 2. Run the same numerical machinery across different mission profiles.
 3. Compare physical assumptions and design choices without duplicating solver logic.
 
-## Documentation
-
-The repository-level technical documentation now lives in:
-
-- `documentation/`
-
-This folder contains the model and solution description in LaTeX form, including:
-
-- network graph representation
-- governing equations (mass/energy/solid thermal state)
-- operating configurations and switching behavior
-- numerical method and integration strategy
-- legacy vs graph-based paradigm comparison
-
-Start from `documentation/main.tex`.
-
-To build the documentation PDF after activating the environment:
-
-```bash
-cd documentation
-make
-```
 
 ## Examples
 
