@@ -17,7 +17,7 @@ class MultiTankState:
     """
     State container for multiple tanks.
 
-    Manages the N-tank state vector [m1, T1, Ts1, m2, T2, Ts2, ..., mN, TN, TsN]
+    Manages the N-tank state vector [m1, T1, Ts1, Tsh1, m2, T2, Ts2, Tsh2, ..., mN, TN, TsN, TshN]
     and provides convenient access to individual tank states.
     """
     tank_states: List[IsochoricTankState]
@@ -30,13 +30,14 @@ class MultiTankState:
 
     @property
     def state_vector(self) -> np.ndarray:
-        """Combined state vector [m1, T1, Ts1, m2, T2, Ts2, ...]"""
+        """Combined state vector [m1, T1, Ts1, Tsh1, m2, T2, Ts2, Tsh2, ...]"""
         vector = []
         for tank_state in self.tank_states:
             vector.extend([
                 tank_state.fuel_mass,
                 tank_state.temperature,
-                tank_state.solid_temperature
+                tank_state.solid_temperature,
+                tank_state.shell_temperature,
             ])
         return np.array(vector)
 
@@ -48,17 +49,18 @@ class MultiTankState:
                          flow_data: List[Dict] = None) -> 'MultiTankState':
         """Create MultiTankState from combined state vector"""
         n_tanks = len(tank_objects)
-        if len(state_vector) != 3 * n_tanks:
-            raise ValueError(f"State vector length {len(state_vector)} != 3 * {n_tanks} tanks")
+        if len(state_vector) != 4 * n_tanks:
+            raise ValueError(f"State vector length {len(state_vector)} != 4 * {n_tanks} tanks")
 
         tank_states = []
         for i in range(n_tanks):
-            idx = 3 * i
+            idx = 4 * i
             tank_state = IsochoricTankState(
                 tank=tank_objects[i],
                 fuel_mass=state_vector[idx],
                 temperature=state_vector[idx + 1],
-                solid_temperature=state_vector[idx + 2]
+                solid_temperature=state_vector[idx + 2],
+                shell_temperature=state_vector[idx + 3],
             )
 
             # Add flow rate data if provided
@@ -81,10 +83,11 @@ class MultiTankState:
     def update_from_state_vector(self, state_vector: np.ndarray):
         """Update all tank states from combined state vector"""
         for i, tank_state in enumerate(self.tank_states):
-            idx = 3 * i
+            idx = 4 * i
             tank_state.fuel_mass = state_vector[idx]
             tank_state.temperature = state_vector[idx + 1]
             tank_state.solid_temperature = state_vector[idx + 2]
+            tank_state.shell_temperature = state_vector[idx + 3]
 
             # Recompute derived properties
             tank_state.compute_pressure()
@@ -131,6 +134,7 @@ class MultiTankResults:
             'masses': [],
             'temperatures': [],
             'solid_temperatures': [],
+            'shell_temperatures': [],
             'pressures': [],
             'densities': [],
             'inflow_rates': [],
@@ -142,13 +146,15 @@ class MultiTankResults:
 
         for tank_idx in range(self.n_tanks):
             tank_data = self._extract_tank_arrays(tank_idx)
-            for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities',
-                       'inflow_rates', 'outflow_rates', 'vent_rates', 'coupling_inflow_rates', 'coupling_outflow_rates']:
+            for key in ['masses', 'temperatures', 'solid_temperatures', 'shell_temperatures',
+                        'pressures', 'densities', 'inflow_rates', 'outflow_rates', 'vent_rates',
+                        'coupling_inflow_rates', 'coupling_outflow_rates']:
                 data[key].append(tank_data[key])
 
         # Convert lists to numpy arrays
-        for key in ['masses', 'temperatures', 'solid_temperatures', 'pressures', 'densities',
-                   'inflow_rates', 'outflow_rates', 'vent_rates', 'coupling_inflow_rates', 'coupling_outflow_rates']:
+        for key in ['masses', 'temperatures', 'solid_temperatures', 'shell_temperatures',
+                    'pressures', 'densities', 'inflow_rates', 'outflow_rates', 'vent_rates',
+                    'coupling_inflow_rates', 'coupling_outflow_rates']:
             data[key] = np.array(data[key])
 
         return data
@@ -158,6 +164,7 @@ class MultiTankResults:
         masses = []
         temperatures = []
         solid_temperatures = []
+        shell_temperatures = []
         pressures = []
         densities = []
         inflow_rates = []
@@ -171,6 +178,7 @@ class MultiTankResults:
             masses.append(tank_state.fuel_mass)
             temperatures.append(tank_state.temperature)
             solid_temperatures.append(tank_state.solid_temperature)
+            shell_temperatures.append(tank_state.shell_temperature)
 
             # Calculate pressure if not available
             if tank_state.pressure is None:
@@ -190,6 +198,7 @@ class MultiTankResults:
             'masses': np.array(masses),
             'temperatures': np.array(temperatures),
             'solid_temperatures': np.array(solid_temperatures),
+            'shell_temperatures': np.array(shell_temperatures),
             'pressures': np.array(pressures),
             'densities': np.array(densities),
             'inflow_rates': np.array(inflow_rates),

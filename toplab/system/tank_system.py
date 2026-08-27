@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
 from toplab.tank_design.tank_shapes import CapsuleTank
-from toplab.thermodynamics.isochoric_thermal_model import StopsModelThermalModel
+from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
 )
@@ -729,12 +729,25 @@ class TankSystem:
             raise RuntimeError("Liner thickness not specified in configuration")
 
         insulation_config = materials_config.get('insulation', {})
-        thickness_insulation = insulation_config.get('thickness', None)
+        thickness_insulation = insulation_config.get('thickness')
         if thickness_insulation is None:
-            raise RuntimeError("Insulation thickness not specified in configuration")
-        if 'heat_transfer_coefficient' not in insulation_config:
-            raise RuntimeError("Insulation heat_transfer_coefficient not specified in configuration")
-        ambient_htc = float(insulation_config['heat_transfer_coefficient'])
+            raise RuntimeError(f"'insulation.thickness' not specified in configuration for tank {tank_id_yaml}")
+        thickness_insulation = float(thickness_insulation)
+
+        shell_thickness = insulation_config.get('shell_thickness')
+        if shell_thickness is None:
+            raise RuntimeError(f"'insulation.shell_thickness' not specified in configuration for tank {tank_id_yaml}")
+        shell_thickness = float(shell_thickness)
+
+        alpha_amb = insulation_config.get('alpha_amb')
+        if alpha_amb is None:
+            raise RuntimeError(f"'insulation.alpha_amb' not specified in configuration for tank {tank_id_yaml}")
+        alpha_amb = float(alpha_amb)
+
+        emissivity_shell = insulation_config.get('emissivity')
+        if emissivity_shell is None:
+            raise RuntimeError(f"'insulation.emissivity' not specified in configuration for tank {tank_id_yaml}")
+        emissivity_shell = float(emissivity_shell)
 
         # Get design parameters from configuration - NO HARDCODED VALUES
         safety_factor = materials_config.get('safety_margin', None)
@@ -794,52 +807,59 @@ class TankSystem:
         print(f"      Radius: {inner_radius:.3f} m")
         print(f"      Working pressure: {working_pressure/1e5:.0f} bar, Safety factor: {safety_factor:.2f}")
         print(f"      Structural design pressure: {design_pressure_structural/1e5:.0f} bar")
-        print(f"      Liner: {type(liner_material).__name__}, thickness: {thickness_liner*1000:.1f}mm")
-        print(f"      Composite: {type(composite_material).__name__}, σ_failure = {composite_material.failure_stress/1e6:.0f} MPa")
-        print(f"      Winding angle: {math.degrees(composite_material.winding_angle):.1f}°")
-        print(f"      Cylinder thickness: {cylinder_thickness*1000:.1f} mm")
-        print(f"      Endcap thickness: {endcap_thickness*1000:.1f} mm")
-        print(f"      Governing wall thickness: {thickness_wall*1000:.1f} mm")
-
-        # Calculate radii at each layer
+        # Radii for each layer (inside → outside)
         liner_outer_radius = inner_radius + thickness_liner
-        wall_outer_radius = liner_outer_radius + thickness_wall
-        external_radius = wall_outer_radius + thickness_insulation
+        wall_outer_radius = liner_outer_radius + thickness_wall   # = r_structure
+        r_structure = wall_outer_radius
+        r_shell = r_structure + thickness_insulation              # outer radius of insulation
+        r_shell_outer = r_shell + shell_thickness                 # outer radius of outer Al shell
 
-        # Calculate areas and volumes using the configured capsule geometry.
+        # Surface areas and volumes
         volume = tank.volume
         inner_surface_area = tank.surface_area
         cylinder_length = tank.cylindrical_section_length
-        outer_surface_area = 4 * math.pi * external_radius**2 + 2 * math.pi * external_radius * cylinder_length
-        # Outer volume: two hemispherical endcaps (= one full sphere) + cylindrical section
-        outer_volume = (4/3) * math.pi * external_radius**3 + math.pi * external_radius**2 * cylinder_length
+        # A_shell = 2π r_shell L + 4π r_shell² (per governing equations, at foam-shell interface)
+        outer_surface_area = 2 * math.pi * r_shell * cylinder_length + 4 * math.pi * r_shell ** 2
+        outer_volume = (4 / 3) * math.pi * r_shell_outer ** 3 + math.pi * r_shell_outer ** 2 * cylinder_length
 
-        # Calculate masses using proper cylindrical+spherical geometry and NIST densities
-        # Geometry: Cylindrical section (L = φR) + 2 hemispherical endcaps
+        # Layer masses using capsule (cylinder + 2 hemispherical endcaps) geometry
+        def _layer_mass(density, r_inner, r_outer):
+            cyl = math.pi * (r_outer ** 2 - r_inner ** 2) * cylinder_length
+            sph = (4 / 3) * math.pi * (r_outer ** 3 - r_inner ** 3)
+            return density * (cyl + sph)
 
-        # Liner mass (aluminum, inner shell)
-        liner_inner_radius = inner_radius
-        liner_outer_radius = inner_radius + thickness_liner
-        # Cylindrical section + spherical endcaps
-        liner_cyl_volume = math.pi * (liner_outer_radius**2 - liner_inner_radius**2) * cylinder_length
-        liner_sphere_volume = 2 * (4/3) * math.pi * (liner_outer_radius**3 - liner_inner_radius**3)
-        liner_total_volume = liner_cyl_volume + liner_sphere_volume
-        liner_mass = liner_material.density * liner_total_volume
+        liner_mass = _layer_mass(liner_material.density, inner_radius, liner_outer_radius)
+        wall_mass  = _layer_mass(composite_material.density, liner_outer_radius, wall_outer_radius)
+        from toplab.materials.rohacell_properties import DENSITY as ROHACELL_DENSITY
+        foam_mass  = _layer_mass(ROHACELL_DENSITY, r_structure, r_shell)
+        shell_mass = _layer_mass(liner_material.density, r_shell, r_shell_outer)  # same Al as liner
 
-        # Wall mass (composite, outer shell)
-        wall_inner_radius = liner_outer_radius
-        wall_outer_radius = liner_outer_radius + thickness_wall
-        # Cylindrical section + spherical endcaps
-        wall_cyl_volume = math.pi * (wall_outer_radius**2 - wall_inner_radius**2) * cylinder_length
-        wall_sphere_volume = 2 * (4/3) * math.pi * (wall_outer_radius**3 - wall_inner_radius**3)
-        wall_total_volume = wall_cyl_volume + wall_sphere_volume
-        wall_mass = composite_material.density * wall_total_volume
+        print(f"\n[{tank_id} Geometry]")
+        print(f"  Inner radius:     {inner_radius:.4f} m")
+        print(f"  Structure radius: {r_structure:.4f} m  "
+              f"(liner {thickness_liner*1000:.1f}mm + wall {thickness_wall*1000:.1f}mm)")
+        print(f"  Shell radius:     {r_shell:.4f} m  (insulation {thickness_insulation*1000:.0f}mm)")
+        print(f"  Shell outer:      {r_shell_outer:.4f} m  (shell {shell_thickness*1000:.1f}mm)")
+        print(f"  Cylinder length:  {cylinder_length:.4f} m  (φ={tank.phi:.2f})")
+        print(f"\n[{tank_id} Structural – netting analysis]")
+        print(f"  Working pressure:  {working_pressure/1e5:.0f} bar  →  "
+              f"design: {design_pressure_structural/1e5:.0f} bar  (SF={safety_factor:.1f})")
+        print(f"  Liner:   {liner_material.name}, {thickness_liner*1000:.1f} mm, {liner_mass:.1f} kg")
+        print(f"  Wall:    {composite_material.name}, {thickness_wall*1000:.1f} mm "
+              f"({math.degrees(composite_material.winding_angle):.1f}°), {wall_mass:.1f} kg")
+        print(f"  Foam:    Rohacell 51A, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
+        print(f"  Shell:   {liner_material.name}, {shell_thickness*1000:.1f} mm, {shell_mass:.1f} kg")
+        dry_mass = liner_mass + wall_mass + foam_mass + shell_mass
+        print(f"  Total dry mass: {dry_mass:.1f} kg")
+        print(f"\n[{tank_id} Thermal areas]")
+        print(f"  Inner surface (A_in):  {inner_surface_area:.4f} m²")
+        print(f"  Shell surface (A_sh):  {outer_surface_area:.4f} m²")
 
-        print(f"      Geometry: Cylinder (L={cylinder_length:.2f}m, φ={tank.phi:.3f}) + 2 spherical endcaps")
-        print(f"      Liner mass: {liner_mass:.1f} kg (ρ={liner_material.density} kg/m³)")
-        print(f"      Wall mass: {wall_mass:.1f} kg (ρ={composite_material.density} kg/m³)")
+        # Netting analysis detail for reference
+        print(f"\n[{tank_id} Netting analysis detail]")
+        print(f"  Cylinder wall: {cylinder_thickness*1000:.1f} mm  |  Endcap: {endcap_thickness*1000:.1f} mm  "
+              f"(governing: {thickness_wall*1000:.1f} mm)")
 
-        # Update the properties to include calculated thickness for orchestrator
         thickness_info = {
             'wall_thickness': thickness_wall,
             'cylinder_thickness': cylinder_thickness,
@@ -849,18 +869,7 @@ class TankSystem:
             'phi': tank.phi,
         }
 
-        # Only print properties during initialization, not during simulation
         if hasattr(self, '_properties_printed') and tank_index not in self._properties_printed:
-            print(f"   {tank_id} properties calculated:")
-            print(f"      Volume: {volume:.6f} m³")
-            print(f"      Inner surface area: {inner_surface_area:.4f} m²")
-            print(f"      Outer surface area: {outer_surface_area:.4f} m²")
-            print(f"      Inner volume: {volume:.6f} m³")
-            print(f"      Outer volume: {outer_volume:.6f} m³")
-            print(f"      Inner radius: {inner_radius:.3f} m")
-            print(f"      External radius: {external_radius:.3f} m")
-            print(f"      Liner mass: {liner_mass:.2f} kg")
-            print(f"      Wall mass: {wall_mass:.2f} kg")
             self._properties_printed.add(tank_index)
 
         return {
@@ -869,28 +878,41 @@ class TankSystem:
             'inner_surface_area': inner_surface_area,
             'outer_surface_area': outer_surface_area,
             'inner_diameter': 2 * inner_radius,
-            'outer_diameter': 2 * external_radius,
+            'outer_diameter': 2 * r_shell_outer,  # true outer envelope (includes shell)
+            'inner_radius': inner_radius,
+            'r_structure': r_structure,
+            'r_shell': r_shell,
             'liner_mass': liner_mass,
             'wall_mass': wall_mass,
-            'radius': inner_radius,
-            'inner_radius': inner_radius,
-            'ambient_htc': ambient_htc,
+            'foam_mass': foam_mass,
+            'shell_mass': shell_mass,
+            'liner_material': liner_material,
+            'wall_material': composite_material,
+            'shell_material': liner_material,  # outer shell is same Al as liner
+            'alpha_amb': alpha_amb,
+            'emissivity_shell': emissivity_shell,
             'thickness_wall': thickness_wall,
-            # Add netting analysis results
-            **thickness_info
+            **thickness_info,
         }
 
     def _create_thermal_model(self, tank_properties: Dict[str, float]):
-        """Create thermal model for tank"""
-        return StopsModelThermalModel(
+        """Create InsulatedTankThermalModel for a tank from its geometry property dict."""
+        return InsulatedTankThermalModel(
             tank_volume=tank_properties['volume'],
             inner_surface_area=tank_properties['inner_surface_area'],
-            outer_surface_area=tank_properties['outer_surface_area'],
             inner_diameter=tank_properties['inner_diameter'],
+            r_structure=tank_properties['r_structure'],
+            r_shell=tank_properties['r_shell'],
+            cylinder_length=tank_properties['cylindrical_section_length'],
             liner_mass=tank_properties['liner_mass'],
             wall_mass=tank_properties['wall_mass'],
+            shell_mass=tank_properties['shell_mass'],
             ambient_temperature=self.config.AMBIENT_TEMPERATURE,
-            ambient_htc=tank_properties['ambient_htc']
+            alpha_amb=tank_properties['alpha_amb'],
+            emissivity_shell=tank_properties['emissivity_shell'],
+            liner_material=tank_properties['liner_material'],
+            wall_material=tank_properties['wall_material'],
+            shell_material=tank_properties['shell_material'],
         )
 
     def create_initial_state(self) -> np.ndarray:
@@ -903,35 +925,34 @@ class TankSystem:
             print(f"Tank {i+1}: ", end="")
 
             if tank_config.MASS_INIT is not None:
-                # Use specified mass
                 m_init = tank_config.MASS_INIT
                 tank_volume = self._cached_tank_properties[i]['volume']
                 density_init = m_init / tank_volume
-                print(f"Using specified mass {m_init:.2f} kg in {tank_volume:.4f} m³ volume")
-                print(f"        Resulting density: {density_init:.2f} kg/m³")
+                print(f"  Tank {i+1}: specified mass {m_init:.2f} kg, "
+                      f"density {density_init:.2f} kg/m³")
             else:
-                # Calculate mass from P, T conditions
-                try:
-                    density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, "hydrogen")
-                    tank_volume = self._cached_tank_properties[i]['volume']
-                    m_init = density_init * tank_volume
-                    print(f"Calculated from P={tank_config.P_INIT/1e5:.0f} bar, T={tank_config.T_INIT:.1f} K")
-                    print(f"        Density: {density_init:.2f} kg/m³, Volume: {tank_volume:.4f} m³")
-                    print(f"        Resulting mass: {m_init:.2f} kg")
-                except Exception as e:
-                    print(f"WARNING: Error calculating initial state for Tank {i+1}: {e}")
-                    # Use default values
-                    m_init = 10.0  # kg
-                    print(f"        Using default mass: {m_init:.2f} kg")
+                density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, "hydrogen")
+                tank_volume = self._cached_tank_properties[i]['volume']
+                m_init = density_init * tank_volume
+                print(f"  Tank {i+1}: P={tank_config.P_INIT/1e5:.0f} bar, "
+                      f"T={tank_config.T_INIT:.1f} K, "
+                      f"ρ={density_init:.2f} kg/m³, "
+                      f"m={m_init:.2f} kg")
 
-            # Add tank state: [mass, temperature, solid_temperature]
-            state.extend([m_init, tank_config.T_INIT, tank_config.T_INIT + 0.1])
+            # State: [mass, T_fluid, T_structure, T_shell]
+            # T_structure starts slightly above T_fluid; T_shell starts at ambient
+            T_shell_init = self.config.AMBIENT_TEMPERATURE
+            state.extend([m_init, tank_config.T_INIT, tank_config.T_INIT + 0.1, T_shell_init])
 
         initial_state = np.array(state)
-        print(f"Initial conditions summary:")
+        print("Initial state summary:")
         for i in range(len(self.config.tanks)):
-            idx = i * 3
-            print(f"  Tank {i+1}: m={initial_state[idx]:.2f}kg, T={initial_state[idx+1]:.1f}K, Ts={initial_state[idx+2]:.1f}K")
+            idx = 4 * i
+            print(f"  {self.config.tanks[i].name}: "
+                  f"m={initial_state[idx]:.2f} kg  "
+                  f"T_f={initial_state[idx+1]:.1f} K  "
+                  f"T_s={initial_state[idx+2]:.1f} K  "
+                  f"T_sh={initial_state[idx+3]:.1f} K")
 
         return initial_state
 
@@ -939,177 +960,127 @@ class TankSystem:
         """
         Compute derivatives for the multi-tank system.
 
-        State vector y = [m1, T1, Ts1, m2, T2, Ts2, ..., mN, TN, TsN]
-        Each tank has 3 state variables: mass, temperature, solid temperature
+        State vector y = [m1, T1, Ts1, Tsh1, m2, T2, Ts2, Tsh2, ..., mN, TN, TsN, TshN]
+        Each tank has 4 state variables: mass, fluid temperature, structure temperature, shell temperature.
         """
-        #TODO: clean up this mess
-        import os
-        debug_enabled = self._is_debug() or os.environ.get("H2_DEBUG", "0") == "1"
-
-        # Detect potential stuck integration (solver calling RHS without advancing time)
-        if not hasattr(self, '_last_ode_t'):
-            self._last_ode_t = t
-            self._ode_stuck_count = 0
-            self._ode_heartbeat_last_t = -1e9
-        dt_sim = t - getattr(self, '_last_ode_t', t)
-        if dt_sim <= 1e-12:
-            self._ode_stuck_count = getattr(self, '_ode_stuck_count', 0) + 1
-            if debug_enabled and self._ode_stuck_count in (100, 1000, 5000):
-                self._log_debug(
-                    f"[ODE DEBUG] Potential stuck integration near t={t:.6f}s "
-                    f"(no progress for {self._ode_stuck_count} calls)"
-                )
-        else:
-            self._ode_stuck_count = 0
-        self._last_ode_t = t
-
-        # Heartbeat: avoid repeated logs from solver callback retries at same timestamps.
-        if debug_enabled:
-            heartbeat_due = (t - getattr(self, '_ode_heartbeat_last_t', -1e9) >= self._ode_progress_interval_s) or (t <= 1e-9)
-        else:
-            progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
-            heartbeat_due = progress_bucket > getattr(self, '_ode_progress_bucket', -1)
-
-        if heartbeat_due:
-            tank_summaries = []
+        # Periodic heartbeat: one print per progress bucket (default every 60 s sim-time)
+        progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
+        if progress_bucket > getattr(self, '_ode_progress_bucket', -1):
+            self._ode_progress_bucket = progress_bucket
+            lines = [f"t = {t:.1f} s ({t/3600:.3f} h)"]
             for i in range(len(self.tanks)):
-                idx = i * 3
-                m_i = float(y[idx])
-                T_i = float(y[idx + 1])
-                vol = getattr(self.tanks[i], 'volume', 1.0)
-                density = m_i / max(vol, 1e-9)
-                # Quick pressure estimate using saturation-aware helper to avoid warnings
+                idx_hb = 4 * i
+                m_i   = max(float(y[idx_hb]),     1e-9)
+                T_i   = max(float(y[idx_hb + 1]), 14.0)
+                T_s   = float(y[idx_hb + 2])
+                T_sh  = float(y[idx_hb + 3])
+                rho_i = m_i / max(self.tanks[i].volume, 1e-9)
                 try:
                     from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
-                    P_i = safe_pressure_from_T_rho(max(T_i, 1.0), max(density, 1e-9), "hydrogen")
+                    P_i = safe_pressure_from_T_rho(T_i, rho_i, "hydrogen")
                 except Exception:
-                    from CoolProp.CoolProp import PropsSI
-                    P_i = float(PropsSI("P", "T", max(T_i, 1.0), "Dmass", max(density, 1e-9), "hydrogen"))
-                tank_summaries.append((P_i / 1e5, m_i))
-            press_str = ", ".join([f"P{i+1}={p:.2f}bar" for i, (p, _) in enumerate(tank_summaries)])
-            mass_str = ", ".join([f"m{i+1}={m:.2f}kg" for i, (_, m) in enumerate(tank_summaries)])
-            self._log_summary(f"t={t:.1f}s | {press_str} | {mass_str}")
-            self._ode_heartbeat_last_t = t
-            if not debug_enabled:
-                self._ode_progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
-        try:
-            # Create multi-tank state from current state vector
-            multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
-
-            # Initialize derivatives for all tanks
-            n_tanks = len(self.tanks)
-            dydt = np.zeros(3 * n_tanks)
-
-            # Calculate coupling mass flows
-            coupling_flows = self._calculate_coupling_flows(multi_state, t)
-
-            # Calculate derivatives for each tank
-            for i in range(n_tanks):
-                tank_state = multi_state.tank_states[i]
-
-                # Prevent numerical instability near empty tank
-                if tank_state.fuel_mass <= 1.0:  # 1 kg minimum
-                    if not hasattr(self, '_empty_warn_printed'):
-                        self._log_warning(f"   WARNING: Tank {i+1} approaching empty: {tank_state.fuel_mass:.2f} kg")
-                        self._empty_warn_printed = True
-                    tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
-
-                # Get coupling contribution for this tank (simplified pattern)
-                net_coupling_flow = coupling_flows[i]
-
-                # Calculate coupling enthalpy (hydrogen coming from other tanks)
-                coupling_enthalpy = 0.0
-                if net_coupling_flow > 0:
-                    coupling_enthalpy = self._calculate_coupling_enthalpy(i, multi_state)
-
-
-                # Helper to ensure scalar float from any flow source
-                def _as_float(val: Any) -> float:
-                    try:
-                        # Handle list/tuple/ndarray by taking the first element
-                        if isinstance(val, (list, tuple)):
-                            return float(val[0])
-                        import numpy as _np
-                        if isinstance(val, _np.ndarray):
-                            return float(val.flat[0])
-                        return float(val)
-                    except Exception:
-                        return 0.0
-
-                # Build directed edge-flow list for this tank
-                edge_flows = []
-
-                mission_inflow = _as_float(self._get_inflow_rate(t, i))
-                if mission_inflow > 0.0:
-                    edge_flows.append(EdgeFlow(
-                        mdot=mission_inflow, h=0.0,
-                        edge_type='refuel', from_node=-1, to_node=i,
-                    ))
-
-                mission_outflow = _as_float(self._get_outflow_rate(t, i))
-                if mission_outflow > 0.0:
-                    edge_flows.append(EdgeFlow(
-                        mdot=mission_outflow, h=0.0,
-                        edge_type='discharge', from_node=i, to_node=-1,
-                    ))
-
-                coupling_inflow = max(0.0, _as_float(net_coupling_flow))
-                if coupling_inflow > 0.0:
-                    edge_flows.append(EdgeFlow(
-                        mdot=coupling_inflow, h=coupling_enthalpy,
-                        edge_type='coupling', from_node=-2, to_node=i,
-                    ))
-
-                coupling_outflow = max(0.0, _as_float(-net_coupling_flow))
-                if coupling_outflow > 0.0:
-                    edge_flows.append(EdgeFlow(
-                        mdot=coupling_outflow, h=0.0,
-                        edge_type='coupling', from_node=i, to_node=-2,
-                    ))
-
-                # Get thermal derivatives from thermal model using correct interface
-                Q_solid = self.thermal_models[i].compute_heat_flux(t, tank_state)
-                dTs_dt = self.thermal_models[i].compute_solid_temperature_derivative(t, tank_state)
-
-                # Get state derivatives from dynamic model
-                state_derivatives = self.dynamic_models[i].compute_state_derivatives(
-                    time=t,
-                    state=tank_state,
-                    edge_flows=edge_flows,
-                    Q_solid=Q_solid,
-                    dTs_dt=dTs_dt,
-                    Q_discharge=0.0,
-                    tank_index=i,
+                    P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, "hydrogen")
+                thermal = self.thermal_models[i]
+                try:
+                    Q_amb = thermal.compute_ambient_heat_flux(T_sh)
+                    Q_ins = thermal.compute_insulation_heat_flux(T_s, T_sh)
+                    alpha_s = thermal.get_alpha_s(T_i, T_s, P_i)
+                    Q_str = alpha_s * thermal.A_in * (T_s - T_i)
+                    heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_ins={Q_ins:+.1f}W  Q_str={Q_str:+.1f}W")
+                except Exception as e:
+                    heat_str = f"heat flows unavailable ({e})"
+                lines.append(
+                    f"  {self.config.tanks[i].name}: "
+                    f"T_f={T_i:.1f}K  T_s={T_s:.1f}K  T_sh={T_sh:.1f}K  |  "
+                    f"{heat_str}  |  "
+                    f"P={P_i/1e5:.1f}bar  ρ={rho_i:.2f}kg/m³"
                 )
+            self._log_summary("\n".join(lines))
 
-                # Pack derivatives: [dm/dt, dT/dt, dTs/dt]
-                # Note: coupling flows are now included in the flow functions, so temperature derivatives
-                # automatically account for coupling enthalpy effects
-                idx = i * 3
-                dydt[idx] = state_derivatives.fuel_mass_derivative  # Mass derivative already includes coupling
-                dydt[idx + 1] = state_derivatives.temperature_derivative  # Temperature derivative includes coupling enthalpy
-                dydt[idx + 2] = state_derivatives.solid_temperature_derivative  # Solid temperature derivative
+        # Build multi-tank state and compute derivatives
+        multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
 
-            # Optional debug-only heartbeat for detailed mass trends.
-            if hasattr(self, '_last_debug_time'):
-                if self._is_debug() and t - self._last_debug_time > 100:
-                    if len(self.tanks) >= 2:
-                        self._log_debug(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg, Tank2_mass={y[3]:.2f}kg")
-                    else:
-                        self._log_debug(f"t={t:.1f}s, Tank1_mass={y[0]:.2f}kg")
-                    self._last_debug_time = t
-            else:
-                self._last_debug_time = t
+        n_tanks = len(self.tanks)
+        dydt = np.zeros(4 * n_tanks)
 
-            return dydt
+        coupling_flows = self._calculate_coupling_flows(multi_state, t)
 
-        except Exception as e:
-            # Print richer diagnostics to locate type/units issues without crashing the solver
-            import traceback
-            self._log_warning(f"ERROR: Failed to create tank system state at t={t:.6f}s: {e}")
-            traceback.print_exc()
-            # Return zero derivatives to prevent integration failure
-            return np.zeros(len(y))
+        for i in range(n_tanks):
+            tank_state = multi_state.tank_states[i]
+
+            if tank_state.fuel_mass <= 1.0:
+                if not hasattr(self, '_empty_warn_printed'):
+                    self._log_warning(f"  WARNING: {self.config.tanks[i].name} approaching empty: "
+                                      f"{tank_state.fuel_mass:.2f} kg")
+                    self._empty_warn_printed = True
+                tank_state.fuel_mass = max(tank_state.fuel_mass, 1.0)
+
+            net_coupling_flow = coupling_flows[i]
+            coupling_enthalpy = 0.0
+            if net_coupling_flow > 0:
+                coupling_enthalpy = self._calculate_coupling_enthalpy(i, multi_state)
+
+            def _as_float(val: Any) -> float:
+                if isinstance(val, (list, tuple)):
+                    return float(val[0])
+                import numpy as _np
+                if isinstance(val, _np.ndarray):
+                    return float(val.flat[0])
+                return float(val)
+
+            edge_flows = []
+
+            mission_inflow = _as_float(self._get_inflow_rate(t, i))
+            if mission_inflow > 0.0:
+                edge_flows.append(EdgeFlow(
+                    mdot=mission_inflow, h=0.0,
+                    edge_type='refuel', from_node=-1, to_node=i,
+                ))
+
+            mission_outflow = _as_float(self._get_outflow_rate(t, i))
+            if mission_outflow > 0.0:
+                edge_flows.append(EdgeFlow(
+                    mdot=mission_outflow, h=0.0,
+                    edge_type='discharge', from_node=i, to_node=-1,
+                ))
+
+            coupling_inflow = max(0.0, _as_float(net_coupling_flow))
+            if coupling_inflow > 0.0:
+                edge_flows.append(EdgeFlow(
+                    mdot=coupling_inflow, h=coupling_enthalpy,
+                    edge_type='coupling', from_node=-2, to_node=i,
+                ))
+
+            coupling_outflow = max(0.0, _as_float(-net_coupling_flow))
+            if coupling_outflow > 0.0:
+                edge_flows.append(EdgeFlow(
+                    mdot=coupling_outflow, h=0.0,
+                    edge_type='coupling', from_node=i, to_node=-2,
+                ))
+
+            # Thermal derivatives
+            Q_structure = self.thermal_models[i].compute_heat_flux(t, tank_state)
+            dTs_dt      = self.thermal_models[i].compute_structure_temperature_derivative(t, tank_state)
+            dTshell_dt  = self.thermal_models[i].compute_shell_temperature_derivative(t, tank_state)
+
+            state_derivatives = self.dynamic_models[i].compute_state_derivatives(
+                time=t,
+                state=tank_state,
+                edge_flows=edge_flows,
+                Q_solid=Q_structure,
+                dTs_dt=dTs_dt,
+                dTshell_dt=dTshell_dt,
+                Q_discharge=0.0,
+                tank_index=i,
+            )
+
+            idx = i * 4
+            dydt[idx]     = state_derivatives.fuel_mass_derivative
+            dydt[idx + 1] = state_derivatives.temperature_derivative
+            dydt[idx + 2] = state_derivatives.solid_temperature_derivative
+            dydt[idx + 3] = state_derivatives.shell_temperature_derivative
+
+        return dydt
 
     def _calculate_coupling_flows(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
         """
@@ -1566,8 +1537,8 @@ class TankSystem:
                     from CoolProp.CoolProp import PropsSI as _PropsSI
 
                     def event(t, y):
-                        m = float(y[idx * 3])
-                        T = float(y[idx * 3 + 1])
+                        m = float(y[idx * 4])
+                        T = float(y[idx * 4 + 1])
                         rho = m / max(float(volume), 1e-9)
                         try:
                             P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "hydrogen")
@@ -1585,7 +1556,7 @@ class TankSystem:
 
                 def make_event(idx, minimum, volume):
                     def event(t, y):
-                        return y[idx * 3] / volume - minimum
+                        return y[idx * 4] / volume - minimum
                     event.terminal = True
                     event.direction = -1  # density decreasing
                     return event
@@ -1598,7 +1569,7 @@ class TankSystem:
         def density_event(t, y):
             """Event function to detect when target density is reached."""
             # Check all tanks - stop if ANY tank reaches target density
-            states_per_tank = 3  # [mass, temp, temp_solid]
+            states_per_tank = 4  # [mass, T_fluid, T_structure, T_shell]
 
             for i in range(len(self.tanks)):
                 mass_idx = i * states_per_tank
@@ -2074,8 +2045,8 @@ class TankSystem:
                 for tank_i in range(_n):
                     if self._tank_fluids.get(tank_i, '') == 'CH2':
                         # Pressure-based check for CH2 tanks
-                        m_val = float(solution.y[tank_i * 3, step_i])
-                        T_val = float(solution.y[tank_i * 3 + 1, step_i])
+                        m_val = float(solution.y[tank_i * 4, step_i])
+                        T_val = float(solution.y[tank_i * 4 + 1, step_i])
                         vol_val = self._cached_tank_properties[tank_i]['volume']
                         rho_val = m_val / max(vol_val, 1e-9)
                         try:
@@ -2088,7 +2059,7 @@ class TankSystem:
                             truncate_tank = tank_i
                             break
                     else:
-                        mass_val = float(solution.y[tank_i * 3, step_i])
+                        mass_val = float(solution.y[tank_i * 4, step_i])
                         vol_val = self._cached_tank_properties[tank_i]['volume']
                         if mass_val / max(vol_val, 1e-9) < self._min_densities[tank_i]:
                             truncate_step = step_i
@@ -2146,14 +2117,15 @@ class TankSystem:
             flow_data = []  # Store flow information for this time step
 
             for tank_idx in range(len(self.tanks)):
-                state_idx = tank_idx * 3  # Each tank has 3 state variables: m, T, Ts
+                state_idx = tank_idx * 4  # Each tank has 4 state variables: m, T, T_structure, T_shell
 
                 # Create tank state from solution
                 tank_state = IsochoricTankState(
                     tank=self.tanks[tank_idx],
                     fuel_mass=solution.y[state_idx, i],
                     temperature=solution.y[state_idx + 1, i],
-                    solid_temperature=solution.y[state_idx + 2, i]
+                    solid_temperature=solution.y[state_idx + 2, i],
+                    shell_temperature=solution.y[state_idx + 3, i],
                 )
 
                 # Recompute derived properties

@@ -131,11 +131,13 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['rho'].append(rho)
 
         dTs_dt = kwargs.get('dTs_dt', 0.0)
+        dTshell_dt = kwargs.get('dTshell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
             temperature_derivative=dT_dt,
             solid_temperature_derivative=dTs_dt,
+            shell_temperature_derivative=dTshell_dt,
             heat_flux=Q_solid,
             discharge_heat_flux=Q_discharge,
         )
@@ -293,11 +295,13 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['rho'].append(rho)
 
         dTs_dt = kwargs.get('dTs_dt', 0.0)
+        dTshell_dt = kwargs.get('dTshell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
             temperature_derivative=dT_dt,
             solid_temperature_derivative=dTs_dt,
+            shell_temperature_derivative=dTshell_dt,
             heat_flux=Q_solid,
             discharge_heat_flux=Q_discharge,
         )
