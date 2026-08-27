@@ -27,7 +27,9 @@ network:
         winding_angle: 54.7
       insulation:
         thickness: 0.05
-        heat_transfer_coefficient: 50.0
+        shell_thickness: 0.002
+        alpha_amb: 10.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.0
@@ -57,7 +59,9 @@ network:
         winding_angle: 54.7
       insulation:
         thickness: 0.05
-        heat_transfer_coefficient: 0.025
+        shell_thickness: 0.002
+        alpha_amb: 5.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.0
@@ -150,7 +154,7 @@ output:
   silent: false
   identifier: coupled_ch2_lh2_feedforward
   save_plots: true
-  plot_formats: [png, pgf]
+  plot_formats: [png]
   save_data: true
   data_format: csv
   results_directory: output/results

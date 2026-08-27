@@ -27,9 +27,10 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 50
+        shell_thickness: 0.002
+        alpha_amb: 10.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.8
@@ -58,9 +59,10 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
+        shell_thickness: 0.002
+        alpha_amb: 5.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.8
