@@ -111,10 +111,19 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     def get_alpha_s(self, T_fluid: float, T_structure: float, pressure: float) -> float:
         """Churchill-Chu natural convection HTC [W/m²K] for inner surface."""
         T_film = max(min(0.5 * (T_fluid + T_structure), 1000.0), 15.0)
-        k   = PropsSI('L', 'T', T_film, 'P', pressure, 'hydrogen')
-        mu  = PropsSI('V', 'T', T_film, 'P', pressure, 'hydrogen')
-        rho = PropsSI('D', 'T', T_film, 'P', pressure, 'hydrogen')
-        cp  = PropsSI('C', 'T', T_film, 'P', pressure, 'hydrogen')
+        try:
+            k   = PropsSI('L', 'T', T_film, 'P', pressure, 'hydrogen')
+            mu  = PropsSI('V', 'T', T_film, 'P', pressure, 'hydrogen')
+            rho = PropsSI('D', 'T', T_film, 'P', pressure, 'hydrogen')
+            cp  = PropsSI('C', 'T', T_film, 'P', pressure, 'hydrogen')
+        except ValueError as e:
+            if 'saturation' not in str(e).lower():
+                raise
+            # (T_film, P) is on the saturation line; evaluate as saturated liquid
+            k   = PropsSI('L', 'T', T_film, 'Q', 0, 'hydrogen')
+            mu  = PropsSI('V', 'T', T_film, 'Q', 0, 'hydrogen')
+            rho = PropsSI('D', 'T', T_film, 'Q', 0, 'hydrogen')
+            cp  = PropsSI('C', 'T', T_film, 'Q', 0, 'hydrogen')
         nu     = mu / rho
         alpha  = k / (rho * cp)
         Pr     = nu / alpha
