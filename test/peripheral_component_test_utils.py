@@ -56,6 +56,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 290.0
         target_pressure = 50e5
         target_temperature = 190.0
+        ambient_temperature = 290.0
         edge["peripheral_components"] = [
             {
                 "type": "compressor",
@@ -70,6 +71,9 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 35.0
         target_pressure = 12e5
         target_temperature = 26.0
+        # Ambient set to source temperature so T_shell,0 ≈ source temperature,
+        # making the insulation driving force negligible over the test duration.
+        ambient_temperature = 36.0
         edge["peripheral_components"] = [
             {
                 "type": "cryopump",
@@ -84,6 +88,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 260.0
         target_pressure = 50e5
         target_temperature = 180.0
+        ambient_temperature = 290.0
         edge["peripheral_components"] = [
             {
                 "type": "ideal_heat_exchanger",
@@ -111,7 +116,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
             "profile": "constant_flow",
             "flow_rate": flow_rate,
             "duration": duration_s,
-            "ambient_temperature": 290.0,
+            "ambient_temperature": ambient_temperature,
             "assigned_to_node": 2,
         },
         "physics": {
@@ -182,9 +187,10 @@ def build_component_benchmark_config(component_type: str) -> dict:
                         "winding_angle": 54.7,
                     },
                     "insulation": {
-                        "nist_path": "g10_nist",
                         "thickness": 0.01,
-                        "heat_transfer_coefficient": 0.0,
+                        "shell_thickness": 0.002,
+                        "alpha_amb": 10.0,
+                        "emissivity": 0.05,
                     },
                     "safety_margin": 1.25,
                 },
@@ -315,9 +321,10 @@ def build_yaml_smoke_config() -> dict:
                             "winding_angle": 54.7,
                         },
                         "insulation": {
-                            "nist_path": "g10_nist",
                             "thickness": 0.01,
-                            "heat_transfer_coefficient": 0.0,
+                            "shell_thickness": 0.002,
+                            "alpha_amb": 10.0,
+                            "emissivity": 0.05,
                         },
                         "safety_margin": 1.25,
                     },
@@ -352,9 +359,10 @@ def build_yaml_smoke_config() -> dict:
                             "winding_angle": 54.7,
                         },
                         "insulation": {
-                            "nist_path": "g10_nist",
                             "thickness": 0.01,
-                            "heat_transfer_coefficient": 0.0,
+                            "shell_thickness": 0.002,
+                            "alpha_amb": 10.0,
+                            "emissivity": 0.05,
                         },
                         "safety_margin": 1.25,
                     },

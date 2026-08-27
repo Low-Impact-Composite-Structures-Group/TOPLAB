@@ -1,6 +1,90 @@
-# Multi-Tank Framework Test Suite
+# Toplab Test Suite
 
-Comprehensive testing framework for the orchestrated multi-tank hydrogen storage system using pytest.
+Unit, integration, and regression tests for the multi-tank hydrogen storage framework, run with [pytest](https://docs.pytest.org).
+
+## Running tests
+
+From the repository root (with the `toplab` package installed or on `PYTHONPATH`):
+
+```bash
+# All tests
+pytest test/
+
+# Stop on first failure
+pytest test/ -x
+
+# Only fast unit tests
+pytest test/ -m unit
+
+# Only integration / simulation tests (slower)
+pytest test/ -m integration
+
+# Exclude slow benchmarks
+pytest test/ -m "not slow"
+
+# Verbose with live output
+pytest test/ -v -s
+```
+
+## Test categories (markers)
+
+| Marker | Scope |
+|---|---|
+| `unit` | Pure-logic tests, no I/O, no simulation |
+| `integration` | Runs the ODE solver for a short simulation |
+| `regression` | Guards against specific previously-fixed bugs |
+| `coupling` | Coupling valves and inter-tank flow physics |
+| `physics` | Edge-flow sign conventions, thermodynamic identities |
+| `plotting` | Report and plot generation smoke tests |
+| `slow` | Full-length numerical benchmarks (Lotka-Volterra, Robertson) |
+
+## What is tested
+
+**Thermal model and state** (`test_tank_thermal_model.py`)
+Validates the four-layer insulation model introduced with the 4-state DAE:
+Rohacell material properties, `InsulatedTankThermalModel` heat-flux sign
+conventions and scaling, `IsochoricTankState` 4-element state vector, and
+`MultiTankState` stride-4 assembly/disassembly.
+
+**NIST materials** (`test_nist_materials.py`)
+Temperature-dependent specific heat and thermal capacity for aluminium and
+composite materials against the raw NIST interpolation functions.
+
+**Edge-flow physics** (`test_edge_flow.py`)
+Sign conventions and enthalpy contributions for coupling, discharge, refuel,
+and vent edge types.
+
+**Coupling flows** (`test_coupling_flows.py`)
+Pressure-triggered valve hysteresis logic, orifice flow-rate calculation, and
+coupling-flow data storage across a short two-tank simulation.
+
+**Peripheral component benchmarks** (`test_peripheral_component_benchmarks.py`)
+Compressor, ideal heat exchanger, and cryopump components against
+analytically-derived steady-state enthalpy and temperature targets.
+
+**Orchestrator smoke** (`test_orchestrator_smoke.py`)
+Loads every config under `examples/`, wires the full orchestrator stack, and
+runs a 10-second simulation to verify that the integration pipeline executes
+without error for both single-tank and coupled configurations.
+
+**Report and plot smoke** (`test_report_and_plot_smoke.py`)
+Verifies that the comprehensive results report can be generated after a short
+simulation and that `generate_plots` is callable on all orchestrators.
+
+**Scenario configuration** (`test_scenario_config.py`)
+YAML parsing, material look-up, mission extraction, and validation for the
+`ScenarioConfig` class.
+
+**Solver benchmarks** (`test_benchmark_problems.py`)
+Solver-architecture validation using standard numerical benchmarks
+(Lotka-Volterra and Robertson's stiff problem) independent of tank physics.
+Marked `slow`; excluded from the default CI run.
+
+## Configuration
+
+pytest settings (markers, default paths, etc.) are in `pytest.ini`.
+Session-scoped fixtures (repo root, example config paths) are in `conftest.py`.
+
 
 ## 🚀 Quick Start
 
