@@ -86,7 +86,7 @@ class Hydrogen(ConvectiveMedium):
             return "unknown"
 
     @property
-    def gas(self) -> "Hydrogen":
+    def gas(self) -> "PARAHYD":
         if self.phase not in [
             "supercritical",
             "supercritical_gas",
@@ -97,12 +97,12 @@ class Hydrogen(ConvectiveMedium):
         return self
 
     @property
-    def liquid(self) -> "Hydrogen":
+    def liquid(self) -> "PARAHYD":
         if self.phase not in ["liquid", "supercritical_liquid", "twophase"]:
             raise ValueError("Hydrogen not in liquid phase")
         return self
 
-    def get_phase(self, phase: str) -> "Hydrogen":
+    def get_phase(self, phase: str) -> "PARAHYD":
         if phase in (None, ""):
             return self
         if phase == "gas":

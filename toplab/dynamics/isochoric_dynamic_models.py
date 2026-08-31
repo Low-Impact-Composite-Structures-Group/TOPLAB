@@ -77,9 +77,9 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             hydrogen = state.hydrogen
 
         try:
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "hydrogen")
-            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
-            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, "hydrogen")
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
+            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "PARAHYD")
+            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, "PARAHYD")
         except:
             h = 0.0
             c_v = 14000.0
@@ -168,12 +168,12 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         if self.scenario == "REFUEL":
             return self._compute_cryopump_enthalpy(pressure, temperature)
         try:
-            return PropsSI("Hmass", "P", pressure, "T", temperature, "hydrogen")
+            return PropsSI("Hmass", "P", pressure, "T", temperature, "PARAHYD")
         except ValueError:
             # (P, T) on the saturation curve — return saturated-vapour enthalpy
             # (single-phase model represents gas-phase tanks)
             try:
-                return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+                return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
             except Exception:
                 return 14300.0 * temperature
         except Exception:
@@ -184,9 +184,9 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", P2, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:
@@ -224,15 +224,15 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             hydrogen = state.hydrogen
 
         try:
-            p_sat = PropsSI("P", "T", T, "Q", 0, "hydrogen")
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "hydrogen")
+            p_sat = PropsSI("P", "T", T, "Q", 0, "PARAHYD")
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
             x = hydrogen.vapor_fraction if hydrogen.vapor_fraction is not None else 0.0
-            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "hydrogen")
-            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, "hydrogen")
-            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, "hydrogen")
-            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, "hydrogen")
-            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, "hydrogen")
-            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, "hydrogen")
+            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "PARAHYD")
+            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, "PARAHYD")
+            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, "PARAHYD")
+            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, "PARAHYD")
+            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, "PARAHYD")
+            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, "PARAHYD")
             L_v       = h_vapor - h_liquid
             delta_v   = (1.0 / rho_vapor) - (1.0 / rho_liquid)
             dp_sat_dT = L_v / (T * delta_v)
@@ -241,12 +241,12 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             _dT = 0.05   # K, step for numerical saturation-curve derivative
             _Tlo, _Thi = max(T - _dT, 14.0), T + _dT
             _step = _Thi - _Tlo
-            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,"hydrogen") -
-                         PropsSI("Dmass","T",_Tlo,"Q",0,"hydrogen")) / _step
-            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,"hydrogen") -
-                         PropsSI("Dmass","T",_Tlo,"Q",1,"hydrogen")) / _step
-            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, "hydrogen")
-            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, "hydrogen")
+            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,"PARAHYD") -
+                         PropsSI("Dmass","T",_Tlo,"Q",0,"PARAHYD")) / _step
+            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,"PARAHYD") -
+                         PropsSI("Dmass","T",_Tlo,"Q",1,"PARAHYD")) / _step
+            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, "PARAHYD")
+            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, "PARAHYD")
             c_v2P_l = c_v_liquid + T * (dp_dT_rho_l - dp_sat_dT) * (-drho_l_dT / rho_liquid**2)
             c_v2P_v = c_v_vapor  + T * (dp_dT_rho_v - dp_sat_dT) * (-drho_v_dT / rho_vapor**2)
             c_v2P = (1.0 - x) * c_v2P_l + x * c_v2P_v
@@ -340,7 +340,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         # the phase from that pair alone.  Use saturated-vapour enthalpy instead,
         # which is the appropriate value for gas leaving a two-phase LH2 tank.
         try:
-            return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+            return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
         except Exception:
             return 14300.0 * temperature  # ideal-gas fallback
 
@@ -349,9 +349,9 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", P2, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:

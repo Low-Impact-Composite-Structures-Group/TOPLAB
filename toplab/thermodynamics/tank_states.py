@@ -85,7 +85,7 @@ class IsochoricTankState:
                 raise ValueError(
                     f"Cannot compute pressure: temperature {self.temperature:.4f} K is non-positive"
                 )
-            self.pressure = safe_pressure_from_T_rho(self.temperature, self.density, "hydrogen")
+            self.pressure = safe_pressure_from_T_rho(self.temperature, self.density, "PARAHYD")
 
     def _needs_hydrogen_update(self) -> bool:
         if self.hydrogen is None:
@@ -119,7 +119,7 @@ class IsochoricTankState:
 
         from CoolProp.CoolProp import PropsSI
 
-        return PropsSI("Cvmass", "T", self.temperature, "Dmass", self.density, "hydrogen")
+        return PropsSI("Cvmass", "T", self.temperature, "Dmass", self.density, "PARAHYD")
 
 
 @dataclass

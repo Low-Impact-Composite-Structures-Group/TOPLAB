@@ -557,7 +557,7 @@ class SystemOrchestrator:
                 try:
                     from CoolProp.CoolProp import PropsSI
                     density = float(geometry_data['initial_density'])
-                    initial_temp = PropsSI("T", "P", initial_pressure, "D", density, "hydrogen")
+                    initial_temp = PropsSI("T", "P", initial_pressure, "D", density, "PARAHYD")
                 except:
                     initial_temp = 53.25  # Default cryogenic temperature
             else:
@@ -1074,17 +1074,17 @@ class SystemOrchestrator:
             # Density specified - solve for temperature
             target_density = float(geometry_data['initial_density'])  # kg/m³
             try:
-                initial_temp = PropsSI("T", "P", initial_pressure, "D", target_density, "hydrogen")
+                initial_temp = PropsSI("T", "P", initial_pressure, "D", target_density, "PARAHYD")
                 print(f"     Solved initial temperature: {initial_temp:.2f} K (from P={initial_pressure/1e5:.0f} bar, ρ={target_density:.1f} kg/m³)")
             except Exception as e:
                 print(f"     Warning: Could not solve for temperature from P,ρ: {e}")
                 initial_temp = geometry_data.get('initial_temperature', 53.25)
-                target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "hydrogen")
+                target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "PARAHYD")
                 print(f"     Using fallback: T={initial_temp:.2f} K, ρ={target_density:.1f} kg/m³")
         else:
             # Temperature specified - calculate density
             initial_temp = geometry_data.get('initial_temperature', 53.25)  # K
-            target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "hydrogen")
+            target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "PARAHYD")
             print(f"     Calculated density: {target_density:.2f} kg/m³ (from P={initial_pressure/1e5:.0f} bar, T={initial_temp:.1f} K)")
 
         # Calculate required tank volume with ullage allowance
@@ -1341,7 +1341,7 @@ class SystemOrchestrator:
 
         try:
             # Calculate target enthalpy (constant for all time points)
-            h_target = PropsSI("Hmass", "T", target_temp, "P", target_press, "hydrogen")
+            h_target = PropsSI("Hmass", "T", target_temp, "P", target_press, "PARAHYD")
         except Exception as e:
             print(f"   WARNING: Could not calculate OHEX target enthalpy: {e}")
             return [0.0] * len(self.results.times)
@@ -1371,13 +1371,13 @@ class SystemOrchestrator:
                     # Calculate current pressure and enthalpy with saturation-aware helpers
                     try:
                         from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho, safe_enthalpy
-                        p_current = safe_pressure_from_T_rho(T_current, rho_current, "hydrogen")
+                        p_current = safe_pressure_from_T_rho(T_current, rho_current, "PARAHYD")
                         # Assume gas enthalpy for outlet stream when in two-phase
-                        h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="hydrogen")
+                        h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="PARAHYD")
                     except Exception:
                         # Fallback to direct CoolProp calls
-                        p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "hydrogen")
-                        h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "hydrogen")
+                        p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "PARAHYD")
+                        h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "PARAHYD")
 
                     # Calculate OHEX heat requirement
                     q_ohex = mass_rate * (h_target - h_current)  # [W]
@@ -2263,11 +2263,11 @@ class SystemOrchestrator:
             }
 
             # === PREPROCESSED INPUTS ===
-            P_crit_bar = PropsSI("Pcrit", "hydrogen") / 1e5
+            P_crit_bar = PropsSI("Pcrit", "PARAHYD") / 1e5
             if initial_pressure_bar <= P_crit_bar:
-                T_sat = float(PropsSI("T", "P", initial_pressure_bar * 1e5, "Q", 0, "hydrogen"))
+                T_sat = float(PropsSI("T", "P", initial_pressure_bar * 1e5, "Q", 0, "PARAHYD"))
             else:
-                T_sat = float(PropsSI("Tcrit", "hydrogen"))
+                T_sat = float(PropsSI("Tcrit", "PARAHYD"))
             delta_T = initial_temperature_K - T_sat
 
             preprocessed_inputs = {

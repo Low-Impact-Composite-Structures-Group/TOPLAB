@@ -252,23 +252,23 @@ def run_component_benchmark(component_type: str) -> dict:
         target_final = results.multi_tank_states[-1].get_tank_state(1)
 
         rho_final = target_final.fuel_mass / target_final.tank.volume
-        h_target = PropsSI("Hmass", "T", target_final.temperature, "Dmass", rho_final, "hydrogen")
+        h_target = PropsSI("Hmass", "T", target_final.temperature, "Dmass", rho_final, "PARAHYD")
 
         if component_type == "compressor":
             expected_component_name = "Compressor"
-            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.temperature, "hydrogen")
-            h_expected = PropsSI("Hmass", "P", 120e5, "Smass", s_in, "hydrogen")
+            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.temperature, "PARAHYD")
+            h_expected = PropsSI("Hmass", "P", 120e5, "Smass", s_in, "PARAHYD")
         elif component_type == "cryopump":
             expected_component_name = "CryoPumpModel"
-            h1 = PropsSI("H", "P", 3e5, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", 3e5, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", target_final.pressure, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", 3e5, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", 3e5, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", target_final.pressure, "S", s1, "PARAHYD")
             h_expected = h1 + (h2s - h1) / 0.78
         else:
             expected_component_name = "IdealHeatExchanger"
-            h_expected = PropsSI("Hmass", "P", source_final.pressure, "T", 315.0, "hydrogen")
+            h_expected = PropsSI("Hmass", "P", source_final.pressure, "T", 315.0, "PARAHYD")
 
-        t_expected = PropsSI("T", "Dmass", rho_final, "Hmass", h_expected, "hydrogen")
+        t_expected = PropsSI("T", "Dmass", rho_final, "Hmass", h_expected, "PARAHYD")
 
         return {
             "component_name": type(original_valve.component_chain[0]).__name__,

@@ -931,7 +931,7 @@ class TankSystem:
                 print(f"  Tank {i+1}: specified mass {m_init:.2f} kg, "
                       f"density {density_init:.2f} kg/m³")
             else:
-                density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, "hydrogen")
+                density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, "PARAHYD")
                 tank_volume = self._cached_tank_properties[i]['volume']
                 m_init = density_init * tank_volume
                 print(f"  Tank {i+1}: P={tank_config.P_INIT/1e5:.0f} bar, "
@@ -977,9 +977,9 @@ class TankSystem:
                 rho_i = m_i / max(self.tanks[i].volume, 1e-9)
                 try:
                     from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
-                    P_i = safe_pressure_from_T_rho(T_i, rho_i, "hydrogen")
+                    P_i = safe_pressure_from_T_rho(T_i, rho_i, "PARAHYD")
                 except Exception:
-                    P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, "hydrogen")
+                    P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, "PARAHYD")
                 thermal = self.thermal_models[i]
                 try:
                     Q_amb = thermal.compute_ambient_heat_flux(T_sh)
@@ -1541,7 +1541,7 @@ class TankSystem:
                         T = float(y[idx * 4 + 1])
                         rho = m / max(float(volume), 1e-9)
                         try:
-                            P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "hydrogen")
+                            P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "PARAHYD")
                             return P - p_min_pa
                         except Exception:
                             return 1.0  # stay positive so a CoolProp error does not falsely trigger
@@ -1887,7 +1887,7 @@ class TankSystem:
                     # Use average outlet pressure (both should be ~3 bar)
                     P_mix = (A_P[ts_idx] + B_P[ts_idx]) / 2.0
                     try:
-                        T_mix = PropsSI("T", "P", P_mix, "Hmass", h_mix, "hydrogen")
+                        T_mix = PropsSI("T", "P", P_mix, "Hmass", h_mix, "PARAHYD")
                     except Exception:
                         T_mix = np.nan
                     mix_mdot_gs[ts_idx] = m_total
@@ -2051,7 +2051,7 @@ class TankSystem:
                         rho_val = m_val / max(vol_val, 1e-9)
                         try:
                             from CoolProp.CoolProp import PropsSI as _P
-                            P_val = _P("P", "T", max(T_val, 14.0), "Dmass", max(rho_val, 1e-9), "hydrogen")
+                            P_val = _P("P", "T", max(T_val, 14.0), "Dmass", max(rho_val, 1e-9), "PARAHYD")
                         except Exception:
                             continue
                         if P_val < self._min_pressures[tank_i]:

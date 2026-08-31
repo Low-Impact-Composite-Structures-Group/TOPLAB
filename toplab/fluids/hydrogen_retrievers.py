@@ -12,7 +12,7 @@ from toplab.fluids.convective_mediums import Hydrogen, IsochoricHydrogen, TwoPha
 path = os.getcwd() + "/src/fluids/refprop/"
 CP.set_config_string(CP.ALTERNATIVE_REFPROP_PATH, path)
 
-HYDROGEN_FLUID = "hydrogen"
+HYDROGEN_FLUID = "PARAHYD"
 
 
 class HydrogenRequester(Protocol):

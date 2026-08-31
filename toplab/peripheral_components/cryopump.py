@@ -56,7 +56,7 @@ class CryoPumpModel(PeripheralComponent):
         if self.enable_cache:
             self._cache_misses += 1
 
-        fluid = "Hydrogen"
+        fluid = "PARAHYD"
         P1 = self.parameters.reservoir_pressure
         P2 = tank_pressure
         eta_p = self.parameters.efficiency
