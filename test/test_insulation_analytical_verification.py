@@ -485,7 +485,7 @@ class TestV6ShellTransient:
             (t_eval[0], t_eval[-1]),
             [self.T_S0],
             t_eval=t_eval,
-            method="RK45",
+            method="LSODA",
             rtol=1e-10,
             atol=1e-12,
         )
@@ -667,8 +667,14 @@ class TestV8QuasiSteadyFoam:
         assert ratio < 100.0, (
             f"V8: τ_foam/τ_shell={ratio:.1f} exceeds 100×. "
             f"τ_foam={result['tau_foam']:.1f} s, τ_shell={result['tau_shell']:.1f} s. "
-            f"NOTE: quasi-steady assumption is NOT justified for the shell ODE."
+            f"NOTE: quasi-s teady assumption is NOT justified for the shell ODE."
         )
+        # warn that if ratio > 0.1, quasi-steady assumption is questionable for the shell ODE
+        if ratio > 0.1:
+            print(
+                f"V8: WARNING: τ_foam/τ_shell={ratio:.1f} > 0.1. "
+                f"Quasi-steady assumption may be questionable for the shell ODE."
+            )
 
     def test_tau_foam_less_than_tau_structure(self):
         model = _make_model()
@@ -678,6 +684,7 @@ class TestV8QuasiSteadyFoam:
             t_foam=t_foam, C_shell=C_shell, h_A=h_A, G_foam=G_foam,
             C_structure=C_structure,
         )
+        print(f"V8: τ_foam={result['tau_foam']:.1f} s, τ_structure={result['tau_structure']:.1f} s")
         assert result["tau_foam"] < result["tau_structure"], (
             f"V8: τ_foam={result['tau_foam']:.1f} s is NOT << "
             f"τ_structure={result['tau_structure']:.1f} s. "
