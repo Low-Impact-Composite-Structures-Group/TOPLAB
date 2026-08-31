@@ -228,15 +228,28 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             h = PropsSI("Hmass", "T", T, "Dmass", rho, "hydrogen")
             x = hydrogen.vapor_fraction if hydrogen.vapor_fraction is not None else 0.0
             c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "hydrogen")
-            c_v_vapor = PropsSI("Cvmass", "T", T, "Q", 1, "hydrogen")
-            c_v2P = x * c_v_vapor + (1.0 - x) * c_v_liquid
-            h_vapor = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
-            h_liquid = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
-            rho_vapor = PropsSI("Dmass", "T", T, "Q", 1, "hydrogen")
-            rho_liquid = PropsSI("Dmass", "T", T, "Q", 0, "hydrogen")
-            L_v = h_vapor - h_liquid
-            delta_v = (1.0 / rho_vapor) - (1.0 / rho_liquid)
+            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, "hydrogen")
+            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, "hydrogen")
+            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, "hydrogen")
+            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, "hydrogen")
+            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, "hydrogen")
+            L_v       = h_vapor - h_liquid
+            delta_v   = (1.0 / rho_vapor) - (1.0 / rho_liquid)
             dp_sat_dT = L_v / (T * delta_v)
+            # Stops et al. Appendix A.3: correct isochoric two-phase heat capacity.
+            # with (dp/dT|_rho - dp_sat/dT)*dv/dT|_sat.
+            _dT = 0.05   # K, step for numerical saturation-curve derivative
+            _Tlo, _Thi = max(T - _dT, 14.0), T + _dT
+            _step = _Thi - _Tlo
+            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,"hydrogen") -
+                         PropsSI("Dmass","T",_Tlo,"Q",0,"hydrogen")) / _step
+            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,"hydrogen") -
+                         PropsSI("Dmass","T",_Tlo,"Q",1,"hydrogen")) / _step
+            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, "hydrogen")
+            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, "hydrogen")
+            c_v2P_l = c_v_liquid + T * (dp_dT_rho_l - dp_sat_dT) * (-drho_l_dT / rho_liquid**2)
+            c_v2P_v = c_v_vapor  + T * (dp_dT_rho_v - dp_sat_dT) * (-drho_v_dT / rho_vapor**2)
+            c_v2P = (1.0 - x) * c_v2P_l + x * c_v2P_v
         except:
             p_sat = state.pressure
             h = 0.0
