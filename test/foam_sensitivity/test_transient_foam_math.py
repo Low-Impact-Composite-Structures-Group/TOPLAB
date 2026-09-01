@@ -9,7 +9,7 @@ test_insulation_analytical_verification.py.
 
 Tests
 -----
-T0  Q_foam_qs exactly matches InsulatedTankThermalModel.compute_insulation_heat_flux.
+T0  Q_foam_qs_split exactly matches InsulatedTankThermalModel.compute_insulation_heat_flux.
 T1  Foam mass formula matches _layer_mass for all sweep thicknesses.
 T2  Foam thermal capacitance is positive over the cryogenic-to-ambient range.
 T3  Cylindrical midpoint radius gives equal log half-resistances.
@@ -40,7 +40,7 @@ from foam_sensitivity_study import (
     build_geometry, TankGeometry,
     _layer_mass,
     cap_foam,
-    Q_foam_qs, Q_shell_to_foam, Q_foam_to_structure,
+    Q_foam_qs_split, Q_shell_to_foam, Q_foam_to_structure,
     _G_half, _integrate,
     _tf_rhs_a,
     SWEEP_THICKNESSES_M,
@@ -63,10 +63,10 @@ def geo50() -> TankGeometry:
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("t_ins", SWEEP_THICKNESSES_M)
-def test_q_foam_qs_matches_production_insulation_model(t_ins: float) -> None:
+def test_q_foam_qs_split_matches_production_insulation_model(t_ins: float) -> None:
     """
-    Q_foam_qs must reproduce InsulatedTankThermalModel.compute_insulation_heat_flux
-    for identical geometry — confirming the study exercises the production formula.
+    Q_foam_qs_split must reproduce InsulatedTankThermalModel.compute_insulation_heat_flux
+    for identical geometry — both solve the same brentq problem independently.
     """
     from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
     from toplab.materials.nist_materials import NISTMetal, NISTComposite
@@ -97,11 +97,11 @@ def test_q_foam_qs_matches_production_insulation_model(t_ins: float) -> None:
     )
 
     for T_s, T_sh in [(60.0, 250.0), (30.0, 100.0), (20.0, 288.0)]:
-        Q_study = Q_foam_qs(T_s, T_sh, geo)
-        Q_prod  = model.compute_insulation_heat_flux(T_s, T_sh)
-        assert Q_study == pytest.approx(Q_prod, rel=1e-12), (
+        Q_study = Q_foam_qs_split(T_sh, T_s, geo)               # study: (T_sh, T_s)
+        Q_prod  = model.compute_insulation_heat_flux(T_s, T_sh)  # model: (T_s, T_sh)
+        assert Q_study == pytest.approx(Q_prod, rel=1e-6), (
             f"t_ins={t_ins*1e3:.0f} mm, T_s={T_s}, T_sh={T_sh}: "
-            f"Q_foam_qs={Q_study:.6f} W ≠ InsulatedTankThermalModel={Q_prod:.6f} W"
+            f"Q_foam_qs_split={Q_study:.6f} W ≠ InsulatedTankThermalModel={Q_prod:.6f} W"
         )
 
 
@@ -306,8 +306,9 @@ def test_foam_halves_balance_at_steady_state(geo50: TankGeometry) -> None:
 
 def test_qs_and_tf_agree_on_total_conductance_constant_k(geo50: TankGeometry) -> None:
     """
-    For constant k, the TF model at steady state (T_foam = (T_sh+T_s)/2) should
-    deliver Q = G_total * ΔT, identical to the QS model.
+    For constant k, the TF split model at steady state (T_foam = (T_sh+T_s)/2)
+    delivers Q = G_total * ΔT, identical to the full-layer analytical formula.
+    Confirms that T5/T6 (equal-resistance split) is algebraically self-consistent.
     """
     T_sh, T_s = 288.0, 60.0
     k_const = 0.020  # W/mK

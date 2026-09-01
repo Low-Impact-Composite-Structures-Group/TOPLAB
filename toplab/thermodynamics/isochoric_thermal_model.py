@@ -6,7 +6,9 @@ The InsulatedTankThermalModel implements the four-layer thermal network:
     fluid  ←(Q_structure)←  structure  ←(Q_insulation)←  shell  ←(Q_amb)←  ambient
 
 Structure (liner + composite) and shell each carry an ODE state.
-Insulation (Rohacell foam) is a static conductive path with k(T_mean).
+Insulation (Rohacell foam) uses a two-k QS-split: the layer is divided at the
+equal-resistance midpoint radius and k is evaluated separately at each half-layer
+midpoint temperature, then the equilibrium foam temperature is solved algebraically.
 
 Author: Dante Raso
 """
@@ -15,6 +17,7 @@ import math
 from abc import ABC, abstractmethod
 
 from CoolProp.CoolProp import PropsSI
+from scipy.optimize import brentq
 
 from toplab.thermodynamics.tank_states import IsochoricTankState
 from toplab.materials.nist_materials import NISTMaterial
@@ -52,7 +55,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
 
     Algebraic:
       Q_structure  = α_s · A_in · (T_structure − T_fluid)          [inner natural convection]
-      Q_insulation = Q_cyl + Q_cap                                  [Fourier through Rohacell]
+      Q_insulation = Q_outer = Q_inner                              [two-k QS-split Fourier]
       Q_amb        = α_amb · A_shell · (T_amb − T_shell)
                    + ε · σ · A_shell · (T_amb⁴ − T_shell⁴)        [conv + radiation]
     """
@@ -103,6 +106,9 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
             2.0 * math.pi * r_shell * cylinder_length
             + 4.0 * math.pi * r_shell ** 2
         )
+        # equal-resistance midpoint radii for the two-k insulation formula
+        self.r_m_cyl = math.sqrt(r_structure * r_shell)                          # geometric mean → equal log resistance
+        self.r_m_sph = 2.0 * r_structure * r_shell / (r_structure + r_shell)     # harmonic mean  → equal 1/r resistance
 
     # ------------------------------------------------------------------
     # Inner convection: structure ↔ fluid
@@ -143,17 +149,29 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     # ------------------------------------------------------------------
 
     def compute_insulation_heat_flux(self, T_structure: float, T_shell: float) -> float:
-        """Q_insulation [W]: heat through foam from shell to structure. Positive when T_shell > T_structure."""
-        T_mid = 0.5 * (T_structure + T_shell)
-        k_ins = rohacell_k(T_mid)
-        r_s   = self.r_structure
-        r_sh  = self.r_shell
-        t_ins = r_sh - r_s
-        # Cylindrical section
-        Q_cyl = 2.0 * math.pi * self.L * k_ins / math.log(r_sh / r_s) * (T_shell - T_structure)
-        # Two spherical endcaps (combined formula for concentric spherical shells)
-        Q_cap = 4.0 * math.pi * k_ins * r_s * r_sh / t_ins * (T_shell - T_structure)
-        return Q_cyl + Q_cap
+        """Q_insulation [W]: two-k QS-split at equal-resistance midpoint. Positive when T_shell > T_structure."""
+        if abs(T_shell - T_structure) < 1e-8:
+            return 0.0
+        r_s, r_sh = self.r_structure, self.r_shell
+        r_mc, r_ms = self.r_m_cyl, self.r_m_sph
+
+        def _G_outer(T_f: float) -> float:
+            k = rohacell_k(max(4.0, min(0.5 * (T_shell + T_f), 400.0)))
+            return (2.0 * math.pi * self.L * k / math.log(r_sh / r_mc)
+                    + 4.0 * math.pi * k * r_ms * r_sh / (r_sh - r_ms))
+
+        def _G_inner(T_f: float) -> float:
+            k = rohacell_k(max(4.0, min(0.5 * (T_f + T_structure), 400.0)))
+            return (2.0 * math.pi * self.L * k / math.log(r_mc / r_s)
+                    + 4.0 * math.pi * k * r_s * r_ms / (r_ms - r_s))
+
+        lo = min(T_structure, T_shell) + 1e-6
+        hi = max(T_structure, T_shell) - 1e-6
+        T_foam = brentq(
+            lambda T_f: _G_outer(T_f) * (T_shell - T_f) - _G_inner(T_f) * (T_f - T_structure),
+            lo, hi, xtol=1e-8,
+        )
+        return _G_outer(T_foam) * (T_shell - T_foam)
 
     # ------------------------------------------------------------------
     # Ambient: convection + radiation to/from shell

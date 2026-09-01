@@ -1,12 +1,15 @@
 """
-Sensitivity study: quasi-steady (QS) vs one-state transient-foam (TF) thermal models.
+Sensitivity study: production (QS-split) vs one-state transient-foam (TF) thermal model.
+
+The only difference between the two models is foam thermal capacitance.  Both use the
+two-k QS-split Fourier formula (= InsulatedTankThermalModel.compute_insulation_heat_flux).
 
 Cases
 -----
 A  Step change in T_amb; T_structure fixed.  Isolates shell–foam coupling.
 B  Full shell + structure network; T_fluid fixed.  Tests structure-side heat input.
 
-Foam-thickness sweep (25–100 mm) and initial-gradient sensitivity are also included.
+Foam-thickness sweep (25–100 mm) is included.
 
 Usage:  python foam_sensitivity_study.py
 """
@@ -64,20 +67,18 @@ SWEEP_THICKNESSES_M = [0.025, 0.050, 0.075, 0.100]
 
 # ── Delft colour palette ──────────────────────────────────────────────────────
 _C = {
-    "qs_shell":   "#0C2340",  # dark blue
-    "tf_shell":   "#0076C2",  # royal blue
-    "tf_foam":    "#00B8C8",  # teal
-    "qs_struct":  "#A50034",  # bordeaux
-    "tf_struct":  "#E03C31",  # red
-    "Q_qs":       "#0C2340",
-    "Q_tf_outer": "#0076C2",
-    "Q_tf_inner": "#E03C31",
-    "delta":      "#6F1D77",  # purple
-    "E_qs":         "#0C2340",
-    "E_tf":         "#E03C31",
-    "residual":     "#EC6842",  # orange
-    "qs_split_shell": "#6CC24A",  # green — QS-split model
-    "Q_qs_split":    "#6CC24A",
+    "prod_shell":  "#0C2340",  # dark blue — production
+    "tf_shell":    "#0076C2",  # royal blue — TF
+    "tf_foam":     "#00B8C8",  # teal — TF foam node
+    "prod_struct": "#A50034",  # bordeaux — production
+    "tf_struct":   "#E03C31",  # red — TF
+    "Q_prod":      "#0C2340",
+    "Q_tf_outer":  "#0076C2",
+    "Q_tf_inner":  "#E03C31",
+    "delta":       "#6F1D77",  # purple — TF − production
+    "E_prod":      "#0C2340",
+    "E_tf":        "#E03C31",
+    "residual":    "#EC6842",  # orange
 }
 
 _OUTDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -172,17 +173,6 @@ def Q_amb(T_sh: float, T_amb: float, geo: TankGeometry) -> float:
             + EMISSIVITY * SIGMA * geo.A_shell * (T_amb**4 - T_sh**4))
 
 
-def Q_foam_qs(T_s: float, T_sh: float, geo: TankGeometry) -> float:
-    """Production insulation formula — identical to InsulatedTankThermalModel.compute_insulation_heat_flux.
-    k evaluated at midpoint temperature; positive when T_sh > T_s."""
-    T_m = 0.5 * (T_s + T_sh)
-    k   = rohacell_k(_clamp(T_m))
-    r_s, r_sh = R_STRUCTURE, geo.r_shell
-    G_cyl = 2.0 * math.pi * L_CYL * k / math.log(r_sh / r_s)
-    G_cap = 4.0 * math.pi * k * r_s * r_sh / (r_sh - r_s)
-    return (G_cyl + G_cap) * (T_sh - T_s)
-
-
 def _G_half(r_cyl_in: float, r_cyl_out: float,
              r_sph_in: float, r_sph_out: float, k: float) -> float:
     """Combined cylindrical + spherical conductance for one foam half-layer [W/K]."""
@@ -219,19 +209,13 @@ def _solve_foam_qs_split(T_sh: float, T_s: float, geo: TankGeometry) -> float:
 
 
 def Q_foam_qs_split(T_sh: float, T_s: float, geo: TankGeometry) -> float:
-    """QS-split heat flow: split-resistance geometry with zero foam capacitance [W]."""
+    """Production insulation heat flow [W]: two-k QS-split, algebraic T_foam. Matches compute_insulation_heat_flux."""
     return Q_shell_to_foam(T_sh, _solve_foam_qs_split(T_sh, T_s, geo), geo)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ODE right-hand sides
 # ══════════════════════════════════════════════════════════════════════════════
-
-def _qs_rhs_a(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
-    """QS Case A: state = [T_shell]; T_structure pinned."""
-    T_sh = y[0]
-    return [(Q_amb(T_sh, T_amb, geo) - Q_foam_qs(T_STRUCT_FIXED, T_sh, geo)) / cap_shell(T_sh, geo)]
-
 
 def _tf_rhs_a(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
     """TF Case A: state = [T_shell, T_foam]; T_structure pinned."""
@@ -241,16 +225,6 @@ def _tf_rhs_a(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
     return [
         (Q_amb(T_sh, T_amb, geo) - Qsf) / cap_shell(T_sh, geo),
         (Qsf - Qfs) / cap_foam(T_f, geo),
-    ]
-
-
-def _qs_rhs_b(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
-    """QS Case B: state = [T_shell, T_structure]."""
-    T_sh, T_s = y
-    Qf = Q_foam_qs(T_s, T_sh, geo)
-    return [
-        (Q_amb(T_sh, T_amb, geo) - Qf) / cap_shell(T_sh, geo),
-        (Qf - Q_struct_to_fluid(T_s)) / cap_structure(T_s, geo),
     ]
 
 
@@ -267,14 +241,14 @@ def _tf_rhs_b(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
 
 
 def _qs_split_rhs_a(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
-    """QS-split Case A: split-resistance geometry, T_foam algebraic, T_structure pinned."""
+    """Production Case A: state = [T_shell]; T_foam algebraic, T_structure pinned."""
     T_sh = y[0]
     Qf = Q_foam_qs_split(T_sh, T_STRUCT_FIXED, geo)
     return [(Q_amb(T_sh, T_amb, geo) - Qf) / cap_shell(T_sh, geo)]
 
 
 def _qs_split_rhs_b(t: float, y: np.ndarray, geo: TankGeometry, T_amb: float) -> list:
-    """QS-split Case B: split-resistance geometry, T_foam algebraic."""
+    """Production Case B: state = [T_shell, T_structure]; T_foam algebraic."""
     T_sh, T_s = y
     Qf = Q_foam_qs_split(T_sh, T_s, geo)
     return [
@@ -305,9 +279,9 @@ def _integrate(rhs, y0: list, geo: TankGeometry, T_amb: float,
 
 
 def _find_shell_eq_a(T_amb_eq: float, geo: TankGeometry) -> float:
-    """Equilibrium shell temperature for Case A: Q_amb(T_sh) = Q_foam_qs(T_STRUCT_FIXED, T_sh)."""
+    """Equilibrium shell temperature for Case A: Q_amb(T_sh) = Q_foam_qs_split(T_sh, T_STRUCT_FIXED)."""
     def res(T_sh: float) -> float:
-        return Q_amb(T_sh, T_amb_eq, geo) - Q_foam_qs(T_STRUCT_FIXED, T_sh, geo)
+        return Q_amb(T_sh, T_amb_eq, geo) - Q_foam_qs_split(T_sh, T_STRUCT_FIXED, geo)
     lo = T_STRUCT_FIXED + 0.1
     hi = max(T_amb_eq, T_STRUCT_FIXED) + 30.0
     return brentq(res, lo, hi, xtol=1e-6)
@@ -327,43 +301,33 @@ def run_case_a(
     """
     Case A: step T_amb_init → T_amb_final at t=0; T_structure fixed.
 
-    Three models run on the same grid:
-      production:    k(T_m) at midpoint, matches InsulatedTankThermalModel.compute_insulation_heat_flux.
-      QS-split:      split-resistance geometry, T_foam algebraic (zero capacitance).
-      TF-split:      split-resistance geometry, T_foam as ODE state.
+    Two models on the same grid:
+      production:  T_foam algebraic (zero capacitance), two-k QS-split formula.
+      TF:          T_foam as ODE state, same two-k formula.
 
-    TF foam initial condition = QS-split algebraic equilibrium, so the only
-    difference between QS-split and TF-split is the foam thermal capacitance.
+    The only difference is foam thermal capacitance.
     """
     if T_sh_init is None:
         T_sh_init = _find_shell_eq_a(T_amb_init, geo)
     T_f_init = _solve_foam_qs_split(T_sh_init, T_STRUCT_FIXED, geo)
 
-    y_qs  = _integrate(_qs_rhs_a,       [T_sh_init],           geo, T_amb_final, t_eval)
-    y_qss = _integrate(_qs_split_rhs_a, [T_sh_init],           geo, T_amb_final, t_eval)
-    y_tf  = _integrate(_tf_rhs_a,       [T_sh_init, T_f_init], geo, T_amb_final, t_eval)
+    y_prod = _integrate(_qs_split_rhs_a, [T_sh_init],           geo, T_amb_final, t_eval)
+    y_tf   = _integrate(_tf_rhs_a,       [T_sh_init, T_f_init], geo, T_amb_final, t_eval)
 
-    T_sh_qs  = y_qs[0]
-    T_sh_qss = y_qss[0]
+    T_sh_prod = y_prod[0]
     T_sh_tf, T_f_tf = y_tf[0], y_tf[1]
     n = len(t_eval)
 
-    Q_qs  = np.array([Q_foam_qs(T_STRUCT_FIXED, T_sh_qs[i], geo) for i in range(n)])
-    Q_qss = np.array([Q_foam_qs_split(T_sh_qss[i], T_STRUCT_FIXED, geo) for i in range(n)])
-    Qsf   = np.array([Q_shell_to_foam(T_sh_tf[i], T_f_tf[i], geo) for i in range(n)])
-    Qfs   = np.array([Q_foam_to_structure(T_f_tf[i], T_STRUCT_FIXED, geo) for i in range(n)])
+    Q_prod = np.array([Q_foam_qs_split(T_sh_prod[i], T_STRUCT_FIXED, geo) for i in range(n)])
+    Qsf    = np.array([Q_shell_to_foam(T_sh_tf[i], T_f_tf[i], geo) for i in range(n)])
+    Qfs    = np.array([Q_foam_to_structure(T_f_tf[i], T_STRUCT_FIXED, geo) for i in range(n)])
 
     return dict(
         t=t_eval, geo=geo,
-        qs=dict(
-            T_shell=T_sh_qs,
+        production=dict(
+            T_shell=T_sh_prod,
             T_structure=np.full(n, T_STRUCT_FIXED),
-            Q_into_structure=Q_qs,
-        ),
-        qs_split=dict(
-            T_shell=T_sh_qss,
-            T_structure=np.full(n, T_STRUCT_FIXED),
-            Q_into_structure=Q_qss,
+            Q_into_structure=Q_prod,
         ),
         tf=dict(
             T_shell=T_sh_tf,
@@ -383,38 +347,27 @@ def run_case_b(
     T_s_init: float = 60.0,
     t_eval: np.ndarray = T_EVAL,
 ) -> dict:
-    """
-    Case B: full shell + structure network; T_fluid fixed.
-    Three models: production, QS-split, TF-split.
-    """
+    """Case B: full shell + structure network; T_fluid fixed. Two models: production, TF."""
     T_f_init = _solve_foam_qs_split(T_sh_init, T_s_init, geo)
 
-    y_qs  = _integrate(_qs_rhs_b,       [T_sh_init, T_s_init],           geo, T_amb_final, t_eval)
-    y_qss = _integrate(_qs_split_rhs_b, [T_sh_init, T_s_init],           geo, T_amb_final, t_eval)
-    y_tf  = _integrate(_tf_rhs_b,       [T_sh_init, T_f_init, T_s_init], geo, T_amb_final, t_eval)
+    y_prod = _integrate(_qs_split_rhs_b, [T_sh_init, T_s_init],           geo, T_amb_final, t_eval)
+    y_tf   = _integrate(_tf_rhs_b,       [T_sh_init, T_f_init, T_s_init], geo, T_amb_final, t_eval)
 
-    T_sh_qs,  T_s_qs  = y_qs[0],  y_qs[1]
-    T_sh_qss, T_s_qss = y_qss[0], y_qss[1]
+    T_sh_prod, T_s_prod = y_prod[0], y_prod[1]
     T_sh_tf, T_f_tf, T_s_tf = y_tf[0], y_tf[1], y_tf[2]
     n = len(t_eval)
 
-    Q_foam_qs_arr  = np.array([Q_foam_qs(T_s_qs[i], T_sh_qs[i], geo) for i in range(n)])
-    Q_str_qs       = np.array([Q_struct_to_fluid(T_s_qs[i]) for i in range(n)])
-    Q_qss_arr      = np.array([Q_foam_qs_split(T_sh_qss[i], T_s_qss[i], geo) for i in range(n)])
-    Q_str_qss      = np.array([Q_struct_to_fluid(T_s_qss[i]) for i in range(n)])
-    Qsf            = np.array([Q_shell_to_foam(T_sh_tf[i], T_f_tf[i], geo) for i in range(n)])
-    Qfs            = np.array([Q_foam_to_structure(T_f_tf[i], T_s_tf[i], geo) for i in range(n)])
-    Q_str_tf       = np.array([Q_struct_to_fluid(T_s_tf[i]) for i in range(n)])
+    Q_prod_arr = np.array([Q_foam_qs_split(T_sh_prod[i], T_s_prod[i], geo) for i in range(n)])
+    Q_str_prod = np.array([Q_struct_to_fluid(T_s_prod[i]) for i in range(n)])
+    Qsf        = np.array([Q_shell_to_foam(T_sh_tf[i], T_f_tf[i], geo) for i in range(n)])
+    Qfs        = np.array([Q_foam_to_structure(T_f_tf[i], T_s_tf[i], geo) for i in range(n)])
+    Q_str_tf   = np.array([Q_struct_to_fluid(T_s_tf[i]) for i in range(n)])
 
     return dict(
         t=t_eval, geo=geo,
-        qs=dict(
-            T_shell=T_sh_qs, T_structure=T_s_qs,
-            Q_into_structure=Q_foam_qs_arr, Q_structure=Q_str_qs,
-        ),
-        qs_split=dict(
-            T_shell=T_sh_qss, T_structure=T_s_qss,
-            Q_into_structure=Q_qss_arr, Q_structure=Q_str_qss,
+        production=dict(
+            T_shell=T_sh_prod, T_structure=T_s_prod,
+            Q_into_structure=Q_prod_arr, Q_structure=Q_str_prod,
         ),
         tf=dict(
             T_shell=T_sh_tf, T_foam=T_f_tf, T_structure=T_s_tf,
@@ -430,63 +383,35 @@ def run_case_b(
 
 def compute_metrics(result: dict) -> dict:
     t    = result["t"]
-    qs   = result["qs"]
+    prod = result["production"]
     tf   = result["tf"]
-    qs_s = result.get("qs_split")
 
-    E_qs = cumulative_trapezoid(qs["Q_into_structure"], t, initial=0.0)
-    E_tf = cumulative_trapezoid(tf["Q_into_structure"], t, initial=0.0)
-    out: dict = {"E_qs": E_qs, "E_tf": E_tf, "dE": E_tf - E_qs}
+    E_prod = cumulative_trapezoid(prod["Q_into_structure"], t, initial=0.0)
+    E_tf   = cumulative_trapezoid(tf["Q_into_structure"],  t, initial=0.0)
+    out: dict = {"E_prod": E_prod, "E_tf": E_tf, "dE": E_tf - E_prod}
 
-    if qs_s is not None:
-        E_qss = cumulative_trapezoid(qs_s["Q_into_structure"], t, initial=0.0)
-        out["E_qs_split"]  = E_qss
-        out["dE_form"]     = E_qss - E_qs     # k(T) discretisation only
-        out["dE_inertia"]  = E_tf  - E_qss    # thermal inertia only
+    dT_sh = tf["T_shell"]          - prod["T_shell"]
+    dT_s  = tf["T_structure"]      - prod["T_structure"]
+    dQ    = tf["Q_into_structure"] - prod["Q_into_structure"]
 
-    dT_sh_tot = tf["T_shell"]          - qs["T_shell"]
-    dT_s_tot  = tf["T_structure"]      - qs["T_structure"]
-    dQ_tot    = tf["Q_into_structure"] - qs["Q_into_structure"]
-
-    windows = {"1h": 3_600, "3h": 10_800, "6h": int(T_END)}
-    for label, t_hi in windows.items():
+    for label, t_hi in {"1h": 3_600, "3h": 10_800, "6h": int(T_END)}.items():
         m = (t >= 0.0) & (t <= t_hi)
-        entry = dict(
-            max_dT_shell  = float(np.max(np.abs(dT_sh_tot[m]))),
-            max_dT_struct = float(np.max(np.abs(dT_s_tot[m]))),
-            max_dQ_struct = float(np.max(np.abs(dQ_tot[m]))),
+        out[label] = dict(
+            max_dT_shell  = float(np.max(np.abs(dT_sh[m]))),
+            max_dT_struct = float(np.max(np.abs(dT_s[m]))),
+            max_dQ_struct = float(np.max(np.abs(dQ[m]))),
             dE_final      = float(np.abs(out["dE"][m][-1])),
         )
-        if qs_s is not None:
-            dQ_form    = qs_s["Q_into_structure"] - qs["Q_into_structure"]
-            dQ_inertia = tf["Q_into_structure"]   - qs_s["Q_into_structure"]
-            dT_sh_in   = tf["T_shell"]            - qs_s["T_shell"]
-            dT_s_in    = tf["T_structure"]        - qs_s["T_structure"]
-            entry["max_dQ_form"]        = float(np.max(np.abs(dQ_form[m])))
-            entry["max_dQ_inertia"]     = float(np.max(np.abs(dQ_inertia[m])))
-            entry["max_dT_sh_inertia"]  = float(np.max(np.abs(dT_sh_in[m])))
-            entry["max_dT_s_inertia"]   = float(np.max(np.abs(dT_s_in[m])))
-            entry["dE_form_final"]      = float(np.abs(out["dE_form"][m][-1]))
-            entry["dE_inertia_final"]   = float(np.abs(out["dE_inertia"][m][-1]))
-        out[label] = entry
 
     ss = t >= 0.9 * T_END
-    Q_QS_ss = float(np.mean(qs["Q_into_structure"][ss]))
-    Q_TF_ss = float(np.mean(tf["Q_into_structure"][ss]))
-    ss_entry = dict(
-        Q_QS    = Q_QS_ss,
-        Q_TF    = Q_TF_ss,
-        dQ      = abs(Q_TF_ss - Q_QS_ss),
-        dQ_rel  = abs(Q_TF_ss - Q_QS_ss) / max(abs(Q_QS_ss), 1e-10),
+    Q_prod_ss = float(np.mean(prod["Q_into_structure"][ss]))
+    Q_tf_ss   = float(np.mean(tf["Q_into_structure"][ss]))
+    out["ss"] = dict(
+        Q_prod  = Q_prod_ss,
+        Q_TF    = Q_tf_ss,
+        dQ      = abs(Q_tf_ss - Q_prod_ss),
+        dQ_rel  = abs(Q_tf_ss - Q_prod_ss) / max(abs(Q_prod_ss), 1e-10),
     )
-    if qs_s is not None:
-        Q_split_ss = float(np.mean(qs_s["Q_into_structure"][ss]))
-        ss_entry["Q_QS_split"]    = Q_split_ss
-        ss_entry["dQ_form"]       = abs(Q_split_ss - Q_QS_ss)
-        ss_entry["dQ_form_rel"]   = abs(Q_split_ss - Q_QS_ss) / max(abs(Q_QS_ss), 1e-10)
-        ss_entry["dQ_inertia"]    = abs(Q_TF_ss - Q_split_ss)
-        ss_entry["dQ_inertia_rel"]= abs(Q_TF_ss - Q_split_ss) / max(abs(Q_split_ss), 1e-10)
-    out["ss"] = ss_entry
     return out
 
 
@@ -498,7 +423,7 @@ def compute_timescales(geo: TankGeometry,
                        T_sh: float = 288.0,
                        T_s: float = T_STRUCT_FIXED) -> dict:
     """Compute foam, shell, and structure thermal timescales at given temperatures."""
-    G_foam = Q_foam_qs(T_s, T_sh, geo) / (T_sh - T_s)
+    G_foam = Q_foam_qs_split(T_sh, T_s, geo) / (T_sh - T_s)
     h_A    = ALPHA_AMB * geo.A_shell
     C_sh   = cap_shell(T_sh, geo)
     C_str  = cap_structure(T_s, geo)
@@ -541,133 +466,84 @@ def _save(fig: plt.Figure, name: str) -> None:
 
 
 def plot_temperatures(result: dict, case_label: str) -> None:
-    """Plot 1: temperatures for QS-production, QS-split, and TF-split models."""
-    t, qs, tf = _hours(result["t"]), result["qs"], result["tf"]
-    qs_s = result.get("qs_split")
+    t    = _hours(result["t"])
+    prod = result["production"]
+    tf   = result["tf"]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(t, qs["T_shell"],   color=_C["qs_shell"],  lw=1.8, label="production $T_{shell}$")
-    if qs_s is not None:
-        ax.plot(t, qs_s["T_shell"], color=_C["qs_split_shell"], lw=1.5,
-                ls=(0, (3, 1, 1, 1)), label="QS-split $T_{shell}$")
-    ax.plot(t, tf["T_shell"],   color=_C["tf_shell"],  lw=1.8, ls="--",
-            label="TF-split $T_{shell}$")
-    ax.plot(t, tf["T_foam"],    color=_C["tf_foam"],   lw=1.8, ls="-.",
-            label="TF $T_{foam}$")
-    ax.plot(t, qs["T_structure"], color=_C["qs_struct"], lw=1.8,
-            label="production $T_{structure}$")
-    if not np.allclose(tf["T_structure"], qs["T_structure"], atol=0.0):
-        if qs_s is not None:
-            ax.plot(t, qs_s["T_structure"], color=_C["qs_split_shell"], lw=1.2,
-                    ls=":", label="QS-split $T_{structure}$")
-        ax.plot(t, tf["T_structure"], color=_C["tf_struct"], lw=1.8, ls="--",
-                label="TF-split $T_{structure}$")
+    ax.plot(t, prod["T_shell"],     color=_C["prod_shell"],  lw=1.8,          label="production $T_{shell}$")
+    ax.plot(t, tf["T_shell"],       color=_C["tf_shell"],    lw=1.8, ls="--",  label="TF $T_{shell}$")
+    ax.plot(t, tf["T_foam"],        color=_C["tf_foam"],     lw=1.8, ls="-.",  label="TF $T_{foam}$")
+    ax.plot(t, prod["T_structure"], color=_C["prod_struct"], lw=1.8,          label="production $T_{structure}$")
+    if not np.allclose(tf["T_structure"], prod["T_structure"], atol=0.0):
+        ax.plot(t, tf["T_structure"], color=_C["tf_struct"], lw=1.8, ls="--", label="TF $T_{structure}$")
     ax.set_xlabel("Time [h]")
     ax.set_ylabel("Temperature [K]")
-    ax.set_title(f"Case {case_label} — Temperatures")
+    ax.set_title(f"Case {case_label} — Temperatures: production vs TF")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     _save(fig, f"case{case_label}_temperatures.png")
 
 
 def plot_heat_flows(result: dict, case_label: str) -> None:
-    """Plot 2: foam heat flows for all three models."""
-    t, qs, tf = _hours(result["t"]), result["qs"], result["tf"]
-    qs_s = result.get("qs_split")
+    t    = _hours(result["t"])
+    prod = result["production"]
+    tf   = result["tf"]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    # ax.plot(t, qs["Q_into_structure"], color=_C["Q_qs"], lw=1.8,
-    #         label="QS-prod $\\dot{Q}_{foam}$")
-    if qs_s is not None:
-        ax.plot(t, qs_s["Q_into_structure"], color=_C["Q_qs_split"], lw=1.5,
-                ls=(0, (3, 1, 1, 1)), label="QS-split $\\dot{Q}_{foam}$")
-    ax.plot(t, tf["Q_shell_to_foam"],   color=_C["Q_tf_outer"], lw=1.8, ls="--",
-            label="TF $\\dot{Q}_{shell\\to foam}$")
-    ax.plot(t, tf["Q_foam_to_structure"], color=_C["Q_tf_inner"], lw=1.8, ls="-.",
-            label="TF $\\dot{Q}_{foam\\to structure}$")
+    ax.plot(t, prod["Q_into_structure"],  color=_C["Q_prod"],     lw=1.8,          label="production $\\dot{Q}_{ins}$")
+    ax.plot(t, tf["Q_shell_to_foam"],     color=_C["Q_tf_outer"], lw=1.8, ls="--", label="TF $\\dot{Q}_{shell\\to foam}$")
+    ax.plot(t, tf["Q_foam_to_structure"], color=_C["Q_tf_inner"], lw=1.8, ls="-.", label="TF $\\dot{Q}_{foam\\to structure}$")
     ax.set_xlabel("Time [h]")
     ax.set_ylabel("Heat flow [W]")
-    ax.set_title(f"Case {case_label} — Foam heat transfer")
+    ax.set_title(f"Case {case_label} — Foam heat flows: production vs TF")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     _save(fig, f"case{case_label}_heat_flows.png")
 
 
 def plot_differences(result: dict, case_label: str) -> None:
-    """Plot 3: decompose ΔQ into k(T)-formulation effect and thermal-inertia effect."""
-    t   = _hours(result["t"])
-    qs  = result["qs"]
-    tf  = result["tf"]
-    qs_s = result.get("qs_split")
+    t     = _hours(result["t"])
+    prod  = result["production"]
+    tf    = result["tf"]
+    dT_sh = tf["T_shell"]          - prod["T_shell"]
+    dQ    = tf["Q_into_structure"] - prod["Q_into_structure"]
 
-    dQ_tot = tf["Q_into_structure"] - qs["Q_into_structure"]
-    dT_sh  = tf["T_shell"]          - qs["T_shell"]
-
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-
-    # Panel 1: shell temperature difference (inertia is the relevant driver here)
-    axes[0].plot(t, dT_sh, color=_C["delta"], lw=1.5,
-                 label="TF−production (total)")
-    if qs_s is not None:
-        dT_sh_in = tf["T_shell"] - qs_s["T_shell"]
-        axes[0].plot(t, dT_sh_in, color=_C["Q_tf_outer"], lw=1.5, ls="--",
-                     label="TF−QS-split (inertia only)")
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    axes[0].plot(t, dT_sh, color=_C["delta"], lw=1.5)
     axes[0].axhline(0, color="gray", lw=0.8, ls=":")
-    axes[0].set_ylabel("$\\Delta T_{shell}$ [K]")
-    axes[0].set_title(f"Case {case_label} — Effect decomposition: formulation vs inertia")
-    axes[0].legend(fontsize=9)
+    axes[0].set_ylabel("$\\Delta T_{shell}$ [K]  (TF − production)")
+    axes[0].set_title(f"Case {case_label} — Foam inertia effect: TF − production")
     axes[0].grid(True, alpha=0.3)
 
-    # Panel 2: heat flow difference decomposed into two contributions
-    axes[1].plot(t, dQ_tot, color=_C["delta"], lw=1.8,
-                 label="TF−production (total)")
-    if qs_s is not None:
-        dQ_form    = qs_s["Q_into_structure"] - qs["Q_into_structure"]
-        dQ_inertia = tf["Q_into_structure"]   - qs_s["Q_into_structure"]
-        axes[1].plot(t, dQ_form,    color=_C["Q_qs_split"], lw=1.5,
-                     ls=(0, (3, 1, 1, 1)), label="QS-split−production (formulation, static)")
-        axes[1].plot(t, dQ_inertia, color=_C["Q_tf_outer"], lw=1.5, ls="--",
-                     label="TF−QS-split (inertia, dynamic)")
+    axes[1].plot(t, dQ, color=_C["delta"], lw=1.5)
     axes[1].axhline(0, color="gray", lw=0.8, ls=":")
     axes[1].set_xlabel("Time [h]")
-    axes[1].set_ylabel("$\\Delta \\dot{Q}_{structure}$ [W]")
-    axes[1].legend(fontsize=9)
+    axes[1].set_ylabel("$\\Delta \\dot{Q}_{structure}$ [W]  (TF − production)")
     axes[1].grid(True, alpha=0.3)
-
     plt.tight_layout()
     _save(fig, f"case{case_label}_differences.png")
 
 
 def plot_cumulative_energy(result: dict, metrics: dict, case_label: str) -> None:
-    """Plot 4: cumulative energy into structure for all three models."""
-    t    = _hours(result["t"])
-    E_qs = metrics["E_qs"] / 1e3
-    E_tf = metrics["E_tf"] / 1e3
+    t      = _hours(result["t"])
+    E_prod = metrics["E_prod"] / 1e3
+    E_tf   = metrics["E_tf"]  / 1e3
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    ax1.plot(t, E_qs, color=_C["E_qs"], lw=1.8, label="production $E_{structure}$")
-    if "E_qs_split" in metrics:
-        ax1.plot(t, metrics["E_qs_split"] / 1e3, color=_C["Q_qs_split"], lw=1.5,
-                 ls=(0, (3, 1, 1, 1)), label="QS-split $E_{structure}$")
-    ax1.plot(t, E_tf, color=_C["E_tf"], lw=1.8, ls="--", label="TF-split $E_{structure}$")
+    ax1.plot(t, E_prod, color=_C["E_prod"], lw=1.8,          label="production $E_{structure}$")
+    ax1.plot(t, E_tf,   color=_C["E_tf"],   lw=1.8, ls="--", label="TF $E_{structure}$")
     ax1.set_ylabel("Cumulative heat [kJ]")
     ax1.set_title(f"Case {case_label} — Cumulative heat into structure")
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
 
-    ax2.plot(t, metrics["dE"] / 1e3, color=_C["delta"], lw=1.5,
-             label="TF−production (total)")
-    if "dE_form" in metrics:
-        ax2.plot(t, metrics["dE_form"] / 1e3, color=_C["Q_qs_split"], lw=1.5,
-                 ls=(0, (3, 1, 1, 1)), label="QS-split−production (formulation)")
-        ax2.plot(t, metrics["dE_inertia"] / 1e3, color=_C["Q_tf_outer"], lw=1.5,
-                 ls="--", label="TF−QS-split (inertia)")
+    ax2.plot(t, metrics["dE"] / 1e3, color=_C["delta"], lw=1.5, label="TF − production")
     ax2.axhline(0, color="gray", lw=0.8, ls=":")
     ax2.set_xlabel("Time [h]")
     ax2.set_ylabel("$\\Delta E_{structure}$ [kJ]")
-    ax2.legend(fontsize=8)
+    ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
-
     plt.tight_layout()
     _save(fig, f"case{case_label}_cumulative_energy.png")
 
@@ -721,22 +597,18 @@ def run_thickness_sweep(case: str = "A") -> list[dict]:
         m   = compute_metrics(res)
 
         records.append(dict(
-            t_ins_mm        = t_ins * 1000,
-            tau_foam        = ts["tau_foam"],
-            tau_shell       = ts["tau_shell"],
-            tau_struct      = ts["tau_struct"],
-            tau_ratio       = ts["tau_foam"] / ts["tau_shell"],
+            t_ins_mm         = t_ins * 1000,
+            tau_foam         = ts["tau_foam"],
+            tau_shell        = ts["tau_shell"],
+            tau_struct       = ts["tau_struct"],
+            tau_ratio        = ts["tau_foam"] / ts["tau_shell"],
             max_dT_shell_1h  = m["1h"]["max_dT_shell"],
             max_dT_struct_1h = m["1h"]["max_dT_struct"],
             max_dQ_1h        = m["1h"]["max_dQ_struct"],
-            max_dQ_form_1h   = m["1h"].get("max_dQ_form",    float("nan")),
-            max_dQ_iner_1h   = m["1h"].get("max_dQ_inertia", float("nan")),
             dE_6h            = m["6h"]["dE_final"],
-            ss_Q_QS          = m["ss"]["Q_QS"],
+            ss_Q_prod        = m["ss"]["Q_prod"],
             ss_Q_TF          = m["ss"]["Q_TF"],
             ss_dQ_rel        = m["ss"]["dQ_rel"],
-            ss_dQ_form_rel   = m["ss"].get("dQ_form_rel",    float("nan")),
-            ss_dQ_iner_rel   = m["ss"].get("dQ_inertia_rel", float("nan")),
         ))
     return records
 
@@ -781,28 +653,22 @@ def run_gradient_sensitivity(geo: TankGeometry | None = None) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def print_summary_table(records: list[dict], case: str) -> None:
-    print(f"\n{'='*112}")
-    print(f"Summary — foam-thickness sweep, Case {case}  "
-          "[total = production→TF, form = production→QS-split, iner = QS-split→TF]")
-    print(f"{'='*112}")
+    print(f"\n{'='*78}")
+    print(f"Summary — foam-thickness sweep, Case {case}  [TF − production = foam inertia effect]")
+    print(f"{'='*78}")
     hdr = (f"{'t_foam':>8}  {'τ/τ_s':>6}  "
-           f"{'maxΔQ_tot(1h)':>14}  {'maxΔQ_form(1h)':>14}  {'maxΔQ_iner(1h)':>14}  "
-           f"{'ΔE(6h)':>8}  {'ss_tot':>7}  {'ss_form':>7}  {'ss_iner':>7}")
+           f"{'maxΔQ(1h)':>11}  {'maxΔT_sh(1h)':>13}  "
+           f"{'ΔE(6h)':>8}  {'ss_rel':>7}")
     print(hdr)
     print("-" * len(hdr))
     for r in records:
-        def _pct(v: float) -> str:
-            return f"{v*100:.2f}%" if not math.isnan(v) else "  n/a  "
         print(
             f"{r['t_ins_mm']:>7.0f}mm  "
             f"{r['tau_ratio']:>6.2f}  "
-            f"{r['max_dQ_1h']:>13.2f}W  "
-            f"{r['max_dQ_form_1h']:>13.2f}W  "
-            f"{r['max_dQ_iner_1h']:>13.2f}W  "
+            f"{r['max_dQ_1h']:>10.2f}W  "
+            f"{r['max_dT_shell_1h']:>12.4f}K  "
             f"{r['dE_6h']/1e3:>7.2f}kJ  "
-            f"{_pct(r['ss_dQ_rel']):>7}  "
-            f"{_pct(r['ss_dQ_form_rel']):>7}  "
-            f"{_pct(r['ss_dQ_iner_rel']):>7}"
+            f"{r['ss_dQ_rel']*100:>6.3f}%"
         )
 
 
@@ -842,19 +708,12 @@ def main() -> None:
 
     for win in ("1h", "3h", "6h"):
         mx = m_a[win]
-        print(f"  [{win}]  ΔQ total={mx['max_dQ_struct']:7.2f}W  "
-              f"form={mx.get('max_dQ_form', float('nan')):7.2f}W  "
-              f"inertia={mx.get('max_dQ_inertia', float('nan')):7.2f}W  "
-              f"ΔE={mx['dE_final']/1e3:.3f}kJ")
+        print(f"  [{win}]  \u0394Q={mx['max_dQ_struct']:7.2f}W  "
+              f"\u0394T_sh={mx['max_dT_shell']:6.4f}K  "
+              f"\u0394E={mx['dE_final']/1e3:.3f}kJ")
     ss = m_a["ss"]
-    print(f"  [SS]  Q_prod={ss['Q_QS']:.3f}W  "
-          f"Q_split={ss.get('Q_QS_split', float('nan')):.3f}W  "
-          f"Q_TF={ss['Q_TF']:.3f}W")
-    if "dQ_form_rel" in ss:
-        print(f"        formulation Δ={ss['dQ_form']:.3f}W ({ss['dQ_form_rel']*100:.3f}%)  "
-              "[static k(T) discretisation]")
-        print(f"        inertia     Δ={ss['dQ_inertia']:.3f}W ({ss['dQ_inertia_rel']*100:.3f}%)  "
-              "[→ 0 at steady state]")
+    print(f"  [SS]  Q_prod={ss['Q_prod']:.3f}W  Q_TF={ss['Q_TF']:.3f}W  "
+          f"\u0394={ss['dQ']:.3f}W ({ss['dQ_rel']*100:.3f}%)  [foam inertia]")
 
     plot_temperatures(res_a, "A")
     plot_heat_flows(res_a, "A")
@@ -870,18 +729,13 @@ def main() -> None:
 
     for win in ("1h", "3h", "6h"):
         mx = m_b[win]
-        print(f"  [{win}]  ΔT_struct total={mx['max_dT_struct']:6.4f}K  "
-              f"inertia={mx.get('max_dT_s_inertia', float('nan')):6.4f}K  "
-              f"ΔQ total={mx['max_dQ_struct']:7.2f}W  "
-              f"form={mx.get('max_dQ_form', float('nan')):7.2f}W  "
-              f"inertia={mx.get('max_dQ_inertia', float('nan')):7.2f}W")
+        print(f"  [{win}]  \u0394Q={mx['max_dQ_struct']:7.2f}W  "
+              f"\u0394T_sh={mx['max_dT_shell']:6.4f}K  "
+              f"\u0394T_struct={mx['max_dT_struct']:6.4f}K  "
+              f"\u0394E={mx['dE_final']/1e3:.3f}kJ")
     ss = m_b["ss"]
-    print(f"  [SS]  Q_prod={ss['Q_QS']:.3f}W  "
-          f"Q_split={ss.get('Q_QS_split', float('nan')):.3f}W  "
-          f"Q_TF={ss['Q_TF']:.3f}W")
-    if "dQ_form_rel" in ss:
-        print(f"        formulation Δ={ss['dQ_form']:.3f}W ({ss['dQ_form_rel']*100:.3f}%)")
-        print(f"        inertia     Δ={ss['dQ_inertia']:.3f}W ({ss['dQ_inertia_rel']*100:.3f}%)")
+    print(f"  [SS]  Q_prod={ss['Q_prod']:.3f}W  Q_TF={ss['Q_TF']:.3f}W  "
+          f"\u0394={ss['dQ']:.3f}W ({ss['dQ_rel']*100:.3f}%)  [foam inertia]")
 
     plot_temperatures(res_b, "B")
     plot_heat_flows(res_b, "B")
