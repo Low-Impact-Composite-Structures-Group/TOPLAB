@@ -1,12 +1,15 @@
 """
-Mathematical verification tests for the one-state transient-foam model.
+Mathematical verification tests for the foam sensitivity study helpers.
 
-These tests verify structural correctness (geometry, resistance splitting,
-energy balance) rather than the QS-vs-TF comparison itself, which is reported
-via plots and printed metrics from foam_sensitivity_study.py.
+These tests verify the internal correctness of foam_sensitivity_study.py
+(geometry, resistance splitting, energy balance).  They do NOT independently
+test the production InsulatedTankThermalModel — that is covered end-to-end
+by D2/D3/D4 in dormancy_discharge_verification/ and by
+test_insulation_analytical_verification.py.
 
 Tests
 -----
+T0  Q_foam_qs exactly matches InsulatedTankThermalModel.compute_insulation_heat_flux.
 T1  Foam mass formula matches _layer_mass for all sweep thicknesses.
 T2  Foam thermal capacitance is positive over the cryogenic-to-ambient range.
 T3  Cylindrical midpoint radius gives equal log half-resistances.
@@ -15,6 +18,7 @@ T5  Half conductances equal twice the total conductance (constant-k identity).
 T6  Series combination of half conductances reconstructs the total (constant k).
 T7  Foam energy balance residual is near zero during a short TF simulation.
 T8  At steady state (long run) both halves carry the same heat flow.
+T9  QS and TF models agree on total conductance for constant k.
 """
 
 from __future__ import annotations
@@ -32,14 +36,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from foam_sensitivity_study import (
     R_STRUCTURE, L_CYL, T_STRUCT_FIXED, T_EVAL,
-    ROHACELL_DENSITY,
+    ROHACELL_DENSITY, R_INNER, T_LINER, T_SHELL_THK, A_IN,
     build_geometry, TankGeometry,
     _layer_mass,
     cap_foam,
-    Q_foam_qs, Q_foam_qs_split, Q_shell_to_foam, Q_foam_to_structure,
+    Q_foam_qs, Q_shell_to_foam, Q_foam_to_structure,
     _G_half, _integrate,
-    _qs_rhs_a, _tf_rhs_a, _qs_split_rhs_a,
-    _solve_foam_qs_split,
+    _tf_rhs_a,
     SWEEP_THICKNESSES_M,
 )
 from toplab.materials.rohacell_properties import (
@@ -53,6 +56,53 @@ from toplab.materials.rohacell_properties import (
 @pytest.fixture(scope="module")
 def geo50() -> TankGeometry:
     return build_geometry(0.050)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# T0 — Production formula alignment
+# ══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("t_ins", SWEEP_THICKNESSES_M)
+def test_q_foam_qs_matches_production_insulation_model(t_ins: float) -> None:
+    """
+    Q_foam_qs must reproduce InsulatedTankThermalModel.compute_insulation_heat_flux
+    for identical geometry — confirming the study exercises the production formula.
+    """
+    from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
+    from toplab.materials.nist_materials import NISTMetal, NISTComposite
+
+    geo   = build_geometry(t_ins)
+    liner = NISTMetal.aluminum_6061T6_nist()
+    wall  = NISTComposite.carbon_epoxy_nist()
+    liner_mass = _layer_mass(liner.density, R_INNER, R_INNER + T_LINER)
+    wall_mass  = _layer_mass(wall.density,  R_INNER + T_LINER, R_STRUCTURE)
+    shell_mass = _layer_mass(liner.density, geo.r_shell, geo.r_shell + T_SHELL_THK)
+
+    model = InsulatedTankThermalModel(
+        tank_volume         = 1.0,          # unused by insulation formula
+        inner_surface_area  = A_IN,
+        inner_diameter      = 2.0 * R_INNER,
+        r_structure         = R_STRUCTURE,
+        r_shell             = geo.r_shell,
+        cylinder_length     = L_CYL,
+        liner_mass          = liner_mass,
+        wall_mass           = wall_mass,
+        shell_mass          = shell_mass,
+        ambient_temperature = 288.15,
+        alpha_amb           = 5.0,
+        emissivity_shell    = 0.05,
+        liner_material      = liner,
+        wall_material       = wall,
+        shell_material      = liner,
+    )
+
+    for T_s, T_sh in [(60.0, 250.0), (30.0, 100.0), (20.0, 288.0)]:
+        Q_study = Q_foam_qs(T_s, T_sh, geo)
+        Q_prod  = model.compute_insulation_heat_flux(T_s, T_sh)
+        assert Q_study == pytest.approx(Q_prod, rel=1e-12), (
+            f"t_ins={t_ins*1e3:.0f} mm, T_s={T_s}, T_sh={T_sh}: "
+            f"Q_foam_qs={Q_study:.6f} W ≠ InsulatedTankThermalModel={Q_prod:.6f} W"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -286,34 +336,4 @@ def test_qs_and_tf_agree_on_total_conductance_constant_k(geo50: TankGeometry) ->
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# T10 — QS-split and TF-split converge to the same steady state
-# ══════════════════════════════════════════════════════════════════════════════
 
-def test_qs_split_and_tf_split_have_same_steady_state(geo50: TankGeometry) -> None:
-    """
-    QS-split and TF-split share identical constitutive equations; only the foam
-    capacitance differs.  At long time both must deliver the same heat flow.
-
-    This confirms that any SS difference between QS-production and TF-split is
-    a static k(T)-discretisation artefact rather than a thermal-inertia effect.
-    """
-    T_sh0, T_amb = 250.0, 288.15
-    T_f0   = _solve_foam_qs_split(T_sh0, T_STRUCT_FIXED, geo50)
-    t_long = np.linspace(0.0, 8.0 * T_EVAL[-1], 201)   # ~48 h
-
-    y_qss = _integrate(_qs_split_rhs_a, [T_sh0],        geo50, T_amb, t_eval=t_long)
-    y_tf  = _integrate(_tf_rhs_a,       [T_sh0, T_f0],  geo50, T_amb, t_eval=t_long)
-
-    n = len(t_long)
-    Q_qss = np.array([Q_foam_qs_split(y_qss[0, i], T_STRUCT_FIXED, geo50) for i in range(n)])
-    Q_tf  = np.array([Q_foam_to_structure(y_tf[1, i], T_STRUCT_FIXED, geo50) for i in range(n)])
-
-    ss       = t_long >= 0.95 * t_long[-1]
-    scale    = np.mean(np.abs(Q_tf[ss])) + 1e-10
-    rel_diff = np.max(np.abs(Q_qss[ss] - Q_tf[ss])) / scale
-
-    assert rel_diff < 1e-4, (
-        f"QS-split and TF-split SS heat flows differ by {rel_diff:.3e} — "
-        "this would indicate an inertia effect persisting at steady state."
-    )

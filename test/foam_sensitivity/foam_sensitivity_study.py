@@ -173,8 +173,8 @@ def Q_amb(T_sh: float, T_amb: float, geo: TankGeometry) -> float:
 
 
 def Q_foam_qs(T_s: float, T_sh: float, geo: TankGeometry) -> float:
-    """QS: single-layer Fourier radial conduction [W] (production formula).
-    Positive when T_sh > T_s."""
+    """Production insulation formula — identical to InsulatedTankThermalModel.compute_insulation_heat_flux.
+    k evaluated at midpoint temperature; positive when T_sh > T_s."""
     T_m = 0.5 * (T_s + T_sh)
     k   = rohacell_k(_clamp(T_m))
     r_s, r_sh = R_STRUCTURE, geo.r_shell
@@ -328,7 +328,7 @@ def run_case_a(
     Case A: step T_amb_init → T_amb_final at t=0; T_structure fixed.
 
     Three models run on the same grid:
-      QS-production: single k(T_m), production formula.
+      production:    k(T_m) at midpoint, matches InsulatedTankThermalModel.compute_insulation_heat_flux.
       QS-split:      split-resistance geometry, T_foam algebraic (zero capacitance).
       TF-split:      split-resistance geometry, T_foam as ODE state.
 
@@ -385,7 +385,7 @@ def run_case_b(
 ) -> dict:
     """
     Case B: full shell + structure network; T_fluid fixed.
-    Three models: QS-production, QS-split, TF-split.
+    Three models: production, QS-split, TF-split.
     """
     T_f_init = _solve_foam_qs_split(T_sh_init, T_s_init, geo)
 
@@ -546,7 +546,7 @@ def plot_temperatures(result: dict, case_label: str) -> None:
     qs_s = result.get("qs_split")
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(t, qs["T_shell"],   color=_C["qs_shell"],  lw=1.8, label="QS-prod $T_{shell}$")
+    ax.plot(t, qs["T_shell"],   color=_C["qs_shell"],  lw=1.8, label="production $T_{shell}$")
     if qs_s is not None:
         ax.plot(t, qs_s["T_shell"], color=_C["qs_split_shell"], lw=1.5,
                 ls=(0, (3, 1, 1, 1)), label="QS-split $T_{shell}$")
@@ -555,7 +555,7 @@ def plot_temperatures(result: dict, case_label: str) -> None:
     ax.plot(t, tf["T_foam"],    color=_C["tf_foam"],   lw=1.8, ls="-.",
             label="TF $T_{foam}$")
     ax.plot(t, qs["T_structure"], color=_C["qs_struct"], lw=1.8,
-            label="QS-prod $T_{structure}$")
+            label="production $T_{structure}$")
     if not np.allclose(tf["T_structure"], qs["T_structure"], atol=0.0):
         if qs_s is not None:
             ax.plot(t, qs_s["T_structure"], color=_C["qs_split_shell"], lw=1.2,
@@ -576,8 +576,8 @@ def plot_heat_flows(result: dict, case_label: str) -> None:
     qs_s = result.get("qs_split")
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(t, qs["Q_into_structure"], color=_C["Q_qs"], lw=1.8,
-            label="QS-prod $\\dot{Q}_{foam}$")
+    # ax.plot(t, qs["Q_into_structure"], color=_C["Q_qs"], lw=1.8,
+    #         label="QS-prod $\\dot{Q}_{foam}$")
     if qs_s is not None:
         ax.plot(t, qs_s["Q_into_structure"], color=_C["Q_qs_split"], lw=1.5,
                 ls=(0, (3, 1, 1, 1)), label="QS-split $\\dot{Q}_{foam}$")
@@ -607,7 +607,7 @@ def plot_differences(result: dict, case_label: str) -> None:
 
     # Panel 1: shell temperature difference (inertia is the relevant driver here)
     axes[0].plot(t, dT_sh, color=_C["delta"], lw=1.5,
-                 label="TF−QS-prod (total)")
+                 label="TF−production (total)")
     if qs_s is not None:
         dT_sh_in = tf["T_shell"] - qs_s["T_shell"]
         axes[0].plot(t, dT_sh_in, color=_C["Q_tf_outer"], lw=1.5, ls="--",
@@ -620,12 +620,12 @@ def plot_differences(result: dict, case_label: str) -> None:
 
     # Panel 2: heat flow difference decomposed into two contributions
     axes[1].plot(t, dQ_tot, color=_C["delta"], lw=1.8,
-                 label="TF−QS-prod (total)")
+                 label="TF−production (total)")
     if qs_s is not None:
         dQ_form    = qs_s["Q_into_structure"] - qs["Q_into_structure"]
         dQ_inertia = tf["Q_into_structure"]   - qs_s["Q_into_structure"]
         axes[1].plot(t, dQ_form,    color=_C["Q_qs_split"], lw=1.5,
-                     ls=(0, (3, 1, 1, 1)), label="QS-split−QS-prod (formulation, static)")
+                     ls=(0, (3, 1, 1, 1)), label="QS-split−production (formulation, static)")
         axes[1].plot(t, dQ_inertia, color=_C["Q_tf_outer"], lw=1.5, ls="--",
                      label="TF−QS-split (inertia, dynamic)")
     axes[1].axhline(0, color="gray", lw=0.8, ls=":")
@@ -645,7 +645,7 @@ def plot_cumulative_energy(result: dict, metrics: dict, case_label: str) -> None
     E_tf = metrics["E_tf"] / 1e3
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    ax1.plot(t, E_qs, color=_C["E_qs"], lw=1.8, label="QS-prod $E_{structure}$")
+    ax1.plot(t, E_qs, color=_C["E_qs"], lw=1.8, label="production $E_{structure}$")
     if "E_qs_split" in metrics:
         ax1.plot(t, metrics["E_qs_split"] / 1e3, color=_C["Q_qs_split"], lw=1.5,
                  ls=(0, (3, 1, 1, 1)), label="QS-split $E_{structure}$")
@@ -656,10 +656,10 @@ def plot_cumulative_energy(result: dict, metrics: dict, case_label: str) -> None
     ax1.grid(True, alpha=0.3)
 
     ax2.plot(t, metrics["dE"] / 1e3, color=_C["delta"], lw=1.5,
-             label="TF−QS-prod (total)")
+             label="TF−production (total)")
     if "dE_form" in metrics:
         ax2.plot(t, metrics["dE_form"] / 1e3, color=_C["Q_qs_split"], lw=1.5,
-                 ls=(0, (3, 1, 1, 1)), label="QS-split−QS-prod (formulation)")
+                 ls=(0, (3, 1, 1, 1)), label="QS-split−production (formulation)")
         ax2.plot(t, metrics["dE_inertia"] / 1e3, color=_C["Q_tf_outer"], lw=1.5,
                  ls="--", label="TF−QS-split (inertia)")
     ax2.axhline(0, color="gray", lw=0.8, ls=":")
@@ -783,7 +783,7 @@ def run_gradient_sensitivity(geo: TankGeometry | None = None) -> list[dict]:
 def print_summary_table(records: list[dict], case: str) -> None:
     print(f"\n{'='*112}")
     print(f"Summary — foam-thickness sweep, Case {case}  "
-          "[total = QS-prod→TF, form = QS-prod→QS-split, iner = QS-split→TF]")
+          "[total = production→TF, form = production→QS-split, iner = QS-split→TF]")
     print(f"{'='*112}")
     hdr = (f"{'t_foam':>8}  {'τ/τ_s':>6}  "
            f"{'maxΔQ_tot(1h)':>14}  {'maxΔQ_form(1h)':>14}  {'maxΔQ_iner(1h)':>14}  "
@@ -896,8 +896,6 @@ def main() -> None:
     sweep_b = run_thickness_sweep("B")
     print_summary_table(sweep_b, "B")
 
-    # ── Initial-gradient sensitivity ──────────────────────────────────────────
-    run_gradient_sensitivity(geo)
 
     print(f"\nStudy complete. Figures saved to: {_OUTDIR}")
 
