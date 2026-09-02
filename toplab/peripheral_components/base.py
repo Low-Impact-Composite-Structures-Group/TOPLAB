@@ -66,7 +66,7 @@ class PeripheralFlowState:
             density = tank_state.fuel_mass / tank_state.tank.volume
         return cls(
             pressure=pressure,
-            temperature=tank_state.temperature,
+            temperature=tank_state.h2_temperature,
             mass_flow_rate=mass_flow_rate,
             fluid=fluid,
             density=density,

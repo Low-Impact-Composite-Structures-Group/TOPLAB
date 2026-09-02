@@ -60,6 +60,24 @@ def thermal_conductivity(temperature: float) -> float:
     return float(np.interp(T_clamped, T_arr, k_arr))
 
 
+def integrated_thermal_conductivity(temperature_low: float, temperature_high: float) -> float:
+    """Integrate Rohacell 51A conductivity [W/m] over a temperature interval."""
+    if temperature_low == temperature_high:
+        return 0.0
+
+    sign = 1.0 if temperature_high > temperature_low else -1.0
+    T_arr, k_arr = _load()
+    lower = float(np.clip(min(temperature_low, temperature_high), T_arr[0], T_arr[-1]))
+    upper = float(np.clip(max(temperature_low, temperature_high), T_arr[0], T_arr[-1]))
+    temperatures = np.concatenate((
+        [lower],
+        T_arr[(T_arr > lower) & (T_arr < upper)],
+        [upper],
+    ))
+    conductivities = np.interp(temperatures, T_arr, k_arr)
+    return sign * float(np.trapz(conductivities, temperatures))
+
+
 def specific_heat(temperature: float) -> float:
     """Return Rohacell 31 specific heat [J/kg·K] at *temperature* [K] (clamped at data bounds)."""
     T_arr, cp_arr = _load_cp()

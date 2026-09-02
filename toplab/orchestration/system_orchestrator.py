@@ -1287,7 +1287,7 @@ class SystemOrchestrator:
             for i in range(len(self.tank_geometries)):
                 tank_state = final_multi_state.get_tank_state(i)
                 print(f"   Tank {i+1}: m={tank_state.fuel_mass:.2f}kg, "
-                      f"T={tank_state.temperature:.1f}K, "
+                        f"T_H2={tank_state.h2_temperature:.1f}K, "
                       f"ρ={tank_state.density:.1f}kg/m³")
 
             return self.results
@@ -1357,7 +1357,7 @@ class SystemOrchestrator:
         for i, state in enumerate(tank_series.states):
             try:
                 # Get current state conditions
-                T_current = state.temperature
+                T_current = state.h2_temperature
                 m_current = state.fuel_mass
 
                 # Get tank volume for density calculation
@@ -2196,7 +2196,7 @@ class SystemOrchestrator:
                 'final_tank_states': [
                     {
                         'fuel_mass': final_multi_state.get_tank_state(i).fuel_mass,
-                        'temperature': final_multi_state.get_tank_state(i).temperature,
+                        'h2_temperature': final_multi_state.get_tank_state(i).h2_temperature,
                         'density': final_multi_state.get_tank_state(i).density
                     }
                     for i in range(len(self.tank_geometries))
@@ -2626,9 +2626,9 @@ class SystemOrchestrator:
             block.append(_line("Final fuel mass [kg]:", _fmt(final_mass, 2)))
             block.append(_line("Fuel consumed [kg]:", _fmt(fuel_consumed, 2)))
             block.append(_line("Initial pressure actual [bar]:", _fmt(initial_state.pressure / 1e5, 2)))
-            block.append(_line("Initial temperature actual [K]:", _fmt(initial_state.temperature, 2)))
+            block.append(_line("Initial H2 temperature actual [K]:", _fmt(initial_state.h2_temperature, 2)))
             block.append(_line("Initial density actual [kg/m^3]:", _fmt(initial_state.density, 2)))
-            block.append(_line("Final temperature [K]:", _fmt(final_state.temperature, 2)))
+            block.append(_line("Final H2 temperature [K]:", _fmt(final_state.h2_temperature, 2)))
             block.append(_line("Final pressure [bar]:", _fmt(final_state.pressure / 1e5, 2)))
             block.append(_line("Final density [kg/m^3]:", _fmt(final_state.density, 2)))
             block.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))

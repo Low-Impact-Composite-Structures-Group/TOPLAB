@@ -1,11 +1,11 @@
 """
-Tests for the four-layer insulation thermal model and the 4-state DAE paradigm.
+Tests for the five-state insulation thermal model and DAE paradigm.
 
 Covers:
 - Rohacell 51A material properties
-- InsulatedTankThermalModel physics (Q_structure, Q_insulation, Q_amb)
-- IsochoricTankState 4-element state vector
-- MultiTankState stride-4 assembly / disassembly
+- InsulatedTankThermalModel directional heat flows
+- IsochoricTankState 5-element state vector
+- MultiTankState stride-5 assembly / disassembly
 - ODE sign convention and energy balance directions
 """
 
@@ -50,6 +50,7 @@ def _make_thermal_model(
 
     liner_mass = _layer_mass(liner.density, r_inner, r_inner + 0.003)
     wall_mass  = _layer_mass(wall.density,  r_inner + 0.003, r_structure)
+    foam_mass = _layer_mass(ROHACELL_DENSITY, r_structure, r_shell)
     shell_mass = _layer_mass(liner.density, r_shell, r_shell + t_shell)
 
     return InsulatedTankThermalModel(
@@ -61,6 +62,7 @@ def _make_thermal_model(
         cylinder_length=L,
         liner_mass=liner_mass,
         wall_mass=wall_mass,
+        foam_mass=foam_mass,
         shell_mass=shell_mass,
         ambient_temperature=T_amb,
         alpha_amb=alpha_amb,
@@ -79,16 +81,17 @@ class _MockTank:
         return 0.0
 
 
-def _make_state(T_fluid=54.0, T_structure=60.0, T_shell=288.0, volume=2.5, mass=None):
+def _make_state(h2_temperature=54.0, structure_temperature=60.0, insulation_temperature=174.0, shell_temperature=288.0, volume=2.5, mass=None):
     tank = _MockTank(volume)
     if mass is None:
         mass = 70.0 * volume  # ~70 kg/m³
     return IsochoricTankState(
         tank=tank,
         fuel_mass=mass,
-        temperature=T_fluid,
-        solid_temperature=T_structure,
-        shell_temperature=T_shell,
+        h2_temperature=h2_temperature,
+        structure_temperature=structure_temperature,
+        insulation_temperature=insulation_temperature,
+        shell_temperature=shell_temperature,
     )
 
 
@@ -139,6 +142,7 @@ class TestInsulatedTankThermalModel:
                 cylinder_length=1.0,
                 liner_mass=50.0,
                 wall_mass=100.0,
+                foam_mass=10.0,
                 shell_mass=20.0,
                 ambient_temperature=288.15,
                 alpha_amb=5.0,
@@ -155,38 +159,48 @@ class TestInsulatedTankThermalModel:
         expected = 2.0 * math.pi * r_sh * L + 4.0 * math.pi * r_sh**2
         assert model.A_shell == pytest.approx(expected, rel=1e-9)
 
-    def test_q_amb_positive_when_shell_colder_than_ambient(self):
+    def test_q_ambient_to_shell_positive_when_shell_colder_than_ambient(self):
         model = _make_thermal_model(T_amb=288.15)
-        Q = model.compute_ambient_heat_flux(T_shell=250.0)
+        Q = model.compute_ambient_to_shell_heat_flux(shell_temperature=250.0)
         assert Q > 0.0
 
-    def test_q_amb_negative_when_shell_hotter_than_ambient(self):
+    def test_q_ambient_to_shell_negative_when_shell_hotter_than_ambient(self):
         model = _make_thermal_model(T_amb=288.15)
-        Q = model.compute_ambient_heat_flux(T_shell=350.0)
+        Q = model.compute_ambient_to_shell_heat_flux(shell_temperature=350.0)
         assert Q < 0.0
 
-    def test_q_insulation_positive_when_shell_hotter_than_structure(self):
+    def test_insulation_half_layer_heat_flows_are_positive_down_gradient(self):
         model = _make_thermal_model()
-        Q = model.compute_insulation_heat_flux(T_structure=60.0, T_shell=288.0)
-        assert Q > 0.0
+        assert model.compute_shell_to_insulation_heat_flux(288.0, 174.0) > 0.0
+        assert model.compute_insulation_to_structure_heat_flux(174.0, 60.0) > 0.0
 
-    def test_q_insulation_zero_when_equal_temperatures(self):
+    def test_insulation_half_layer_heat_flow_is_zero_at_equal_temperature(self):
         model = _make_thermal_model()
-        Q = model.compute_insulation_heat_flux(T_structure=100.0, T_shell=100.0)
+        Q = model.compute_shell_to_insulation_heat_flux(100.0, 100.0)
         assert Q == pytest.approx(0.0, abs=1e-10)
 
-    def test_q_insulation_scales_with_conductivity_and_geometry(self):
-        """Thicker insulation → lower Q_insulation for same ΔT."""
+    def test_initial_insulation_temperature_balances_half_layer_heat_flows(self):
+        model = _make_thermal_model()
+        insulation_temperature = model.determine_initial_insulation_temperature(25.1, 288.15)
+        Q_shell_to_insulation = model.compute_shell_to_insulation_heat_flux(
+            288.15, insulation_temperature
+        )
+        Q_insulation_to_structure = model.compute_insulation_to_structure_heat_flux(
+            insulation_temperature, 25.1
+        )
+        assert Q_shell_to_insulation == pytest.approx(Q_insulation_to_structure, abs=1e-8)
+
+    def test_insulation_heat_flow_decreases_with_thickness(self):
         model_thin = _make_thermal_model(t_insulation=0.02)
         model_thick = _make_thermal_model(t_insulation=0.10)
-        Q_thin  = model_thin.compute_insulation_heat_flux(60.0, 288.0)
-        Q_thick = model_thick.compute_insulation_heat_flux(60.0, 288.0)
+        Q_thin  = model_thin.compute_shell_to_insulation_heat_flux(288.0, 174.0)
+        Q_thick = model_thick.compute_shell_to_insulation_heat_flux(288.0, 174.0)
         assert Q_thick < Q_thin
 
-    def test_q_structure_positive_when_structure_hotter_than_fluid(self):
+    def test_structure_to_h2_heat_flow_positive_when_structure_is_warmer(self):
         model = _make_thermal_model()
-        state = _make_state(T_fluid=54.0, T_structure=60.0, T_shell=288.0)
-        Q = model.compute_heat_flux(0.0, state)
+        state = _make_state(h2_temperature=54.0, structure_temperature=60.0, shell_temperature=288.0)
+        Q = model.compute_structure_to_h2_heat_flux(0.0, state)
         assert Q > 0.0
 
     def test_structure_ode_sign_convention(self):
@@ -194,7 +208,7 @@ class TestInsulatedTankThermalModel:
         model = _make_thermal_model()
         # Large T gradient across insulation → large Q_insulation
         # Small T gradient fluid↔structure → small Q_structure
-        state = _make_state(T_fluid=54.0, T_structure=54.1, T_shell=288.0)
+        state = _make_state(h2_temperature=54.0, structure_temperature=54.1, insulation_temperature=174.0, shell_temperature=288.0)
         dTs = model.compute_structure_temperature_derivative(0.0, state)
         assert dTs > 0.0  # structure warms: Q_insulation dominates
 
@@ -202,113 +216,115 @@ class TestInsulatedTankThermalModel:
         """dT_shell/dt > 0 when Q_amb > Q_insulation (net heating of shell)."""
         model = _make_thermal_model(T_amb=288.15)
         # Shell slightly below ambient → Q_amb > 0; small insulation load
-        state = _make_state(T_fluid=286.0, T_structure=286.5, T_shell=287.0)
+        state = _make_state(h2_temperature=286.0, structure_temperature=286.5, insulation_temperature=286.8, shell_temperature=287.0)
         dTsh = model.compute_shell_temperature_derivative(0.0, state)
         assert dTsh > 0.0
 
-    def test_legacy_alias_matches_structure_derivative(self):
+    def test_insulation_ode_sign_convention(self):
         model = _make_thermal_model()
-        state = _make_state()
-        assert model.compute_solid_temperature_derivative(0.0, state) == pytest.approx(
-            model.compute_structure_temperature_derivative(0.0, state)
-        )
+        assert model.compute_insulation_temperature_derivative(0.0, _make_state()) > 0.0
 
 
 # ---------------------------------------------------------------------------
-# IsochoricTankState — 4-element state vector
+# IsochoricTankState — 5-element state vector
 # ---------------------------------------------------------------------------
 
-class TestIsochoricTankState4State:
+class TestIsochoricTankState5State:
 
-    def test_state_vector_has_four_elements(self):
+    def test_state_vector_has_five_elements(self):
         state = _make_state()
-        assert len(state.state_vector) == 4
+        assert len(state.state_vector) == 5
 
     def test_state_vector_order(self):
-        state = _make_state(T_fluid=54.0, T_structure=60.0, T_shell=288.0)
+        state = _make_state(h2_temperature=54.0, structure_temperature=60.0, insulation_temperature=174.0, shell_temperature=288.0)
         sv = state.state_vector
         assert sv[1] == pytest.approx(54.0)
         assert sv[2] == pytest.approx(60.0)
-        assert sv[3] == pytest.approx(288.0)
+        assert sv[3] == pytest.approx(174.0)
+        assert sv[4] == pytest.approx(288.0)
 
     def test_from_state_vector_round_trip(self):
-        state = _make_state(T_fluid=54.0, T_structure=61.0, T_shell=285.0, mass=180.0)
+        state = _make_state(h2_temperature=54.0, structure_temperature=61.0, insulation_temperature=173.0, shell_temperature=285.0, mass=180.0)
         recovered = IsochoricTankState.from_state_vector(state.tank, state.state_vector)
-        assert recovered.temperature      == pytest.approx(54.0)
-        assert recovered.solid_temperature == pytest.approx(61.0)
+        assert recovered.h2_temperature == pytest.approx(54.0)
+        assert recovered.structure_temperature == pytest.approx(61.0)
+        assert recovered.insulation_temperature == pytest.approx(173.0)
         assert recovered.shell_temperature == pytest.approx(285.0)
         assert recovered.fuel_mass         == pytest.approx(180.0)
 
     def test_update_from_state_vector(self):
         state = _make_state()
-        new_sv = [150.0, 55.0, 62.0, 290.0]
+        new_sv = [150.0, 55.0, 62.0, 176.0, 290.0]
         state.update_from_state_vector(new_sv)
         assert state.fuel_mass         == pytest.approx(150.0)
-        assert state.temperature       == pytest.approx(55.0)
-        assert state.solid_temperature == pytest.approx(62.0)
+        assert state.h2_temperature == pytest.approx(55.0)
+        assert state.structure_temperature == pytest.approx(62.0)
+        assert state.insulation_temperature == pytest.approx(176.0)
         assert state.shell_temperature == pytest.approx(290.0)
 
     def test_initial_state_get_state_vector(self):
         init = IsochoricInitialState(
-            fuel_mass=200.0, temperature=54.0, solid_temperature=54.1, shell_temperature=288.15
+            fuel_mass=200.0, h2_temperature=54.0, structure_temperature=54.1,
+            insulation_temperature=171.125, shell_temperature=288.15
         )
         sv = init.get_state_vector()
-        assert len(sv) == 4
-        assert sv[3] == pytest.approx(288.15)
+        assert len(sv) == 5
+        assert sv[4] == pytest.approx(288.15)
 
 
 # ---------------------------------------------------------------------------
 # IsochoricStateDerivatives — shell_temperature_derivative field
 # ---------------------------------------------------------------------------
 
-class TestIsochoricStateDerivatives4State:
+class TestIsochoricStateDerivatives5State:
 
-    def test_derivative_vector_has_four_elements(self):
+    def test_derivative_vector_has_five_elements(self):
         d = IsochoricStateDerivatives(
             fuel_mass_derivative=-0.01,
-            temperature_derivative=0.001,
-            solid_temperature_derivative=0.0005,
+            h2_temperature_derivative=0.001,
+            structure_temperature_derivative=0.0005,
+            insulation_temperature_derivative=0.0002,
             shell_temperature_derivative=-0.0001,
         )
-        assert len(d.state_derivative_vector) == 4
-        assert d.state_derivative_vector[3] == pytest.approx(-0.0001)
+        assert len(d.state_derivative_vector) == 5
+        assert d.state_derivative_vector[4] == pytest.approx(-0.0001)
 
 
 # ---------------------------------------------------------------------------
-# MultiTankState — stride-4 assembly
+# MultiTankState — stride-5 assembly
 # ---------------------------------------------------------------------------
 
-class TestMultiTankStateStride4:
+class TestMultiTankStateStride5:
 
     def _make_tanks(self, n):
         return [_MockTank(2.5) for _ in range(n)]
 
-    def test_state_vector_length_is_4n(self):
+    def test_state_vector_length_is_5n(self):
         tanks = self._make_tanks(2)
         states = [_make_state(volume=2.5) for _ in tanks]
         ms = MultiTankState(tank_states=states)
-        assert len(ms.state_vector) == 8
+        assert len(ms.state_vector) == 10
 
-    def test_from_state_vector_stride_4(self):
+    def test_from_state_vector_stride_5(self):
         tanks = self._make_tanks(2)
-        y = np.array([100.0, 54.0, 60.0, 288.0,
-                      200.0, 30.0, 35.0, 280.0])
+        y = np.array([100.0, 54.0, 60.0, 174.0, 288.0,
+                  200.0, 30.0, 35.0, 155.0, 280.0])
         ms = MultiTankState.from_state_vector(y, tanks)
         assert ms.tank_states[0].fuel_mass         == pytest.approx(100.0)
-        assert ms.tank_states[0].temperature       == pytest.approx(54.0)
-        assert ms.tank_states[0].solid_temperature == pytest.approx(60.0)
+        assert ms.tank_states[0].h2_temperature == pytest.approx(54.0)
+        assert ms.tank_states[0].structure_temperature == pytest.approx(60.0)
         assert ms.tank_states[0].shell_temperature == pytest.approx(288.0)
         assert ms.tank_states[1].fuel_mass         == pytest.approx(200.0)
         assert ms.tank_states[1].shell_temperature == pytest.approx(280.0)
 
     def test_wrong_length_raises(self):
         tanks = self._make_tanks(2)
-        with pytest.raises(ValueError, match="4 \\* 2"):
+        with pytest.raises(ValueError, match="5 \\* 2"):
             MultiTankState.from_state_vector(np.zeros(6), tanks)
 
     def test_state_vector_round_trip(self):
         tanks = self._make_tanks(1)
-        y = np.array([180.0, 54.0, 61.0, 287.5])
+        y = np.array([180.0, 54.0, 61.0, 174.0, 287.5])
         ms = MultiTankState.from_state_vector(y, tanks)
         recovered = ms.state_vector
         np.testing.assert_allclose(recovered, y, rtol=1e-6)

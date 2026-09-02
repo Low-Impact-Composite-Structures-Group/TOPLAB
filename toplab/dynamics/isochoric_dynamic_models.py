@@ -65,8 +65,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1.0)
-        T = max(state.temperature, 1.0)
-        Ts = state.solid_temperature
+        T = max(state.h2_temperature, 1.0)
         rho = state.density
         p = state.pressure
 
@@ -103,7 +102,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_dT_rho * net_mass_flow
 
-        Q_solid = kwargs.get('Q_solid', 0.0)
+        Q_structure_to_h2 = kwargs.get('Q_structure_to_h2', 0.0)
         Q_discharge = kwargs.get('Q_discharge', 0.0)
         dm_dt = net_mass_flow
         actual_qdot_disch = 0.0
@@ -113,14 +112,14 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
                 term1 = (T / rho) * dp_dT_rho
                 dT_drho_p = PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, 'hydrogen')
                 term2 = rho * c_v * dT_drho_p
-                qdot_disch_B = mdot_discharge * (term1 - term2) - Q_solid
+                qdot_disch_B = mdot_discharge * (term1 - term2) - Q_structure_to_h2
                 actual_qdot_disch = qdot_disch_B
-                dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + qdot_disch_B) / (m * c_v)
             except Exception:
-                dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v)
                 actual_qdot_disch = 0.0
         else:
-            dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v)
+            dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v)
 
         if _heat_flow_data is not None:
             _heat_flow_data['t'].append(time)
@@ -130,15 +129,15 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['T'].append(T)
             _heat_flow_data['rho'].append(rho)
 
-        dTs_dt = kwargs.get('dTs_dt', 0.0)
-        dTshell_dt = kwargs.get('dTshell_dt', 0.0)
+        dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
-            temperature_derivative=dT_dt,
-            solid_temperature_derivative=dTs_dt,
-            shell_temperature_derivative=dTshell_dt,
-            heat_flux=Q_solid,
+            h2_temperature_derivative=dT_dt,
+            structure_temperature_derivative=kwargs.get('dT_structure_dt', 0.0),
+            insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
+            shell_temperature_derivative=dT_shell_dt,
+            heat_flux=Q_structure_to_h2,
             discharge_heat_flux=Q_discharge,
         )
 
@@ -213,8 +212,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1e-12)
-        T = max(state.temperature, 1.0)
-        Ts = state.solid_temperature
+        T = max(state.h2_temperature, 1.0)
         rho = state.density
 
         if state.hydrogen is None:
@@ -279,7 +277,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_sat_dT * net_mass_flow
 
-        Q_solid = kwargs.get('Q_solid', 0.0)
+        Q_structure_to_h2 = kwargs.get('Q_structure_to_h2', 0.0)
         Q_discharge = kwargs.get('Q_discharge', 0.0)
         dm_dt = net_mass_flow
         actual_qdot_disch = 0.0
@@ -289,14 +287,14 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
                 term1 = (T / rho) * dp_sat_dT
                 h_disch = h
                 term2 = h_disch - h
-                qdot_disch_B = mdot_discharge * (term1 + term2) - Q_solid
+                qdot_disch_B = mdot_discharge * (term1 + term2) - Q_structure_to_h2
                 actual_qdot_disch = qdot_disch_B
-                dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v2P)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + qdot_disch_B) / (m * c_v2P)
             except Exception:
-                dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v2P)
                 actual_qdot_disch = 0.0
         else:
-            dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+            dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v2P)
             actual_qdot_disch = 0.0
 
         if _heat_flow_data is not None:
@@ -307,15 +305,15 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['T'].append(T)
             _heat_flow_data['rho'].append(rho)
 
-        dTs_dt = kwargs.get('dTs_dt', 0.0)
-        dTshell_dt = kwargs.get('dTshell_dt', 0.0)
+        dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
-            temperature_derivative=dT_dt,
-            solid_temperature_derivative=dTs_dt,
-            shell_temperature_derivative=dTshell_dt,
-            heat_flux=Q_solid,
+            h2_temperature_derivative=dT_dt,
+            structure_temperature_derivative=kwargs.get('dT_structure_dt', 0.0),
+            insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
+            shell_temperature_derivative=dT_shell_dt,
+            heat_flux=Q_structure_to_h2,
             discharge_heat_flux=Q_discharge,
         )
 

@@ -101,9 +101,9 @@ class TestCouplingFlows:
 
         # Create realistic tank states
         class MockTankState:
-            def __init__(self, pressure, temperature, fuel_mass, volume):
+            def __init__(self, pressure, h2_temperature, fuel_mass, volume):
                 self.pressure = pressure
-                self.temperature = temperature
+                self.h2_temperature = h2_temperature
                 self.fuel_mass = fuel_mass
                 self.volume = volume
                 self.tank = MockTank(volume)
@@ -118,7 +118,7 @@ class TestCouplingFlows:
         # High pressure source (CH2 at 700 bar)
         source_state = MockTankState(
             pressure=700e5,     # 700 bar
-            temperature=330,    # 330 K
+            h2_temperature=330, # 330 K
             fuel_mass=50,       # 50 kg
             volume=1.4          # 1.4 m³
         )
@@ -126,7 +126,7 @@ class TestCouplingFlows:
         # Low pressure target (CCH2 at 15 bar - valve should open)
         target_state = MockTankState(
             pressure=15e5,      # 15 bar
-            temperature=50,     # 50 K
+            h2_temperature=50,  # 50 K
             fuel_mass=200,      # 200 kg
             volume=2.7          # 2.7 m³
         )
@@ -398,7 +398,7 @@ class TestCouplingFlows:
         class MockTankState:
             def __init__(self):
                 self.pressure = 700e5
-                self.temperature = 330
+                self.h2_temperature = 330
                 self.fuel_mass = 50
                 self.volume = 1.4
                 self.tank = MockTank()

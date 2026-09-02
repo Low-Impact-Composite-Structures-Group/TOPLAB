@@ -906,6 +906,7 @@ class TankSystem:
             cylinder_length=tank_properties['cylindrical_section_length'],
             liner_mass=tank_properties['liner_mass'],
             wall_mass=tank_properties['wall_mass'],
+            foam_mass=tank_properties['foam_mass'],
             shell_mass=tank_properties['shell_mass'],
             ambient_temperature=self.config.AMBIENT_TEMPERATURE,
             alpha_amb=tank_properties['alpha_amb'],
@@ -939,20 +940,34 @@ class TankSystem:
                       f"ρ={density_init:.2f} kg/m³, "
                       f"m={m_init:.2f} kg")
 
-            # State: [mass, T_fluid, T_structure, T_shell]
-            # T_structure starts slightly above T_fluid; T_shell starts at ambient
+            # State: [mass, T_H2, T_structure, T_insulation, T_shell]
+            # Structure starts slightly above H2 and shell starts at ambient.
+            # Initialize insulation at the temperature that balances its two
+            # half-layer heat flows, avoiding a nonphysical initial storage pulse.
+            T_h2_init = tank_config.T_INIT
+            T_structure_init = T_h2_init + 0.1
             T_shell_init = self.config.AMBIENT_TEMPERATURE
-            state.extend([m_init, tank_config.T_INIT, tank_config.T_INIT + 0.1, T_shell_init])
+            T_insulation_init = self.thermal_models[i].determine_initial_insulation_temperature(
+                T_structure_init, T_shell_init
+            )
+            state.extend([
+                m_init,
+                T_h2_init,
+                T_structure_init,
+                T_insulation_init,
+                T_shell_init,
+            ])
 
         initial_state = np.array(state)
         print("Initial state summary:")
         for i in range(len(self.config.tanks)):
-            idx = 4 * i
+            idx = 5 * i
             print(f"  {self.config.tanks[i].name}: "
                   f"m={initial_state[idx]:.2f} kg  "
-                  f"T_f={initial_state[idx+1]:.1f} K  "
-                  f"T_s={initial_state[idx+2]:.1f} K  "
-                  f"T_sh={initial_state[idx+3]:.1f} K")
+                f"T_H2={initial_state[idx+1]:.1f} K  "
+                f"T_struct={initial_state[idx+2]:.1f} K  "
+                f"T_ins={initial_state[idx+3]:.1f} K  "
+                f"T_shell={initial_state[idx+4]:.1f} K")
 
         return initial_state
 
@@ -960,8 +975,8 @@ class TankSystem:
         """
         Compute derivatives for the multi-tank system.
 
-        State vector y = [m1, T1, Ts1, Tsh1, m2, T2, Ts2, Tsh2, ..., mN, TN, TsN, TshN]
-        Each tank has 4 state variables: mass, fluid temperature, structure temperature, shell temperature.
+        State vector y = [m1, T_H2, T_struct, T_ins, T_shell, ..., mN, T_H2,N, T_struct,N, T_ins,N, T_shell,N].
+        Each tank has five state variables.
         """
         # Periodic heartbeat: one print per progress bucket (default every 60 s sim-time)
         progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
@@ -969,11 +984,12 @@ class TankSystem:
             self._ode_progress_bucket = progress_bucket
             lines = [f"t = {t:.1f} s ({t/3600:.3f} h)"]
             for i in range(len(self.tanks)):
-                idx_hb = 4 * i
+                idx_hb = 5 * i
                 m_i   = max(float(y[idx_hb]),     1e-9)
                 T_i   = max(float(y[idx_hb + 1]), 14.0)
                 T_s   = float(y[idx_hb + 2])
-                T_sh  = float(y[idx_hb + 3])
+                T_ins = float(y[idx_hb + 3])
+                T_sh  = float(y[idx_hb + 4])
                 rho_i = m_i / max(self.tanks[i].volume, 1e-9)
                 try:
                     from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
@@ -982,16 +998,18 @@ class TankSystem:
                     P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, "PARAHYD")
                 thermal = self.thermal_models[i]
                 try:
-                    Q_amb = thermal.compute_ambient_heat_flux(T_sh)
-                    Q_ins = thermal.compute_insulation_heat_flux(T_s, T_sh)
+                    Q_amb = thermal.compute_ambient_to_shell_heat_flux(T_sh)
+                    Q_sh_ins = thermal.compute_shell_to_insulation_heat_flux(T_sh, T_ins)
+                    Q_ins_str = thermal.compute_insulation_to_structure_heat_flux(T_ins, T_s)
                     alpha_s = thermal.get_alpha_s(T_i, T_s, P_i)
                     Q_str = alpha_s * thermal.A_in * (T_s - T_i)
-                    heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_ins={Q_ins:+.1f}W  Q_str={Q_str:+.1f}W")
+                    heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_sh-ins={Q_sh_ins:+.1f}W  "
+                                f"Q_ins-str={Q_ins_str:+.1f}W  Q_str-H2={Q_str:+.1f}W")
                 except Exception as e:
                     heat_str = f"heat flows unavailable ({e})"
                 lines.append(
                     f"  {self.config.tanks[i].name}: "
-                    f"T_f={T_i:.1f}K  T_s={T_s:.1f}K  T_sh={T_sh:.1f}K  |  "
+                    f"T_H2={T_i:.1f}K  T_struct={T_s:.1f}K  T_ins={T_ins:.1f}K  T_shell={T_sh:.1f}K  |  "
                     f"{heat_str}  |  "
                     f"P={P_i/1e5:.1f}bar  ρ={rho_i:.2f}kg/m³"
                 )
@@ -1001,7 +1019,7 @@ class TankSystem:
         multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
 
         n_tanks = len(self.tanks)
-        dydt = np.zeros(4 * n_tanks)
+        dydt = np.zeros(5 * n_tanks)
 
         coupling_flows = self._calculate_coupling_flows(multi_state, t)
 
@@ -1059,26 +1077,29 @@ class TankSystem:
                 ))
 
             # Thermal derivatives
-            Q_structure = self.thermal_models[i].compute_heat_flux(t, tank_state)
-            dTs_dt      = self.thermal_models[i].compute_structure_temperature_derivative(t, tank_state)
-            dTshell_dt  = self.thermal_models[i].compute_shell_temperature_derivative(t, tank_state)
+            Q_structure_to_h2 = self.thermal_models[i].compute_structure_to_h2_heat_flux(t, tank_state)
+            dT_structure_dt = self.thermal_models[i].compute_structure_temperature_derivative(t, tank_state)
+            dT_insulation_dt = self.thermal_models[i].compute_insulation_temperature_derivative(t, tank_state)
+            dT_shell_dt = self.thermal_models[i].compute_shell_temperature_derivative(t, tank_state)
 
             state_derivatives = self.dynamic_models[i].compute_state_derivatives(
                 time=t,
                 state=tank_state,
                 edge_flows=edge_flows,
-                Q_solid=Q_structure,
-                dTs_dt=dTs_dt,
-                dTshell_dt=dTshell_dt,
+                Q_structure_to_h2=Q_structure_to_h2,
+                dT_structure_dt=dT_structure_dt,
+                dT_insulation_dt=dT_insulation_dt,
+                dT_shell_dt=dT_shell_dt,
                 Q_discharge=0.0,
                 tank_index=i,
             )
 
-            idx = i * 4
+            idx = i * 5
             dydt[idx]     = state_derivatives.fuel_mass_derivative
-            dydt[idx + 1] = state_derivatives.temperature_derivative
-            dydt[idx + 2] = state_derivatives.solid_temperature_derivative
-            dydt[idx + 3] = state_derivatives.shell_temperature_derivative
+            dydt[idx + 1] = state_derivatives.h2_temperature_derivative
+            dydt[idx + 2] = state_derivatives.structure_temperature_derivative
+            dydt[idx + 3] = state_derivatives.insulation_temperature_derivative
+            dydt[idx + 4] = state_derivatives.shell_temperature_derivative
 
         return dydt
 
@@ -1164,7 +1185,7 @@ class TankSystem:
                 if target_pressure <= mid_threshold and source_state.pressure > target_state.pressure:
                     # Estimate flow rate using simplified physics
                     P1, P2 = source_state.pressure, target_state.pressure
-                    T1 = source_state.temperature
+                    T1 = source_state.h2_temperature
                     rho1 = source_state.fuel_mass / source_state.tank.volume
 
                     # Use valve's effective area and max flow rate
@@ -1339,7 +1360,7 @@ class TankSystem:
                         # Simple choked flow approximation
                         P_ratio = target_pressure / source_pressure
                         if P_ratio < 0.528:  # Choked flow
-                            flow_rate = 0.6 * valve.effective_area * source_pressure * math.sqrt(0.7 / (287 * source_state.temperature))
+                            flow_rate = 0.6 * valve.effective_area * source_pressure * math.sqrt(0.7 / (287 * source_state.h2_temperature))
                         else:  # Subsonic flow
                             flow_rate = 0.6 * valve.effective_area * math.sqrt(2 * source_state.density * (source_pressure - target_pressure))
 
@@ -1537,8 +1558,8 @@ class TankSystem:
                     from CoolProp.CoolProp import PropsSI as _PropsSI
 
                     def event(t, y):
-                        m = float(y[idx * 4])
-                        T = float(y[idx * 4 + 1])
+                        m = float(y[idx * 5])
+                        T = float(y[idx * 5 + 1])
                         rho = m / max(float(volume), 1e-9)
                         try:
                             P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "PARAHYD")
@@ -1556,7 +1577,7 @@ class TankSystem:
 
                 def make_event(idx, minimum, volume):
                     def event(t, y):
-                        return y[idx * 4] / volume - minimum
+                        return y[idx * 5] / volume - minimum
                     event.terminal = True
                     event.direction = -1  # density decreasing
                     return event
@@ -1569,7 +1590,7 @@ class TankSystem:
         def density_event(t, y):
             """Event function to detect when target density is reached."""
             # Check all tanks - stop if ANY tank reaches target density
-            states_per_tank = 4  # [mass, T_fluid, T_structure, T_shell]
+            states_per_tank = 5  # [mass, T_H2, T_structure, T_insulation, T_shell]
 
             for i in range(len(self.tanks)):
                 mass_idx = i * states_per_tank
@@ -2045,8 +2066,8 @@ class TankSystem:
                 for tank_i in range(_n):
                     if self._tank_fluids.get(tank_i, '') == 'CH2':
                         # Pressure-based check for CH2 tanks
-                        m_val = float(solution.y[tank_i * 4, step_i])
-                        T_val = float(solution.y[tank_i * 4 + 1, step_i])
+                        m_val = float(solution.y[tank_i * 5, step_i])
+                        T_val = float(solution.y[tank_i * 5 + 1, step_i])
                         vol_val = self._cached_tank_properties[tank_i]['volume']
                         rho_val = m_val / max(vol_val, 1e-9)
                         try:
@@ -2059,7 +2080,7 @@ class TankSystem:
                             truncate_tank = tank_i
                             break
                     else:
-                        mass_val = float(solution.y[tank_i * 4, step_i])
+                        mass_val = float(solution.y[tank_i * 5, step_i])
                         vol_val = self._cached_tank_properties[tank_i]['volume']
                         if mass_val / max(vol_val, 1e-9) < self._min_densities[tank_i]:
                             truncate_step = step_i
@@ -2117,15 +2138,16 @@ class TankSystem:
             flow_data = []  # Store flow information for this time step
 
             for tank_idx in range(len(self.tanks)):
-                state_idx = tank_idx * 4  # Each tank has 4 state variables: m, T, T_structure, T_shell
+                state_idx = tank_idx * 5
 
                 # Create tank state from solution
                 tank_state = IsochoricTankState(
                     tank=self.tanks[tank_idx],
                     fuel_mass=solution.y[state_idx, i],
-                    temperature=solution.y[state_idx + 1, i],
-                    solid_temperature=solution.y[state_idx + 2, i],
-                    shell_temperature=solution.y[state_idx + 3, i],
+                    h2_temperature=solution.y[state_idx + 1, i],
+                    structure_temperature=solution.y[state_idx + 2, i],
+                    insulation_temperature=solution.y[state_idx + 3, i],
+                    shell_temperature=solution.y[state_idx + 4, i],
                 )
 
                 # Recompute derived properties
