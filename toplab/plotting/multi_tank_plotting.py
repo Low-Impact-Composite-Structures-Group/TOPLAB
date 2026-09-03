@@ -742,7 +742,7 @@ class DelftColourPlotter:
 
             # Temperature plot (match combined plot dimensions)
             fig_t, ax_t = plt.subplots(1, 1, figsize=(12, 10))
-            ax_t.plot(times_hours, tank_data['temperatures'], color=primary_color, linewidth=2, linestyle=line_style,
+            ax_t.plot(times_hours, tank_data['h2_temperatures'], color=primary_color, linewidth=2, linestyle=line_style,
                       label='Temperature')
             _format_axes(ax_t, None, 'Temperature [K]', ylim_temperature)
             if reference_lines and 'T_ambient' in reference_lines:
@@ -841,7 +841,7 @@ class DelftColourPlotter:
                     label=f'{tank_label} Pressure' if should_overlay else 'Pressure')
 
             # Plot 2: Temperature vs Time
-            ax2.plot(times_hours, tank_data['temperatures'], color=color, linewidth=2, linestyle=line_style,
+            ax2.plot(times_hours, tank_data['h2_temperatures'], color=color, linewidth=2, linestyle=line_style,
                     label=f'{tank_label} Temperature' if should_overlay else 'Temperature')
 
             # Plot 3: Density vs Time
@@ -1215,8 +1215,8 @@ class DelftColourPlotter:
 
         # Auto-compute temperature range (xlim) based on actual data if not provided
         if xlim is None:
-            temp_min = min(tank_data['temperatures']) - 4
-            temp_max = max(tank_data['temperatures']) + 15
+            temp_min = min(tank_data['h2_temperatures']) - 4
+            temp_max = max(tank_data['h2_temperatures']) + 15
             xlim = (temp_min, temp_max)
 
         # Set default density range (ylim) if not provided
@@ -1232,19 +1232,19 @@ class DelftColourPlotter:
         primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color
 
         # Plot tank path (no markers, just lines)
-        tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
+        tank_line, = ax.plot(tank_data['h2_temperatures'], tank_data['densities'],
                             '-', color=primary_color, linewidth=2,
                             label=f"Thermodynamic path")
 
         # Add configurable direction arrow
-        if len(tank_data['temperatures']) > 10:
+        if len(tank_data['h2_temperatures']) > 10:
             # Calculate arrow position along path
-            idx = max(1, int(len(tank_data['temperatures']) * arrow_position))
+            idx = max(1, int(len(tank_data['h2_temperatures']) * arrow_position))
             start_idx = max(0, idx - max(1, int(8 * arrow_size)))
 
             ax.annotate('',
-                xy=(tank_data['temperatures'][idx], tank_data['densities'][idx]),
-                xytext=(tank_data['temperatures'][start_idx], tank_data['densities'][start_idx]),
+                xy=(tank_data['h2_temperatures'][idx], tank_data['densities'][idx]),
+                xytext=(tank_data['h2_temperatures'][start_idx], tank_data['densities'][start_idx]),
                 arrowprops=dict(
                     arrowstyle='-|>',
                     color=primary_color,
@@ -1265,8 +1265,8 @@ class DelftColourPlotter:
                 closest_idx = min(range(len(times_seconds)),
                                 key=lambda i: abs(times_seconds[i] - event_time))
 
-                if closest_idx < len(tank_data['temperatures']):
-                    temp = tank_data['temperatures'][closest_idx]
+                if closest_idx < len(tank_data['h2_temperatures']):
+                    temp = tank_data['h2_temperatures'][closest_idx]
                     density = tank_data['densities'][closest_idx]
 
                     if event_type == 'open':
@@ -1809,7 +1809,7 @@ class DelftColourPlotter:
 
             combined_times.extend(adjusted_times)
             combined_pressures.extend(tank_data['pressures'])
-            combined_temperatures.extend(tank_data['temperatures'])
+            combined_temperatures.extend(tank_data['h2_temperatures'])
             combined_masses.extend(tank_data['masses'])
             combined_densities.extend(tank_data['densities'])
 
@@ -1989,13 +1989,13 @@ class DelftColourPlotter:
             color = mission_colors[i % len(mission_colors)]
 
             # Plot trajectory
-            ax.plot(tank_data['temperatures'], tank_data['densities'],
+            ax.plot(tank_data['h2_temperatures'], tank_data['densities'],
                    color=color, linewidth=2.5, label=f"{name.title()}", alpha=0.8)
 
             # Mark start and end points
-            ax.scatter(tank_data['temperatures'][0], tank_data['densities'][0],
+            ax.scatter(tank_data['h2_temperatures'][0], tank_data['densities'][0],
                       color=color, s=80, marker='o', edgecolor='white', linewidth=1, zorder=5)
-            ax.scatter(tank_data['temperatures'][-1], tank_data['densities'][-1],
+            ax.scatter(tank_data['h2_temperatures'][-1], tank_data['densities'][-1],
                       color=color, s=80, marker='s', edgecolor='white', linewidth=1, zorder=5)
 
         # Add isobars if requested (simplified for sequential plots)
@@ -3030,7 +3030,7 @@ class DelftColourPlotter:
             times_h = results.times / 3600.0
             tank_data = results._extract_tank_arrays(source_tank_idx)
             mdot_gs       = tank_data['coupling_outflow_rates']
-            temperature_K = tank_data['temperatures']
+            temperature_K = tank_data['h2_temperatures']
             pressure_bar  = tank_data['pressures']
             col = colors[0 % len(colors)]
             ax_mdot.plot(times_h, mdot_gs,       color=col, linewidth=2, label='Fuel Cell Inlet')

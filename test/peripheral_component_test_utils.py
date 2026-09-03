@@ -252,11 +252,11 @@ def run_component_benchmark(component_type: str) -> dict:
         target_final = results.multi_tank_states[-1].get_tank_state(1)
 
         rho_final = target_final.fuel_mass / target_final.tank.volume
-        h_target = PropsSI("Hmass", "T", target_final.temperature, "Dmass", rho_final, "PARAHYD")
+        h_target = PropsSI("Hmass", "T", target_final.h2_temperature, "Dmass", rho_final, "PARAHYD")
 
         if component_type == "compressor":
             expected_component_name = "Compressor"
-            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.temperature, "PARAHYD")
+            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.h2_temperature, "PARAHYD")
             h_expected = PropsSI("Hmass", "P", 120e5, "Smass", s_in, "PARAHYD")
         elif component_type == "cryopump":
             expected_component_name = "CryoPumpModel"
@@ -277,7 +277,7 @@ def run_component_benchmark(component_type: str) -> dict:
             "final_target_mass": target_final.fuel_mass,
             "initial_source_mass": source_initial.fuel_mass,
             "final_source_mass": source_final.fuel_mass,
-            "target_temperature": target_final.temperature,
+            "target_temperature": target_final.h2_temperature,
             "expected_temperature": t_expected,
             "target_enthalpy": h_target,
             "expected_enthalpy": h_expected,
