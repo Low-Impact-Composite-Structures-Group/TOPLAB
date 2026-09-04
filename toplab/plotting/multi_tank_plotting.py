@@ -742,8 +742,21 @@ class DelftColourPlotter:
 
             # Temperature plot (match combined plot dimensions)
             fig_t, ax_t = plt.subplots(1, 1, figsize=(12, 10))
-            ax_t.plot(times_hours, tank_data['h2_temperatures'], color=primary_color, linewidth=2, linestyle=line_style,
-                      label='Temperature')
+            temperature_series = [
+                ('Shell', 'shell_temperatures'),
+                ('Insulation', 'insulation_temperatures'),
+                ('Structure', 'structure_temperatures'),
+                ('H2', 'h2_temperatures'),
+            ]
+            for series_index, (label, key) in enumerate(temperature_series):
+                ax_t.plot(
+                    times_hours,
+                    tank_data[key],
+                    color=self.color_palette[series_index % len(self.color_palette)],
+                    linewidth=2,
+                    linestyle=self.line_styles[series_index % len(self.line_styles)] if self.use_greyscale else '-',
+                    label=label,
+                )
             _format_axes(ax_t, None, 'Temperature [K]', ylim_temperature)
             if reference_lines and 'T_ambient' in reference_lines:
                 ax_t.axhline(y=reference_lines['T_ambient'], color=('#404040' if self.use_greyscale else self.color_palette[2]),
@@ -840,9 +853,26 @@ class DelftColourPlotter:
             ax1.plot(times_hours, tank_data['pressures'], color=color, linewidth=2, linestyle=line_style,
                     label=f'{tank_label} Pressure' if should_overlay else 'Pressure')
 
-            # Plot 2: Temperature vs Time
-            ax2.plot(times_hours, tank_data['h2_temperatures'], color=color, linewidth=2, linestyle=line_style,
-                    label=f'{tank_label} Temperature' if should_overlay else 'Temperature')
+            # Plot 2: all thermal-network node temperatures vs time
+            temperature_series = [
+                ('Shell', 'shell_temperatures'),
+                ('Insulation', 'insulation_temperatures'),
+                ('Structure', 'structure_temperatures'),
+                ('H2', 'h2_temperatures'),
+            ]
+            for series_index, (node_label, key) in enumerate(temperature_series):
+                ax2.plot(
+                    times_hours,
+                    tank_data[key],
+                    color=self.color_palette[series_index % len(self.color_palette)] if not should_overlay else color,
+                    linewidth=2,
+                    linestyle=(
+                        self.line_styles[series_index % len(self.line_styles)]
+                        if not should_overlay and self.use_greyscale
+                        else ['-', '--', '-.', ':'][series_index]
+                    ),
+                    label=f'{tank_label} {node_label}' if should_overlay else node_label,
+                )
 
             # Plot 3: Density vs Time
             ax3.plot(times_hours, tank_data['densities'], color=color, linewidth=2, linestyle=line_style,
@@ -1577,6 +1607,80 @@ class DelftColourPlotter:
             self._save_figure(fig, save_path, dpi=900)
 
         print(f"   Mass flow plot completed")
+        return fig
+
+    def plot_thermal_heat_flows(
+            self,
+            results: MultiTankResults,
+            thermal_model: Any,
+            tank_index: int = 0,
+            save_path: Optional[str] = None,
+            xlim: Optional[Tuple[float, float]] = None,
+            ylim: Optional[Tuple[float, float]] = None,
+            legend_location: str = 'best') -> plt.Figure:
+        """Plot the heat flow through each layer of a tank thermal network."""
+        if tank_index >= results.n_tanks:
+            raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
+
+        print(f"Plotting thermal heat flows for Tank {tank_index + 1}...")
+        times_hours = results.times / 3600.0
+        heat_flows = {
+            'Ambient to shell': [],
+            'Shell to insulation': [],
+            'Insulation to structure': [],
+            'Structure to H2': [],
+        }
+
+        for time, multi_state in zip(results.times, results.multi_tank_states):
+            state = multi_state.get_tank_state(tank_index)
+            heat_flows['Ambient to shell'].append(
+                thermal_model.compute_ambient_to_shell_heat_flux(state.shell_temperature)
+            )
+            heat_flows['Shell to insulation'].append(
+                thermal_model.compute_shell_to_insulation_heat_flux(
+                    state.shell_temperature, state.insulation_temperature
+                )
+            )
+            heat_flows['Insulation to structure'].append(
+                thermal_model.compute_insulation_to_structure_heat_flux(
+                    state.insulation_temperature, state.structure_temperature
+                )
+            )
+            heat_flows['Structure to H2'].append(
+                thermal_model.compute_structure_to_h2_heat_flux(time, state)
+            )
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        line_styles = ['-', '--', '-.', ':']
+        for series_index, (label, values) in enumerate(heat_flows.items()):
+            ax.plot(
+                times_hours,
+                values,
+                color=self.color_palette[series_index % len(self.color_palette)],
+                linewidth=2,
+                linestyle=line_styles[series_index],
+                label=label,
+            )
+
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Heat flow [W]')
+        ax.grid(True, alpha=0.3)
+        if xlim is not None:
+            ax.set_xlim(xlim)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location,
+                           frameon=True, fancybox=True, shadow=True,
+                           framealpha=0.9, edgecolor='black')
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
+        plt.tight_layout()
+
+        if save_path:
+            self._save_figure(fig, save_path, dpi=900)
+
+        print(f"   Thermal heat-flow plot completed")
         return fig
 
     def plot_heat_exchanger_requirements(self,

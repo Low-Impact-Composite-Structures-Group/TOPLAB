@@ -1949,6 +1949,29 @@ class SystemOrchestrator:
                 )
                 figures.append(mf_fig)
 
+            # Generate thermal-network heat-flow plot for this tank
+            thermal_flow_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('thermal_heat_flows', {})
+            if thermal_flow_config.get('enabled', True):
+                thermal_flow_save_path = None
+                if save_path:
+                    from pathlib import Path
+                    save_dir = Path(save_path).parent
+                    save_ext = Path(save_path).suffix or '.png'
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                    thermal_flow_filename = thermal_flow_config.get('filename', 'thermal_heat_flows')
+                    thermal_flow_save_path = save_dir / f"{base_name}_{thermal_flow_filename}_tank{tank_idx + 1}{save_ext}"
+
+                thermal_flow_fig = plotter.plot_thermal_heat_flows(
+                    results=self.results,
+                    thermal_model=self.tank_system.thermal_models[tank_idx],
+                    tank_index=tank_idx,
+                    save_path=str(thermal_flow_save_path) if thermal_flow_save_path else None,
+                    xlim=thermal_flow_config.get('xlim'),
+                    ylim=thermal_flow_config.get('ylim'),
+                    legend_location=thermal_flow_config.get('legend_location', 'best'),
+                )
+                figures.append(thermal_flow_fig)
+
             # Get heat exchanger plot configuration
             hex_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {})
 
@@ -2025,6 +2048,7 @@ class SystemOrchestrator:
 
         # Count plots generated
         mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
+        thermal_heat_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('thermal_heat_flows', {}).get('enabled', True)
         heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
 
         # -------------------------------------------------------------------
@@ -2132,6 +2156,8 @@ class SystemOrchestrator:
         plots_per_tank = 2  # Always: evolution + density-temperature
         if mass_flows_enabled:
             plots_per_tank += 1
+        if thermal_heat_flows_enabled:
+            plots_per_tank += 1
         if heat_exchanger_enabled:
             plots_per_tank += 1
 
@@ -2142,6 +2168,8 @@ class SystemOrchestrator:
         plot_types = ['evolution', 'density-temperature']
         if mass_flows_enabled:
             plot_types.append('mass flows')
+        if thermal_heat_flows_enabled:
+            plot_types.append('thermal heat flows')
         if heat_exchanger_enabled:
             plot_types.append('heat exchanger requirements')
         if pressure_req_enabled:
