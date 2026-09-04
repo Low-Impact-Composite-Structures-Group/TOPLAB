@@ -162,7 +162,7 @@ output:
   plots:
     figure_prefix: coupled_ch2_lh2
     style:
-      use_greyscale: true
+      use_greyscale: false
       enable_multi_tank_overlay: false
       font:
         master_size: 16
@@ -219,6 +219,12 @@ output:
       filename: mass_flows
       include_venting_flow: true
       include_coupling_flows: true
+      xlim: null
+      ylim: null
+      legend_location: best
+    thermal_heat_flows:
+      enabled: true
+      filename: thermal_heat_flows
       xlim: null
       ylim: null
       legend_location: best
