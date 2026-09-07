@@ -2582,7 +2582,7 @@ class SystemOrchestrator:
         total_initial_mass = 0.0
         total_final_mass = 0.0
         total_fuel_consumed = 0.0
-        total_structural_mass = 0.0
+        total_dry_mass = 0.0
         total_inner_volume = 0.0
         total_outer_volume = 0.0
         total_ihex_kwh = 0.0
@@ -2594,6 +2594,8 @@ class SystemOrchestrator:
         for tank_index, tank_geometry in enumerate(self.tank_geometries):
             tank_name = f"Tank_{tank_index + 1}"
             _, tank_config = tank_config_items[tank_index] if tank_index < len(tank_config_items) else (tank_name, {})
+            tank_material_config = self.scenario_config.get_tank_material_config(tank_index + 1)
+            insulation_config = tank_material_config.get('insulation', {})
             initial_state = self.results.multi_tank_states[0].get_tank_state(tank_index)
             final_state = self.results.multi_tank_states[-1].get_tank_state(tank_index)
             tank_props = _get_tank_props(tank_geometry, tank_index)
@@ -2615,7 +2617,11 @@ class SystemOrchestrator:
                 ohex_kwh = 0.0
 
             hex_kwh = ihex_kwh + ohex_kwh
-            structure_mass = float(tank_props.get('liner_mass', 0.0)) + float(tank_props.get('wall_mass', 0.0))
+            liner_mass = float(tank_props.get('liner_mass', 0.0))
+            composite_wall_mass = float(tank_props.get('wall_mass', 0.0))
+            insulation_mass = float(tank_props.get('foam_mass', 0.0))
+            outer_shell_mass = float(tank_props.get('shell_mass', 0.0))
+            dry_mass = liner_mass + composite_wall_mass + insulation_mass + outer_shell_mass
 
             inner_volume = float(getattr(tank_geometry, 'volume', tank_props.get('volume', 0.0)))
             outer_volume = float(tank_props.get('outer_volume', 0.0))
@@ -2623,7 +2629,7 @@ class SystemOrchestrator:
             total_initial_mass += initial_mass
             total_final_mass += final_mass
             total_fuel_consumed += fuel_consumed
-            total_structural_mass += structure_mass
+            total_dry_mass += dry_mass
             total_inner_volume += inner_volume
             total_outer_volume += outer_volume
             total_ihex_kwh += ihex_kwh
@@ -2646,10 +2652,15 @@ class SystemOrchestrator:
             block.append(_line("Total length [m]:", _fmt(getattr(tank_geometry, 'total_height', 0.0), 3)))
             block.append(_line("Inner area [m^2]:", _fmt(tank_props.get('inner_surface_area', 0.0), 3)))
             block.append(_line("Outer area [m^2]:", _fmt(tank_props.get('outer_surface_area', 0.0), 3)))
-            block.append(_line("Wall thickness [m]:", _fmt(tank_props.get('wall_thickness', 0.0), 4)))
-            block.append(_line("Liner mass [kg]:", _fmt(tank_props.get('liner_mass', 0.0), 2)))
-            block.append(_line("Wall mass [kg]:", _fmt(tank_props.get('wall_mass', 0.0), 2)))
-            block.append(_line("Structural mass [kg]:", _fmt(structure_mass, 2)))
+            block.append(_line("Liner thickness [m]:", _fmt(tank_material_config.get('liner', {}).get('thickness'), 4)))
+            block.append(_line("Composite wall thickness [m]:", _fmt(tank_props.get('wall_thickness', 0.0), 4)))
+            block.append(_line("Insulation thickness [m]:", _fmt(insulation_config.get('thickness'), 4)))
+            block.append(_line("Outer shell thickness [m]:", _fmt(insulation_config.get('shell_thickness'), 4)))
+            block.append(_line("Liner mass [kg]:", _fmt(liner_mass, 2)))
+            block.append(_line("Composite wall mass [kg]:", _fmt(composite_wall_mass, 2)))
+            block.append(_line("Insulation mass [kg]:", _fmt(insulation_mass, 2)))
+            block.append(_line("Outer shell mass [kg]:", _fmt(outer_shell_mass, 2)))
+            block.append(_line("Total dry mass [kg]:", _fmt(dry_mass, 2)))
             block.append(_line("Initial fuel mass [kg]:", _fmt(initial_mass, 2)))
             block.append(_line("Final fuel mass [kg]:", _fmt(final_mass, 2)))
             block.append(_line("Fuel consumed [kg]:", _fmt(fuel_consumed, 2)))
@@ -2679,8 +2690,9 @@ class SystemOrchestrator:
         report_lines.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))
         report_lines.append(_line("Data points:", data_points))
         report_lines.append(_line("Liner material:", materials_config.get('liner', {}).get('name', 'N/A')))
-        report_lines.append(_line("Composite material:", materials_config.get('composite', {}).get('name', 'N/A')))
+        report_lines.append(_line("Composite wall material:", materials_config.get('composite', {}).get('name', 'N/A')))
         report_lines.append(_line("Insulation material:", materials_config.get('insulation', {}).get('name', 'N/A')))
+        report_lines.append(_line("Outer shell material:", materials_config.get('insulation', {}).get('shell_material', materials_config.get('liner', {}).get('name', 'N/A'))))
         if mission_sections:
             mission_duration_str = ", ".join(_fmt(duration, 1) for duration in mission_sections)
             report_lines.append(_line("Mission section durations [s]:", mission_duration_str))
@@ -2691,10 +2703,10 @@ class SystemOrchestrator:
         report_lines.append(_line("Initial fuel mass [kg]:", _fmt(total_initial_mass, 2)))
         report_lines.append(_line("Final fuel mass [kg]:", _fmt(total_final_mass, 2)))
         report_lines.append(_line("Fuel consumed [kg]:", _fmt(total_fuel_consumed, 2)))
-        report_lines.append(_line("Structural mass [kg]:", _fmt(total_structural_mass, 2)))
+        report_lines.append(_line("Total dry mass [kg]:", _fmt(total_dry_mass, 2)))
         report_lines.append(_line("Total inner volume [m^3]:", _fmt(total_inner_volume, 4)))
         report_lines.append(_line("Total outer volume [m^3]:", _fmt(total_outer_volume, 4)))
-        total_system_mass = total_initial_mass + total_structural_mass
+        total_system_mass = total_initial_mass + total_dry_mass
         gravimetric_efficiency = total_initial_mass / total_system_mass if total_system_mass > 0 else 0.0
         volumetric_efficiency = total_inner_volume / total_outer_volume if total_outer_volume > 0 else 0.0
         report_lines.append(_line("Gravimetric efficiency [-]:", _fmt(gravimetric_efficiency, 4)))
