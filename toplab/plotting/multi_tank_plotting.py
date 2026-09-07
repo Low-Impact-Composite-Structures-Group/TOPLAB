@@ -225,14 +225,14 @@ class DelftColourPlotter:
 
         # Critical and triple points (with safe fallbacks)
         try:
-            Tcrit = float(PropsSI("Tcrit", "hydrogen"))
-            Pcrit = float(PropsSI("pcrit", "hydrogen"))
+            Tcrit = float(PropsSI("Tcrit", "PARAHYD"))
+            Pcrit = float(PropsSI("pcrit", "PARAHYD"))
         except Exception:
             Tcrit, Pcrit = 33.0, 1.3e6
 
         try:
-            Ttriple = float(PropsSI("Ttriple", "hydrogen"))
-            Ptriple = float(PropsSI("ptriple", "hydrogen"))
+            Ttriple = float(PropsSI("Ttriple", "PARAHYD"))
+            Ptriple = float(PropsSI("ptriple", "PARAHYD"))
         except Exception:
             Ttriple, Ptriple = 13.8, 7e3  # approximate values
 
@@ -247,8 +247,8 @@ class DelftColourPlotter:
         for i, T in enumerate(T_vals):
             if T < Tcrit:
                 try:
-                    rho_l_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 0, "hydrogen"))
-                    rho_g_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 1, "hydrogen"))
+                    rho_l_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 0, "PARAHYD"))
+                    rho_g_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 1, "PARAHYD"))
                 except Exception:
                     # leave as NaN if CoolProp can't provide at extreme edges
                     pass
@@ -358,7 +358,7 @@ class DelftColourPlotter:
 
             # Extend saturation curves to critical point explicitly
             try:
-                rho_crit = float(PropsSI("rhocrit", "hydrogen"))
+                rho_crit = float(PropsSI("rhocrit", "PARAHYD"))
             except Exception:
                 rho_crit = None
             if rho_crit is not None and np.isfinite(rho_crit):
@@ -381,7 +381,7 @@ class DelftColourPlotter:
                 rhos_valid = []
                 for T in T_for_isobars:
                     try:
-                        rho = float(PropsSI("Dmass", "T", T, "P", ppa, "hydrogen"))
+                        rho = float(PropsSI("Dmass", "T", T, "P", ppa, "PARAHYD"))
                         if np.isfinite(rho) and (rho_min <= rho <= rho_max):
                             Ts_valid.append(T)
                             rhos_valid.append(rho)
@@ -422,7 +422,7 @@ class DelftColourPlotter:
         # Mark critical point
         if T_min <= Tcrit <= T_max:
             try:
-                rho_crit = float(PropsSI("rhocrit", "hydrogen"))
+                rho_crit = float(PropsSI("rhocrit", "PARAHYD"))
             except Exception:
                 rho_crit = 31.0  # approx kg/m³
             if rho_min <= rho_crit <= rho_max:
@@ -431,8 +431,8 @@ class DelftColourPlotter:
         # Mark triple point (optional)
         if T_min <= Ttriple <= T_max:
             try:
-                rho_l_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 0, "hydrogen"))
-                rho_g_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 1, "hydrogen"))
+                rho_l_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 0, "PARAHYD"))
+                rho_g_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 1, "PARAHYD"))
                 # Show as two markers at the same T
                 markers = []
                 if rho_min <= rho_l_tp <= rho_max:
@@ -742,8 +742,21 @@ class DelftColourPlotter:
 
             # Temperature plot (match combined plot dimensions)
             fig_t, ax_t = plt.subplots(1, 1, figsize=(12, 10))
-            ax_t.plot(times_hours, tank_data['temperatures'], color=primary_color, linewidth=2, linestyle=line_style,
-                      label='Temperature')
+            temperature_series = [
+                ('Shell', 'shell_temperatures'),
+                ('Insulation', 'insulation_temperatures'),
+                ('Structure', 'structure_temperatures'),
+                ('H2', 'h2_temperatures'),
+            ]
+            for series_index, (label, key) in enumerate(temperature_series):
+                ax_t.plot(
+                    times_hours,
+                    tank_data[key],
+                    color=self.color_palette[series_index % len(self.color_palette)],
+                    linewidth=2,
+                    linestyle=self.line_styles[series_index % len(self.line_styles)] if self.use_greyscale else '-',
+                    label=label,
+                )
             _format_axes(ax_t, None, 'Temperature [K]', ylim_temperature)
             if reference_lines and 'T_ambient' in reference_lines:
                 ax_t.axhline(y=reference_lines['T_ambient'], color=('#404040' if self.use_greyscale else self.color_palette[2]),
@@ -840,9 +853,26 @@ class DelftColourPlotter:
             ax1.plot(times_hours, tank_data['pressures'], color=color, linewidth=2, linestyle=line_style,
                     label=f'{tank_label} Pressure' if should_overlay else 'Pressure')
 
-            # Plot 2: Temperature vs Time
-            ax2.plot(times_hours, tank_data['temperatures'], color=color, linewidth=2, linestyle=line_style,
-                    label=f'{tank_label} Temperature' if should_overlay else 'Temperature')
+            # Plot 2: all thermal-network node temperatures vs time
+            temperature_series = [
+                ('Shell', 'shell_temperatures'),
+                ('Insulation', 'insulation_temperatures'),
+                ('Structure', 'structure_temperatures'),
+                ('H2', 'h2_temperatures'),
+            ]
+            for series_index, (node_label, key) in enumerate(temperature_series):
+                ax2.plot(
+                    times_hours,
+                    tank_data[key],
+                    color=self.color_palette[series_index % len(self.color_palette)] if not should_overlay else color,
+                    linewidth=2,
+                    linestyle=(
+                        self.line_styles[series_index % len(self.line_styles)]
+                        if not should_overlay and self.use_greyscale
+                        else ['-', '--', '-.', ':'][series_index]
+                    ),
+                    label=f'{tank_label} {node_label}' if should_overlay else node_label,
+                )
 
             # Plot 3: Density vs Time
             ax3.plot(times_hours, tank_data['densities'], color=color, linewidth=2, linestyle=line_style,
@@ -1215,8 +1245,8 @@ class DelftColourPlotter:
 
         # Auto-compute temperature range (xlim) based on actual data if not provided
         if xlim is None:
-            temp_min = min(tank_data['temperatures']) - 4
-            temp_max = max(tank_data['temperatures']) + 15
+            temp_min = min(tank_data['h2_temperatures']) - 4
+            temp_max = max(tank_data['h2_temperatures']) + 15
             xlim = (temp_min, temp_max)
 
         # Set default density range (ylim) if not provided
@@ -1232,19 +1262,19 @@ class DelftColourPlotter:
         primary_color = self.color_palette[0]  # Black for greyscale, Delft blue for color
 
         # Plot tank path (no markers, just lines)
-        tank_line, = ax.plot(tank_data['temperatures'], tank_data['densities'],
+        tank_line, = ax.plot(tank_data['h2_temperatures'], tank_data['densities'],
                             '-', color=primary_color, linewidth=2,
                             label=f"Thermodynamic path")
 
         # Add configurable direction arrow
-        if len(tank_data['temperatures']) > 10:
+        if len(tank_data['h2_temperatures']) > 10:
             # Calculate arrow position along path
-            idx = max(1, int(len(tank_data['temperatures']) * arrow_position))
+            idx = max(1, int(len(tank_data['h2_temperatures']) * arrow_position))
             start_idx = max(0, idx - max(1, int(8 * arrow_size)))
 
             ax.annotate('',
-                xy=(tank_data['temperatures'][idx], tank_data['densities'][idx]),
-                xytext=(tank_data['temperatures'][start_idx], tank_data['densities'][start_idx]),
+                xy=(tank_data['h2_temperatures'][idx], tank_data['densities'][idx]),
+                xytext=(tank_data['h2_temperatures'][start_idx], tank_data['densities'][start_idx]),
                 arrowprops=dict(
                     arrowstyle='-|>',
                     color=primary_color,
@@ -1265,8 +1295,8 @@ class DelftColourPlotter:
                 closest_idx = min(range(len(times_seconds)),
                                 key=lambda i: abs(times_seconds[i] - event_time))
 
-                if closest_idx < len(tank_data['temperatures']):
-                    temp = tank_data['temperatures'][closest_idx]
+                if closest_idx < len(tank_data['h2_temperatures']):
+                    temp = tank_data['h2_temperatures'][closest_idx]
                     density = tank_data['densities'][closest_idx]
 
                     if event_type == 'open':
@@ -1579,6 +1609,80 @@ class DelftColourPlotter:
         print(f"   Mass flow plot completed")
         return fig
 
+    def plot_thermal_heat_flows(
+            self,
+            results: MultiTankResults,
+            thermal_model: Any,
+            tank_index: int = 0,
+            save_path: Optional[str] = None,
+            xlim: Optional[Tuple[float, float]] = None,
+            ylim: Optional[Tuple[float, float]] = None,
+            legend_location: str = 'best') -> plt.Figure:
+        """Plot the heat flow through each layer of a tank thermal network."""
+        if tank_index >= results.n_tanks:
+            raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
+
+        print(f"Plotting thermal heat flows for Tank {tank_index + 1}...")
+        times_hours = results.times / 3600.0
+        heat_flows = {
+            'Ambient to shell': [],
+            'Shell to insulation': [],
+            'Insulation to structure': [],
+            'Structure to H2': [],
+        }
+
+        for time, multi_state in zip(results.times, results.multi_tank_states):
+            state = multi_state.get_tank_state(tank_index)
+            heat_flows['Ambient to shell'].append(
+                thermal_model.compute_ambient_to_shell_heat_flux(state.shell_temperature)
+            )
+            heat_flows['Shell to insulation'].append(
+                thermal_model.compute_shell_to_insulation_heat_flux(
+                    state.shell_temperature, state.insulation_temperature
+                )
+            )
+            heat_flows['Insulation to structure'].append(
+                thermal_model.compute_insulation_to_structure_heat_flux(
+                    state.insulation_temperature, state.structure_temperature
+                )
+            )
+            heat_flows['Structure to H2'].append(
+                thermal_model.compute_structure_to_h2_heat_flux(time, state)
+            )
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        line_styles = ['-', '--', '-.', ':']
+        for series_index, (label, values) in enumerate(heat_flows.items()):
+            ax.plot(
+                times_hours,
+                values,
+                color=self.color_palette[series_index % len(self.color_palette)],
+                linewidth=2,
+                linestyle=line_styles[series_index],
+                label=label,
+            )
+
+        ax.set_xlabel('Time [hours]')
+        ax.set_ylabel('Heat flow [W]')
+        ax.grid(True, alpha=0.3)
+        if xlim is not None:
+            ax.set_xlim(xlim)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
+        legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location,
+                           frameon=True, fancybox=True, shadow=True,
+                           framealpha=0.9, edgecolor='black')
+        legend.get_frame().set_facecolor('white')
+        legend.get_frame().set_linewidth(1.2)
+        plt.tight_layout()
+
+        if save_path:
+            self._save_figure(fig, save_path, dpi=900)
+
+        print(f"   Thermal heat-flow plot completed")
+        return fig
+
     def plot_heat_exchanger_requirements(self,
                                        heat_exchanger_data: Dict[str, Any],
                                        tank_index: int = 0,
@@ -1809,7 +1913,7 @@ class DelftColourPlotter:
 
             combined_times.extend(adjusted_times)
             combined_pressures.extend(tank_data['pressures'])
-            combined_temperatures.extend(tank_data['temperatures'])
+            combined_temperatures.extend(tank_data['h2_temperatures'])
             combined_masses.extend(tank_data['masses'])
             combined_densities.extend(tank_data['densities'])
 
@@ -1989,13 +2093,13 @@ class DelftColourPlotter:
             color = mission_colors[i % len(mission_colors)]
 
             # Plot trajectory
-            ax.plot(tank_data['temperatures'], tank_data['densities'],
+            ax.plot(tank_data['h2_temperatures'], tank_data['densities'],
                    color=color, linewidth=2.5, label=f"{name.title()}", alpha=0.8)
 
             # Mark start and end points
-            ax.scatter(tank_data['temperatures'][0], tank_data['densities'][0],
+            ax.scatter(tank_data['h2_temperatures'][0], tank_data['densities'][0],
                       color=color, s=80, marker='o', edgecolor='white', linewidth=1, zorder=5)
-            ax.scatter(tank_data['temperatures'][-1], tank_data['densities'][-1],
+            ax.scatter(tank_data['h2_temperatures'][-1], tank_data['densities'][-1],
                       color=color, s=80, marker='s', edgecolor='white', linewidth=1, zorder=5)
 
         # Add isobars if requested (simplified for sequential plots)
@@ -2828,8 +2932,8 @@ class DelftColourPlotter:
                 if np.isnan(T_in[i]) or np.isnan(T_out[i]):
                     continue
                 try:
-                    h_in  = PropsSI("Hmass", "P", P_in[i]  * 1e5, "T", T_in[i],  "hydrogen")
-                    h_out = PropsSI("Hmass", "P", P_out[i] * 1e5, "T", T_out[i], "hydrogen")
+                    h_in  = PropsSI("Hmass", "P", P_in[i]  * 1e5, "T", T_in[i],  "PARAHYD")
+                    h_out = PropsSI("Hmass", "P", P_out[i] * 1e5, "T", T_out[i], "PARAHYD")
                     power[i] = mdot * (h_out - h_in) / 1000.0  # W → kW
                 except Exception:
                     pass
@@ -3030,7 +3134,7 @@ class DelftColourPlotter:
             times_h = results.times / 3600.0
             tank_data = results._extract_tank_arrays(source_tank_idx)
             mdot_gs       = tank_data['coupling_outflow_rates']
-            temperature_K = tank_data['temperatures']
+            temperature_K = tank_data['h2_temperatures']
             pressure_bar  = tank_data['pressures']
             col = colors[0 % len(colors)]
             ax_mdot.plot(times_h, mdot_gs,       color=col, linewidth=2, label='Fuel Cell Inlet')

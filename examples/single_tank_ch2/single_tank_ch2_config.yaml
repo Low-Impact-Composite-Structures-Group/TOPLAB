@@ -28,7 +28,9 @@ network:
         thickness: calculated
       insulation:
         thickness: 0.05
-        heat_transfer_coefficient: 50
+        shell_thickness: 0.002
+        alpha_amb: 10.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 2.0
@@ -59,7 +61,6 @@ output:
   save_plots: true
   plot_formats:
   - png
-  - pgf
   save_data: true
   data_format: csv
   results_directory: output/results
@@ -67,7 +68,7 @@ output:
   plots:
     figure_prefix: single_tank_ch2
     style:
-      use_greyscale: true
+      use_greyscale: false
       font:
         master_size: 16
         legend_size: 16
@@ -116,6 +117,12 @@ output:
       - 6
       filename: mass_flows
       include_venting_flow: true
+      xlim: null
+      ylim: null
+      legend_location: best
+    thermal_heat_flows:
+      enabled: true
+      filename: thermal_heat_flows
       xlim: null
       ylim: null
       legend_location: best

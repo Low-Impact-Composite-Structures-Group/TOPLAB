@@ -20,14 +20,17 @@ class IsochoricTankState:
     """
     Isochoric tank state for the multistate solver.
 
-    This keeps the multistate state vector local to the supported src/
-    backend after the multistate-only flattening.
+    State vector per tank:
+    [fuel_mass, h2_temperature, structure_temperature, insulation_temperature,
+    shell_temperature]
     """
 
     tank: Tank
     fuel_mass: float
-    temperature: float
-    solid_temperature: float
+    h2_temperature: float
+    structure_temperature: float
+    insulation_temperature: float
+    shell_temperature: float
     pressure: float = None
     configuration: str = "A"
     scenario: str = "DISCHARGE"
@@ -49,16 +52,24 @@ class IsochoricTankState:
 
     @property
     def state_vector(self):
-        return [self.fuel_mass, self.temperature, self.solid_temperature]
+        return [
+            self.fuel_mass,
+            self.h2_temperature,
+            self.structure_temperature,
+            self.insulation_temperature,
+            self.shell_temperature,
+        ]
 
     @classmethod
     def from_state_vector(cls, tank: Tank, state_vector: list, **kwargs):
-        m, temperature, solid_temperature = state_vector
+        fuel_mass, h2_temperature, structure_temperature, insulation_temperature, shell_temperature = state_vector
         return cls(
             tank=tank,
-            fuel_mass=m,
-            temperature=temperature,
-            solid_temperature=solid_temperature,
+            fuel_mass=fuel_mass,
+            h2_temperature=h2_temperature,
+            structure_temperature=structure_temperature,
+            insulation_temperature=insulation_temperature,
+            shell_temperature=shell_temperature,
             **kwargs,
         )
 
@@ -73,36 +84,35 @@ class IsochoricTankState:
                 self.compute_pressure()
             self.hydrogen = requester.get_hydrogen_properties(
                 self.pressure,
-                self.temperature,
+                self.h2_temperature,
                 self.density,
             )
 
     def compute_pressure(self):
         if self.pressure is None:
-            try:
-                from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
-
-                if self.temperature <= 0:
-                    self.pressure = 1e5
-                    return
-                self.pressure = safe_pressure_from_T_rho(
-                    self.temperature,
-                    self.density,
-                    "hydrogen",
+            from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
+            if self.h2_temperature <= 0:
+                raise ValueError(
+                    f"Cannot compute pressure: H2 temperature {self.h2_temperature:.4f} K is non-positive"
                 )
-            except Exception:
-                self.pressure = 1e5
+            self.pressure = safe_pressure_from_T_rho(self.h2_temperature, self.density, "PARAHYD")
 
     def _needs_hydrogen_update(self) -> bool:
         if self.hydrogen is None:
             return True
 
-        temp_change = abs(self.temperature - self.hydrogen.temperature) / self.hydrogen.temperature
+        temp_change = abs(self.h2_temperature - self.hydrogen.temperature) / self.hydrogen.temperature
         density_change = abs(self.density - self.hydrogen.density) / self.hydrogen.density
         return temp_change > 0.01 or density_change > 0.01
 
     def update_from_state_vector(self, state_vector: list):
-        self.fuel_mass, self.temperature, self.solid_temperature = state_vector
+        (
+            self.fuel_mass,
+            self.h2_temperature,
+            self.structure_temperature,
+            self.insulation_temperature,
+            self.shell_temperature,
+        ) = state_vector
         self.compute_pressure()
         self.get_hydrogen_properties()
 
@@ -125,14 +135,16 @@ class IsochoricTankState:
 
         from CoolProp.CoolProp import PropsSI
 
-        return PropsSI("Cvmass", "T", self.temperature, "Dmass", self.density, "hydrogen")
+        return PropsSI("Cvmass", "T", self.h2_temperature, "Dmass", self.density, "PARAHYD")
 
 
 @dataclass
 class IsochoricStateDerivatives:
     fuel_mass_derivative: float
-    temperature_derivative: float
-    solid_temperature_derivative: float
+    h2_temperature_derivative: float
+    structure_temperature_derivative: float
+    insulation_temperature_derivative: float
+    shell_temperature_derivative: float
     heat_flux: float = 0.0
     discharge_heat_flux: float = 0.0
     alpha_s: float = 0.0
@@ -141,16 +153,20 @@ class IsochoricStateDerivatives:
     def state_derivative_vector(self):
         return [
             self.fuel_mass_derivative,
-            self.temperature_derivative,
-            self.solid_temperature_derivative,
+            self.h2_temperature_derivative,
+            self.structure_temperature_derivative,
+            self.insulation_temperature_derivative,
+            self.shell_temperature_derivative,
         ]
 
 
 @dataclass
 class IsochoricInitialState:
     fuel_mass: float
-    temperature: float
-    solid_temperature: float
+    h2_temperature: float
+    structure_temperature: float
+    insulation_temperature: float
+    shell_temperature: float
     pressure: float = None
     scenario: str = "DISCHARGE"
 
@@ -158,14 +174,22 @@ class IsochoricInitialState:
         return IsochoricTankState(
             tank=tank,
             fuel_mass=self.fuel_mass,
-            temperature=self.temperature,
-            solid_temperature=self.solid_temperature,
+            h2_temperature=self.h2_temperature,
+            structure_temperature=self.structure_temperature,
+            insulation_temperature=self.insulation_temperature,
+            shell_temperature=self.shell_temperature,
             pressure=self.pressure,
             scenario=self.scenario,
         )
 
     def get_state_vector(self):
-        return [self.fuel_mass, self.temperature, self.solid_temperature]
+        return [
+            self.fuel_mass,
+            self.h2_temperature,
+            self.structure_temperature,
+            self.insulation_temperature,
+            self.shell_temperature,
+        ]
 
 
 @dataclass
@@ -201,12 +225,20 @@ class IsochoricTankStates:
         return [state.fuel_mass for state in self.states]
 
     @property
-    def temperatures(self) -> list[float]:
-        return [state.temperature for state in self.states]
+    def h2_temperatures(self) -> list[float]:
+        return [state.h2_temperature for state in self.states]
 
     @property
-    def solid_temperatures(self) -> list[float]:
-        return [state.solid_temperature for state in self.states]
+    def structure_temperatures(self) -> list[float]:
+        return [state.structure_temperature for state in self.states]
+
+    @property
+    def insulation_temperatures(self) -> list[float]:
+        return [state.insulation_temperature for state in self.states]
+
+    @property
+    def shell_temperatures(self) -> list[float]:
+        return [state.shell_temperature for state in self.states]
 
     @property
     def pressures(self) -> list[float]:

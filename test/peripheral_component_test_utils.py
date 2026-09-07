@@ -56,6 +56,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 290.0
         target_pressure = 50e5
         target_temperature = 190.0
+        ambient_temperature = 290.0
         edge["peripheral_components"] = [
             {
                 "type": "compressor",
@@ -70,6 +71,9 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 35.0
         target_pressure = 12e5
         target_temperature = 26.0
+        # Ambient set to source temperature so T_shell,0 ≈ source temperature,
+        # making the insulation driving force negligible over the test duration.
+        ambient_temperature = 36.0
         edge["peripheral_components"] = [
             {
                 "type": "cryopump",
@@ -84,6 +88,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
         source_temperature = 260.0
         target_pressure = 50e5
         target_temperature = 180.0
+        ambient_temperature = 290.0
         edge["peripheral_components"] = [
             {
                 "type": "ideal_heat_exchanger",
@@ -111,7 +116,7 @@ def build_component_benchmark_config(component_type: str) -> dict:
             "profile": "constant_flow",
             "flow_rate": flow_rate,
             "duration": duration_s,
-            "ambient_temperature": 290.0,
+            "ambient_temperature": ambient_temperature,
             "assigned_to_node": 2,
         },
         "physics": {
@@ -182,9 +187,10 @@ def build_component_benchmark_config(component_type: str) -> dict:
                         "winding_angle": 54.7,
                     },
                     "insulation": {
-                        "nist_path": "g10_nist",
                         "thickness": 0.01,
-                        "heat_transfer_coefficient": 0.0,
+                        "shell_thickness": 0.002,
+                        "alpha_amb": 10.0,
+                        "emissivity": 0.05,
                     },
                     "safety_margin": 1.25,
                 },
@@ -246,23 +252,23 @@ def run_component_benchmark(component_type: str) -> dict:
         target_final = results.multi_tank_states[-1].get_tank_state(1)
 
         rho_final = target_final.fuel_mass / target_final.tank.volume
-        h_target = PropsSI("Hmass", "T", target_final.temperature, "Dmass", rho_final, "hydrogen")
+        h_target = PropsSI("Hmass", "T", target_final.h2_temperature, "Dmass", rho_final, "PARAHYD")
 
         if component_type == "compressor":
             expected_component_name = "Compressor"
-            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.temperature, "hydrogen")
-            h_expected = PropsSI("Hmass", "P", 120e5, "Smass", s_in, "hydrogen")
+            s_in = PropsSI("Smass", "P", source_final.pressure, "T", source_final.h2_temperature, "PARAHYD")
+            h_expected = PropsSI("Hmass", "P", 120e5, "Smass", s_in, "PARAHYD")
         elif component_type == "cryopump":
             expected_component_name = "CryoPumpModel"
-            h1 = PropsSI("H", "P", 3e5, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", 3e5, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", target_final.pressure, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", 3e5, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", 3e5, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", target_final.pressure, "S", s1, "PARAHYD")
             h_expected = h1 + (h2s - h1) / 0.78
         else:
             expected_component_name = "IdealHeatExchanger"
-            h_expected = PropsSI("Hmass", "P", source_final.pressure, "T", 315.0, "hydrogen")
+            h_expected = PropsSI("Hmass", "P", source_final.pressure, "T", 315.0, "PARAHYD")
 
-        t_expected = PropsSI("T", "Dmass", rho_final, "Hmass", h_expected, "hydrogen")
+        t_expected = PropsSI("T", "Dmass", rho_final, "Hmass", h_expected, "PARAHYD")
 
         return {
             "component_name": type(original_valve.component_chain[0]).__name__,
@@ -271,7 +277,7 @@ def run_component_benchmark(component_type: str) -> dict:
             "final_target_mass": target_final.fuel_mass,
             "initial_source_mass": source_initial.fuel_mass,
             "final_source_mass": source_final.fuel_mass,
-            "target_temperature": target_final.temperature,
+            "target_temperature": target_final.h2_temperature,
             "expected_temperature": t_expected,
             "target_enthalpy": h_target,
             "expected_enthalpy": h_expected,
@@ -315,9 +321,10 @@ def build_yaml_smoke_config() -> dict:
                             "winding_angle": 54.7,
                         },
                         "insulation": {
-                            "nist_path": "g10_nist",
                             "thickness": 0.01,
-                            "heat_transfer_coefficient": 0.0,
+                            "shell_thickness": 0.002,
+                            "alpha_amb": 10.0,
+                            "emissivity": 0.05,
                         },
                         "safety_margin": 1.25,
                     },
@@ -352,9 +359,10 @@ def build_yaml_smoke_config() -> dict:
                             "winding_angle": 54.7,
                         },
                         "insulation": {
-                            "nist_path": "g10_nist",
                             "thickness": 0.01,
-                            "heat_transfer_coefficient": 0.0,
+                            "shell_thickness": 0.002,
+                            "alpha_amb": 10.0,
+                            "emissivity": 0.05,
                         },
                         "safety_margin": 1.25,
                     },

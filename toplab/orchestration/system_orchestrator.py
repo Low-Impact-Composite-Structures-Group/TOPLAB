@@ -557,7 +557,7 @@ class SystemOrchestrator:
                 try:
                     from CoolProp.CoolProp import PropsSI
                     density = float(geometry_data['initial_density'])
-                    initial_temp = PropsSI("T", "P", initial_pressure, "D", density, "hydrogen")
+                    initial_temp = PropsSI("T", "P", initial_pressure, "D", density, "PARAHYD")
                 except:
                     initial_temp = 53.25  # Default cryogenic temperature
             else:
@@ -1074,17 +1074,17 @@ class SystemOrchestrator:
             # Density specified - solve for temperature
             target_density = float(geometry_data['initial_density'])  # kg/m³
             try:
-                initial_temp = PropsSI("T", "P", initial_pressure, "D", target_density, "hydrogen")
+                initial_temp = PropsSI("T", "P", initial_pressure, "D", target_density, "PARAHYD")
                 print(f"     Solved initial temperature: {initial_temp:.2f} K (from P={initial_pressure/1e5:.0f} bar, ρ={target_density:.1f} kg/m³)")
             except Exception as e:
                 print(f"     Warning: Could not solve for temperature from P,ρ: {e}")
                 initial_temp = geometry_data.get('initial_temperature', 53.25)
-                target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "hydrogen")
+                target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "PARAHYD")
                 print(f"     Using fallback: T={initial_temp:.2f} K, ρ={target_density:.1f} kg/m³")
         else:
             # Temperature specified - calculate density
             initial_temp = geometry_data.get('initial_temperature', 53.25)  # K
-            target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "hydrogen")
+            target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, "PARAHYD")
             print(f"     Calculated density: {target_density:.2f} kg/m³ (from P={initial_pressure/1e5:.0f} bar, T={initial_temp:.1f} K)")
 
         # Calculate required tank volume with ullage allowance
@@ -1287,7 +1287,7 @@ class SystemOrchestrator:
             for i in range(len(self.tank_geometries)):
                 tank_state = final_multi_state.get_tank_state(i)
                 print(f"   Tank {i+1}: m={tank_state.fuel_mass:.2f}kg, "
-                      f"T={tank_state.temperature:.1f}K, "
+                        f"T_H2={tank_state.h2_temperature:.1f}K, "
                       f"ρ={tank_state.density:.1f}kg/m³")
 
             return self.results
@@ -1341,7 +1341,7 @@ class SystemOrchestrator:
 
         try:
             # Calculate target enthalpy (constant for all time points)
-            h_target = PropsSI("Hmass", "T", target_temp, "P", target_press, "hydrogen")
+            h_target = PropsSI("Hmass", "T", target_temp, "P", target_press, "PARAHYD")
         except Exception as e:
             print(f"   WARNING: Could not calculate OHEX target enthalpy: {e}")
             return [0.0] * len(self.results.times)
@@ -1357,7 +1357,7 @@ class SystemOrchestrator:
         for i, state in enumerate(tank_series.states):
             try:
                 # Get current state conditions
-                T_current = state.temperature
+                T_current = state.h2_temperature
                 m_current = state.fuel_mass
 
                 # Get tank volume for density calculation
@@ -1371,13 +1371,13 @@ class SystemOrchestrator:
                     # Calculate current pressure and enthalpy with saturation-aware helpers
                     try:
                         from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho, safe_enthalpy
-                        p_current = safe_pressure_from_T_rho(T_current, rho_current, "hydrogen")
+                        p_current = safe_pressure_from_T_rho(T_current, rho_current, "PARAHYD")
                         # Assume gas enthalpy for outlet stream when in two-phase
-                        h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="hydrogen")
+                        h_current = safe_enthalpy(T_current, p_current, assume_gas_when_twophase=True, fluid="PARAHYD")
                     except Exception:
                         # Fallback to direct CoolProp calls
-                        p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "hydrogen")
-                        h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "hydrogen")
+                        p_current = PropsSI("P", "T", T_current, "Dmass", rho_current, "PARAHYD")
+                        h_current = PropsSI("Hmass", "T", T_current, "P", p_current, "PARAHYD")
 
                     # Calculate OHEX heat requirement
                     q_ohex = mass_rate * (h_target - h_current)  # [W]
@@ -1949,6 +1949,29 @@ class SystemOrchestrator:
                 )
                 figures.append(mf_fig)
 
+            # Generate thermal-network heat-flow plot for this tank
+            thermal_flow_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('thermal_heat_flows', {})
+            if thermal_flow_config.get('enabled', True):
+                thermal_flow_save_path = None
+                if save_path:
+                    from pathlib import Path
+                    save_dir = Path(save_path).parent
+                    save_ext = Path(save_path).suffix or '.png'
+                    base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                    thermal_flow_filename = thermal_flow_config.get('filename', 'thermal_heat_flows')
+                    thermal_flow_save_path = save_dir / f"{base_name}_{thermal_flow_filename}_tank{tank_idx + 1}{save_ext}"
+
+                thermal_flow_fig = plotter.plot_thermal_heat_flows(
+                    results=self.results,
+                    thermal_model=self.tank_system.thermal_models[tank_idx],
+                    tank_index=tank_idx,
+                    save_path=str(thermal_flow_save_path) if thermal_flow_save_path else None,
+                    xlim=thermal_flow_config.get('xlim'),
+                    ylim=thermal_flow_config.get('ylim'),
+                    legend_location=thermal_flow_config.get('legend_location', 'best'),
+                )
+                figures.append(thermal_flow_fig)
+
             # Get heat exchanger plot configuration
             hex_config = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {})
 
@@ -2025,6 +2048,7 @@ class SystemOrchestrator:
 
         # Count plots generated
         mass_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('mass_flows', {}).get('enabled', True)
+        thermal_heat_flows_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('thermal_heat_flows', {}).get('enabled', True)
         heat_exchanger_enabled = self.scenario_config.config_dict.get('output', {}).get('plots', {}).get('heat_exchanger_requirements', {}).get('enabled', False)
 
         # -------------------------------------------------------------------
@@ -2132,6 +2156,8 @@ class SystemOrchestrator:
         plots_per_tank = 2  # Always: evolution + density-temperature
         if mass_flows_enabled:
             plots_per_tank += 1
+        if thermal_heat_flows_enabled:
+            plots_per_tank += 1
         if heat_exchanger_enabled:
             plots_per_tank += 1
 
@@ -2142,6 +2168,8 @@ class SystemOrchestrator:
         plot_types = ['evolution', 'density-temperature']
         if mass_flows_enabled:
             plot_types.append('mass flows')
+        if thermal_heat_flows_enabled:
+            plot_types.append('thermal heat flows')
         if heat_exchanger_enabled:
             plot_types.append('heat exchanger requirements')
         if pressure_req_enabled:
@@ -2196,7 +2224,7 @@ class SystemOrchestrator:
                 'final_tank_states': [
                     {
                         'fuel_mass': final_multi_state.get_tank_state(i).fuel_mass,
-                        'temperature': final_multi_state.get_tank_state(i).temperature,
+                        'h2_temperature': final_multi_state.get_tank_state(i).h2_temperature,
                         'density': final_multi_state.get_tank_state(i).density
                     }
                     for i in range(len(self.tank_geometries))
@@ -2263,11 +2291,11 @@ class SystemOrchestrator:
             }
 
             # === PREPROCESSED INPUTS ===
-            P_crit_bar = PropsSI("Pcrit", "hydrogen") / 1e5
+            P_crit_bar = PropsSI("Pcrit", "PARAHYD") / 1e5
             if initial_pressure_bar <= P_crit_bar:
-                T_sat = float(PropsSI("T", "P", initial_pressure_bar * 1e5, "Q", 0, "hydrogen"))
+                T_sat = float(PropsSI("T", "P", initial_pressure_bar * 1e5, "Q", 0, "PARAHYD"))
             else:
-                T_sat = float(PropsSI("Tcrit", "hydrogen"))
+                T_sat = float(PropsSI("Tcrit", "PARAHYD"))
             delta_T = initial_temperature_K - T_sat
 
             preprocessed_inputs = {
@@ -2554,7 +2582,7 @@ class SystemOrchestrator:
         total_initial_mass = 0.0
         total_final_mass = 0.0
         total_fuel_consumed = 0.0
-        total_structural_mass = 0.0
+        total_dry_mass = 0.0
         total_inner_volume = 0.0
         total_outer_volume = 0.0
         total_ihex_kwh = 0.0
@@ -2566,6 +2594,8 @@ class SystemOrchestrator:
         for tank_index, tank_geometry in enumerate(self.tank_geometries):
             tank_name = f"Tank_{tank_index + 1}"
             _, tank_config = tank_config_items[tank_index] if tank_index < len(tank_config_items) else (tank_name, {})
+            tank_material_config = self.scenario_config.get_tank_material_config(tank_index + 1)
+            insulation_config = tank_material_config.get('insulation', {})
             initial_state = self.results.multi_tank_states[0].get_tank_state(tank_index)
             final_state = self.results.multi_tank_states[-1].get_tank_state(tank_index)
             tank_props = _get_tank_props(tank_geometry, tank_index)
@@ -2587,7 +2617,11 @@ class SystemOrchestrator:
                 ohex_kwh = 0.0
 
             hex_kwh = ihex_kwh + ohex_kwh
-            structure_mass = float(tank_props.get('liner_mass', 0.0)) + float(tank_props.get('wall_mass', 0.0))
+            liner_mass = float(tank_props.get('liner_mass', 0.0))
+            composite_wall_mass = float(tank_props.get('wall_mass', 0.0))
+            insulation_mass = float(tank_props.get('foam_mass', 0.0))
+            outer_shell_mass = float(tank_props.get('shell_mass', 0.0))
+            dry_mass = liner_mass + composite_wall_mass + insulation_mass + outer_shell_mass
 
             inner_volume = float(getattr(tank_geometry, 'volume', tank_props.get('volume', 0.0)))
             outer_volume = float(tank_props.get('outer_volume', 0.0))
@@ -2595,7 +2629,7 @@ class SystemOrchestrator:
             total_initial_mass += initial_mass
             total_final_mass += final_mass
             total_fuel_consumed += fuel_consumed
-            total_structural_mass += structure_mass
+            total_dry_mass += dry_mass
             total_inner_volume += inner_volume
             total_outer_volume += outer_volume
             total_ihex_kwh += ihex_kwh
@@ -2618,17 +2652,22 @@ class SystemOrchestrator:
             block.append(_line("Total length [m]:", _fmt(getattr(tank_geometry, 'total_height', 0.0), 3)))
             block.append(_line("Inner area [m^2]:", _fmt(tank_props.get('inner_surface_area', 0.0), 3)))
             block.append(_line("Outer area [m^2]:", _fmt(tank_props.get('outer_surface_area', 0.0), 3)))
-            block.append(_line("Wall thickness [m]:", _fmt(tank_props.get('wall_thickness', 0.0), 4)))
-            block.append(_line("Liner mass [kg]:", _fmt(tank_props.get('liner_mass', 0.0), 2)))
-            block.append(_line("Wall mass [kg]:", _fmt(tank_props.get('wall_mass', 0.0), 2)))
-            block.append(_line("Structural mass [kg]:", _fmt(structure_mass, 2)))
+            block.append(_line("Liner thickness [m]:", _fmt(tank_material_config.get('liner', {}).get('thickness'), 4)))
+            block.append(_line("Composite wall thickness [m]:", _fmt(tank_props.get('wall_thickness', 0.0), 4)))
+            block.append(_line("Insulation thickness [m]:", _fmt(insulation_config.get('thickness'), 4)))
+            block.append(_line("Outer shell thickness [m]:", _fmt(insulation_config.get('shell_thickness'), 4)))
+            block.append(_line("Liner mass [kg]:", _fmt(liner_mass, 2)))
+            block.append(_line("Composite wall mass [kg]:", _fmt(composite_wall_mass, 2)))
+            block.append(_line("Insulation mass [kg]:", _fmt(insulation_mass, 2)))
+            block.append(_line("Outer shell mass [kg]:", _fmt(outer_shell_mass, 2)))
+            block.append(_line("Total dry mass [kg]:", _fmt(dry_mass, 2)))
             block.append(_line("Initial fuel mass [kg]:", _fmt(initial_mass, 2)))
             block.append(_line("Final fuel mass [kg]:", _fmt(final_mass, 2)))
             block.append(_line("Fuel consumed [kg]:", _fmt(fuel_consumed, 2)))
             block.append(_line("Initial pressure actual [bar]:", _fmt(initial_state.pressure / 1e5, 2)))
-            block.append(_line("Initial temperature actual [K]:", _fmt(initial_state.temperature, 2)))
+            block.append(_line("Initial H2 temperature actual [K]:", _fmt(initial_state.h2_temperature, 2)))
             block.append(_line("Initial density actual [kg/m^3]:", _fmt(initial_state.density, 2)))
-            block.append(_line("Final temperature [K]:", _fmt(final_state.temperature, 2)))
+            block.append(_line("Final H2 temperature [K]:", _fmt(final_state.h2_temperature, 2)))
             block.append(_line("Final pressure [bar]:", _fmt(final_state.pressure / 1e5, 2)))
             block.append(_line("Final density [kg/m^3]:", _fmt(final_state.density, 2)))
             block.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))
@@ -2651,8 +2690,9 @@ class SystemOrchestrator:
         report_lines.append(_line("Mission duration [h]:", _fmt(total_duration_s / 3600.0, 3)))
         report_lines.append(_line("Data points:", data_points))
         report_lines.append(_line("Liner material:", materials_config.get('liner', {}).get('name', 'N/A')))
-        report_lines.append(_line("Composite material:", materials_config.get('composite', {}).get('name', 'N/A')))
+        report_lines.append(_line("Composite wall material:", materials_config.get('composite', {}).get('name', 'N/A')))
         report_lines.append(_line("Insulation material:", materials_config.get('insulation', {}).get('name', 'N/A')))
+        report_lines.append(_line("Outer shell material:", materials_config.get('insulation', {}).get('shell_material', materials_config.get('liner', {}).get('name', 'N/A'))))
         if mission_sections:
             mission_duration_str = ", ".join(_fmt(duration, 1) for duration in mission_sections)
             report_lines.append(_line("Mission section durations [s]:", mission_duration_str))
@@ -2663,10 +2703,10 @@ class SystemOrchestrator:
         report_lines.append(_line("Initial fuel mass [kg]:", _fmt(total_initial_mass, 2)))
         report_lines.append(_line("Final fuel mass [kg]:", _fmt(total_final_mass, 2)))
         report_lines.append(_line("Fuel consumed [kg]:", _fmt(total_fuel_consumed, 2)))
-        report_lines.append(_line("Structural mass [kg]:", _fmt(total_structural_mass, 2)))
+        report_lines.append(_line("Total dry mass [kg]:", _fmt(total_dry_mass, 2)))
         report_lines.append(_line("Total inner volume [m^3]:", _fmt(total_inner_volume, 4)))
         report_lines.append(_line("Total outer volume [m^3]:", _fmt(total_outer_volume, 4)))
-        total_system_mass = total_initial_mass + total_structural_mass
+        total_system_mass = total_initial_mass + total_dry_mass
         gravimetric_efficiency = total_initial_mass / total_system_mass if total_system_mass > 0 else 0.0
         volumetric_efficiency = total_inner_volume / total_outer_volume if total_outer_volume > 0 else 0.0
         report_lines.append(_line("Gravimetric efficiency [-]:", _fmt(gravimetric_efficiency, 4)))

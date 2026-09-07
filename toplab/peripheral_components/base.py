@@ -15,7 +15,7 @@ class PeripheralFlowState:
     pressure: float
     temperature: float
     mass_flow_rate: float
-    fluid: str = "hydrogen"
+    fluid: str = "PARAHYD"
     enthalpy: Optional[float] = None
     entropy: Optional[float] = None
     density: Optional[float] = None
@@ -56,7 +56,7 @@ class PeripheralFlowState:
         cls,
         tank_state,
         mass_flow_rate: float,
-        fluid: str = "hydrogen",
+        fluid: str = "PARAHYD",
     ) -> "PeripheralFlowState":
         pressure = tank_state.pressure
         if pressure is None and hasattr(tank_state, "compute_pressure"):
@@ -66,7 +66,7 @@ class PeripheralFlowState:
             density = tank_state.fuel_mass / tank_state.tank.volume
         return cls(
             pressure=pressure,
-            temperature=tank_state.temperature,
+            temperature=tank_state.h2_temperature,
             mass_flow_rate=mass_flow_rate,
             fluid=fluid,
             density=density,

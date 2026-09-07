@@ -27,9 +27,10 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 50
+        shell_thickness: 0.002
+        alpha_amb: 10.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.8
@@ -58,9 +59,10 @@ network:
         nist_path: carbon_epoxy_nist
         winding_angle: 54.7
       insulation:
-        nist_path: g10_nist
         thickness: 0.05
-        heat_transfer_coefficient: 0.01
+        shell_thickness: 0.002
+        alpha_amb: 5.0
+        emissivity: 0.05
       safety_margin: 1.25
     stopping_criteria:
       minimum_density: 5.8
@@ -127,7 +129,6 @@ output:
   save_plots: true
   plot_formats:
   - png
-  - pgf
   save_data: true
   data_format: csv
   results_directory: output/results
@@ -135,7 +136,7 @@ output:
   plots:
     figure_prefix: coupled_ch2_cch2
     style:
-      use_greyscale: true
+      use_greyscale: false
       enable_multi_tank_overlay: false
       font:
         master_size: 16
@@ -209,6 +210,12 @@ output:
       xlim: null  # [0, 1.2] or null for autofit
       ylim: null  # [-50, 100] or null for autofit
       legend_location: lower left
+    thermal_heat_flows:
+      enabled: true
+      filename: thermal_heat_flows
+      xlim: null
+      ylim: null
+      legend_location: best
     heat_exchanger_requirements:
       enabled: true
       figsize:

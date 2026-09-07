@@ -7,7 +7,7 @@ from toplab.fluids.international_standard_atmosphere import ISA, get_ISA_air_pro
 
 __all__ = [
 	"ConvectiveMedium",
-	"Hydrogen",
+	"PARAHYD",
 	"HydrogenRetriever",
 	"ISA",
 	"IsochoricHydrogen",

@@ -21,8 +21,8 @@ class IsochoricMissionParameters:
     p_min: float = 15e5
     p_vent: float = 450e5
     initial_mass: float = 10.0
-    initial_temperature: float = 20.0
-    initial_solid_temperature: float = 288.15
+    initial_h2_temperature: float = 20.0
+    initial_structure_temperature: float = 288.15
     ambient_temperature: float = 288.15
     time_step: float = 1.0
     rtol: float = 1e-6
@@ -49,8 +49,12 @@ class IsochoricMission(Mission):
     def create_initial_state(self) -> IsochoricInitialState:
         return IsochoricInitialState(
             fuel_mass=self.parameters.initial_mass,
-            temperature=self.parameters.initial_temperature,
-            solid_temperature=self.parameters.initial_solid_temperature,
+            h2_temperature=self.parameters.initial_h2_temperature,
+            structure_temperature=self.parameters.initial_structure_temperature,
+            insulation_temperature=0.5 * (
+                self.parameters.initial_structure_temperature + self.parameters.ambient_temperature
+            ),
+            shell_temperature=self.parameters.ambient_temperature,
             scenario=self.scenario,
         )
 
@@ -137,12 +141,12 @@ class DischargeMission(IsochoricMission):
 
     @classmethod
     def constant_discharge(cls, discharge_rate: float, duration: float, initial_mass: float = 10.0, initial_temperature: float = 20.0) -> "DischargeMission":
-        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_temperature=initial_temperature)
+        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_h2_temperature=initial_temperature)
         return cls(discharge_rate, duration, parameters)
 
     @classmethod
     def time_varying_discharge(cls, discharge_profile: list[float], duration: float, initial_mass: float = 10.0, initial_temperature: float = 20.0) -> "DischargeMission":
-        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_temperature=initial_temperature)
+        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_h2_temperature=initial_temperature)
         discharge_section = MissionSection(duration=duration, fuel_flows=[OutFlow([-rate for rate in discharge_profile], "gas")], altitude=0.0, mach_number=0.0)
         mission = cls.__new__(cls)
         IsochoricMission.__init__(mission, [discharge_section], parameters, "DISCHARGE")
@@ -150,7 +154,7 @@ class DischargeMission(IsochoricMission):
 
     @classmethod
     def atr72_mission(cls, initial_mass: float = 25.0, initial_temperature: float = 53.25) -> "DischargeMission":
-        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_temperature=initial_temperature)
+        parameters = IsochoricMissionParameters(initial_mass=initial_mass, initial_h2_temperature=initial_temperature)
         atr72_mission = Mission.atr72()
         discharge_sections = []
         for i, section in enumerate(atr72_mission.sections):
@@ -181,7 +185,7 @@ class DischargeMission(IsochoricMission):
             def __init__(self, volume):
                 self.volume = volume
         minimal_tank = MinimalTank(self.mission.parameters.tank_volume)
-        current_state = IsochoricTankState(tank=minimal_tank, fuel_mass=initial_state.fuel_mass, temperature=initial_state.temperature, solid_temperature=initial_state.solid_temperature, scenario=initial_state.scenario)
+        current_state = initial_state.to_isochoric_tank_state(minimal_tank)
         for section in self.mission.sections:
             fuel_flow_func = self.mission.get_fuel_flow_function(section)
             discharge_flow_func = self.mission.get_discharge_flow_function(section)
@@ -196,29 +200,40 @@ class DischargeMission(IsochoricMission):
                     bounded_mass = False
                 y[1] = max(min(y[1], max_temp), min_temp)
                 y[2] = max(min(y[2], max_temp), min_temp)
-                if y[0] <= 0 or y[1] <= 0 or y[2] <= 0:
-                    rho = max(y[0], 0.001) / self.mission.parameters.tank_volume
-                    return np.array([-0.001, 0.001, 0.001])
+                y[3] = max(min(y[3], max_temp), min_temp)
+                y[4] = max(min(y[4], max_temp), min_temp)
+                if y[0] <= 0 or y[1] <= 0 or y[2] <= 0 or y[3] <= 0 or y[4] <= 0:
+                    return np.array([-0.001, 0.001, 0.001, 0.001, 0.001])
                 try:
-                    state = IsochoricTankState(tank=minimal_tank, fuel_mass=y[0], temperature=y[1], solid_temperature=y[2])
+                    state = IsochoricTankState.from_state_vector(minimal_tank, y)
                 except Exception:
-                    return np.array([0.0, 0.0, 0.0])
-                Q_solid = self.thermal_model.compute_heat_flux(current_time + t, state)
-                dTs_dt = self.thermal_model.compute_solid_temperature_derivative(current_time + t, state)
+                    return np.zeros(5)
+                Q_structure_to_h2 = self.thermal_model.compute_structure_to_h2_heat_flux(current_time + t, state)
+                dT_structure_dt = self.thermal_model.compute_structure_temperature_derivative(current_time + t, state)
+                dT_insulation_dt = self.thermal_model.compute_insulation_temperature_derivative(current_time + t, state)
+                dT_shell_dt = self.thermal_model.compute_shell_temperature_derivative(current_time + t, state)
                 def section_fuel_flow_func(abs_time):
                     section_time = abs_time - current_time
                     return fuel_flow_func(section_time)
                 def section_discharge_flow_func(abs_time):
                     section_time = abs_time - current_time
                     return discharge_flow_func(section_time)
-                derivatives = self.mission.dynamic_model_switcher.compute_state_derivatives(current_time + t, state, section_fuel_flow_func, section_discharge_flow_func, Q_solid=Q_solid, dTs_dt=dTs_dt)
+                derivatives = self.mission.dynamic_model_switcher.compute_state_derivatives(
+                    current_time + t, state, section_fuel_flow_func, section_discharge_flow_func,
+                    Q_structure_to_h2=Q_structure_to_h2,
+                    dT_structure_dt=dT_structure_dt,
+                    dT_insulation_dt=dT_insulation_dt,
+                    dT_shell_dt=dT_shell_dt,
+                )
                 mass_derivative = derivatives.fuel_mass_derivative
                 if bounded_mass and mass_derivative < 0:
                     mass_derivative = 0.0
-                temp_derivative = max(min(derivatives.temperature_derivative, 100.0), -100.0)
-                solid_temp_derivative = max(min(derivatives.solid_temperature_derivative, 10.0), -10.0)
-                return [mass_derivative, temp_derivative, solid_temp_derivative]
-            y0 = [current_state.fuel_mass, current_state.temperature, current_state.solid_temperature]
+                h2_temp_derivative = max(min(derivatives.h2_temperature_derivative, 100.0), -100.0)
+                structure_temp_derivative = max(min(derivatives.structure_temperature_derivative, 10.0), -10.0)
+                insulation_temp_derivative = max(min(derivatives.insulation_temperature_derivative, 10.0), -10.0)
+                shell_temp_derivative = max(min(derivatives.shell_temperature_derivative, 10.0), -10.0)
+                return [mass_derivative, h2_temp_derivative, structure_temp_derivative, insulation_temp_derivative, shell_temp_derivative]
+            y0 = current_state.state_vector
             t_span = (0.0, section.duration)
             t_eval = np.arange(0.0, section.duration, self.mission.parameters.time_step)
             if len(t_eval) == 0 or t_eval[-1] < section.duration:
@@ -228,7 +243,7 @@ class DischargeMission(IsochoricMission):
             section_times = current_time + section_results.t
             section_states = []
             for i, t in enumerate(section_results.t):
-                state = IsochoricTankState(tank=minimal_tank, fuel_mass=section_results.y[0][i], temperature=section_results.y[1][i], solid_temperature=section_results.y[2][i])
+                state = IsochoricTankState.from_state_vector(minimal_tank, section_results.y[:, i])
                 section_states.append(state)
             all_times.extend(section_times)
             all_states.extend(section_states)

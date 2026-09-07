@@ -65,8 +65,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1.0)
-        T = max(state.temperature, 1.0)
-        Ts = state.solid_temperature
+        T = max(state.h2_temperature, 1.0)
         rho = state.density
         p = state.pressure
 
@@ -77,9 +76,9 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             hydrogen = state.hydrogen
 
         try:
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "hydrogen")
-            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "hydrogen")
-            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, "hydrogen")
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
+            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "PARAHYD")
+            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, "PARAHYD")
         except:
             h = 0.0
             c_v = 14000.0
@@ -103,7 +102,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_dT_rho * net_mass_flow
 
-        Q_solid = kwargs.get('Q_solid', 0.0)
+        Q_structure_to_h2 = kwargs.get('Q_structure_to_h2', 0.0)
         Q_discharge = kwargs.get('Q_discharge', 0.0)
         dm_dt = net_mass_flow
         actual_qdot_disch = 0.0
@@ -113,14 +112,14 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
                 term1 = (T / rho) * dp_dT_rho
                 dT_drho_p = PropsSI('d(T)/d(D)|P', 'P', p, 'T', T, 'hydrogen')
                 term2 = rho * c_v * dT_drho_p
-                qdot_disch_B = mdot_discharge * (term1 - term2) - Q_solid
+                qdot_disch_B = mdot_discharge * (term1 - term2) - Q_structure_to_h2
                 actual_qdot_disch = qdot_disch_B
-                dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + qdot_disch_B) / (m * c_v)
             except Exception:
-                dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v)
                 actual_qdot_disch = 0.0
         else:
-            dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v)
+            dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v)
 
         if _heat_flow_data is not None:
             _heat_flow_data['t'].append(time)
@@ -130,13 +129,15 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['T'].append(T)
             _heat_flow_data['rho'].append(rho)
 
-        dTs_dt = kwargs.get('dTs_dt', 0.0)
+        dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
-            temperature_derivative=dT_dt,
-            solid_temperature_derivative=dTs_dt,
-            heat_flux=Q_solid,
+            h2_temperature_derivative=dT_dt,
+            structure_temperature_derivative=kwargs.get('dT_structure_dt', 0.0),
+            insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
+            shell_temperature_derivative=dT_shell_dt,
+            heat_flux=Q_structure_to_h2,
             discharge_heat_flux=Q_discharge,
         )
 
@@ -166,12 +167,12 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         if self.scenario == "REFUEL":
             return self._compute_cryopump_enthalpy(pressure, temperature)
         try:
-            return PropsSI("Hmass", "P", pressure, "T", temperature, "hydrogen")
+            return PropsSI("Hmass", "P", pressure, "T", temperature, "PARAHYD")
         except ValueError:
             # (P, T) on the saturation curve — return saturated-vapour enthalpy
             # (single-phase model represents gas-phase tanks)
             try:
-                return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+                return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
             except Exception:
                 return 14300.0 * temperature
         except Exception:
@@ -182,9 +183,9 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", P2, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:
@@ -211,8 +212,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         **kwargs,
     ) -> IsochoricStateDerivatives:
         m = max(state.fuel_mass, 1e-12)
-        T = max(state.temperature, 1.0)
-        Ts = state.solid_temperature
+        T = max(state.h2_temperature, 1.0)
         rho = state.density
 
         if state.hydrogen is None:
@@ -222,19 +222,32 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             hydrogen = state.hydrogen
 
         try:
-            p_sat = PropsSI("P", "T", T, "Q", 0, "hydrogen")
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "hydrogen")
+            p_sat = PropsSI("P", "T", T, "Q", 0, "PARAHYD")
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
             x = hydrogen.vapor_fraction if hydrogen.vapor_fraction is not None else 0.0
-            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "hydrogen")
-            c_v_vapor = PropsSI("Cvmass", "T", T, "Q", 1, "hydrogen")
-            c_v2P = x * c_v_vapor + (1.0 - x) * c_v_liquid
-            h_vapor = PropsSI("Hmass", "T", T, "Q", 1, "hydrogen")
-            h_liquid = PropsSI("Hmass", "T", T, "Q", 0, "hydrogen")
-            rho_vapor = PropsSI("Dmass", "T", T, "Q", 1, "hydrogen")
-            rho_liquid = PropsSI("Dmass", "T", T, "Q", 0, "hydrogen")
-            L_v = h_vapor - h_liquid
-            delta_v = (1.0 / rho_vapor) - (1.0 / rho_liquid)
+            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "PARAHYD")
+            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, "PARAHYD")
+            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, "PARAHYD")
+            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, "PARAHYD")
+            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, "PARAHYD")
+            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, "PARAHYD")
+            L_v       = h_vapor - h_liquid
+            delta_v   = (1.0 / rho_vapor) - (1.0 / rho_liquid)
             dp_sat_dT = L_v / (T * delta_v)
+            # Stops et al. Appendix A.3: correct isochoric two-phase heat capacity.
+            # with (dp/dT|_rho - dp_sat/dT)*dv/dT|_sat.
+            _dT = 0.05   # K, step for numerical saturation-curve derivative
+            _Tlo, _Thi = max(T - _dT, 14.0), T + _dT
+            _step = _Thi - _Tlo
+            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,"PARAHYD") -
+                         PropsSI("Dmass","T",_Tlo,"Q",0,"PARAHYD")) / _step
+            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,"PARAHYD") -
+                         PropsSI("Dmass","T",_Tlo,"Q",1,"PARAHYD")) / _step
+            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, "PARAHYD")
+            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, "PARAHYD")
+            c_v2P_l = c_v_liquid + T * (dp_dT_rho_l - dp_sat_dT) * (-drho_l_dT / rho_liquid**2)
+            c_v2P_v = c_v_vapor  + T * (dp_dT_rho_v - dp_sat_dT) * (-drho_v_dT / rho_vapor**2)
+            c_v2P = (1.0 - x) * c_v2P_l + x * c_v2P_v
         except:
             p_sat = state.pressure
             h = 0.0
@@ -264,7 +277,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         net_mass_flow = sum(e.mass_contribution(tank_idx) for e in edge_flows) - mdot_vent
         work_term = (T / rho) * dp_sat_dT * net_mass_flow
 
-        Q_solid = kwargs.get('Q_solid', 0.0)
+        Q_structure_to_h2 = kwargs.get('Q_structure_to_h2', 0.0)
         Q_discharge = kwargs.get('Q_discharge', 0.0)
         dm_dt = net_mass_flow
         actual_qdot_disch = 0.0
@@ -274,14 +287,14 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
                 term1 = (T / rho) * dp_sat_dT
                 h_disch = h
                 term2 = h_disch - h
-                qdot_disch_B = mdot_discharge * (term1 + term2) - Q_solid
+                qdot_disch_B = mdot_discharge * (term1 + term2) - Q_structure_to_h2
                 actual_qdot_disch = qdot_disch_B
-                dT_dt = (h_term + work_term + Q_solid + qdot_disch_B) / (m * c_v2P)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + qdot_disch_B) / (m * c_v2P)
             except Exception:
-                dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+                dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v2P)
                 actual_qdot_disch = 0.0
         else:
-            dT_dt = (h_term + work_term + Q_solid + Q_discharge) / (m * c_v2P)
+            dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v2P)
             actual_qdot_disch = 0.0
 
         if _heat_flow_data is not None:
@@ -292,13 +305,15 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             _heat_flow_data['T'].append(T)
             _heat_flow_data['rho'].append(rho)
 
-        dTs_dt = kwargs.get('dTs_dt', 0.0)
+        dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
             fuel_mass_derivative=dm_dt,
-            temperature_derivative=dT_dt,
-            solid_temperature_derivative=dTs_dt,
-            heat_flux=Q_solid,
+            h2_temperature_derivative=dT_dt,
+            structure_temperature_derivative=kwargs.get('dT_structure_dt', 0.0),
+            insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
+            shell_temperature_derivative=dT_shell_dt,
+            heat_flux=Q_structure_to_h2,
             discharge_heat_flux=Q_discharge,
         )
 
@@ -323,7 +338,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         # the phase from that pair alone.  Use saturated-vapour enthalpy instead,
         # which is the appropriate value for gas leaving a two-phase LH2 tank.
         try:
-            return PropsSI("Hmass", "T", temperature, "Q", 1, "hydrogen")
+            return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
         except Exception:
             return 14300.0 * temperature  # ideal-gas fallback
 
@@ -332,9 +347,9 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "hydrogen")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "hydrogen")
-            h2s = PropsSI("H", "P", P2, "S", s1, "hydrogen")
+            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
+            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
+            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:
