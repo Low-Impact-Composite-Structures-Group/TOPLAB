@@ -8,12 +8,16 @@ output formatting.
 Author: Dante Raso
 """
 
+import copy
 import sys
+import tempfile
 import time
 import os
 from contextlib import nullcontext, redirect_stdout, redirect_stderr
 from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from toplab.configuration.scenario_configuration import ScenarioConfig
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
@@ -21,6 +25,92 @@ from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
 def _is_output_silent(config: ScenarioConfig) -> bool:
     return bool(config.config_dict.get('output', {}).get('silent', False))
+
+
+def run_dormancy_check(config_path: Path, silent: bool = False) -> dict:
+    """
+    Run a zero-outflow dormancy simulation from the same initial conditions as
+    discharge and verify the vented mass stays within the configured rate limit.
+
+    Reads the ``dormancy_check`` block from the YAML config:
+        enabled: bool
+        duration_h: float (default 12.0)
+        maximum_loss_percent_per_hour: float (required when enabled)
+
+    Returns:
+        dict with 'ran' (bool), 'passed' (bool), and 'tanks' (per-tank details),
+        or {'ran': False} if the check is disabled.
+    """
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
+
+    dormancy_config = raw.get('dormancy_check', {})
+    if not dormancy_config.get('enabled', False):
+        return {'ran': False}
+
+    duration_h = float(dormancy_config.get('duration_h', 12.0))
+    maximum_loss_percent_per_hour = float(dormancy_config.get('maximum_loss_percent_per_hour'))
+    original_missions = raw.get('missions', [{}])
+    ambient_temperature = original_missions[0].get('ambient_temperature', 288.15) if original_missions else 288.15
+
+    if not silent:
+        print(f"\n{'=' * 80}")
+        print(f"DORMANCY VENTING CHECK ({duration_h:.1f} h) - same initial conditions as discharge")
+        print(f"Requirement: no more than {maximum_loss_percent_per_hour:.3f}% of initial fuel mass vented per hour")
+        print('=' * 80)
+
+    dormancy_case = copy.deepcopy(raw)
+    dormancy_case.pop('missions', None)
+    dormancy_case['mission'] = {
+        'type': 'dormancy',
+        'profile': 'constant_flow',
+        'ambient_temperature': ambient_temperature,
+        'assigned_to_node': 1,
+        'flow_rate': 0.0,
+        'duration': duration_h * 3600.0,
+    }
+    dormancy_case.setdefault('output', {}).update({'save_plots': False, 'save_data': False, 'silent': True})
+    dormancy_case.pop('dormancy_check', None)
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', dir=config_path.parent, delete=False) as temp_file:
+        yaml.dump(dormancy_case, temp_file)
+        temporary_config_path = Path(temp_file.name)
+
+    try:
+        config = ScenarioConfig.from_yaml(str(temporary_config_path))
+        orchestrator = SystemOrchestrator(config, verbosity='quiet')
+        results = orchestrator.run_simulation()
+    finally:
+        temporary_config_path.unlink(missing_ok=True)
+
+    actual_duration_h = float(results.times[-1]) / 3600.0
+    all_tanks_pass = True
+    tank_results = []
+    for tank_index in range(len(orchestrator.tank_geometries)):
+        initial_mass = results.multi_tank_states[0].get_tank_state(tank_index).fuel_mass
+        final_mass = results.multi_tank_states[-1].get_tank_state(tank_index).fuel_mass
+        vented_mass = max(0.0, initial_mass - final_mass)
+        loss_percent_per_hour = (
+            100.0 * vented_mass / initial_mass / actual_duration_h if actual_duration_h > 0.0 else float('inf')
+        )
+        passed = loss_percent_per_hour <= maximum_loss_percent_per_hour
+        all_tanks_pass = all_tanks_pass and passed
+        tank_results.append({
+            'tank_index': tank_index,
+            'vented_mass_kg': vented_mass,
+            'loss_percent_per_hour': loss_percent_per_hour,
+            'passed': passed,
+        })
+        if not silent:
+            status = 'PASS' if passed else 'FAIL'
+            print(f"  Tank {tank_index + 1}: vented {vented_mass:.3f} kg over {actual_duration_h:.2f} h "
+                  f"({loss_percent_per_hour:.4f}%/h, limit {maximum_loss_percent_per_hour:.3f}%/h) - {status}")
+
+    if not silent:
+        verdict = 'PASS' if all_tanks_pass else 'FAIL'
+        print(f"  -> Dormancy venting requirement: {verdict}")
+
+    return {'ran': True, 'passed': all_tanks_pass, 'tanks': tank_results}
 
 
 def _stdout_context(silent: bool):
@@ -209,6 +299,9 @@ def run_analysis(
                         silent=silent_output,
                     )
 
+                # --- Optional: dormancy venting check ---
+                dormancy_result = run_dormancy_check(config_path, silent=silent_output)
+
     except Exception as e:
         error_msg = f"ERROR: Analysis execution failed: {e}"
         print(error_msg)
@@ -230,6 +323,7 @@ def run_analysis(
         'validation': validation,
         'execution_time': execution_time,
         'packaging': packaging_result,
+        'dormancy': dormancy_result,
     }
 
 
