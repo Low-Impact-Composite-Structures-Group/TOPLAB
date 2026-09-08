@@ -142,7 +142,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         )
 
     def _determine_configuration(self, pressure: float) -> str:
-        p_min_hysteresis = self.p_min * 0.01
+        p_min_hysteresis = self.p_min * 0.05
         current_config = getattr(self, '_last_config', 'A')
         if pressure >= self.p_vent:
             config = "C"
