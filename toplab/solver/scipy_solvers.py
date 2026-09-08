@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Callable
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.optimize import OptimizeResult
 
 
 @dataclass
@@ -78,7 +79,7 @@ class SciPySolver:
 
         Args:
             time: Current time value
-            state: Current state vector (e.g., [m, T, Ts])
+            state: Current state vector (e.g., [m, T, Tstruct, Tinsulation, Tshell])
         """
         self._current_time = time
         self._current_state = np.array(state)
@@ -288,6 +289,110 @@ class LSODASolver(SciPySolver):
     @property
     def method_name(self) -> str:
         return 'LSODA'
+
+@dataclass
+class RK4FixedSolver(SciPySolver):
+    """
+    Fixed-step 4th order Runge-Kutta method.
+
+    Characteristics:
+    - Explicit method (for non-stiff problems)
+    - Fixed timestep
+    - 4th order accuracy
+    - For debbugging when adaptive stepping is not desired or when a fixed timestep is required
+    """
+
+    @property
+    def method_name(self) -> str:
+        return 'RK4_FIXED'
+
+    def integrate_step(self, **kwargs) -> tuple[np.ndarray, bool]:
+        """Advance the current state by one fixed fourth-order Runge-Kutta step."""
+        if self._ode_function is None:
+            raise ValueError("ODE function not set. Call set_ode_function() first.")
+        if self._current_state is None:
+            raise ValueError("Current state not set. Call set_current_state() first.")
+
+        timestep = float(kwargs.get('timestep', self.timestep))
+        try:
+            new_state = self._rk4_step(self._current_time, self._current_state, timestep)
+        except Exception as exc:
+            print(f"RK4 fixed-step integration error: {exc}")
+            return self._current_state, False
+
+        self._current_time += timestep
+        self._current_state = new_state
+        return new_state, True
+
+    def integrate_full(self, t_span: tuple, y0: np.ndarray, t_eval: np.ndarray = None, **kwargs) -> OptimizeResult:
+        """Integrate with fixed RK4 steps and terminal-event detection at step boundaries."""
+        if self._ode_function is None:
+            raise ValueError("ODE function not set. Call set_ode_function() first.")
+
+        start_time, end_time = map(float, t_span)
+        timestep = float(kwargs.get('timestep', self.timestep))
+        if timestep <= 0.0:
+            raise ValueError("RK4 fixed-step solver requires a positive timestep.")
+
+        events = kwargs.get('events', [])
+        if callable(events):
+            events = [events]
+        event_times = [[] for _ in events]
+        time_points = [start_time]
+        state_points = [np.asarray(y0, dtype=float).copy()]
+        current_time = start_time
+        current_state = state_points[0]
+        event_values = [event(current_time, current_state) for event in events]
+        function_evaluations = 0
+
+        while current_time < end_time:
+            step = min(timestep, end_time - current_time)
+            next_state = self._rk4_step(current_time, current_state, step)
+            function_evaluations += 4
+            next_time = current_time + step
+            next_event_values = [event(next_time, next_state) for event in events]
+
+            terminal_event = False
+            for index, event in enumerate(events):
+                direction = getattr(event, 'direction', 0.0)
+                crossed_up = event_values[index] < 0.0 <= next_event_values[index]
+                crossed_down = event_values[index] > 0.0 >= next_event_values[index]
+                crossed = crossed_up if direction > 0.0 else crossed_down if direction < 0.0 else crossed_up or crossed_down
+                if crossed:
+                    event_times[index].append(next_time)
+                    terminal_event = terminal_event or bool(getattr(event, 'terminal', False))
+
+            time_points.append(next_time)
+            state_points.append(next_state.copy())
+            current_time, current_state, event_values = next_time, next_state, next_event_values
+            if terminal_event:
+                break
+
+        times = np.asarray(time_points)
+        states = np.asarray(state_points).T
+        if t_eval is not None:
+            requested_times = np.asarray(t_eval, dtype=float)
+            keep = np.isin(times, requested_times)
+            if not keep[-1]:
+                keep[-1] = True
+            times = times[keep]
+            states = states[:, keep]
+
+        return OptimizeResult(
+            t=times,
+            y=states,
+            t_events=[np.asarray(times) for times in event_times],
+            success=True,
+            message='The solver successfully reached the end of the integration interval.',
+            nfev=function_evaluations,
+        )
+
+    def _rk4_step(self, time: float, state: np.ndarray, timestep: float) -> np.ndarray:
+        k1 = np.asarray(self._ode_function(time, state), dtype=float)
+        k2 = np.asarray(self._ode_function(time + 0.5 * timestep, state + 0.5 * timestep * k1), dtype=float)
+        k3 = np.asarray(self._ode_function(time + 0.5 * timestep, state + 0.5 * timestep * k2), dtype=float)
+        k4 = np.asarray(self._ode_function(time + timestep, state + timestep * k3), dtype=float)
+        return state + timestep * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
 
 
 # Backward compatibility alias (maintains existing interface)

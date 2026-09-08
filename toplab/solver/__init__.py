@@ -13,6 +13,7 @@ from .scipy_solvers import (
     DOP853Solver,
     BDFSolver,
     LSODASolver,
+    RK4FixedSolver,
     ScipyMethod  # Backward compatibility
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     'DOP853Solver',
     'BDFSolver',
     'LSODASolver',
+    'RK4FixedSolver',
     'ScipyMethod'
 ]

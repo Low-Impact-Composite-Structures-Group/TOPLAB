@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from toplab.tank_design.tank_shapes import CapsuleTank
 from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
 from ..solver import (
-    LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver
+    LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver, RK4FixedSolver
 )
 from toplab.thermodynamics.tank_states import IsochoricTankState
 from toplab.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
@@ -1995,6 +1995,9 @@ class TankSystem:
             self.solver.set_ode_function(self.ode_system)
         elif solver_method == "BDF":
             self.solver = BDFSolver(**solver_params)
+            self.solver.set_ode_function(self.ode_system)
+        elif solver_method == "RK4_FIXED":
+            self.solver = RK4FixedSolver(**solver_params)
             self.solver.set_ode_function(self.ode_system)
         else:
             raise ValueError(f"Unknown solver method: {solver_method}")
