@@ -364,6 +364,8 @@ def _run_aft_packaging(
             l2=float(dims_cfg["l2"]),
             l3=float(dims_cfg["l3"]),
             epsilon=float(dims_cfg.get("epsilon", 0.05)),
+            psi_1=float(dims_cfg.get("psi_1", 0.0)),
+            psi_2=float(dims_cfg.get("psi_2", 0.0)),
         )
     except KeyError as exc:
         print(f"  ERROR: Missing required aft_fuselage_dimensions key: {exc}")
@@ -403,6 +405,7 @@ def _run_aft_packaging(
         print(
             f"  Aft dimensions: d1={dims.d1} m, d2={dims.d2} m, d3={dims.d3} m, "
             f"l1={dims.l1} m, l2={dims.l2} m, l3={dims.l3} m, ε={dims.epsilon} m"
+            f", psi_1={dims.psi_1} deg, psi_2={dims.psi_2} deg"
         )
 
     # --- Run placement ---
@@ -418,14 +421,14 @@ def _run_aft_packaging(
         print(f"  {result.message}")
         for p in result.placements:
             half_total = result.half_outer_lengths[p.tank_index]
-            x_start = p.x_center - half_total
-            x_end = p.x_center + half_total
+            s_end = p.s_leftmost_pole + 2.0 * half_total
             viol_str = (
                 f"violation = {p.max_violation:.4f} m" if not p.feasible else "OK"
             )
             print(
-                f"    Tank {p.tank_index + 1}: x_centre = {p.x_center:.3f} m  "
-                f"[{x_start:.3f}, {x_end:.3f}]  {viol_str}"
+                f"    Tank {p.tank_index + 1}: aft pole s = {p.s_leftmost_pole:.3f} m  "
+                f"[{p.s_leftmost_pole:.3f}, {s_end:.3f}] m, "
+                f"lateral x = {p.lateral_offset:.3f} m  {viol_str}"
             )
 
     # --- Append packaging section to the results report ---
@@ -464,7 +467,12 @@ def _run_aft_packaging(
     return {
         "feasible": result.feasible,
         "placements": [
-            {"tank_index": p.tank_index, "x_center": p.x_center, "feasible": p.feasible}
+            {
+                "tank_index": p.tank_index,
+                "s_leftmost_pole": p.s_leftmost_pole,
+                "lateral_offset": p.lateral_offset,
+                "feasible": p.feasible,
+            }
             for p in result.placements
         ],
         "result": result,
@@ -493,6 +501,8 @@ def _append_packaging_report(result, report_file: str) -> None:
         f"  l2 (first cone length)      : {dims.l2:.4f} m",
         f"  l3 (second cone length)     : {dims.l3:.4f} m",
         f"  epsilon (clearance margin)  : {dims.epsilon:.4f} m",
+        f"  psi_1 (first cone angle)    : {dims.psi_1:.4f} deg",
+        f"  psi_2 (second cone angle)   : {dims.psi_2:.4f} deg",
         f"  Total aft length            : {dims.total_length:.4f} m",
         "",
         "Tank Placement",
@@ -501,16 +511,17 @@ def _append_packaging_report(result, report_file: str) -> None:
 
     for p in result.placements:
         half_total = result.half_outer_lengths[p.tank_index]
-        x_start = p.x_center - half_total
-        x_end = p.x_center + half_total
+        s_start = p.s_leftmost_pole
+        s_end = p.s_leftmost_pole + 2.0 * half_total
         R_out = result.outer_radii[p.tank_index]
         status = "FEASIBLE" if p.feasible else f"INFEASIBLE (violation = {p.max_violation:.4f} m)"
         lines += [
             f"  Tank {p.tank_index + 1}:",
             f"    Outer radius              : {R_out:.4f} m",
             f"    Total outer length        : {2.0 * half_total:.4f} m",
-            f"    x_centre (from aft datum) : {p.x_center:.4f} m",
-            f"    x extent                  : [{x_start:.4f}, {x_end:.4f}] m",
+            f"    s_leftmost_pole           : {p.s_leftmost_pole:.4f} m",
+            f"    s extent                  : [{s_start:.4f}, {s_end:.4f}] m",
+            f"    lateral x offset          : {p.lateral_offset:.4f} m",
             f"    Status                    : {status}",
         ]
 

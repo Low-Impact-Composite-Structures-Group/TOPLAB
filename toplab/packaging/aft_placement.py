@@ -1,19 +1,4 @@
-"""Aft-fuselage tank placement for packaging studies.
-
-Coordinate convention
----------------------
-The aft fuselage is parameterised with:
-  - x = 0  at the centre of the aft bulkhead (d1 face)
-  - x increasing forward (toward the nose)
-  - y = z = 0 on the fuselage symmetry axis
-
-The three segments are:
-  1. Cylinder  (0 < x ≤ l1):          inner radius = d1/2
-  2. First cone (l1 < x ≤ l1+l2):     radius tapers from d1/2 to d2/2
-  3. Second cone (l1+l2 < x ≤ L_tot): radius tapers from d2/2 to d3/2
-
-Tanks are placed on-axis (y = z = 0) with their longitudinal axis along x.
-"""
+"""Centreline-following aft-fuselage tank placement."""
 from __future__ import annotations
 
 import math
@@ -36,54 +21,65 @@ class AftFuselageDimensions:
     l2: float       # length of first (aft) conical section [m]
     l3: float       # length of second (fwd) conical section [m]
     epsilon: float  # radial clearance margin deducted from all constraints [m]
+    psi_1: float = 0.0  # first cone centreline angle [degrees]
+    psi_2: float = 0.0  # second cone centreline angle [degrees]
 
     @property
     def total_length(self) -> float:
         return self.l1 + self.l2 + self.l3
 
+    @property
+    def centreline_interface_1(self) -> float:
+        return self.l1
 
-def allowed_radius_at(x: float, dims: AftFuselageDimensions) -> float:
-    """Max allowed containment radius (epsilon already deducted) at axial position x.
+    @property
+    def centreline_interface_2(self) -> float:
+        return self.l1 + self.l2
 
-    Returns 0 for x outside the fuselage extent [0, total_length].
-    """
-    if x <= 0.0 or x > dims.total_length:
-        return 0.0
-    if x <= dims.l1:
-        # Constraint 1 – cylindrical section
-        return dims.d1 / 2.0 - dims.epsilon
-    if x <= dims.l1 + dims.l2:
-        # Constraint 2 – first conical transition (d1 → d2)
-        return (
-            (dims.l1 + dims.l2 - x) * (dims.d1 - dims.d2) / (2.0 * dims.l2)
-            + dims.d2 / 2.0
-            - dims.epsilon
-        )
-    # Constraint 3 – second conical transition (d2 → d3)
-    return (
-        (dims.l1 + dims.l2 + dims.l3 - x) * (dims.d2 - dims.d3) / (2.0 * dims.l3)
-        + dims.d3 / 2.0
-        - dims.epsilon
-    )
+    def radius_at(self, s: float) -> float:
+        """Return the fuselage radius at global axial coordinate ``s``."""
+        if not 0.0 <= s <= self.total_length:
+            return 0.0
+        if s <= self.l1:
+            return self.d1 / 2.0
+        if s <= self.centreline_interface_2:
+            fraction = (s - self.l1) / self.l2
+            return self.d1 / 2.0 + fraction * (self.d2 - self.d1) / 2.0
+        fraction = (s - self.centreline_interface_2) / self.l3
+        return self.d2 / 2.0 + fraction * (self.d3 - self.d2) / 2.0
+
+    def centreline_at(self, s: float) -> tuple[float, float, float]:
+        """Return ``(x, y, z)`` on the piecewise centreline."""
+        if not 0.0 <= s <= self.total_length:
+            raise ValueError(f"s = {s} lies outside [0, {self.total_length}].")
+        if s <= self.l1:
+            y = 0.0
+        elif s <= self.centreline_interface_2:
+            y = (s - self.l1) * math.tan(math.radians(self.psi_1))
+        else:
+            y = (
+                self.l2 * math.tan(math.radians(self.psi_1))
+                + (s - self.centreline_interface_2) * math.tan(math.radians(self.psi_2))
+            )
+        return 0.0, y, s
+
+    def tangent_at(self, s: float) -> tuple[float, float, float]:
+        """Return the unit tangent in the global ``(x, y, z)`` frame."""
+        angle = self.psi_1 if self.l1 < s <= self.centreline_interface_2 else self.psi_2
+        angle_rad = math.radians(angle) if s > self.l1 else 0.0
+        norm = math.sqrt(1.0 + math.tan(angle_rad) ** 2)
+        return 0.0, math.sin(angle_rad), math.cos(angle_rad)
 
 
-# ---------------------------------------------------------------------------
-# Capsule radial profile
-# ---------------------------------------------------------------------------
+def allowed_radius_at(s: float, dims: AftFuselageDimensions) -> float:
+    """Return the usable fuselage radius at global axial coordinate ``s``."""
+    return dims.radius_at(s) - dims.epsilon if 0.0 < s <= dims.total_length else 0.0
+
 
 def _capsule_radius_at_offset(
     delta: float, outer_radius: float, half_cyl_length: float
 ) -> float:
-    """Cross-sectional radius of the capsule at axial offset *delta* from its centre.
-
-    Args:
-        delta: Signed axial offset from the capsule centre [m].
-        outer_radius: Outer radius of the cylindrical section [m].
-        half_cyl_length: Half the length of the cylindrical section [m].
-
-    Returns:
-        Radial envelope at that offset.
-    """
+    """Return the capsule envelope radius at an axial offset."""
     abs_delta = abs(delta)
     if abs_delta <= half_cyl_length:
         return outer_radius
@@ -91,49 +87,115 @@ def _capsule_radius_at_offset(
     return math.sqrt(max(0.0, outer_radius ** 2 - cap_dist ** 2))
 
 
+def _rigid_tank_pose(
+    s_leftmost_pole: float,
+    half_total_length: float,
+    lateral_offset: float,
+    dims: AftFuselageDimensions,
+) -> tuple[
+    float,
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    """Return a rigid tank midpoint, axis, and radial basis."""
+    s_mid = s_leftmost_pole + half_total_length
+    for _ in range(8):
+        _, tangent_y, tangent_z = dims.tangent_at(
+            min(max(s_mid, 0.0), dims.total_length)
+        )
+        s_mid = s_leftmost_pole + half_total_length * tangent_z
+
+    _, centreline_y, _ = dims.centreline_at(s_mid)
+    _, tangent_y, tangent_z = dims.tangent_at(s_mid)
+    return (
+        s_mid,
+        (lateral_offset, centreline_y, s_mid),
+        (0.0, tangent_y, tangent_z),
+        (0.0, tangent_z, -tangent_y),
+    )
+
+
+def _tank_z_end(
+    s_leftmost_pole: float,
+    half_total_length: float,
+    lateral_offset: float,
+    dims: AftFuselageDimensions,
+) -> float:
+    """Return the forward global-z extent of a rigid tank."""
+    _, center, axis, _ = _rigid_tank_pose(
+        s_leftmost_pole,
+        half_total_length,
+        lateral_offset,
+        dims,
+    )
+    return center[2] + half_total_length * axis[2]
+
+
 # ---------------------------------------------------------------------------
 # Single-tank violation
 # ---------------------------------------------------------------------------
 
 def _tank_violation(
-    x_center: float,
+    s_leftmost_pole: float,
+    lateral_offset: float,
     outer_radius: float,
     half_cyl_length: float,
     dims: AftFuselageDimensions,
     n_samples: int = 200,
 ) -> float:
-    """Max radial constraint violation for one tank placed at *x_center*.
+    """Max radial constraint violation for a centreline-following tank.
 
     A positive return value means the tank protrudes outside the fuselage wall.
     ``float('inf')`` indicates the tank extends beyond the fuselage length.
 
     Args:
-        x_center: Axial position of the tank centre [m].
+        s_leftmost_pole: Axial position of the aft tank pole [m].
         outer_radius: Tank outer radius [m].
         half_cyl_length: Half the cylindrical section length [m].
         dims: Aft fuselage dimensions.
         n_samples: Number of axial samples for the profile check.
 
     Returns:
-        Max violation ≥ 0 (positive = infeasible), or inf if out-of-bounds.
+        Max violation >= 0 (positive = infeasible), or inf if out-of-bounds.
     """
-    half_total = outer_radius + half_cyl_length
-    x_start = x_center - half_total
-    x_end = x_center + half_total
-
-    if x_start <= 0.0 or x_end > dims.total_length:
+    half_total_length = outer_radius + half_cyl_length
+    _, center, axis, radial_basis = _rigid_tank_pose(
+        s_leftmost_pole,
+        half_total_length,
+        lateral_offset,
+        dims,
+    )
+    s_start = center[2] - half_total_length * axis[2]
+    s_end = center[2] + half_total_length * axis[2]
+    if s_start <= 0.0 or s_end > dims.total_length:
         return float("inf")
 
     max_viol = 0.0
+    radial_angles = [2.0 * math.pi * i / 16.0 for i in range(16)]
     for i in range(n_samples + 1):
         t = i / n_samples
-        x = x_start + t * (x_end - x_start)
-        delta = x - x_center
+        delta = (2.0 * t - 1.0) * half_total_length
         tank_r = _capsule_radius_at_offset(delta, outer_radius, half_cyl_length)
-        allowed = allowed_radius_at(x, dims)
-        viol = tank_r - allowed
-        if viol > max_viol:
-            max_viol = viol
+        point_center = tuple(center[j] + delta * axis[j] for j in range(3))
+        for angle in radial_angles:
+            radial_cos = math.cos(angle) * tank_r
+            radial_sin = math.sin(angle) * tank_r
+            point = tuple(
+                point_center[j]
+                + (radial_cos if j == 0 else 0.0)
+                + radial_sin * radial_basis[j]
+                for j in range(3)
+            )
+            if not 0.0 <= point[2] <= dims.total_length:
+                return float("inf")
+            _, fuselage_centerline_y, _ = dims.centreline_at(point[2])
+            radial_distance = math.sqrt(
+                point[0] ** 2 + (point[1] - fuselage_centerline_y) ** 2
+            )
+            viol = radial_distance - allowed_radius_at(point[2], dims)
+            if viol > max_viol:
+                max_viol = viol
 
     return max_viol
 
@@ -144,7 +206,8 @@ def _tank_violation(
 
 def _combined_violation(
     tank_idx: int,
-    centers: list[float],
+    poles: list[float],
+    lateral_offsets: list[float],
     outer_radii: Sequence[float],
     half_cyl_lengths: Sequence[float],
     half_totals: list[float],
@@ -152,9 +215,10 @@ def _combined_violation(
     n_samples: int,
 ) -> float:
     """Violation for tank *tank_idx*: fuselage constraint + adjacent gap penalties."""
-    n = len(centers)
+    n = len(poles)
     viol = _tank_violation(
-        centers[tank_idx],
+        poles[tank_idx],
+        lateral_offsets[tank_idx],
         outer_radii[tank_idx],
         half_cyl_lengths[tank_idx],
         dims,
@@ -162,20 +226,52 @@ def _combined_violation(
     )
 
     if tank_idx > 0:
-        gap = (
-            (centers[tank_idx] - half_totals[tank_idx])
-            - (centers[tank_idx - 1] + half_totals[tank_idx - 1])
+        previous_end = _tank_z_end(
+            poles[tank_idx - 1],
+            half_totals[tank_idx - 1],
+            lateral_offsets[tank_idx - 1],
+            dims,
         )
+        gap = poles[tank_idx] - previous_end
         if gap < dims.epsilon:
             viol += dims.epsilon - gap
 
     if tank_idx < n - 1:
-        gap = (
-            (centers[tank_idx + 1] - half_totals[tank_idx + 1])
-            - (centers[tank_idx] + half_totals[tank_idx])
+        current_end = _tank_z_end(
+            poles[tank_idx],
+            half_totals[tank_idx],
+            lateral_offsets[tank_idx],
+            dims,
         )
+        gap = poles[tank_idx + 1] - current_end
         if gap < dims.epsilon:
             viol += dims.epsilon - gap
+
+    tank_start = poles[tank_idx]
+    tank_end = _tank_z_end(
+        tank_start,
+        half_totals[tank_idx],
+        lateral_offsets[tank_idx],
+        dims,
+    )
+    for other_idx in range(n):
+        if other_idx == tank_idx:
+            continue
+        other_start = poles[other_idx]
+        other_end = _tank_z_end(
+            other_start,
+            half_totals[other_idx],
+            lateral_offsets[other_idx],
+            dims,
+        )
+        if min(tank_end, other_end) > max(tank_start, other_start):
+            lateral_gap = (
+                abs(lateral_offsets[tank_idx] - lateral_offsets[other_idx])
+                - outer_radii[tank_idx]
+                - outer_radii[other_idx]
+            )
+            if lateral_gap < dims.epsilon:
+                viol += dims.epsilon - lateral_gap
 
     return viol
 
@@ -189,9 +285,19 @@ class TankPlacement:
     """Placement result for a single tank."""
 
     tank_index: int
-    x_center: float       # axial centre position [m]
+    s_leftmost_pole: float  # aft pole axial coordinate [m]
+    lateral_offset: float   # offset in global x from the centreline [m]
     feasible: bool
     max_violation: float  # [m], 0 if feasible
+
+    @property
+    def x_center(self) -> float:
+        """Compatibility alias for the former axial centre field."""
+        return self.s_leftmost_pole
+
+    @property
+    def center(self) -> tuple[float, float, float]:
+        return self.lateral_offset, 0.0, self.s_leftmost_pole
 
 
 @dataclass
@@ -230,7 +336,7 @@ def place_tanks_in_aft(
         half_cyl_lengths: Half the cylindrical section length of each tank [m] (length N).
         dims: Aft fuselage dimensions.
         max_iterations: Maximum nudge iterations before declaring convergence.
-        nudge_step: Step size for each nudge in x [m].
+        nudge_step: Step size for each positional nudge [m].
         n_samples: Axial sample count for the radial constraint check.
 
     Returns:
@@ -247,8 +353,7 @@ def place_tanks_in_aft(
             message="No tanks to place.",
         )
 
-    # Sort tanks largest-first (by outer radius) so the biggest tank is placed
-    # nearest the datum where the cylindrical section offers maximum clearance.
+    # Sort tanks largest-first so the biggest tank gets the aft clearance.
     order = sorted(range(n), key=lambda i: -outer_radii[i])
     inv_order = [0] * n
     for k, orig in enumerate(order):
@@ -259,13 +364,21 @@ def place_tanks_in_aft(
     s_half_tot = [s_outer[k] + s_half_cyl[k] for k in range(n)]
 
     # Per-position x bounds: largest tank clears the aft end, smallest clears the fwd end.
-    x_lo = s_half_tot[0] + dims.epsilon
-    x_hi = dims.total_length - s_half_tot[-1] - dims.epsilon
+    x_lo = dims.epsilon
+    minimum_axis_projection = min(
+        math.cos(math.radians(dims.psi_1)),
+        math.cos(math.radians(dims.psi_2)),
+    )
+    x_hi = (
+        dims.total_length
+        - 2.0 * s_half_tot[-1] * minimum_axis_projection
+        - dims.epsilon
+    )
 
     if x_lo > x_hi:
         half_tots_orig = [outer_radii[i] + half_cyl_lengths[i] for i in range(n)]
         placements = [
-            TankPlacement(i, dims.total_length / 2.0, False, float("inf"))
+            TankPlacement(i, dims.total_length / 2.0, 0.0, False, float("inf"))
             for i in range(n)
         ]
         return AftPlacementResult(
@@ -277,34 +390,44 @@ def place_tanks_in_aft(
             message="Tanks too large to fit within aft fuselage length.",
         )
 
-    # Initial positions: evenly spaced in sorted order (k=0 = smallest x = largest tank)
+    # Initial positions are expressed by the aft pole of each capsule.
     if n == 1:
-        centers = [0.5 * (x_lo + x_hi)]
+        poles = [0.5 * (x_lo + x_hi)]
     else:
         pitch = (x_hi - x_lo) / (n - 1)
-        centers = [x_lo + k * pitch for k in range(n)]
+        poles = [x_lo + k * pitch for k in range(n)]
+    lateral_offsets = [0.0] * n
 
     # Iterative coordinate-descent nudge on the sorted arrays
     for _ in range(max_iterations):
         improved = False
         for k in range(n):
             cur_viol = _combined_violation(
-                k, centers, s_outer, s_half_cyl, s_half_tot, dims, n_samples
+                k, poles, lateral_offsets, s_outer, s_half_cyl, s_half_tot, dims, n_samples
             )
             if cur_viol <= 0.0:
                 continue
 
-            for sign in (+1.0, -1.0):
-                centers[k] += sign * nudge_step
-                new_viol = _combined_violation(
-                    k, centers, s_outer, s_half_cyl, s_half_tot, dims, n_samples
-                )
-                if new_viol < cur_viol - 1e-12:
-                    cur_viol = new_viol
-                    improved = True
+            for coordinate in (poles, lateral_offsets):
+                for sign in (+1.0, -1.0):
+                    coordinate[k] += sign * nudge_step
+                    new_viol = _combined_violation(
+                        k,
+                        poles,
+                        lateral_offsets,
+                        s_outer,
+                        s_half_cyl,
+                        s_half_tot,
+                        dims,
+                        n_samples,
+                    )
+                    if new_viol < cur_viol - 1e-12:
+                        cur_viol = new_viol
+                        improved = True
+                        break
+                    coordinate[k] -= sign * nudge_step
+                if improved:
                     break
-                else:
-                    centers[k] -= sign * nudge_step  # revert
 
         if not improved:
             break
@@ -314,18 +437,55 @@ def place_tanks_in_aft(
     overall_feasible = True
     for i in range(n):
         k = inv_order[i]
-        raw_viol = _tank_violation(centers[k], s_outer[k], s_half_cyl[k], dims, n_samples)
+        raw_viol = _tank_violation(
+            poles[k], lateral_offsets[k], s_outer[k], s_half_cyl[k], dims, n_samples
+        )
         feasible = raw_viol <= 0.0
         if not feasible:
             overall_feasible = False
-        placements.append(TankPlacement(i, centers[k], feasible, max(0.0, raw_viol)))
+        placements.append(TankPlacement(
+            i, poles[k], lateral_offsets[k], feasible, max(0.0, raw_viol)
+        ))
 
     gap_violations: list[tuple[int, int, float]] = []
     for k in range(n - 1):
-        gap = (centers[k + 1] - s_half_tot[k + 1]) - (centers[k] + s_half_tot[k])
+        gap = poles[k + 1] - _tank_z_end(
+            poles[k],
+            s_half_tot[k],
+            lateral_offsets[k],
+            dims,
+        )
         if gap < dims.epsilon:
             overall_feasible = False
             gap_violations.append((order[k], order[k + 1], gap))
+
+    lateral_violations: list[tuple[int, int, float]] = []
+    for first_idx in range(n):
+        first_start = poles[first_idx]
+        first_end = _tank_z_end(
+            first_start,
+            s_half_tot[first_idx],
+            lateral_offsets[first_idx],
+            dims,
+        )
+        for second_idx in range(first_idx + 1, n):
+            second_start = poles[second_idx]
+            second_end = _tank_z_end(
+                second_start,
+                s_half_tot[second_idx],
+                lateral_offsets[second_idx],
+                dims,
+            )
+            if min(first_end, second_end) <= max(first_start, second_start):
+                continue
+            lateral_gap = (
+                abs(lateral_offsets[first_idx] - lateral_offsets[second_idx])
+                - s_outer[first_idx]
+                - s_outer[second_idx]
+            )
+            if lateral_gap < dims.epsilon:
+                overall_feasible = False
+                lateral_violations.append((order[first_idx], order[second_idx], lateral_gap))
 
     if overall_feasible:
         msg = "Placement feasible."
@@ -334,6 +494,11 @@ def place_tanks_in_aft(
         for orig_a, orig_b, gap in gap_violations:
             msg += (
                 f" Gap between tank {orig_a + 1} and tank {orig_b + 1}: "
+                f"{gap:.3f} m (min {dims.epsilon:.3f} m required)."
+            )
+        for orig_a, orig_b, gap in lateral_violations:
+            msg += (
+                f" Lateral overlap between tank {orig_a + 1} and tank {orig_b + 1}: "
                 f"{gap:.3f} m (min {dims.epsilon:.3f} m required)."
             )
 
@@ -352,22 +517,6 @@ def place_tanks_in_aft(
 # 3-D visualisation
 # ---------------------------------------------------------------------------
 
-def _raw_radius_at(x: float, dims: AftFuselageDimensions) -> float:
-    """Aft-fuselage inner-wall radius at x (no epsilon deduction)."""
-    if x <= 0.0 or x > dims.total_length:
-        return 0.0
-    if x <= dims.l1:
-        return dims.d1 / 2.0
-    if x <= dims.l1 + dims.l2:
-        return (
-            (dims.l1 + dims.l2 - x) * (dims.d1 - dims.d2) / (2.0 * dims.l2)
-            + dims.d2 / 2.0
-        )
-    return (
-        (dims.l1 + dims.l2 + dims.l3 - x) * (dims.d2 - dims.d3) / (2.0 * dims.l3)
-        + dims.d3 / 2.0
-    )
-
 def _plot_fuselage_surface(
     fig,
     dims: AftFuselageDimensions,
@@ -378,21 +527,18 @@ def _plot_fuselage_surface(
     import numpy as np
     import plotly.graph_objects as go
 
-    x_vals = np.linspace(0.0, dims.total_length, n_x)
+    s_vals = np.linspace(0.0, dims.total_length, n_x)
     theta = np.linspace(0.0, 2.0 * np.pi, n_theta)
-
-    xx, tt = np.meshgrid(x_vals, theta)
-
-    rr = np.vectorize(
-        lambda x: _raw_radius_at(x, dims)
-    )(xx)
+    ss, tt = np.meshgrid(s_vals, theta)
+    rr = np.vectorize(dims.radius_at)(ss)
+    centreline_y = np.vectorize(lambda s: dims.centreline_at(s)[1])(ss)
 
     fig.add_trace(
         go.Surface(
-            x=xx,
-            y=rr * np.cos(tt),
-            z=rr * np.sin(tt),
-            surfacecolor=np.zeros_like(xx),
+            x=rr * np.cos(tt),
+            y=centreline_y + rr * np.sin(tt),
+            z=ss,
+            surfacecolor=np.zeros_like(ss),
             colorscale=[
                 [0.0, "#8fbcd4"],
                 [1.0, "#8fbcd4"],
@@ -406,105 +552,55 @@ def _plot_fuselage_surface(
     )
 
 
-def _plot_capsule_along_x(
+def _plot_capsule_along_centreline(
     fig,
-    x_center: float,
+    placement: TankPlacement,
     outer_radius: float,
     half_cyl: float,
+    dims: AftFuselageDimensions,
     color: str,
     name: str,
 ) -> None:
-    """Add a capsule surface with its longitudinal axis along x."""
+    """Add a rigid capsule aligned with the midpoint centreline tangent."""
     import numpy as np
     import plotly.graph_objects as go
 
     theta = np.linspace(0.0, 2.0 * np.pi, 48)
-
-    # ------------------------------------------------------------------
-    # Cylindrical section
-    # ------------------------------------------------------------------
-
-    x_cyl = np.linspace(
-        x_center - half_cyl,
-        x_center + half_cyl,
-        22,
+    half_total_length = outer_radius + half_cyl
+    _, center, axis, radial_basis = _rigid_tank_pose(
+        placement.s_leftmost_pole,
+        half_total_length,
+        placement.lateral_offset,
+        dims,
     )
+    distances = np.linspace(-half_total_length, half_total_length, 44)
+    tt, dd = np.meshgrid(theta, distances)
+    x_values = np.zeros_like(dd)
+    y_values = np.zeros_like(dd)
+    z_values = np.zeros_like(dd)
+    radial = np.zeros_like(dd)
 
-    tt, xx = np.meshgrid(theta, x_cyl)
-
-    yy = outer_radius * np.cos(tt)
-    zz = outer_radius * np.sin(tt)
-
-    fig.add_trace(
-        go.Surface(
-            x=xx,
-            y=yy,
-            z=zz,
-            surfacecolor=np.zeros_like(xx),
-            colorscale=[
-                [0.0, color],
-                [1.0, color],
-            ],
-            showscale=False,
-            opacity=0.7,
-            hovertemplate=(
-                f"{name}"
-                "<br>x: %{x:.3f} m"
-                "<br>y: %{y:.3f} m"
-                "<br>z: %{z:.3f} m"
-                "<extra></extra>"
-            ),
-            name=name,
-            showlegend=False,
+    for row, distance in enumerate(distances):
+        radius = _capsule_radius_at_offset(
+            distance, outer_radius, half_cyl
         )
-    )
+        radial[row, :] = radius
+        x_values[row, :] = center[0] + radius * np.cos(theta)
+        y_values[row, :] = center[1] + distance * axis[1] + radius * radial_basis[1] * np.sin(theta)
+        z_values[row, :] = center[2] + distance * axis[2] + radius * radial_basis[2] * np.sin(theta)
 
-    # ------------------------------------------------------------------
-    # Hemispherical caps
-    # ------------------------------------------------------------------
-
-    phi = np.linspace(0.0, np.pi / 2.0, 20)
-
-    pp, tt2 = np.meshgrid(phi, theta)
-
-    radial = outer_radius * np.cos(pp)
-
-    yy_cap = radial * np.cos(tt2)
-    zz_cap = radial * np.sin(tt2)
-
-    for sign in (-1.0, +1.0):
-
-        xx_cap = (
-            x_center
-            + sign * (
-                half_cyl
-                + outer_radius * np.sin(pp)
-            )
-        )
-
-        fig.add_trace(
-            go.Surface(
-                x=xx_cap,
-                y=yy_cap,
-                z=zz_cap,
-                surfacecolor=np.zeros_like(xx_cap),
-                colorscale=[
-                    [0.0, color],
-                    [1.0, color],
-                ],
-                showscale=False,
-                opacity=0.7,
-                hovertemplate=(
-                    f"{name}"
-                    "<br>x: %{x:.3f} m"
-                    "<br>y: %{y:.3f} m"
-                    "<br>z: %{z:.3f} m"
-                    "<extra></extra>"
-                ),
-                name=name,
-                showlegend=False,
-            )
-        )
+    fig.add_trace(go.Surface(
+        x=x_values,
+        y=y_values,
+        z=z_values,
+        surfacecolor=np.zeros_like(x_values),
+        colorscale=[[0.0, color], [1.0, color]],
+        showscale=False,
+        opacity=0.7,
+        hovertemplate=f"{name}<br>x: %{{x:.3f}} m<br>y: %{{y:.3f}} m<br>z: %{{z:.3f}} m<extra></extra>",
+        name=name,
+        showlegend=False,
+    ))
 
 
 def _set_equal_axes(
@@ -546,8 +642,8 @@ def _set_equal_axes(
 def plot_aft_placement(result: AftPlacementResult):
     """Render an interactive 3-D view of the aft fuselage with placed tanks.
 
-    The fuselage axis runs along the Plotly x-axis. The plot is generated
-    even for infeasible placements so violations remain visible.
+    The fuselage centreline runs along the Plotly z-axis. The plot is
+    generated even for infeasible placements so violations remain visible.
 
     Returns:
         Plotly Figure.
@@ -585,11 +681,12 @@ def plot_aft_placement(result: AftPlacementResult):
 
         tank_name = f"Tank_{i + 1}"
 
-        _plot_capsule_along_x(
+        _plot_capsule_along_centreline(
             fig,
-            p.x_center,
+            p,
             R,
             half_cyl,
+            dims,
             color,
             tank_name,
         )
@@ -606,9 +703,9 @@ def plot_aft_placement(result: AftPlacementResult):
 
         fig.add_trace(
             go.Scatter3d(
-                x=[p.x_center],
-                y=[0.0],
-                z=[R * 1.05],
+                x=[p.lateral_offset],
+                y=[dims.centreline_at(p.s_leftmost_pole)[1]],
+                z=[p.s_leftmost_pole],
                 mode="text",
                 text=[f"{tank_name}<br>{status}"],
                 textfont=dict(size=11),
@@ -622,26 +719,15 @@ def plot_aft_placement(result: AftPlacementResult):
     # ------------------------------------------------------------------
 
     # Determine the complete extent of the geometry.
-    x_min = 0.0
-    x_max = dims.total_length
+    max_radius = max([dims.radius_at(s) for s in (0.0, dims.l1, dims.l1 + dims.l2, dims.total_length)] + result.outer_radii)
+    centreline_ys = [dims.centreline_at(s)[1] for s in (0.0, dims.l1, dims.l1 + dims.l2, dims.total_length)]
 
-    max_radius = max(
-        [
-            _raw_radius_at(x, dims)
-            for x in (
-                0.0,
-                dims.l1,
-                dims.l1 + dims.l2,
-                dims.total_length,
-            )
-        ]
-        + result.outer_radii
-    )
-
-    y_min = -max_radius
-    y_max = max_radius
-    z_min = -max_radius
-    z_max = max_radius
+    x_min = -max_radius
+    x_max = max_radius
+    y_min = min(centreline_ys) - max_radius
+    y_max = max(centreline_ys) + max_radius
+    z_min = 0.0
+    z_max = dims.total_length
 
     # ------------------------------------------------------------------
     # Layout
@@ -658,9 +744,9 @@ def plot_aft_placement(result: AftPlacementResult):
             t=50,
         ),
         scene=dict(
-            xaxis_title="x – from aft bulkhead [m]",
+            xaxis_title="x [m]",
             yaxis_title="y [m]",
-            zaxis_title="z [m]",
+            zaxis_title="s – from aft bulkhead [m]",
 
             # Equivalent to the equal-scale Matplotlib setup
             aspectmode="cube",
