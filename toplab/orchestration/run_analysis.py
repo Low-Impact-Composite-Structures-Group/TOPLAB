@@ -343,9 +343,6 @@ def _run_aft_packaging(
 
     Returns a dict with keys ``feasible``, ``placements``, and ``result``.
     """
-    import matplotlib
-    matplotlib.use("Agg")  # non-interactive backend for file output
-    import matplotlib.pyplot as plt
 
     from toplab.packaging.aft_placement import (
         AftFuselageDimensions,
@@ -353,8 +350,12 @@ def _run_aft_packaging(
         plot_aft_placement,
     )
 
-    # --- Parse aft fuselage dimensions ---
+    # ------------------------------------------------------------------
+    # Parse aft-fuselage geometry
+    # ------------------------------------------------------------------
+
     dims_cfg = packaging_cfg.get("aft_fuselage_dimensions", {})
+
     try:
         dims = AftFuselageDimensions(
             d1=float(dims_cfg["d1"]),
@@ -367,111 +368,292 @@ def _run_aft_packaging(
             psi_1=float(dims_cfg.get("psi_1", 0.0)),
             psi_2=float(dims_cfg.get("psi_2", 0.0)),
         )
+
     except KeyError as exc:
-        print(f"  ERROR: Missing required aft_fuselage_dimensions key: {exc}")
-        return {"feasible": False, "placements": [], "result": None}
+        if not silent:
+            print(
+                "  ERROR: Missing required "
+                f"aft_fuselage_dimensions key: {exc}"
+            )
 
-    generate_3d_plot = bool(packaging_cfg.get("generate_3d_plot", False))
+        return {
+            "feasible": False,
+            "placements": [],
+            "result": None,
+        }
 
-    # --- Gather outer tank dimensions ---
+    generate_3d_plot = bool(
+        packaging_cfg.get("generate_3d_plot", False)
+    )
+
+    # ------------------------------------------------------------------
+    # Placement-algorithm settings
+    # ------------------------------------------------------------------
+
+    placement_cfg = packaging_cfg.get("placement", {})
+
+    max_iterations = int(
+        placement_cfg.get("max_iterations", 1000)
+    )
+
+    initial_step = float(
+        placement_cfg.get("initial_step", 0.10)
+    )
+
+    minimum_step = float(
+        placement_cfg.get("minimum_step", 0.002)
+    )
+
+    step_reduction = float(
+        placement_cfg.get("step_reduction", 0.5)
+    )
+
+    n_axial_samples = int(
+        placement_cfg.get("n_axial_samples", 80)
+    )
+
+    n_circumferential_samples = int(
+        placement_cfg.get("n_circumferential_samples", 24)
+    )
+
+    # ------------------------------------------------------------------
+    # Gather outer tank dimensions
+    # ------------------------------------------------------------------
+
     outer_radii: list[float] = []
     half_cyl_lengths: list[float] = []
 
     for i, tank_geom in enumerate(orchestrator.tank_geometries):
+
         try:
             tank_props = orchestrator.tank_system._get_tank_properties(
-                tank_geom, f"Tank{i + 1}", i
+                tank_geom,
+                f"Tank{i + 1}",
+                i,
             )
-            outer_radius = float(tank_props["outer_diameter"]) / 2.0
+
+            outer_radius = (
+                float(tank_props["outer_diameter"]) / 2.0
+            )
+
         except Exception:
             outer_radius = float(tank_geom.radius)
+
             if not silent:
                 print(
-                    f"  WARNING: Could not compute outer radius for tank {i + 1}; "
-                    "using inner radius as fallback."
+                    f"  WARNING: Could not compute outer radius "
+                    f"for tank {i + 1}; using inner radius as fallback."
                 )
+
         outer_radii.append(outer_radius)
-        half_cyl_lengths.append(tank_geom.cylindrical_section_length / 2.0)
+
+        half_cyl_lengths.append(
+            float(tank_geom.cylindrical_section_length) / 2.0
+        )
 
     n_tanks = len(outer_radii)
 
+    # ------------------------------------------------------------------
+    # Print input geometry
+    # ------------------------------------------------------------------
+
     if not silent:
+
         for i in range(n_tanks):
-            total_outer_length = 2.0 * (outer_radii[i] + half_cyl_lengths[i])
-            print(
-                f"  Tank {i + 1}: outer radius = {outer_radii[i]:.3f} m, "
-                f"total outer length = {total_outer_length:.3f} m"
+
+            half_total = (
+                outer_radii[i]
+                + half_cyl_lengths[i]
             )
+
+            total_outer_length = 2.0 * half_total
+
+            print(
+                f"  Tank {i + 1}: "
+                f"outer radius = {outer_radii[i]:.3f} m, "
+                f"total outer length = "
+                f"{total_outer_length:.3f} m"
+            )
+
         print(
-            f"  Aft dimensions: d1={dims.d1} m, d2={dims.d2} m, d3={dims.d3} m, "
-            f"l1={dims.l1} m, l2={dims.l2} m, l3={dims.l3} m, ε={dims.epsilon} m"
-            f", psi_1={dims.psi_1} deg, psi_2={dims.psi_2} deg"
+            "  Aft dimensions: "
+            f"d1={dims.d1} m, "
+            f"d2={dims.d2} m, "
+            f"d3={dims.d3} m, "
+            f"l1={dims.l1} m, "
+            f"l2={dims.l2} m, "
+            f"l3={dims.l3} m, "
+            f"epsilon={dims.epsilon} m, "
+            f"psi_1={dims.psi_1} deg, "
+            f"psi_2={dims.psi_2} deg"
         )
 
-    # --- Run placement ---
+    # ------------------------------------------------------------------
+    # Run placement subroutine
+    # ------------------------------------------------------------------
+
     result = place_tanks_in_aft(
         outer_radii=outer_radii,
         half_cyl_lengths=half_cyl_lengths,
         dims=dims,
+        max_iterations=max_iterations,
+        initial_step=initial_step,
+        minimum_step=minimum_step,
+        step_reduction=step_reduction,
+        n_axial_samples=n_axial_samples,
+        n_circumferential_samples=n_circumferential_samples,
     )
 
+    # ------------------------------------------------------------------
+    # Print result
+    # ------------------------------------------------------------------
+
     if not silent:
-        status = "FEASIBLE" if result.feasible else "INFEASIBLE"
+
+        status = (
+            "FEASIBLE"
+            if result.feasible
+            else "INFEASIBLE"
+        )
+
         print(f"\n  Placement result: {status}")
         print(f"  {result.message}")
+
         for p in result.placements:
-            half_total = result.half_outer_lengths[p.tank_index]
-            s_end = p.s_leftmost_pole + 2.0 * half_total
-            viol_str = (
-                f"violation = {p.max_violation:.4f} m" if not p.feasible else "OK"
-            )
+
+            x, y, z = p.center
+            tx, ty, tz = p.axis
+
+            s_start = p.s_leftmost_pole
+            s_end = p.s_rightmost_pole
+
+            if p.feasible:
+                viol_str = "OK"
+            else:
+                viol_str = (
+                    f"violation = "
+                    f"{p.max_violation:.4f} m"
+                )
+
             print(
-                f"    Tank {p.tank_index + 1}: aft pole s = {p.s_leftmost_pole:.3f} m  "
-                f"[{p.s_leftmost_pole:.3f}, {s_end:.3f}] m, "
-                f"lateral x = {p.lateral_offset:.3f} m  {viol_str}"
+                f"    Tank {p.tank_index + 1}: "
+                f"center = "
+                f"({x:.3f}, {y:.3f}, {z:.3f}) m, "
+                f"axis = "
+                f"({tx:.3f}, {ty:.3f}, {tz:.3f}), "
+                f"axial extent = "
+                f"[{s_start:.3f}, {s_end:.3f}] m, "
+                f"{viol_str}"
             )
 
-    # --- Append packaging section to the results report ---
-    if report_file:
-        try:
-            _append_packaging_report(result, report_file)
-            if not silent:
-                print(f"\n  Packaging summary appended to: {report_file}")
-        except Exception as exc:
-            if not silent:
-                print(f"  WARNING: Could not append packaging report: {exc}")
+    # ------------------------------------------------------------------
+    # Append packaging section to results report
+    # ------------------------------------------------------------------
 
-    # --- Optional 3-D plot ---
+    if report_file:
+
+        try:
+            _append_packaging_report(
+                result,
+                report_file,
+            )
+
+            if not silent:
+                print(
+                    "\n  Packaging summary appended to: "
+                    f"{report_file}"
+                )
+
+        except Exception as exc:
+
+            if not silent:
+                print(
+                    "  WARNING: Could not append "
+                    f"packaging report: {exc}"
+                )
+
+    # ------------------------------------------------------------------
+    # Optional 3-D visualization
+    # ------------------------------------------------------------------
+
     if generate_3d_plot:
+
         try:
             fig = plot_aft_placement(result)
 
-            plot_dir = Path(config_path).parent / "output" / "plots"
-            plot_dir.mkdir(parents=True, exist_ok=True)
+            plot_dir = (
+                Path(config_path).parent
+                / "output"
+                / "plots"
+            )
 
-            # Static image
-            png_path = plot_dir / "aft_placement_3d.png"
-            fig.write_image(png_path, scale=2)
+            plot_dir.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
-            # Interactive HTML
-            html_path = plot_dir / "aft_placement_3d.html"
+            # Static image.
+            png_path = (
+                plot_dir
+                / "aft_placement_3d.png"
+            )
+
+            fig.write_image(
+                png_path,
+                scale=2,
+            )
+
+            # Interactive HTML.
+            html_path = (
+                plot_dir
+                / "aft_placement_3d.html"
+            )
+
             fig.write_html(html_path)
 
             if not silent:
-                print(f"  Saved 3-D plot: {html_path}")
+                print(
+                    f"  Saved 3-D plot: {html_path}"
+                )
 
         except Exception as exc:
+
             if not silent:
-                print(f"  WARNING: 3-D plot generation failed: {exc}")
+                print(
+                    "  WARNING: 3-D plot "
+                    f"generation failed: {exc}"
+                )
+
+    # ------------------------------------------------------------------
+    # Return lightweight serialized placement data + complete result object
+    # ------------------------------------------------------------------
 
     return {
         "feasible": result.feasible,
         "placements": [
             {
                 "tank_index": p.tank_index,
+
+                # Cartesian rigid-body pose.
+                "center": {
+                    "x": p.center[0],
+                    "y": p.center[1],
+                    "z": p.center[2],
+                },
+                "axis": {
+                    "x": p.axis[0],
+                    "y": p.axis[1],
+                    "z": p.axis[2],
+                },
+
+                # Useful derived quantities.
                 "s_leftmost_pole": p.s_leftmost_pole,
+                "s_rightmost_pole": p.s_rightmost_pole,
                 "lateral_offset": p.lateral_offset,
+
+                # Feasibility information.
                 "feasible": p.feasible,
+                "max_violation": p.max_violation,
             }
             for p in result.placements
         ],
@@ -512,14 +694,14 @@ def _append_packaging_report(result, report_file: str) -> None:
     for p in result.placements:
         half_total = result.half_outer_lengths[p.tank_index]
         s_start = p.s_leftmost_pole
-        s_end = p.s_leftmost_pole + 2.0 * half_total
+        s_end = p.s_rightmost_pole
         R_out = result.outer_radii[p.tank_index]
         status = "FEASIBLE" if p.feasible else f"INFEASIBLE (violation = {p.max_violation:.4f} m)"
         lines += [
             f"  Tank {p.tank_index + 1}:",
             f"    Outer radius              : {R_out:.4f} m",
             f"    Total outer length        : {2.0 * half_total:.4f} m",
-            f"    s_leftmost_pole           : {p.s_leftmost_pole:.4f} m",
+            f"    s_leftmost_pole           : {s_start:.4f} m",
             f"    s extent                  : [{s_start:.4f}, {s_end:.4f}] m",
             f"    lateral x offset          : {p.lateral_offset:.4f} m",
             f"    Status                    : {status}",
