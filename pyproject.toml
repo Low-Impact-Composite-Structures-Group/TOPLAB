@@ -19,6 +19,8 @@ dependencies = [
     "networkx",
     "pandas",
     "rich",
+    "pymoo",
+    "plotly",
 ]
 
 [tool.setuptools.packages.find]
