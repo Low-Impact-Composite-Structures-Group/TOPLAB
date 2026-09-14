@@ -259,23 +259,30 @@ def run_analysis(
                         print(f"  Final Pressure: {final_state.pressure/1e5:.1f} bar")
                         print(f"  Average Discharge: {fuel_consumed/results.times[-1]:.6f} kg/s")
 
-                if not silent_output:
-                    print(f"\nGenerating plots...")
-
                 config_dict = config.config_dict
-                output_path = config_dict.get('output', {}).get('plots', {}).get('save_path', 'output/plots')
-                output_dir = Path(output_path)
-                output_dir.mkdir(parents=True, exist_ok=True)
+                nofigures = bool(config_dict.get('output', {}).get('no_figures', False))
 
-                save_path = output_dir / f"{config.analysis_name.replace(' ', '_')}_evolution.png"
-                figures = orchestrator.generate_plots(save_path=str(save_path))
+                if nofigures:
+                    figures = None
+                    if not silent_output:
+                        print(f"\nSkipping plot generation (output.no_figures=true)")
+                else:
+                    if not silent_output:
+                        print(f"\nGenerating plots...")
 
-                if not silent_output:
-                    if figures:
-                        print(f"  SUCCESS: Generated {len(figures)} plots")
-                        print(f"  Plots saved to: {output_dir}")
-                    else:
-                        print(f"  WARNING: Plot generation returned no figures")
+                    output_path = config_dict.get('output', {}).get('plots', {}).get('save_path', 'output/plots')
+                    output_dir = Path(output_path)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+
+                    save_path = output_dir / f"{config.analysis_name.replace(' ', '_')}_evolution.png"
+                    figures = orchestrator.generate_plots(save_path=str(save_path))
+
+                    if not silent_output:
+                        if figures:
+                            print(f"  SUCCESS: Generated {len(figures)} plots")
+                            print(f"  Plots saved to: {output_dir}")
+                        else:
+                            print(f"  WARNING: Plot generation returned no figures")
 
                 if not silent_output:
                     print(f"\nGenerating comprehensive results report...")
