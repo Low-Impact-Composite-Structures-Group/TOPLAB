@@ -220,6 +220,8 @@ class AftPlacementResult:
     half_cyl_lengths: list[float]
     half_outer_lengths: list[float]
     message: str
+    z_shift: float = 0.0
+    zeta_p: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +401,7 @@ def _containment_violation(
     axis: Vector3,
     geometry: TankGeometry,
     dims: AftFuselageDimensions,
+    z_min: float = 0.0,
     n_axial_samples: int = 80,
     n_circumferential_samples: int = 24,
 ) -> float:
@@ -433,8 +436,8 @@ def _containment_violation(
             point = _add(section_center, radial_vector)
             z = point[2]
 
-            if z < 0.0:
-                violation = -z + dims.epsilon
+            if z < z_min:
+                violation = z_min - z + dims.epsilon
             elif z > dims.total_length:
                 violation = z - dims.total_length + dims.epsilon
             else:
@@ -456,6 +459,7 @@ def _tank_violation(
     centers: Sequence[Vector3],
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
+    z_min: float,
     n_axial_samples: int,
     n_circumferential_samples: int,
 ) -> float:
@@ -470,6 +474,7 @@ def _tank_violation(
             axis_i,
             geometries[tank_idx],
             dims,
+            z_min,
             n_axial_samples,
             n_circumferential_samples,
         ),
@@ -499,6 +504,7 @@ def _evaluate_placement(
     centers: Sequence[Vector3],
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
+    z_min: float,
     n_axial_samples: int,
     n_circumferential_samples: int,
 ) -> tuple[bool, list[float]]:
@@ -511,6 +517,7 @@ def _evaluate_placement(
                 _pose_axis(centers[i], dims),
                 geometries[i],
                 dims,
+                z_min,
                 n_axial_samples,
                 n_circumferential_samples,
             ),
@@ -547,6 +554,7 @@ def _evaluate_placement(
 def _initial_centers(
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
+    z_min: float = 0.0,
 ) -> list[Vector3]:
     """Construct a deterministic centreline-based initial placement.
 
@@ -556,21 +564,22 @@ def _initial_centers(
     n = len(geometries)
 
     if n == 1:
-        z_values = [0.5 * dims.total_length]
+        z_values = [0.5 * (z_min + dims.total_length)]
     else:
         # Keep initial centres away from the exact volume boundaries.
         margin = max(
             dims.epsilon,
             min(g.half_total_length for g in geometries),
         )
-        z_lo = min(margin, 0.45 * dims.total_length)
+        available_length = dims.total_length - z_min
+        z_lo = z_min + min(margin, 0.45 * available_length)
         z_hi = max(
             z_lo,
-            dims.total_length - min(margin, 0.45 * dims.total_length),
+            dims.total_length - min(margin, 0.45 * available_length),
         )
 
         if z_hi <= z_lo:
-            z_values = [0.5 * dims.total_length] * n
+            z_values = [0.5 * (z_min + dims.total_length)] * n
         else:
             z_values = [
                 z_lo + i * (z_hi - z_lo) / (n - 1)
@@ -588,6 +597,7 @@ def place_tanks_in_aft(
     half_cyl_lengths: Sequence[float],
     dims: AftFuselageDimensions,
     *,
+    z_min: float = 0.0,
     max_iterations: int = 1000,
     initial_step: float = 0.10,
     minimum_step: float = 0.002,
@@ -631,6 +641,10 @@ def place_tanks_in_aft(
             "outer_radii and half_cyl_lengths must have the same length."
         )
 
+
+    if not 0.0 <= z_min <= dims.l1:
+        raise ValueError("z_min must lie within the cylindrical section [0, l1].")
+
     if initial_step <= 0.0 or minimum_step <= 0.0:
         raise ValueError("Placement step sizes must be positive.")
 
@@ -648,6 +662,8 @@ def place_tanks_in_aft(
             half_cyl_lengths=[],
             half_outer_lengths=[],
             message="No tanks to place.",
+            z_shift=z_min,
+            zeta_p=(z_min / dims.l1 if dims.l1 > 0.0 else 0.0),
         )
 
     geometries_original = [
@@ -667,7 +683,7 @@ def place_tanks_in_aft(
     )
 
     geometries = [geometries_original[i] for i in order]
-    centers = _initial_centers(geometries, dims)
+    centers = _initial_centers(geometries, dims, z_min)
 
     step = initial_step
     iteration = 0
@@ -691,6 +707,7 @@ def place_tanks_in_aft(
                 centers,
                 geometries,
                 dims,
+                z_min,
                 n_axial_samples,
                 n_circumferential_samples,
             )
@@ -720,6 +737,7 @@ def place_tanks_in_aft(
                     centers,
                     geometries,
                     dims,
+                    z_min,
                     n_axial_samples,
                     n_circumferential_samples,
                 )
@@ -741,6 +759,7 @@ def place_tanks_in_aft(
         centers,
         geometries,
         dims,
+        z_min,
         n_axial_samples,
         n_circumferential_samples,
     )
@@ -784,7 +803,79 @@ def place_tanks_in_aft(
             g.half_total_length for g in geometries_original
         ],
         message=message,
+        z_shift=z_min,
+        zeta_p=(z_min / dims.l1 if dims.l1 > 0.0 else 0.0),
     )
+
+
+def maximize_packaging_compaction(
+    outer_radii: Sequence[float],
+    half_cyl_lengths: Sequence[float],
+    dims: AftFuselageDimensions,
+    *,
+    z_tolerance: float = 1e-3,
+    max_bisection_iterations: int = 40,
+    **placement_kwargs,
+) -> AftPlacementResult:
+    """Maximize the forward bulkhead shift while retaining a feasible placement.
+
+    The physical fuselage geometry is unchanged. ``z_shift`` is a clipping
+    plane imposed within the cylindrical section, so the admissible axial
+    domain is [z_shift, dims.total_length]. The returned performance metric is
+    ``zeta_p = z_shift / dims.l1``.
+
+    If the unshifted geometry is infeasible, the unshifted result is returned
+    with ``z_shift = 0`` and ``zeta_p = 0``. This routine currently searches
+    only the physical interval [0, l1]; a signed infeasibility extension can
+    be added separately if desired.
+    """
+    if z_tolerance <= 0.0:
+        raise ValueError("z_tolerance must be positive.")
+    if max_bisection_iterations <= 0:
+        raise ValueError("max_bisection_iterations must be positive.")
+    if dims.l1 <= 0.0:
+        raise ValueError("dims.l1 must be positive to define zeta_p.")
+
+    base = place_tanks_in_aft(
+        outer_radii, half_cyl_lengths, dims, z_min=0.0, **placement_kwargs
+    )
+    if not base.feasible:
+        base.message += " Compaction search skipped because z_shift = 0 is infeasible."
+        return base
+
+    upper = place_tanks_in_aft(
+        outer_radii, half_cyl_lengths, dims, z_min=dims.l1, **placement_kwargs
+    )
+    if upper.feasible:
+        upper.message = (
+            f"Maximum tested compaction reached: z_shift = {dims.l1:.6g} m, "
+            f"zeta_p = 1.000000. " + upper.message
+        )
+        return upper
+
+    lo = 0.0
+    hi = dims.l1
+    best = base
+    iteration = 0
+
+    while (hi - lo) > z_tolerance and iteration < max_bisection_iterations:
+        iteration += 1
+        mid = 0.5 * (lo + hi)
+        trial = place_tanks_in_aft(
+            outer_radii, half_cyl_lengths, dims, z_min=mid, **placement_kwargs
+        )
+        if trial.feasible:
+            lo = mid
+            best = trial
+        else:
+            hi = mid
+
+    best.message = (
+        f"Compaction bisection converged after {iteration} iterations: "
+        f"z_shift = {best.z_shift:.6g} m, zeta_p = {best.zeta_p:.6f}; "
+        f"bracket = [{lo:.6g}, {hi:.6g}] m. " + best.message
+    )
+    return best
 
 
 # ---------------------------------------------------------------------------

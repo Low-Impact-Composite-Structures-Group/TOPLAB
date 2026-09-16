@@ -353,7 +353,7 @@ def _run_aft_packaging(
 
     from toplab.packaging.aft_placement import (
         AftFuselageDimensions,
-        place_tanks_in_aft,
+        maximize_packaging_compaction,
         plot_aft_placement,
     )
 
@@ -483,7 +483,7 @@ def _run_aft_packaging(
             )
 
         print(
-            "  Aft dimensions: "
+            "\nAft dimensions: "
             f"d1={dims.d1} m, "
             f"d2={dims.d2} m, "
             f"d3={dims.d3} m, "
@@ -499,7 +499,7 @@ def _run_aft_packaging(
     # Run placement subroutine
     # ------------------------------------------------------------------
 
-    result = place_tanks_in_aft(
+    result = maximize_packaging_compaction(
         outer_radii=outer_radii,
         half_cyl_lengths=half_cyl_lengths,
         dims=dims,
@@ -526,6 +526,8 @@ def _run_aft_packaging(
         print(f"\n  Placement result: {status}")
         print(f"  {result.message}")
 
+        print(f"  zeta_p (compaction fraction): {result.zeta_p:.4f}, with a z_shift of {result.z_shift:.4f} m")
+
         for p in result.placements:
 
             x, y, z = p.center
@@ -544,7 +546,7 @@ def _run_aft_packaging(
 
             print(
                 f"    Tank {p.tank_index + 1}: "
-                f"center = "
+                f"centre = "
                 f"({x:.3f}, {y:.3f}, {z:.3f}) m, "
                 f"axis = "
                 f"({tx:.3f}, {ty:.3f}, {tz:.3f}), "
