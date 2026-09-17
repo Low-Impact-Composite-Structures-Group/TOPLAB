@@ -211,7 +211,13 @@ class TankPlacement:
 
 @dataclass
 class AftPlacementResult:
-    """Full placement result."""
+    """Full placement result.
+
+    ``zeta_p`` is a signed packaging margin proxy. Positive values indicate
+    feasible forward compaction, zero is the unshifted feasibility boundary,
+    and negative values quantify the unshifted placement violation relative to
+    the cylindrical-section length.
+    """
 
     feasible: bool
     placements: list[TankPlacement]
@@ -825,9 +831,9 @@ def maximize_packaging_compaction(
     ``zeta_p = z_shift / dims.l1``.
 
     If the unshifted geometry is infeasible, the unshifted result is returned
-    with ``z_shift = 0`` and ``zeta_p = 0``. This routine currently searches
-    only the physical interval [0, l1]; a signed infeasibility extension can
-    be added separately if desired.
+    with ``z_shift = 0`` and a negative ``zeta_p`` based on the largest
+    remaining placement violation. This signed extension preserves a useful
+    optimization signal across the feasibility boundary.
     """
     if z_tolerance <= 0.0:
         raise ValueError("z_tolerance must be positive.")
@@ -840,6 +846,11 @@ def maximize_packaging_compaction(
         outer_radii, half_cyl_lengths, dims, z_min=0.0, **placement_kwargs
     )
     if not base.feasible:
+        max_violation = max(
+            (placement.max_violation for placement in base.placements),
+            default=0.0,
+        )
+        base.zeta_p = -max_violation / dims.l1
         base.message += " Compaction search skipped because z_shift = 0 is infeasible."
         return base
 

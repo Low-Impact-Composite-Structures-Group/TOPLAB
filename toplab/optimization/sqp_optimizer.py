@@ -134,6 +134,38 @@ def epsilon_residuals(epsilon: EpsilonTriplet, result: CandidateResult) -> tuple
             epsilon.zeta_p - result.zeta_p)
 
 
+def physical_constraint_residuals(result: CandidateResult) -> dict[str, float]:
+    """Return named physical residuals; every value <= 0 is feasible.
+
+    ``g_dis`` is a time shortfall in seconds. ``g_dorm`` is the largest
+    per-tank vented fraction divided by its allowed fraction, minus one.
+    ``g_packaging`` is the signed compaction-margin constraint. Since
+    ``zeta_p`` is positive for feasible forward compaction and negative for an
+    unshifted placement violation, ``-zeta_p <= 0`` is the smooth packaging
+    proxy used by SLSQP. The Boolean placement result remains a final validity
+    guard because the placement search itself is sampled and numerical.
+    """
+    return {
+        "g_dis": float(result.discharge_residual),
+        "g_dorm": float(result.dormancy_residual),
+        "g_packaging": -float(result.zeta_p),
+    }
+
+
+def constraint_residuals(result: CandidateResult,
+                          epsilon: EpsilonTriplet | None = None) -> dict[str, float]:
+    """Return all active constraints using the canonical ``g <= 0`` sign."""
+    residuals = physical_constraint_residuals(result)
+    if epsilon is not None:
+        epsilon_values = epsilon_residuals(epsilon, result)
+        residuals.update({
+            "g_epsilon_v": epsilon_values[0],
+            "g_epsilon_vent": epsilon_values[1],
+            "g_epsilon_p": epsilon_values[2],
+        })
+    return residuals
+
+
 class SQPCandidateEvaluator:
     """Evaluate discharge, dormancy, system metrics, and aft packaging once."""
 
@@ -283,8 +315,6 @@ def _epsilon_values(raw: Any, name: str) -> list[float]:
         values = []
     if not values:
         raise ValueError(f"epsilon_constraints.{name} must define values or min/max/count.")
-    # if name in {"eta_v", "zeta_p"} and any(not 0.0 <= value <= 1.0 for value in values):
-    #     raise ValueError(f"epsilon_constraints.{name} values must lie in [0, 1].")
     return values
 
 
@@ -336,7 +366,7 @@ class SQPOptimizer:
     @staticmethod
     def _hold_period_s(base_raw: dict[str, Any], optimizer_raw: dict[str, Any] | None = None) -> float:
         settings = (optimizer_raw or {}).get("dormancy", {})
-        hours = settings.get("hold_period_h", base_raw.get("dormancy_check", {}).get("duration_h", 12.0))
+        hours = settings.get("hold_period_h", base_raw.get("dormancy_check", {}).get("duration_h"))
         return float(hours) * 3600.0
 
     @staticmethod
@@ -383,9 +413,10 @@ class SQPOptimizer:
 
         def residuals(x: Sequence[float]) -> tuple[float, ...]:
             result = self._get(x)
-            return (result.discharge_residual, result.dormancy_residual,
-                    epsilon.eta_v - result.eta_v, epsilon.eta_vent - result.eta_vent,
-                    epsilon.zeta_p - result.zeta_p, 0.0 if result.packaging_feasible else 1.0)
+            values = constraint_residuals(result, epsilon)
+            return tuple(values[name] for name in (
+                "g_dis", "g_dorm", "g_epsilon_v", "g_epsilon_vent",
+                "g_epsilon_p", "g_packaging"))
 
         constraints = [{"type": "ineq", "fun": lambda x, i=i: -residuals(x)[i]} for i in range(6)]
         solver = self.cfg.get("solver", {})
@@ -425,9 +456,8 @@ class SQPOptimizer:
         clipped = np.clip(initial, [b[0] for b in bounds], [b[1] for b in bounds])
 
         def physical_residuals(x: Sequence[float]) -> tuple[float, ...]:
-            result = self._get(x)
-            return (result.discharge_residual, result.dormancy_residual,
-                    0.0 if result.packaging_feasible else 1.0)
+            values = physical_constraint_residuals(self._get(x))
+            return tuple(values[name] for name in ("g_dis", "g_dorm", "g_packaging"))
 
         constraints = [{"type": "ineq", "fun": lambda x, i=i: -physical_residuals(x)[i]} for i in range(3)]
         solver = self.cfg.get("solver", {})
@@ -526,7 +556,7 @@ def serialize_evaluation_history(optimizer: SQPOptimizer, path: Path) -> None:
             "x": list(x), "eta_g": candidate.eta_g, "eta_v": candidate.eta_v,
             "eta_vent": candidate.eta_vent, "zeta_p": candidate.zeta_p,
             "g_dis": candidate.discharge_residual, "g_dorm": candidate.dormancy_residual,
-            "g_packaging": 0.0 if candidate.packaging_feasible else 1.0,
+            "g_packaging": physical_constraint_residuals(candidate)["g_packaging"],
             "packaging_feasible": candidate.packaging_feasible,
             "feasible": candidate.feasible, "error": candidate.error or "",
         })
@@ -549,6 +579,10 @@ def serialize_sweep(result: ParetoSweepResult, path: Path, runs: Sequence[SQPSub
         "z_shift_star": run.candidate.z_shift_star,
         "g_dis": run.candidate.discharge_residual,
         "g_dorm": run.candidate.dormancy_residual,
+        "g_packaging": physical_constraint_residuals(run.candidate)["g_packaging"],
+        "g_epsilon_v": run.epsilon.eta_v - run.candidate.eta_v,
+        "g_epsilon_vent": run.epsilon.eta_vent - run.candidate.eta_vent,
+        "g_epsilon_p": run.epsilon.zeta_p - run.candidate.zeta_p,
         "packaging_feasible": run.candidate.packaging_feasible,
     } for run in selected]
     with path.open("w", newline="", encoding="utf-8") as stream:
@@ -559,5 +593,6 @@ def serialize_sweep(result: ParetoSweepResult, path: Path, runs: Sequence[SQPSub
 
 __all__ = ["CandidateResult", "EpsilonTriplet", "EvalResult", "ParetoSweepResult", "SingleObjectiveResult",
            "SQPCandidateEvaluator", "SQPOptimizer", "SQPSubproblemResult", "TankDesign",
-           "decode_design_vector", "epsilon_residuals", "evaluate_design", "serialize_evaluation_history",
+           "constraint_residuals", "decode_design_vector", "epsilon_residuals", "evaluate_design",
+           "physical_constraint_residuals", "serialize_evaluation_history",
            "serialize_single_objective", "serialize_sweep", "venting_performance"]

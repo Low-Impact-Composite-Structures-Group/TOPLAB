@@ -2,6 +2,7 @@ import math
 
 from toplab.packaging.aft_placement import (
     AftFuselageDimensions,
+    maximize_packaging_compaction,
     place_tanks_in_aft,
 )
 
@@ -81,3 +82,20 @@ def test_baseline_tank_can_follow_fuselage_tangent_to_feasibility():
 
     assert result.feasible
     assert result.placements[0].max_violation <= 1e-10
+
+
+def test_infeasible_compaction_has_negative_signed_zeta_proxy():
+    dims = AftFuselageDimensions(
+        d1=2.16,
+        d2=1.17,
+        d3=0.328,
+        l1=2.067,
+        l2=1.8,
+        l3=3.407,
+        epsilon=0.05,
+    )
+
+    result = maximize_packaging_compaction([2.0], [0.1], dims)
+
+    assert not result.feasible
+    assert result.zeta_p < 0.0
