@@ -318,12 +318,19 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         )
 
     def _determine_configuration(self, pressure: float) -> str:
+        """Select the pressure configuration without solver-step chatter."""
+        p_min_hysteresis = self.p_min * 0.05
+        current_config = getattr(self, "_last_config", "A")
         if pressure >= self.p_vent:
-            return "C"
-        elif pressure <= self.p_min:
-            return "B"
+            config = "C"
+        elif current_config == "B" and pressure <= self.p_min + p_min_hysteresis:
+            config = "B"
+        elif current_config != "B" and pressure <= self.p_min - p_min_hysteresis:
+            config = "B"
         else:
-            return "A"
+            config = "A"
+        self._last_config = config
+        return config
 
     def _get_vent_flow_rate(self, config: str, p: float) -> float:
         if config == "C":
