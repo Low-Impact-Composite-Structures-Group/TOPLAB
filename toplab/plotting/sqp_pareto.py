@@ -55,7 +55,7 @@ def _add_objective_points(fig: Any, rows: list[dict[str, Any]], name: str,
     fig.add_trace(go.Scatter3d(
         x=[row["eta_g"] for row in rows],
         y=[row["eta_v"] for row in rows],
-        z=[row["eta_vent"] for row in rows],
+        z=[row["zeta_p"] for row in rows],
         mode="markers",
         name=name,
         text=[_hover_text(row) for row in rows],
@@ -83,7 +83,7 @@ def create_objective_space_figure(history_path: str | Path, pareto_path: str | P
         height=750,
         margin=dict(l=30, r=30, t=80, b=30),
         legend=dict(orientation="h", y=1.03, x=0.0),
-        scene=dict(xaxis_title="eta_g", yaxis_title="eta_v", zaxis_title="eta_vent"),
+        scene=dict(xaxis_title="eta_g", yaxis_title="eta_v", zaxis_title="zeta_p"),
     )
     return fig
 
