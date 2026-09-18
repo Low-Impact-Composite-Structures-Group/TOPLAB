@@ -7,6 +7,7 @@ import csv
 import itertools
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -170,20 +171,31 @@ class SQPCandidateEvaluator:
     """Evaluate discharge, dormancy, system metrics, and aft packaging once."""
 
     def __init__(self, base_config_path: Path, packaging_dimensions: AftFuselageDimensions,
-                 maximum_vented_fraction: float, hold_period_s: float) -> None:
+                 maximum_vented_fraction: float, hold_period_s: float,
+                 progress: bool = False) -> None:
         self.base_config_path = Path(base_config_path)
         self.packaging_dimensions = packaging_dimensions
         self.maximum_vented_fraction = float(maximum_vented_fraction)
         self.hold_period_s = float(hold_period_s)
+        self.progress = bool(progress)
         with self.base_config_path.open("r", encoding="utf-8") as stream:
             self.base_config = yaml.safe_load(stream) or {}
         self.evaluation_count = 0
+
+    def _progress(self, message: str) -> None:
+        if self.progress:
+            print(f"[SQP evaluation {self.evaluation_count}] {message}", flush=True)
 
     def evaluate(self, values: Sequence[float]) -> CandidateResult:
         designs = decode_design_vector(values)
         result = CandidateResult(designs=designs)
         self.evaluation_count += 1
+        vector = [float(value) for value in values]
+        started = time.perf_counter()
+        self._progress(f"start x={vector}")
         try:
+            stage_started = time.perf_counter()
+            self._progress("discharge start")
             discharge_config = self._build_candidate_config(designs)
             with _TemporaryConfig(discharge_config, self.base_config_path.parent) as path:
                 from toplab.configuration.scenario_configuration import ScenarioConfig
@@ -191,6 +203,8 @@ class SQPCandidateEvaluator:
                 scenario = ScenarioConfig.from_yaml(path)
                 orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
                 discharge = orchestrator.run_simulation()
+            self._progress(
+                f"discharge done elapsed={time.perf_counter() - stage_started:.2f}s")
 
             tank_count = len(orchestrator.tank_geometries)
             target_s = float(orchestrator.tank_system.config.MISSION_DURATION)
@@ -198,6 +212,9 @@ class SQPCandidateEvaluator:
             result.mission_completed = actual_s >= target_s
             result.discharge_residuals = [target_s - actual_s] * tank_count
             result.discharge_residual = max(result.discharge_residuals, default=0.0)
+            self._progress(
+                f"discharge metrics actual_s={actual_s:.3f} target_s={target_s:.3f} "
+                f"g_dis={result.discharge_residual:.3f}")
             result.initial_hydrogen_masses_kg = [
                 float(discharge.multi_tank_states[0].get_tank_state(i).fuel_mass)
                 for i in range(tank_count)]
@@ -212,11 +229,15 @@ class SQPCandidateEvaluator:
             result.external_volumes_m3 = [float(properties[i]["outer_volume"]) for i in range(tank_count)]
             self._calculate_system_metrics(result)
 
+            stage_started = time.perf_counter()
+            self._progress("dormancy start")
             dormancy_config = self._build_dormancy_config(discharge_config)
             with _TemporaryConfig(dormancy_config, self.base_config_path.parent) as path:
                 dormancy_scenario = ScenarioConfig.from_yaml(path)
                 dormancy_orchestrator = SystemOrchestrator(dormancy_scenario, verbosity="quiet")
                 dormancy = dormancy_orchestrator.run_simulation()
+            self._progress(
+                f"dormancy done elapsed={time.perf_counter() - stage_started:.2f}s")
             dormancy_initial = [
                 float(dormancy.multi_tank_states[0].get_tank_state(i).fuel_mass)
                 for i in range(tank_count)]
@@ -236,7 +257,12 @@ class SQPCandidateEvaluator:
                 fraction / limit - 1.0 if limit > 0.0 else float("inf")
                 for fraction in result.per_tank_vented_fraction]
             result.dormancy_residual = max(result.dormancy_residuals, default=0.0)
+            self._progress(
+                f"dormancy metrics f_vent={result.f_vent:.6g} "
+                f"eta_vent={result.eta_vent:.6g} g_dorm={result.dormancy_residual:.6g}")
 
+            stage_started = time.perf_counter()
+            self._progress("packaging start")
             radii = [float(properties[i]["outer_diameter"]) / 2.0 for i in range(tank_count)]
             half_lengths = [
                 float(properties[i].get("cylindrical_section_length", 0.0)) / 2.0
@@ -247,8 +273,15 @@ class SQPCandidateEvaluator:
             result.z_shift_star = float(packaging.z_shift)
             result.zeta_p = float(packaging.zeta_p)
             result.placements = packaging.placements
+            self._progress(
+                f"packaging done elapsed={time.perf_counter() - stage_started:.2f}s "
+                f"feasible={result.packaging_feasible} zeta_p={result.zeta_p:.6g}")
         except Exception as exc:
             result.error = f"{type(exc).__name__}: {exc}"
+            self._progress(f"error={result.error}")
+        self._progress(
+            f"done elapsed={time.perf_counter() - started:.2f}s "
+            f"objectives={result.objectives} feasible={result.feasible}")
         return result
 
     @staticmethod
@@ -360,7 +393,8 @@ class SQPOptimizer:
         self.base_raw = base_raw
         self.evaluator = SQPCandidateEvaluator(
             self.base_config_path, _packaging_dimensions(base_raw),
-            self._maximum_vented_fraction(base_raw, self.cfg), self._hold_period_s(base_raw, self.cfg))
+            self._maximum_vented_fraction(base_raw, self.cfg), self._hold_period_s(base_raw, self.cfg),
+            progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", False)))
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
 
     @staticmethod
