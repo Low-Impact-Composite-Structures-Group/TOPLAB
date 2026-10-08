@@ -396,6 +396,8 @@ class SQPOptimizer:
             self._maximum_vented_fraction(base_raw, self.cfg), self._hold_period_s(base_raw, self.cfg),
             progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", True)))
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
+        self.history: list[dict[str, Any]] = []
+        self._active_epsilon: EpsilonTriplet | None = None
 
     @staticmethod
     def _hold_period_s(base_raw: dict[str, Any], optimizer_raw: dict[str, Any] | None = None) -> float:
@@ -439,11 +441,18 @@ class SQPOptimizer:
         key = tuple(float(value) for value in x)
         if key not in self._cache:
             self._cache[key] = self.evaluator.evaluate(key)
+            self.history.append({
+                "evaluation": len(self.history) + 1,
+                "epsilon": self._active_epsilon,
+                "x": key,
+                "candidate": self._cache[key],
+            })
         return self._cache[key]
 
     def solve_epsilon_subproblem(self, epsilon: EpsilonTriplet, x0: Sequence[float]) -> SQPSubproblemResult:
         bounds, _ = self._bounds_and_x0()
         clipped = np.clip(np.asarray(x0, dtype=float), [b[0] for b in bounds], [b[1] for b in bounds])
+        self._active_epsilon = epsilon
 
         def residuals(x: Sequence[float]) -> tuple[float, ...]:
             result = self._get(x)
@@ -582,12 +591,17 @@ def serialize_single_objective(result: SingleObjectiveResult, path: Path) -> Non
 
 
 def serialize_evaluation_history(optimizer: SQPOptimizer, path: Path) -> None:
-    """Write every unique candidate evaluated by the optimizer callbacks."""
+    """Write every unique candidate evaluated, in order, tagged with the active epsilon triplet."""
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
-    for x, candidate in optimizer._cache.items():
+    for entry in optimizer.history:
+        candidate, epsilon = entry["candidate"], entry["epsilon"]
         rows.append({
-            "x": list(x), "eta_g": candidate.eta_g, "eta_v": candidate.eta_v,
+            "evaluation": entry["evaluation"],
+            "epsilon_v": "" if epsilon is None else epsilon.eta_v,
+            "epsilon_vent": "" if epsilon is None else epsilon.eta_vent,
+            "epsilon_p": "" if epsilon is None else epsilon.zeta_p,
+            "x": list(entry["x"]), "eta_g": candidate.eta_g, "eta_v": candidate.eta_v,
             "eta_vent": candidate.eta_vent, "zeta_p": candidate.zeta_p,
             "g_dis": candidate.discharge_residual, "g_dorm": candidate.dormancy_residual,
             "g_packaging": physical_constraint_residuals(candidate)["g_packaging"],
@@ -595,7 +609,7 @@ def serialize_evaluation_history(optimizer: SQPOptimizer, path: Path) -> None:
             "feasible": candidate.feasible, "error": candidate.error or "",
         })
     with path.open("w", newline="", encoding="utf-8") as stream:
-        fieldnames = list(rows[0]) if rows else ["x"]
+        fieldnames = list(rows[0]) if rows else ["evaluation"]
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
