@@ -20,11 +20,7 @@ from CoolProp.CoolProp import PropsSI
 from scipy.optimize import brentq
 from toplab.thermodynamics.tank_states import IsochoricTankState
 from toplab.materials.nist_materials import NISTMaterial
-from toplab.materials.rohacell_properties import (
-    specific_heat as rohacell_cp,
-    integrated_thermal_conductivity,
-    thermal_conductivity as rohacell_k,
-)
+from toplab.materials.insulation_models import ROHACELL, InsulationModel
 
 
 class IsochoricThermalModel(ABC):
@@ -85,6 +81,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         liner_material: NISTMaterial,
         wall_material: NISTMaterial,
         shell_material: NISTMaterial,
+        insulation_model: InsulationModel = ROHACELL,
     ):
         if r_shell <= r_structure:
             raise ValueError(
@@ -100,6 +97,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         self.m_liner = liner_mass
         self.m_wall = wall_mass
         self.m_foam = foam_mass
+        self.insulation_model = insulation_model
         self.m_shell = shell_mass
         self.T_amb = ambient_temperature
         self.alpha_amb = alpha_amb
@@ -154,9 +152,8 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     # Insulation: Rohacell foam (variable-conductivity Fourier conduction)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _integrated_conductivity(temperature_low: float, temperature_high: float) -> float:
-        return integrated_thermal_conductivity(temperature_low, temperature_high)
+    def _integrated_conductivity(self, temperature_low: float, temperature_high: float) -> float:
+        return self.insulation_model.integrated_conductivity(temperature_low, temperature_high)
 
     def compute_shell_to_insulation_heat_flux(self, shell_temperature: float, insulation_temperature: float) -> float:
         """Heat flow from shell to insulation [W]. Positive when shell is warmer."""
@@ -236,7 +233,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         Q_insulation_to_structure = self.compute_insulation_to_structure_heat_flux(
             insulation_temperature, state.structure_temperature
         )
-        heat_capacity = self.m_foam * float(rohacell_cp(max(4.0, min(insulation_temperature, 400.0))))
+        heat_capacity = self.m_foam * float(self.insulation_model.specific_heat(max(4.0, min(insulation_temperature, 400.0))))
         return (Q_shell_to_insulation - Q_insulation_to_structure) / heat_capacity
 
     def compute_shell_temperature_derivative(

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from toplab.tank_design.tank_shapes import CapsuleTank
 from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
+from toplab.materials.insulation_models import insulation_model_from_config
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver, RK4FixedSolver
 )
@@ -830,8 +831,8 @@ class TankSystem:
 
         liner_mass = _layer_mass(liner_material.density, inner_radius, liner_outer_radius)
         wall_mass  = _layer_mass(composite_material.density, liner_outer_radius, wall_outer_radius)
-        from toplab.materials.rohacell_properties import DENSITY as ROHACELL_DENSITY
-        foam_mass  = _layer_mass(ROHACELL_DENSITY, r_structure, r_shell)
+        insulation_model = insulation_model_from_config(insulation_config)
+        foam_mass  = _layer_mass(insulation_model.density, r_structure, r_shell)
         shell_mass = _layer_mass(liner_material.density, r_shell, r_shell_outer)  # same Al as liner
 
         print(f"\n[{tank_id} Geometry]")
@@ -847,7 +848,7 @@ class TankSystem:
         print(f"  Liner:   {liner_material.name}, {thickness_liner*1000:.1f} mm, {liner_mass:.1f} kg")
         print(f"  Wall:    {composite_material.name}, {thickness_wall*1000:.1f} mm "
               f"({math.degrees(composite_material.winding_angle):.1f}°), {wall_mass:.1f} kg")
-        print(f"  Foam:    Rohacell 51A, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
+        print(f"  Foam:    {insulation_model.name}, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
         print(f"  Shell:   {liner_material.name}, {shell_thickness*1000:.1f} mm, {shell_mass:.1f} kg")
         dry_mass = liner_mass + wall_mass + foam_mass + shell_mass
         print(f"  Total dry mass: {dry_mass:.1f} kg")
@@ -885,6 +886,7 @@ class TankSystem:
             'liner_mass': liner_mass,
             'wall_mass': wall_mass,
             'foam_mass': foam_mass,
+            'insulation_model': insulation_model,
             'shell_mass': shell_mass,
             'liner_material': liner_material,
             'wall_material': composite_material,
@@ -914,6 +916,7 @@ class TankSystem:
             liner_material=tank_properties['liner_material'],
             wall_material=tank_properties['wall_material'],
             shell_material=tank_properties['shell_material'],
+            insulation_model=tank_properties['insulation_model'],
         )
 
     def create_initial_state(self) -> np.ndarray:
