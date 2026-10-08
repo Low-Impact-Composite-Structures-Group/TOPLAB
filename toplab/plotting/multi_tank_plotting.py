@@ -1628,7 +1628,7 @@ class DelftColourPlotter:
             'Ambient to shell': [],
             'Shell to insulation': [],
             'Insulation to structure': [],
-            'Structure to H2': [],
+            # 'Structure to H2': [],
         }
 
         for time, multi_state in zip(results.times, results.multi_tank_states):
@@ -1646,9 +1646,9 @@ class DelftColourPlotter:
                     state.insulation_temperature, state.structure_temperature
                 )
             )
-            heat_flows['Structure to H2'].append(
-                thermal_model.compute_structure_to_h2_heat_flux(time, state)
-            )
+            # heat_flows['Structure to H2'].append(
+            #     thermal_model.compute_structure_to_h2_heat_flux(time, state)
+            # )
 
         fig, ax = plt.subplots(figsize=(12, 6))
         line_styles = ['-', '--', '-.', ':']
