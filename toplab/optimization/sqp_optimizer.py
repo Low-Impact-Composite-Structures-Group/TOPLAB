@@ -172,7 +172,7 @@ class SQPCandidateEvaluator:
 
     def __init__(self, base_config_path: Path, packaging_dimensions: AftFuselageDimensions,
                  maximum_vented_fraction: float, hold_period_s: float,
-                 progress: bool = False) -> None:
+                 progress: bool = True) -> None:
         self.base_config_path = Path(base_config_path)
         self.packaging_dimensions = packaging_dimensions
         self.maximum_vented_fraction = float(maximum_vented_fraction)
@@ -394,7 +394,7 @@ class SQPOptimizer:
         self.evaluator = SQPCandidateEvaluator(
             self.base_config_path, _packaging_dimensions(base_raw),
             self._maximum_vented_fraction(base_raw, self.cfg), self._hold_period_s(base_raw, self.cfg),
-            progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", False)))
+            progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", True)))
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
 
     @staticmethod

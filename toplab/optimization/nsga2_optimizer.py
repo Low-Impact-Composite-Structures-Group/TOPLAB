@@ -67,6 +67,7 @@ class NSGA2Config:
     output_directory: Path
     save_history: bool = True
     save_pareto_front: bool = True
+    evaluation_progress: bool = True
 
 
 def decode_design_vector(values: Sequence[float]) -> TankDesign:
@@ -200,6 +201,7 @@ def build_optimizer_problem(config: NSGA2Config, packaging_dimensions: AftFusela
         def __init__(self):
             self.evaluator = SingleTankCandidateEvaluator(config, packaging_dimensions)
             self.history: list[CandidateResult] = []
+            self.progress = config.evaluation_progress
             super().__init__(
                 n_var=3,
                 n_obj=3,
@@ -211,6 +213,13 @@ def build_optimizer_problem(config: NSGA2Config, packaging_dimensions: AftFusela
         def _evaluate(self, x, out, *args, **kwargs):
             result = self.evaluator.evaluate(x)
             self.history.append(result)
+            if self.progress:
+                print(
+                    f"[NSGA-II evaluation {len(self.history)}] x={[float(v) for v in x]} "
+                    f"objectives={result.objectives} feasible={result.feasible}"
+                    + (f" error={result.error}" if result.error else ""),
+                    flush=True,
+                )
             out["F"] = result.objectives
             out["G"] = result.constraints
 

@@ -33,6 +33,7 @@ class SweepRuntimeConfig:
     ranking: tuple[str, ...] = DEFAULT_RANKING
     require_mission_completion: bool = False
     case_timeout_s: float | None = None
+    evaluation_progress: bool = True
 
 
 @dataclass
@@ -67,6 +68,7 @@ class BaseSweepStudy(Generic[DesignT]):
         self.ranking = runtime_config.ranking
         self.require_mission_completion = runtime_config.require_mission_completion
         self.case_timeout_s = runtime_config.case_timeout_s
+        self.evaluation_progress = runtime_config.evaluation_progress
 
     @classmethod
     def load_sweep_config(cls, sweep_config_path: str | Path) -> tuple[Path, dict]:
@@ -112,28 +114,31 @@ class BaseSweepStudy(Generic[DesignT]):
             ranking=ranking,
             require_mission_completion=bool(constraints.get("require_mission_completion", False)),
             case_timeout_s=case_timeout_s,
+            evaluation_progress=bool(sweep_section.get("evaluation_progress", True)),
         )
 
     def run_sweep(self, design_points: Iterable[DesignT]) -> list[SweepResult]:
         design_list = list(design_points)
         results: list[SweepResult] = []
         for index, design in enumerate(design_list, start=1):
-            print(
-                f"Now running case {index}/{len(design_list)} with design vector {self.format_design_vector(design)}",
-                flush=True,
-            )
+            if self.evaluation_progress:
+                print(
+                    f"Now running case {index}/{len(design_list)} with design vector {self.format_design_vector(design)}",
+                    flush=True,
+                )
             case_start = time.perf_counter()
             result = self._evaluate_design_with_timeout(design)
             elapsed_s = time.perf_counter() - case_start
             status = "PASS" if result.mission_completed else ("FAIL" if result.error else "SHORT")
-            print(
-                f"Completed case {index}/{len(design_list)}: {status} "
-                f"(mission={result.mission_duration_s/3600.0:.3f}/{result.target_duration_s/3600.0:.3f} h, "
-                f"gravimetric={result.gravimetric_efficiency:.4f}, "
-                f"volumetric={result.volumetric_efficiency:.4f}, "
-                f"wall_time={elapsed_s:.2f} s)",
-                flush=True,
-            )
+            if self.evaluation_progress:
+                print(
+                    f"Completed case {index}/{len(design_list)}: {status} "
+                    f"(mission={result.mission_duration_s/3600.0:.3f}/{result.target_duration_s/3600.0:.3f} h, "
+                    f"gravimetric={result.gravimetric_efficiency:.4f}, "
+                    f"volumetric={result.volumetric_efficiency:.4f}, "
+                    f"wall_time={elapsed_s:.2f} s)",
+                    flush=True,
+                )
             results.append(result)
         return results
 

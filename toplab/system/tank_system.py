@@ -22,6 +22,7 @@ from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver, RK4FixedSolver
 )
 from toplab.thermodynamics.tank_states import IsochoricTankState
+from toplab.utilities.output_control import silent_when_quiet
 from toplab.dynamics.isochoric_dynamic_models import IsochoricModelSwitcher
 from toplab.dynamics.edge_flow import EdgeFlow
 
@@ -70,6 +71,7 @@ class TankSystem:
     - Flexible configuration via TankSystemConfig
     """
 
+    @silent_when_quiet
     def __init__(self,
                  tank_geometries: List[CapsuleTank],
                  config: TankSystemConfig,
@@ -1942,6 +1944,7 @@ class TankSystem:
 
         return histories
 
+    @silent_when_quiet
     def run_analysis(self, solver_method: str = "RK45", solver_config: dict = None) -> MultiTankResults:
         """
         Run complete tank system analysis.

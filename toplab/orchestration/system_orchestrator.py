@@ -28,6 +28,7 @@ from toplab.configuration.scenario_configuration import ScenarioConfig
 # Multi-tank DAE physics engine
 from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig
 from toplab.utilities.tank_geometry import create_tank_from_fuel_mass
+from toplab.utilities.output_control import silent_when_quiet
 
 # Mission framework
 from toplab.missions.isochoric_missions import DischargeMission
@@ -54,6 +55,7 @@ class SystemOrchestrator:
     _cached_tank_geometries = {}
     _sizing_mission_key = None
 
+    @silent_when_quiet
     def __init__(self, scenario_config: ScenarioConfig = None, config_path: str = None, verbosity: str = "summary"):
         self.verbosity = self._normalize_verbosity(verbosity)
 
@@ -1210,6 +1212,7 @@ class SystemOrchestrator:
         # Beyond mission duration
         return 0.0
 
+    @silent_when_quiet
     def run_simulation(self, solver_method: str = None, solver_config: dict = None) -> Any:
         """
         Execute the complete multi-tank simulation using ScenarioConfig.
@@ -1296,6 +1299,7 @@ class SystemOrchestrator:
             print(f"ERROR: Simulation failed: {e}")
             raise
 
+    @silent_when_quiet
     def validate_results(self) -> Dict[str, Any]:
         """
         Validate multi-tank simulation results.
@@ -1509,6 +1513,7 @@ class SystemOrchestrator:
         except Exception:
             return 0.0
 
+    @silent_when_quiet
     def generate_plots(self, save_path: str = None) -> Any:
         """
         Generate plots from simulation results.
@@ -2519,6 +2524,7 @@ class SystemOrchestrator:
 
 
 
+    @silent_when_quiet
     def save_comprehensive_results(self) -> str:
         """
         Generate and save comprehensive results report to text file.
