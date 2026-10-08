@@ -1,0 +1,4 @@
+description,Q_W,T_hot_K,T_cold_K,L_m,r_in_m,r_out_m
+CcH2 medium,25,300,55,1,0.50,0.52
+LH2 medium,5,300,25,1,0.50,0.53
+CcH2 large,25,300,55,2,0.75,0.77
