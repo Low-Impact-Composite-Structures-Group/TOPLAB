@@ -759,9 +759,26 @@ class SystemOrchestrator:
             )
 
         csv_path = Path(csv_file)
+
         if not csv_path.is_absolute():
             config_dir = Path(self.scenario_config._config_path).parent
-            csv_path = config_dir / csv_file
+
+            # Normal behavior: resolve relative to the configuration file.
+            resolved_path = config_dir / csv_path
+
+            if resolved_path.exists():
+                csv_path = resolved_path
+            else:
+                # Fallback for staged HPC jobs, where input files are copied
+                # into the same working directory as the configuration file.
+                staged_path = config_dir / csv_path.name
+
+                if staged_path.exists():
+                    csv_path = staged_path
+                else:
+                    # Preserve the normal path so Mission.from_csv() raises
+                    # its usual informative FileNotFoundError.
+                    csv_path = resolved_path
 
         column_name = params.get('column_name')  # None → fall back to default column
         cruise_altitude = params.get('cruise_altitude', 7010.0)
