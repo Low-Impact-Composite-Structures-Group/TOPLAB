@@ -616,6 +616,8 @@ class DelftColourPlotter:
                 - 'pressure': location string (e.g., 'best', 'upper left')
                 - 'temperature': location string
                 - 'density': location string
+                Each value may also be a dict {'loc': str, 'offset': [dx, dy]} to nudge
+                the legend by a fraction of the axes size (e.g. offset [0.02, 0.0]).
 
         Returns:
             matplotlib Figure object (main evolution plot)
@@ -1029,10 +1031,21 @@ class DelftColourPlotter:
                 else:
                     loc = 'best'
 
+                # A legend entry may be a location string or {loc, offset: [dx, dy]},
+                # where the offset shifts the legend in axes-fraction units.
+                offset = None
+                if isinstance(loc, dict):
+                    offset = loc.get('offset')
+                    loc = loc.get('loc', 'best')
+                legend_kwargs = {}
+                if offset is not None and loc != 'best':
+                    legend_kwargs = {'bbox_to_anchor': (float(offset[0]), float(offset[1]), 1.0, 1.0),
+                                     'bbox_transform': ax.transAxes}
                 legend = ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=loc, frameon=True, fancybox=True,
-                                 shadow=True, framealpha=0.9, edgecolor='black')
-                # Ensure legend stays within plot boundaries
-                legend.set_bbox_to_anchor(None)
+                                 shadow=True, framealpha=0.9, edgecolor='black', **legend_kwargs)
+                if not legend_kwargs:
+                    # Ensure legend stays within plot boundaries
+                    legend.set_bbox_to_anchor(None)
                 # Additional styling for 3D effect
                 legend.get_frame().set_facecolor('white')
                 legend.get_frame().set_linewidth(1.2)
