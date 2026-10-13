@@ -84,6 +84,26 @@ def test_baseline_tank_can_follow_fuselage_tangent_to_feasibility():
     assert result.placements[0].max_violation <= 1e-10
 
 
+def test_single_large_tank_starts_in_cylindrical_section_and_fits():
+    dims = AftFuselageDimensions(
+        d1=2.16,
+        d2=1.17,
+        d3=0.328,
+        l1=2.067,
+        l2=1.8,
+        l3=3.407,
+        epsilon=0.05,
+        psi_1=12.0,
+        psi_2=9.0,
+    )
+
+    result = place_tanks_in_aft([0.8443], [0.72], dims)
+
+    assert result.feasible
+    assert result.placements[0].center[2] < dims.l1
+    assert result.placements[0].max_violation <= 1e-10
+
+
 def test_infeasible_compaction_has_negative_signed_zeta_proxy():
     dims = AftFuselageDimensions(
         d1=2.16,

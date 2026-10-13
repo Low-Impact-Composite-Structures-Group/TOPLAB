@@ -564,13 +564,17 @@ def _initial_centers(
 ) -> list[Vector3]:
     """Construct a deterministic centreline-based initial placement.
 
-    The tanks are distributed along the available fuselage length. The packing
-    search is free to move them in x, y, and z from these initial positions.
+    A single tank starts midway through the available cylindrical section when
+    possible; multiple tanks are distributed along the available fuselage
+    length. The packing search can move them in x, y, and z.
     """
     n = len(geometries)
 
     if n == 1:
-        z_values = [0.5 * (z_min + dims.total_length)]
+        if z_min < dims.l1:
+            z_values = [0.5 * (z_min + dims.l1)]
+        else:
+            z_values = [0.5 * (z_min + dims.total_length)]
     else:
         # Keep initial centres away from the exact volume boundaries.
         margin = max(
@@ -610,6 +614,7 @@ def place_tanks_in_aft(
     step_reduction: float = 0.5,
     n_axial_samples: int = 80,
     n_circumferential_samples: int = 24,
+    search_trace: bool = False,
 ) -> AftPlacementResult:
     """Find feasible rigid-body poses for a set of capsule tanks.
 
@@ -638,6 +643,8 @@ def place_tanks_in_aft(
         step_reduction: Multiplicative step reduction in (0, 1).
         n_axial_samples: Surface samples along each tank axis.
         n_circumferential_samples: Surface samples around each tank section.
+        search_trace: Print per-sweep candidate scores for diagnosing search
+            behavior.
 
     Returns:
         AftPlacementResult containing the rigid pose of every tank.
@@ -694,6 +701,14 @@ def place_tanks_in_aft(
     step = initial_step
     iteration = 0
 
+    if search_trace:
+        print(
+            "  Placement search start: "
+            f"centres={centers}, step={step:.6g}, "
+            f"minimum_step={minimum_step:.6g}, "
+            f"max_iterations={max_iterations}"
+        )
+
     cartesian_directions: tuple[Vector3, ...] = (
         (1.0, 0.0, 0.0),
         (-1.0, 0.0, 0.0),
@@ -723,6 +738,8 @@ def place_tanks_in_aft(
 
             best_center = centers[i]
             best_violation = current_violation
+            best_direction: Vector3 | None = None
+            candidate_scores: list[tuple[Vector3, float]] = []
 
             # Include tangent-following moves so a tank can travel along the
             # bent fuselage without first becoming more eccentric in y.
@@ -749,17 +766,45 @@ def place_tanks_in_aft(
                 )
 
                 centers[i] = old_center
+                candidate_scores.append((direction, candidate_violation))
 
                 if candidate_violation < best_violation - 1e-12:
                     best_violation = candidate_violation
                     best_center = candidate
+                    best_direction = direction
+
+            if search_trace:
+                scores = ", ".join(
+                    f"({dx:+.2f},{dy:+.2f},{dz:+.2f})={score:.6g}"
+                    for (dx, dy, dz), score in candidate_scores
+                )
+                selected = (
+                    "none"
+                    if best_direction is None
+                    else (
+                        f"({best_direction[0]:+.2f},"
+                        f"{best_direction[1]:+.2f},"
+                        f"{best_direction[2]:+.2f})"
+                    )
+                )
+                print(
+                    f"  Placement sweep {iteration}, tank {order[i] + 1}: "
+                    f"step={step:.6g}, current={current_violation:.6g}, "
+                    f"candidates=[{scores}], selected={selected}"
+                )
 
             if best_center != centers[i]:
                 centers[i] = best_center
                 sweep_improved = True
 
         if not sweep_improved:
+            previous_step = step
             step *= step_reduction
+            if search_trace:
+                print(
+                    f"  Placement sweep {iteration}: no improving move; "
+                    f"step {previous_step:.6g} -> {step:.6g}"
+                )
 
     feasible_sorted, violations_sorted = _evaluate_placement(
         centers,

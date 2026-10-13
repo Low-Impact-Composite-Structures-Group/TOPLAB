@@ -423,6 +423,8 @@ def _run_aft_packaging(
         placement_cfg.get("n_circumferential_samples", 24)
     )
 
+    search_trace = bool(placement_cfg.get("search_trace", False))
+
     # ------------------------------------------------------------------
     # Gather outer tank dimensions
     # ------------------------------------------------------------------
@@ -509,6 +511,7 @@ def _run_aft_packaging(
         step_reduction=step_reduction,
         n_axial_samples=n_axial_samples,
         n_circumferential_samples=n_circumferential_samples,
+        search_trace=search_trace and not silent,
     )
 
     # ------------------------------------------------------------------
