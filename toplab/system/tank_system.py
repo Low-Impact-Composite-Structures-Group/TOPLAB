@@ -45,6 +45,14 @@ class TankConfig:
 
 
 @dataclass
+class MixerGroup:
+    """Mission demand shared by several tanks through a flow-distribution mixer."""
+    mixer_id: Any
+    fractions: Dict[int, float]   # tank_index (0-based) -> share of mixer demand
+    profiles: List[Any]           # mission profiles assigned to the mixer; demands are summed
+
+
+@dataclass
 class TankSystemConfig:
     """Configuration parameters for the tank system."""
     AMBIENT_TEMPERATURE: float = 298.15  # K
@@ -54,6 +62,7 @@ class TankSystemConfig:
     minimum_density: float = 5.8         # Stopping density [kg/m³]
     target_density: float = None         # Target density for refuel missions [kg/m³]
     per_tank_mission_profiles: Optional[Dict[int, Any]] = None  # tank_index (0-based) → Mission or List[Mission]
+    mixer_groups: Optional[List[MixerGroup]] = None
 
     def __post_init__(self):
         if self.tanks is None:
@@ -1449,6 +1458,11 @@ class TankSystem:
         Returns:
             Flow rate [kg/s] (positive)
         """
+        for group in self.config.mixer_groups or []:
+            if tank_index in group.fractions:
+                demand = sum(self._eval_single_profile_flow(p, time, flow_type) for p in group.profiles)
+                return group.fractions[tank_index] * demand
+
         if self.config.mission_profile is None and not self.config.per_tank_mission_profiles:
             return 0.0
 

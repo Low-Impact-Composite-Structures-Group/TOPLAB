@@ -26,7 +26,7 @@ import numpy as np
 from toplab.configuration.scenario_configuration import ScenarioConfig
 
 # Multi-tank DAE physics engine
-from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig
+from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig, MixerGroup
 from toplab.utilities.tank_geometry import create_tank_from_fuel_mass
 from toplab.utilities.output_control import silent_when_quiet
 
@@ -101,14 +101,25 @@ class SystemOrchestrator:
 
         # For multi-node 'missions:' list, load per-tank profiles and set primary profile
         raw_missions_list = raw_config.get('missions') if isinstance(raw_config, dict) else None
+        mixer_ids = {g['mixer_id'] for g in getattr(self.scenario_config, 'mixer_groups', [])}
+        self._mixer_profiles: Dict[Any, List[Any]] = {}
         if isinstance(raw_missions_list, list) and len(raw_missions_list) > 1:
             self.per_tank_mission_profiles = self._load_per_tank_mission_profiles_from_raw(raw_missions_list)
             # Primary profile for sizing/duration: first tank's profile (unwrap list if multi-stream)
-            primary = self.per_tank_mission_profiles.get(0) or self._get_mission_profile(mission_profile)
+            primary = self.per_tank_mission_profiles.get(0)
+            if primary is None and self._mixer_profiles:
+                primary = next(iter(self._mixer_profiles.values()))[0]
+            if primary is None:
+                primary = self._get_mission_profile(mission_profile)
             self.mission_profile = primary[0] if isinstance(primary, list) else primary
+            if not self.per_tank_mission_profiles:
+                self.per_tank_mission_profiles = None
         else:
             self.per_tank_mission_profiles = None
             self.mission_profile = self._get_mission_profile(mission_profile)
+            assigned = self.scenario_config.mission_sequence.missions[0].assigned_to
+            if assigned in mixer_ids:
+                self._mixer_profiles[assigned] = [self.mission_profile]
         print(f"   Mission profile loaded: {mission_profile}")
 
         # Create tank geometries from scenario configuration (now with mission profile available)
@@ -377,7 +388,7 @@ class SystemOrchestrator:
             elif coupling_type == 'proportional_split':
                 # Fraction of source tank's mission discharge routed to target via component chain
                 participants = rule_config.get('participants', {})
-                split_fraction = float(rule_config.get('split_fraction', 0.05))
+                split_fraction = float(rule_config.get('split_fraction', 0.5))
 
                 tank_system_rule = {
                     'type': 'proportional_split',
@@ -518,7 +529,11 @@ class SystemOrchestrator:
                 # own mission (not the shared primary profile which defaults to Tank 1).
                 tank_index = int(tank_id) - 1
                 per_tank = getattr(self, 'per_tank_mission_profiles', None)
-                if per_tank and tank_index in per_tank:
+                mixer_fuel = self._mixer_fuel_share(tank_id)
+                if mixer_fuel is not None:
+                    tank_geom = self._create_mission_sized_tank(geometry_data, material, operating_pressure,
+                                                                fuel_mass_override=mixer_fuel)
+                elif per_tank and tank_index in per_tank:
                     _orig_profile = self.mission_profile
                     self.mission_profile = per_tank[tank_index]
                     try:
@@ -619,9 +634,37 @@ class SystemOrchestrator:
             minimum_density=minimum_density,
             target_density=target_density,
             per_tank_mission_profiles=getattr(self, 'per_tank_mission_profiles', None),
+            mixer_groups=self._build_mixer_groups(),
         )
 
         return system_config
+
+    def _mixer_ids(self) -> set:
+        return {g['mixer_id'] for g in getattr(self.scenario_config, 'mixer_groups', [])}
+
+    def _build_mixer_groups(self) -> Optional[List[MixerGroup]]:
+        """Translate config mixer groups into TankSystem groups (tank id N -> index N-1)."""
+        groups = []
+        for g in getattr(self.scenario_config, 'mixer_groups', []):
+            profiles = self._mixer_profiles.get(g['mixer_id'])
+            if not profiles:
+                raise ValueError(
+                    f"Mixer node {g['mixer_id']} has no mission: set 'assigned_to_node: {g['mixer_id']}' "
+                    f"on the mission(s) feeding it."
+                )
+            fractions = {int(tid) - 1: f for tid, f in g['flow_fractions'].items()}
+            groups.append(MixerGroup(mixer_id=g['mixer_id'], fractions=fractions, profiles=profiles))
+            print(f"   Mixer {g['mixer_id']}: tank shares " +
+                  ", ".join(f"Tank {tid}={f:.3f}" for tid, f in g['flow_fractions'].items()))
+        return groups or None
+
+    def _mixer_fuel_share(self, tank_id) -> Optional[float]:
+        """Mission fuel [kg] a mixer-fed tank must carry, or None if the tank is not on a mixer."""
+        for g in getattr(self.scenario_config, 'mixer_groups', []):
+            if tank_id in g['flow_fractions']:
+                profiles = self._mixer_profiles.get(g['mixer_id'], [])
+                return g['flow_fractions'][tank_id] * sum(p.required_fuel for p in profiles)
+        return None
 
     def _calculate_mission_duration(self) -> float:
         """
@@ -697,6 +740,10 @@ class SystemOrchestrator:
                 assigned_to=assigned_node,
             )
             profile = self._get_mission_profile_for_node(mc)
+            if assigned_node in self._mixer_ids():
+                self._mixer_profiles.setdefault(assigned_node, []).append(profile)
+                print(f"   Mixer mission: node {assigned_node} → profile={mc.profile}")
+                continue
             label = mc.parameters.get('column_name', f"Stream {len(stream_labels.get(tank_index, [])) + 1}")
 
             if tank_index in per_tank:
@@ -937,7 +984,7 @@ class SystemOrchestrator:
             print(f"   ERROR: CSV mission creation failed: {e}")
             raise ValueError(f"Failed to create CSV mission: {e}")
 
-    def _create_mission_sized_tank(self, geometry_data, material, operating_pressure):
+    def _create_mission_sized_tank(self, geometry_data, material, operating_pressure, fuel_mass_override=None):
         """
         Create tank geometry sized for mission fuel requirements.
 
@@ -1047,6 +1094,9 @@ class SystemOrchestrator:
             except:
                 required_fuel_mass = 36.0  # Default for ATR72-like missions
                 print(f"   Using fallback fuel requirement: {required_fuel_mass:.2f} kg")
+        if fuel_mass_override is not None:
+            required_fuel_mass = fuel_mass_override
+            print(f"   Mixer share of mission fuel: {required_fuel_mass:.2f} kg")
         print(f"   Mission profile type: {type(self.mission_profile)}")
         if hasattr(self.mission_profile, 'sections'):
             print(f"   Mission sections: {len(self.mission_profile.sections)}")
@@ -1155,6 +1205,8 @@ class SystemOrchestrator:
         if getattr(self, 'per_tank_mission_profiles', None):
             print(f"     Multi-node mission dispatch active: "
                   f"{len(self.per_tank_mission_profiles)} per-tank profiles configured")
+        elif self._mixer_profiles:
+            print(f"     Mixer mission dispatch active: {len(self._mixer_profiles)} mixer(s)")
         else:
             self._apply_mission_assignment()
 

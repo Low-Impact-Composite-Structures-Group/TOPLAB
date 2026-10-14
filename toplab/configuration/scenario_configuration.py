@@ -147,6 +147,7 @@ class ScenarioConfig:
             self.materials = self._parse_materials_new_format()
             self.tank_materials = self._parse_tank_materials_new_format()
             self.tank_geometries = self._parse_tank_geometries_new_format()
+            self.mixer_groups = self._compile_mixer_groups(config_dict)
         elif self.config_format == "old":
             # Parse analysis metadata (legacy format)
             self.analysis_name = config_dict.get('analysis_name', config_dict.get('analysis', {}).get('name', 'Unnamed Analysis'))
@@ -160,6 +161,7 @@ class ScenarioConfig:
             self.materials = self._parse_materials_old_format()
             self.tank_materials = self._parse_tank_materials_old_format()
             self.tank_geometries = self._parse_tank_geometries_old_format()
+            self.mixer_groups = []
         else:
             raise ValueError(f"Unknown config_format '{self.config_format}'. Expected 'new' or 'old'.")
 
@@ -171,6 +173,65 @@ class ScenarioConfig:
         if key == 'target':
             return participants.get('target', edge.get('to_node'))
         raise ValueError(f"Unknown participant key '{key}'")
+
+    @classmethod
+    def _compile_mixer_groups(cls, config_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Find flow-distribution mixers: mixer junctions fed by two or more tanks through
+        plain ``discharge`` edges. The mission demand assigned to the mixer is split
+        across those tanks by the optional per-edge ``flow_fraction`` (default 1/N).
+
+        Returns one dict per mixer with ``mixer_id``, ``tank_ids`` (edge order) and
+        ``flow_fractions`` (tank_id -> fraction, summing to 1).
+        """
+        network = config_dict.get('network', {}) or {}
+        node_by_id = {n.get('node_id'): n for n in network.get('nodes', []) or [] if n.get('node_id') is not None}
+        edges = network.get('edges', []) or []
+
+        groups: List[Dict[str, Any]] = []
+        for node_id, node in node_by_id.items():
+            if node.get('type') != 'junction':
+                continue
+            if str(node.get('junction_role') or node.get('role') or '').lower() != 'mixer':
+                continue
+
+            incoming = [e for e in edges if cls._edge_participant(e, 'target') == node_id]
+            if len(incoming) < 2:
+                continue
+            all_tank_discharges = all(
+                node_by_id.get(cls._edge_participant(e, 'source'), {}).get('type') == 'tank'
+                and e.get('connection_type', 'discharge') == 'discharge'
+                for e in incoming
+            )
+            if not all_tank_discharges:
+                continue
+
+            tank_ids = [cls._edge_participant(e, 'source') for e in incoming]
+            if len(set(tank_ids)) != len(tank_ids):
+                raise ValueError(f"Mixer '{node_id}' has more than one edge from the same tank")
+
+            specified = [e.get('flow_fraction') for e in incoming]
+            if all(f is None for f in specified):
+                fractions = [1.0 / len(incoming)] * len(incoming)
+            elif any(f is None for f in specified):
+                raise ValueError(
+                    f"Mixer '{node_id}': set 'flow_fraction' on all incoming edges or on none"
+                )
+            else:
+                fractions = [float(f) for f in specified]
+                if any(f < 0.0 for f in fractions):
+                    raise ValueError(f"Mixer '{node_id}': flow_fraction values must be >= 0")
+                if abs(sum(fractions) - 1.0) > 1e-6:
+                    raise ValueError(
+                        f"Mixer '{node_id}': flow_fraction values must sum to 1 (got {sum(fractions):.6g})"
+                    )
+
+            groups.append({
+                'mixer_id': node_id,
+                'tank_ids': tank_ids,
+                'flow_fractions': dict(zip(tank_ids, fractions)),
+            })
+        return groups
 
     @classmethod
     def _compile_network_coupling_rules(cls, config_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -227,12 +288,20 @@ class ScenarioConfig:
             node = node_by_id.get(node_id)
             return bool(node and node.get('type') == 'tank')
 
+        mixer_ids = {g['mixer_id'] for g in cls._compile_mixer_groups(config_dict)}
+
         for node in nodes:
             if node.get('type') != 'junction':
                 continue
 
             junction_id = node.get('node_id')
             if junction_id is None:
+                continue
+
+            if junction_id in mixer_ids:
+                # Flow-distribution mixers produce no coupling rule; see mixer_groups.
+                handled_edges.update({edge.get('edge_id') for edge in incoming_edges.get(junction_id, [])})
+                handled_edges.update({edge.get('edge_id') for edge in outgoing_edges.get(junction_id, [])})
                 continue
 
             junction_incoming = incoming_edges.get(junction_id, [])
