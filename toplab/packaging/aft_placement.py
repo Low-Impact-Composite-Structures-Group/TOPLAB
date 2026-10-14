@@ -557,17 +557,12 @@ def _evaluate_placement(
 # Placement algorithm
 # ---------------------------------------------------------------------------
 
-def _initial_centers(
+def _initial_centers_axial(
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
     z_min: float = 0.0,
 ) -> list[Vector3]:
-    """Construct a deterministic centreline-based initial placement.
-
-    A single tank starts midway through the available cylindrical section when
-    possible; multiple tanks are distributed along the available fuselage
-    length. The packing search can move them in x, y, and z.
-    """
+    """Construct the original deterministic centreline-based axial seed."""
     n = len(geometries)
 
     if n == 1:
@@ -602,102 +597,104 @@ def _initial_centers(
     ]
 
 
-def place_tanks_in_aft(
-    outer_radii: Sequence[float],
-    half_cyl_lengths: Sequence[float],
-    dims: AftFuselageDimensions,
-    *,
-    z_min: float = 0.0,
-    max_iterations: int = 1000,
-    initial_step: float = 0.10,
-    minimum_step: float = 0.002,
-    step_reduction: float = 0.5,
-    n_axial_samples: int = 80,
-    n_circumferential_samples: int = 24,
-    search_trace: bool = False,
-) -> AftPlacementResult:
-    """Find feasible rigid-body poses for a set of capsule tanks.
+def _symmetric_offsets_from_radii(
+    geometries: Sequence[TankGeometry],
+    clearance: float,
+) -> list[float]:
+    """Return radius-aware 1-D offsets centred about zero.
 
-    The routine is a self-contained packing subroutine. Tank positions are
-    *not* design variables of an outer optimization problem.
-
-    Each tank centre is free to move in Cartesian x, y, and z. Its axis is
-    aligned with the preferred fuselage direction ``dims.tangent_at(z)`` at
-    the tank centre. Feasibility requires:
-
-      1. every sampled tank-surface point to lie inside the fuselage with
-         clearance ``epsilon``;
-      2. every pair of capsule surfaces to be separated by at least
-         ``epsilon``.
-
-    A deterministic coordinate-descent feasibility search is used. The step
-    length is reduced when no improving Cartesian move is found.
-
-    Args:
-        outer_radii: Tank outer radii [m].
-        half_cyl_lengths: Half-lengths of the cylindrical tank portions [m].
-        dims: Aft-fuselage geometry.
-        max_iterations: Maximum coordinate-descent sweeps.
-        initial_step: Initial Cartesian translation step [m].
-        minimum_step: Smallest translation step [m].
-        step_reduction: Multiplicative step reduction in (0, 1).
-        n_axial_samples: Surface samples along each tank axis.
-        n_circumferential_samples: Surface samples around each tank section.
-        search_trace: Print per-sweep candidate scores for diagnosing search
-            behavior.
-
-    Returns:
-        AftPlacementResult containing the rigid pose of every tank.
+    Adjacent seed centres are separated by r_i + r_j + clearance.  These are
+    only starting positions; they are not required to satisfy containment.
     """
-    if len(outer_radii) != len(half_cyl_lengths):
-        raise ValueError(
-            "outer_radii and half_cyl_lengths must have the same length."
-        )
-
-
-    if not 0.0 <= z_min <= dims.l1:
-        raise ValueError("z_min must lie within the cylindrical section [0, l1].")
-
-    if initial_step <= 0.0 or minimum_step <= 0.0:
-        raise ValueError("Placement step sizes must be positive.")
-
-    if not 0.0 < step_reduction < 1.0:
-        raise ValueError("step_reduction must lie strictly between 0 and 1.")
-
-    n = len(outer_radii)
-
+    n = len(geometries)
     if n == 0:
-        return AftPlacementResult(
-            feasible=True,
-            placements=[],
-            dims=dims,
-            outer_radii=[],
-            half_cyl_lengths=[],
-            half_outer_lengths=[],
-            message="No tanks to place.",
-            z_shift=z_min,
-            zeta_p=(z_min / dims.l1 if dims.l1 > 0.0 else 0.0),
-        )
+        return []
+    if n == 1:
+        return [0.0]
 
-    geometries_original = [
-        TankGeometry(float(r), float(h))
-        for r, h in zip(outer_radii, half_cyl_lengths)
+    positions = [0.0]
+    for i in range(1, n):
+        spacing = (
+            geometries[i - 1].outer_radius
+            + geometries[i].outer_radius
+            + clearance
+        )
+        positions.append(positions[-1] + spacing)
+
+    midpoint = 0.5 * (positions[0] + positions[-1])
+    return [position - midpoint for position in positions]
+
+
+def _initial_center_sets(
+    geometries: Sequence[TankGeometry],
+    dims: AftFuselageDimensions,
+    z_min: float = 0.0,
+) -> list[tuple[str, list[Vector3]]]:
+    """Generate deterministic seeds representing distinct packing topologies."""
+    n = len(geometries)
+    axial = _initial_centers_axial(geometries, dims, z_min)
+
+    if n <= 1:
+        return [("axial", axial)]
+
+    # Prefer the cylindrical region for transverse starts because it has a
+    # straight local axis and, for the present aft geometry, the largest
+    # available cross-section.
+    if z_min < dims.l1:
+        z0 = 0.5 * (z_min + dims.l1)
+    else:
+        z0 = 0.5 * (z_min + dims.total_length)
+
+    offsets = _symmetric_offsets_from_radii(geometries, dims.epsilon)
+    y0 = dims.center_y_at(z0)
+
+    transverse_x = [
+        (offsets[i], y0, z0)
+        for i in range(n)
+    ]
+    transverse_y = [
+        (0.0, y0 + offsets[i], z0)
+        for i in range(n)
     ]
 
-    # Pack the more difficult/larger tanks first, but restore original indexing
-    # in the returned result.
-    order = sorted(
-        range(n),
-        key=lambda i: (
-            geometries_original[i].outer_radius,
-            geometries_original[i].total_length,
-        ),
-        reverse=True,
-    )
+    # Staggered starts retain the original axial distribution but perturb
+    # alternating tanks to opposite sides of the local centreline.
+    staggered_x: list[Vector3] = []
+    staggered_y: list[Vector3] = []
+    for i, (_, _, z) in enumerate(axial):
+        sign = 1.0 if i % 2 == 0 else -1.0
+        offset = geometries[i].outer_radius + 0.5 * dims.epsilon
+        local_y = dims.center_y_at(z)
+        staggered_x.append((sign * offset, local_y, z))
+        staggered_y.append((0.0, local_y + sign * offset, z))
 
-    geometries = [geometries_original[i] for i in order]
-    centers = _initial_centers(geometries, dims, z_min)
+    return [
+        ("axial", axial),
+        ("transverse_x", transverse_x),
+        ("transverse_y", transverse_y),
+        ("staggered_x", staggered_x),
+        ("staggered_y", staggered_y),
+    ]
 
+
+def _search_from_initial_centers(
+    initial_centers: Sequence[Vector3],
+    geometries: Sequence[TankGeometry],
+    dims: AftFuselageDimensions,
+    *,
+    z_min: float,
+    max_iterations: int,
+    initial_step: float,
+    minimum_step: float,
+    step_reduction: float,
+    n_axial_samples: int,
+    n_circumferential_samples: int,
+    search_trace: bool,
+    order: Sequence[int],
+) -> tuple[list[Vector3], bool, list[float], int]:
+    """Run the existing strict-improvement local search from one seed."""
+    centers = list(initial_centers)
+    n = len(centers)
     step = initial_step
     iteration = 0
 
@@ -741,8 +738,7 @@ def place_tanks_in_aft(
             best_direction: Vector3 | None = None
             candidate_scores: list[tuple[Vector3, float]] = []
 
-            # Include tangent-following moves so a tank can travel along the
-            # bent fuselage without first becoming more eccentric in y.
+            # Preserve the existing move set, including tangent-following moves.
             tangent = _pose_axis(centers[i], dims)
             directions = cartesian_directions + (tangent, _scale(tangent, -1.0))
 
@@ -806,7 +802,7 @@ def place_tanks_in_aft(
                     f"step {previous_step:.6g} -> {step:.6g}"
                 )
 
-    feasible_sorted, violations_sorted = _evaluate_placement(
+    feasible, violations = _evaluate_placement(
         centers,
         geometries,
         dims,
@@ -814,6 +810,132 @@ def place_tanks_in_aft(
         n_axial_samples,
         n_circumferential_samples,
     )
+    return centers, feasible, violations, iteration
+
+
+def place_tanks_in_aft(
+    outer_radii: Sequence[float],
+    half_cyl_lengths: Sequence[float],
+    dims: AftFuselageDimensions,
+    *,
+    z_min: float = 0.0,
+    max_iterations: int = 1000,
+    initial_step: float = 0.10,
+    minimum_step: float = 0.002,
+    step_reduction: float = 0.5,
+    n_axial_samples: int = 80,
+    n_circumferential_samples: int = 24,
+    search_trace: bool = False,
+) -> AftPlacementResult:
+    """Find feasible rigid-body poses using deterministic multistart search.
+
+    Five geometrically distinct starts are attempted for multi-tank problems:
+    axial, transverse-x, transverse-y, staggered-x, and staggered-y.  Each start
+    uses the same strict-improvement coordinate-descent search as before.  The
+    first feasible result is returned; if all starts fail, the failed result
+    with the smallest maximum accumulated violation is returned.
+    """
+    if len(outer_radii) != len(half_cyl_lengths):
+        raise ValueError(
+            "outer_radii and half_cyl_lengths must have the same length."
+        )
+
+    if not 0.0 <= z_min <= dims.l1:
+        raise ValueError("z_min must lie within the cylindrical section [0, l1].")
+
+    if initial_step <= 0.0 or minimum_step <= 0.0:
+        raise ValueError("Placement step sizes must be positive.")
+
+    if not 0.0 < step_reduction < 1.0:
+        raise ValueError("step_reduction must lie strictly between 0 and 1.")
+
+    n = len(outer_radii)
+
+    if n == 0:
+        return AftPlacementResult(
+            feasible=True,
+            placements=[],
+            dims=dims,
+            outer_radii=[],
+            half_cyl_lengths=[],
+            half_outer_lengths=[],
+            message="No tanks to place.",
+            z_shift=z_min,
+            zeta_p=(z_min / dims.l1 if dims.l1 > 0.0 else 0.0),
+        )
+
+    geometries_original = [
+        TankGeometry(float(r), float(h))
+        for r, h in zip(outer_radii, half_cyl_lengths)
+    ]
+
+    # Pack the more difficult/larger tanks first, but restore original indexing
+    # in the returned result.
+    order = sorted(
+        range(n),
+        key=lambda i: (
+            geometries_original[i].outer_radius,
+            geometries_original[i].total_length,
+        ),
+        reverse=True,
+    )
+    geometries = [geometries_original[i] for i in order]
+    initial_sets = _initial_center_sets(geometries, dims, z_min)
+
+    if search_trace:
+        print(
+            f"Placement multistart search: {len(initial_sets)} "
+            "initialization(s)"
+        )
+
+    best_failed: tuple[str, list[Vector3], list[float], int] | None = None
+    best_failed_score = float("inf")
+    selected: tuple[str, list[Vector3], bool, list[float], int] | None = None
+
+    for start_number, (start_name, initial_centers) in enumerate(initial_sets, 1):
+        if search_trace:
+            print(
+                f"\nStart {start_number}/{len(initial_sets)}: {start_name}"
+            )
+
+        centers, feasible, violations, iterations = _search_from_initial_centers(
+            initial_centers,
+            geometries,
+            dims,
+            z_min=z_min,
+            max_iterations=max_iterations,
+            initial_step=initial_step,
+            minimum_step=minimum_step,
+            step_reduction=step_reduction,
+            n_axial_samples=n_axial_samples,
+            n_circumferential_samples=n_circumferential_samples,
+            search_trace=search_trace,
+            order=order,
+        )
+
+        score = max(violations, default=0.0)
+
+        if search_trace:
+            status = "feasible" if feasible else "infeasible"
+            print(
+                f"Result from '{start_name}': {status}; "
+                f"max violation={score:.6g} m"
+            )
+
+        if feasible:
+            selected = (start_name, centers, True, violations, iterations)
+            break
+
+        if score < best_failed_score:
+            best_failed_score = score
+            best_failed = (start_name, list(centers), list(violations), iterations)
+
+    if selected is None:
+        assert best_failed is not None
+        start_name, centers, violations_sorted, iteration = best_failed
+        feasible_sorted = False
+    else:
+        start_name, centers, feasible_sorted, violations_sorted, iteration = selected
 
     placements_sorted = [
         TankPlacement(
@@ -834,14 +956,15 @@ def place_tanks_in_aft(
 
     if feasible_sorted:
         message = (
-            f"Placement feasible after {iteration} coordinate-descent sweeps."
+            f"Placement feasible from '{start_name}' initialization after "
+            f"{iteration} coordinate-descent sweeps."
         )
     else:
-        max_violation = max(violations_sorted)
+        max_violation = max(violations_sorted, default=0.0)
         message = (
-            "Placement infeasible: residual constraint violations remain "
-            f"after {iteration} sweeps; maximum accumulated violation "
-            f"is {max_violation:.6g} m."
+            f"Placement infeasible after {len(initial_sets)} deterministic starts. "
+            f"Best residual maximum accumulated violation is "
+            f"{max_violation:.6g} m from '{start_name}'."
         )
 
     return AftPlacementResult(
