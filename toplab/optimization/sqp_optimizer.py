@@ -198,9 +198,9 @@ class SQPCandidateEvaluator:
             self._progress("discharge start")
             discharge_config = self._build_candidate_config(designs)
             with _TemporaryConfig(discharge_config, self.base_config_path.parent) as path:
-                from toplab.configuration.scenario_configuration import ScenarioConfig
+                from toplab.config import load_config
                 from toplab.orchestration.system_orchestrator import SystemOrchestrator
-                scenario = ScenarioConfig.from_yaml(path)
+                scenario = load_config(path)
                 orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
                 discharge = orchestrator.run_simulation()
             self._progress(
@@ -233,7 +233,7 @@ class SQPCandidateEvaluator:
             self._progress("dormancy start")
             dormancy_config = self._build_dormancy_config(discharge_config)
             with _TemporaryConfig(dormancy_config, self.base_config_path.parent) as path:
-                dormancy_scenario = ScenarioConfig.from_yaml(path)
+                dormancy_scenario = load_config(path)
                 dormancy_orchestrator = SystemOrchestrator(dormancy_scenario, verbosity="quiet")
                 dormancy = dormancy_orchestrator.run_simulation()
             self._progress(

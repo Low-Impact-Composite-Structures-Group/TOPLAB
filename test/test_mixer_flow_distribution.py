@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from toplab.configuration.scenario_configuration import ScenarioConfig
+from toplab.config import ConfigError, load_config
+from toplab.network import Network
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -56,17 +57,18 @@ def _write_mixer_config(tmp_path, fractions=None, n_tanks=2):
 
 
 def test_default_fractions_are_even(tmp_path):
-    config = ScenarioConfig.from_yaml(_write_mixer_config(tmp_path, n_tanks=3))
-    (group,) = config.mixer_groups
-    assert group["flow_fractions"] == pytest.approx({1: 1 / 3, 2: 1 / 3, 3: 1 / 3})
-    # Mixer edges must not create tank-to-tank coupling rules
-    assert config.config_dict["coupling_rules"] == []
+    config = load_config(_write_mixer_config(tmp_path, n_tanks=3))
+    network = Network(config)
+    (mixer,) = network.mixers.values()
+    assert mixer.fractions == pytest.approx({1: 1 / 3, 2: 1 / 3, 3: 1 / 3})
+    # Mixer edges must not create tank-to-tank couplings
+    assert network.coupling_edges() == []
 
 
 @pytest.mark.parametrize("fractions", [[0.5, 0.4], [-0.2, 1.2]])
 def test_fractions_must_sum_to_one_and_be_nonnegative(tmp_path, fractions):
-    with pytest.raises(ValueError, match="flow_fraction"):
-        ScenarioConfig.from_yaml(_write_mixer_config(tmp_path, fractions=fractions))
+    with pytest.raises(ConfigError, match="flow_fraction"):
+        Network(load_config(_write_mixer_config(tmp_path, fractions=fractions)))
 
 
 def test_partial_fractions_rejected(tmp_path):
@@ -74,13 +76,13 @@ def test_partial_fractions_rejected(tmp_path):
     cfg = yaml.safe_load(path.read_text())
     del cfg["network"]["edges"][1]["flow_fraction"]
     path.write_text(yaml.safe_dump(cfg))
-    with pytest.raises(ValueError, match="all incoming edges or on none"):
-        ScenarioConfig.from_yaml(path)
+    with pytest.raises(ConfigError, match="all incoming edges or on none"):
+        Network(load_config(path))
 
 
 def test_mixer_splits_mission_flow_and_sizes_tanks(tmp_path):
     fractions = [0.7, 0.3]
-    orchestrator = SystemOrchestrator(ScenarioConfig.from_yaml(_write_mixer_config(tmp_path, fractions)))
+    orchestrator = SystemOrchestrator(load_config(_write_mixer_config(tmp_path, fractions)))
     system = orchestrator.tank_system
 
     t = 500.0
@@ -101,4 +103,4 @@ def test_mixer_without_assigned_mission_is_an_error(tmp_path):
     cfg["mission"]["assigned_to_node"] = 1
     path.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError, match="has no mission"):
-        SystemOrchestrator(ScenarioConfig.from_yaml(path))
+        SystemOrchestrator(load_config(path))

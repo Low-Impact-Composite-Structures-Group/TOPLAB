@@ -8,31 +8,28 @@ output formatting.
 Author: Dante Raso
 """
 
-import copy
+from dataclasses import replace
 import sys
-import tempfile
 import time
 import os
 from contextlib import nullcontext, redirect_stdout, redirect_stderr
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
-from toplab.configuration.scenario_configuration import ScenarioConfig
+from toplab.config import AnalysisConfig, MissionSpec, load_config
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
 
-def _is_output_silent(config: ScenarioConfig) -> bool:
-    return bool(config.config_dict.get('output', {}).get('silent', False))
+def _is_output_silent(config: AnalysisConfig) -> bool:
+    return bool(config.output.get('silent', False))
 
 
-def run_dormancy_check(config_path: Path, silent: bool = False) -> dict:
+def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
     """
     Run a zero-outflow dormancy simulation from the same initial conditions as
     discharge and verify the vented mass stays within the configured rate limit.
 
-    Reads the ``dormancy_check`` block from the YAML config:
+    Uses ``config.dormancy_check``:
         enabled: bool
         duration_h: float (default 12.0)
         maximum_loss_percent_per_hour: float (required when enabled)
@@ -41,17 +38,13 @@ def run_dormancy_check(config_path: Path, silent: bool = False) -> dict:
         dict with 'ran' (bool), 'passed' (bool), and 'tanks' (per-tank details),
         or {'ran': False} if the check is disabled.
     """
-    with open(config_path) as f:
-        raw = yaml.safe_load(f)
-
-    dormancy_config = raw.get('dormancy_check', {})
+    dormancy_config = config.dormancy_check or {}
     if not dormancy_config.get('enabled', False):
         return {'ran': False}
 
     duration_h = float(dormancy_config.get('duration_h', 12.0))
     maximum_loss_percent_per_hour = float(dormancy_config.get('maximum_loss_percent_per_hour'))
-    original_missions = raw.get('missions', [{}])
-    ambient_temperature = original_missions[0].get('ambient_temperature', 288.15) if original_missions else 288.15
+    ambient_temperature = config.missions[0].ambient_temperature if config.missions else 288.15
 
     if not silent:
         print(f"\n{'=' * 80}")
@@ -59,29 +52,21 @@ def run_dormancy_check(config_path: Path, silent: bool = False) -> dict:
         print(f"Requirement: no more than {maximum_loss_percent_per_hour:.3f}% of initial fuel mass vented per hour")
         print('=' * 80)
 
-    dormancy_case = copy.deepcopy(raw)
-    dormancy_case.pop('missions', None)
-    dormancy_case['mission'] = {
-        'type': 'dormancy',
-        'profile': 'constant_flow',
-        'ambient_temperature': ambient_temperature,
-        'assigned_to_node': 1,
-        'flow_rate': 0.0,
-        'duration': duration_h * 3600.0,
-    }
-    dormancy_case.setdefault('output', {}).update({'save_plots': False, 'save_data': False, 'silent': True})
-    dormancy_case.pop('dormancy_check', None)
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', dir=config_path.parent, delete=False) as temp_file:
-        yaml.dump(dormancy_case, temp_file)
-        temporary_config_path = Path(temp_file.name)
-
-    try:
-        config = ScenarioConfig.from_yaml(str(temporary_config_path))
-        orchestrator = SystemOrchestrator(config, verbosity='quiet')
-        results = orchestrator.run_simulation()
-    finally:
-        temporary_config_path.unlink(missing_ok=True)
+    dormancy_mission = MissionSpec(
+        type='dormancy',
+        profile='constant_flow',
+        ambient_temperature=ambient_temperature,
+        assigned_to_node=config.tank_ids[0],
+        options={'flow_rate': 0.0, 'duration': duration_h * 3600.0},
+    )
+    dormancy_case = replace(
+        config,
+        missions=[dormancy_mission],
+        output={**config.output, 'save_plots': False, 'save_data': False, 'silent': True},
+        dormancy_check=None,
+    )
+    orchestrator = SystemOrchestrator(dormancy_case, verbosity='quiet')
+    results = orchestrator.run_simulation()
 
     actual_duration_h = float(results.times[-1]) / 3600.0
     all_tanks_pass = True
@@ -162,7 +147,7 @@ def run_analysis(
 
     # Load configuration
     try:
-        config = ScenarioConfig.from_yaml(str(config_path))
+        config = load_config(config_path)
 
     except Exception as e:
         error_msg = f"ERROR: Configuration loading failed: {e}"
@@ -183,11 +168,10 @@ def run_analysis(
         print(f"Loading configuration: {config_path.name}")
         print(f"SUCCESS: Configuration loaded")
         print(f"\nAnalysis Configuration:")
-        print(f"  Name: {config.analysis_name}")
+        print(f"  Name: {config.name}")
         print(f"  Description: {config.description}")
-        print(f"  Tanks: {config.get_tank_count()}")
-        print(f"  Mission: {config.mission_sequence.missions[0].profile}")
-        print(f"  Materials: {', '.join(config.materials.keys())}")
+        print(f"  Tanks: {len(config.tanks)}")
+        print(f"  Mission: {', '.join(m.profile for m in config.missions)}")
 
     try:
         with _stdout_context(silent_output) as stdout_target:
@@ -259,8 +243,7 @@ def run_analysis(
                         print(f"  Final Pressure: {final_state.pressure/1e5:.1f} bar")
                         print(f"  Average Discharge: {fuel_consumed/results.times[-1]:.6f} kg/s")
 
-                config_dict = config.config_dict
-                nofigures = bool(config_dict.get('output', {}).get('no_figures', False))
+                nofigures = bool(config.output.get('no_figures', False))
 
                 if nofigures:
                     figures = None
@@ -270,11 +253,11 @@ def run_analysis(
                     if not silent_output:
                         print(f"\nGenerating plots...")
 
-                    output_path = config_dict.get('output', {}).get('plots', {}).get('save_path', 'output/plots')
+                    output_path = config.output.get('plots', {}).get('save_path', 'output/plots')
                     output_dir = Path(output_path)
                     output_dir.mkdir(parents=True, exist_ok=True)
 
-                    save_path = output_dir / f"{config.analysis_name.replace(' ', '_')}_evolution.png"
+                    save_path = output_dir / f"{config.name.replace(' ', '_')}_evolution.png"
                     figures = orchestrator.generate_plots(save_path=str(save_path))
 
                     if not silent_output:
@@ -292,7 +275,7 @@ def run_analysis(
                     print(f"  SUCCESS: Report saved to {report_file}")
 
                 # --- Optional: aft fuselage packaging ---
-                packaging_cfg = config.config_dict.get('packaging')
+                packaging_cfg = config.packaging
                 packaging_result = None
                 if packaging_cfg:
                     if not silent_output:
@@ -307,7 +290,7 @@ def run_analysis(
                     )
 
                 # --- Optional: dormancy venting check ---
-                dormancy_result = run_dormancy_check(config_path, silent=silent_output)
+                dormancy_result = run_dormancy_check(config, silent=silent_output)
 
     except Exception as e:
         error_msg = f"ERROR: Analysis execution failed: {e}"

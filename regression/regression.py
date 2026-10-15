@@ -31,10 +31,10 @@ RTOL = 1e-3
 
 
 def simulate(config_path: Path) -> dict:
-    from toplab.configuration.scenario_configuration import ScenarioConfig
+    from toplab.config import load_config
     from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
-    orchestrator = SystemOrchestrator(ScenarioConfig.from_yaml(config_path), verbosity="quiet")
+    orchestrator = SystemOrchestrator(load_config(config_path), verbosity="quiet")
     results = orchestrator.run_simulation()
     data = results.get_combined_data()
     t = np.asarray(data["times"], dtype=float)

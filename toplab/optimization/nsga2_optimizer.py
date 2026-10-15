@@ -12,7 +12,7 @@ from typing import Any, Sequence
 import numpy as np
 import yaml
 
-from toplab.configuration.scenario_configuration import ScenarioConfig
+from toplab.config import load_config
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
 from toplab.packaging.aft_placement import AftFuselageDimensions, place_tanks_in_aft
 
@@ -92,7 +92,7 @@ class SingleTankCandidateEvaluator:
         try:
             discharge_config = self._build_candidate_config(design)
             with self._temporary_config(discharge_config) as config_path:
-                scenario = ScenarioConfig.from_yaml(config_path)
+                scenario = load_config(config_path)
                 orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
                 simulation = orchestrator.run_simulation()
 
@@ -111,7 +111,7 @@ class SingleTankCandidateEvaluator:
 
             dormancy_config = self._build_dormancy_config(discharge_config)
             with self._temporary_config(dormancy_config) as config_path:
-                scenario = ScenarioConfig.from_yaml(config_path)
+                scenario = load_config(config_path)
                 dormancy_orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
                 dormancy = dormancy_orchestrator.run_simulation()
 

@@ -78,7 +78,7 @@ class TankSystem:
                  tank_geometries: List[CapsuleTank],
                  config: TankSystemConfig,
                  coupling_rules: List[Dict] = None,
-                 scenario_config=None,
+                 analysis_config=None,
                  verbosity: str = "summary"):
         """
         Initialize tank system.
@@ -87,6 +87,7 @@ class TankSystem:
             tank_geometries: List of SphericalTank objects (geometry and materials)
             config: TankSystemConfig with tank parameters and scenarios
             coupling_rules: List of inter-tank coupling rules (optional)
+            analysis_config: AnalysisConfig supplying physics, materials and per-tank limits
         """
         self.verbosity = self._normalize_verbosity(verbosity)
         self._ode_progress_interval_s = 60.0
@@ -95,7 +96,7 @@ class TankSystem:
 
         self.tank_geometries = tank_geometries
         self.config = config
-        self.scenario_config = scenario_config  # Store full scenario config for materials
+        self.analysis_config = analysis_config
         self.coupling_rules = coupling_rules or []
 
         # Validate configuration
@@ -117,9 +118,8 @@ class TankSystem:
 
         # Initialize flow physics if configuration is available
         self.flow_physics = None
-        if scenario_config and hasattr(scenario_config, 'config_dict'):
-            # Check for 'physics' section (new schema) or 'flow_physics' (legacy)
-            physics_config = scenario_config.config_dict.get('physics', scenario_config.config_dict.get('flow_physics'))
+        if analysis_config is not None:
+            physics_config = analysis_config.physics
             if physics_config:
                 try:
                     self.flow_physics = FlowPhysics(physics_config)
@@ -201,20 +201,14 @@ class TankSystem:
             )
 
             # Determine fluid type and choose the appropriate stopping criterion.
-            fluid_type = ''
-            if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
-                tank_geom_list = list(self.scenario_config.tank_geometries.values())
-                if i < len(tank_geom_list):
-                    fluid_type = str(tank_geom_list[i].get('fluid', '')).upper()
+            tank_spec = self.analysis_config.tanks[i] if self.analysis_config else None
+            tank_data = tank_spec.geometry_data() if tank_spec else {}
+            fluid_type = tank_spec.fluid if tank_spec else ''
             self._tank_fluids[i] = fluid_type
 
             if fluid_type == 'CH2':
                 # CH2: stop when pressure drops to minimum_pressure
-                raw_p_min = None
-                if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
-                    tank_geom_list = list(self.scenario_config.tank_geometries.values())
-                    if i < len(tank_geom_list):
-                        raw_p_min = tank_geom_list[i].get('minimum_pressure')
+                raw_p_min = tank_data.get('minimum_pressure')
                 if raw_p_min is None:
                     raise ValueError(
                         f"Tank {i + 1} (CH2): 'minimum_pressure' must be set in operating_limits."
@@ -226,15 +220,12 @@ class TankSystem:
             else:
                 # All other fluid types: stop on minimum density
                 per_tank_min = None
-                if self.scenario_config and hasattr(self.scenario_config, 'tank_geometries'):
-                    tank_geom_list = list(self.scenario_config.tank_geometries.values())
-                    if i < len(tank_geom_list):
-                        raw = tank_geom_list[i].get('minimum_density')
-                        if raw is not None:
-                            try:
-                                per_tank_min = float(raw)
-                            except (TypeError, ValueError):
-                                pass
+                raw = tank_data.get('minimum_density')
+                if raw is not None:
+                    try:
+                        per_tank_min = float(raw)
+                    except (TypeError, ValueError):
+                        pass
                 if per_tank_min is None:
                     raise ValueError(
                         f"Tank {i + 1}: 'minimum_density' must be set in the node's stopping_criteria. "
@@ -711,24 +702,19 @@ class TankSystem:
         import math
 
         # Get materials from configuration - NO HARDCODED VALUES
-        if not self.scenario_config:
-            raise RuntimeError("No scenario configuration available - cannot determine materials")
+        if not self.analysis_config:
+            raise RuntimeError("No analysis configuration available - cannot determine materials")
 
-        # Per-tank materials are now mandatory - the get_tank_materials method will handle the error
-
-        # Get materials from config - support per-tank materials
-        # Convert 0-based tank_index to 1-based tank_id for YAML configuration
-        tank_id_yaml = tank_index + 1
-        tank_materials = self.scenario_config.get_tank_materials(tank_id_yaml)
+        tank_spec = self.analysis_config.tanks[tank_index]
+        tank_id_yaml = tank_spec.node_id
+        tank_materials = tank_spec.nist_materials()
         liner_material = tank_materials.get('liner')
         composite_material = tank_materials.get('composite')
 
         if not liner_material or not composite_material:
             raise RuntimeError(f"Liner or composite material not found in configuration for tank {tank_id_yaml}")
 
-        # Get thicknesses from configuration - support per-tank configuration
-        # Use per-tank material config (convert 0-based index to 1-based tank ID)
-        materials_config = self.scenario_config.get_tank_material_config(tank_id_yaml)
+        materials_config = tank_spec.materials
         thickness_liner = materials_config.get('liner', {}).get('thickness', None)
         if thickness_liner is None:
             raise RuntimeError("Liner thickness not specified in configuration")
@@ -769,20 +755,14 @@ class TankSystem:
         if hasattr(tank, 'initial_pressure'):
             working_pressure = float(tank.initial_pressure)
 
-        # If not found in tank object, try getting from scenario config tank geometries
+        # If not found in tank object, fall back to the tank spec
         if design_pressure is None or working_pressure is None:
-            tank_geometries = self.scenario_config.tank_geometries
-            # Find the tank geometry by index (tank_index should match)
             if tank_index >= 0:
-                tank_ids = list(tank_geometries.keys())
-                if tank_index < len(tank_ids):
-                    tank_id_key = tank_ids[tank_index]
-                    tank_config = tank_geometries[tank_id_key]
-
-                    if design_pressure is None and 'venting_pressure' in tank_config:
-                        design_pressure = float(tank_config['venting_pressure'])
-                    if working_pressure is None and 'initial_pressure' in tank_config:
-                        working_pressure = float(tank_config['initial_pressure'])
+                tank_config = tank_spec.geometry_data()
+                if design_pressure is None and 'venting_pressure' in tank_config:
+                    design_pressure = float(tank_config['venting_pressure'])
+                if working_pressure is None and 'initial_pressure' in tank_config:
+                    working_pressure = float(tank_config['initial_pressure'])
 
         if design_pressure is None:
             raise RuntimeError("Design pressure (venting_pressure) not found in tank configuration")
