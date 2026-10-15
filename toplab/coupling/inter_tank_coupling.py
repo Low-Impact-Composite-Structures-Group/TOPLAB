@@ -7,6 +7,7 @@ between tanks in a multi-tank hydrogen storage system.
 Author: Dante Raso
 """
 
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 import math
 from typing import List, Optional, Dict, Any
 from toplab.fluids.flow_physics import FlowPhysics
@@ -1684,8 +1685,10 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                  coupling_id: str = None,
                  flow_physics: Optional[FlowPhysics] = None,
                  source_tank_config: dict = None,
-                 target_tank_config: dict = None):
+                 target_tank_config: dict = None,
+                 fluid: str = DEFAULT_COOLPROP_FLUID):
         super().__init__(source_idx, target_idx, coupling_id)
+        self.fluid = fluid
         self.mission_profile = mission_profile or {}
         self.mission_times = mission_profile.get('time_s') if mission_profile else None
         self.mission_flow_rates = mission_profile.get('flow_rate_kg_s') if mission_profile else None
@@ -1849,8 +1852,8 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             )
 
         # Always use saturated liquid properties at current tank temperature
-        rho_sat_liq = PropsSI("D", "T", temperature_K, "Q", 0, "PARAHYD")
-        mu_sat_liq = PropsSI("V", "T", temperature_K, "Q", 0, "PARAHYD") * rho_sat_liq
+        rho_sat_liq = PropsSI("D", "T", temperature_K, "Q", 0, self.fluid)
+        mu_sat_liq = PropsSI("V", "T", temperature_K, "Q", 0, self.fluid) * rho_sat_liq
 
         # Calculate pressure drop using saturated liquid properties
         pressure_drop = self.flow_physics.calculate_pipe_pressure_drop(
@@ -1904,8 +1907,8 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         base = min(base, self.safety_mass_fraction_per_s * max(source_state.fuel_mass, 0.0))
         return base
 
-    def _predict_pressure_pa(self, mass: float, temperature: float, volume: float) -> float:
-        """Predict pressure using isochoric EOS: P = PropsSI("P", "T", T, "Dmass", ρ, "PARAHYD")
+    def _predict_pressure_pa(self, mass: float, temperature: float, volume: float, fluid: str) -> float:
+        """Predict pressure using isochoric EOS: P = PropsSI("P", "T", T, "Dmass", ρ, fluid)
 
         Args:
             mass: Tank fuel mass [kg]
@@ -1919,7 +1922,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
         density = mass / max(volume, 1e-9)
         if temperature <= 0:
             raise ValueError(f"Invalid temperature for pressure prediction: {temperature} K")
-        return float(PropsSI("P", "T", temperature, "Dmass", density, "PARAHYD"))
+        return float(PropsSI("P", "T", temperature, "Dmass", density, fluid))
 
     def evaluate(self, t: float, tank_states: List) -> bool:
         # Stateless w.r.t valve position; compute at each call
@@ -2015,11 +2018,11 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                 from CoolProp.CoolProp import PropsSI
                 # Source enthalpy (warm CH2 at ~288K)
                 h_source = PropsSI("Hmass", "T", source_state.h2_temperature,
-                                  "Dmass", source_state.fuel_mass / source_state.tank.volume, "PARAHYD")
+                                  "Dmass", source_state.fuel_mass / source_state.tank.volume, source_state.fluid)
                 # Target enthalpy (current state)
-                h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "PARAHYD")
+                h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, target_state.fluid)
                 # Specific heat at constant volume
-                c_v = PropsSI("Cvmass", "T", T, "Dmass", m / V, "PARAHYD")
+                c_v = PropsSI("Cvmass", "T", T, "Dmass", m / V, target_state.fluid)
 
                 # Energy added over dt_ctrl
                 delta_h = h_source - h_target
@@ -2031,7 +2034,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
             else:
                 T_next = T
 
-            return self._predict_pressure_pa(m_next, T_next, V)
+            return self._predict_pressure_pa(m_next, T_next, V, target_state.fluid)
 
         # Bisection bounds: [0, capacity×margin]
         capacity = self._capacity_kg_s(source_state, target_state)
@@ -2051,16 +2054,16 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
 
             # Get source and target enthalpies
             h_source = PropsSI("Hmass", "T", source_state.h2_temperature,
-                              "Dmass", source_state.fuel_mass / source_state.tank.volume, "PARAHYD")
-            h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, "PARAHYD")
+                              "Dmass", source_state.fuel_mass / source_state.tank.volume, source_state.fluid)
+            h_target = PropsSI("Hmass", "T", T, "Dmass", m / V, target_state.fluid)
             delta_h = h_source - h_target
 
             # Use two-phase isochoric heat capacity for accurate thermal prediction
             rho = m / V
             # Check if we're in two-phase region
             try:
-                rho_sat_liq = PropsSI("D", "T", T, "Q", 0, "PARAHYD")
-                rho_sat_vap = PropsSI("D", "T", T, "Q", 1, "PARAHYD")
+                rho_sat_liq = PropsSI("D", "T", T, "Q", 0, target_state.fluid)
+                rho_sat_vap = PropsSI("D", "T", T, "Q", 1, target_state.fluid)
                 in_two_phase = rho_sat_vap <= rho <= rho_sat_liq
             except Exception as e:
                 # FAIL-FAST: Don't silently assume single-phase if CoolProp fails
@@ -2075,18 +2078,18 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                 alpha = max(0.0, min(1.0, alpha))
 
                 # Single-phase cv at saturation states
-                cv_g = PropsSI("CVMASS", "T", T, "Q", 1, "PARAHYD")
-                cv_l = PropsSI("CVMASS", "T", T, "Q", 0, "PARAHYD")
+                cv_g = PropsSI("CVMASS", "T", T, "Q", 1, target_state.fluid)
+                cv_l = PropsSI("CVMASS", "T", T, "Q", 0, target_state.fluid)
 
                 # Saturated enthalpies
-                h_g = PropsSI("Hmass", "T", T, "Q", 1, "PARAHYD")
-                h_l = PropsSI("Hmass", "T", T, "Q", 0, "PARAHYD")
+                h_g = PropsSI("Hmass", "T", T, "Q", 1, target_state.fluid)
+                h_l = PropsSI("Hmass", "T", T, "Q", 0, target_state.fluid)
 
                 # Derivatives of saturation densities wrt T
                 dT = 0.1
                 try:
-                    rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, "PARAHYD")
-                    rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, "PARAHYD")
+                    rho_g_plus = PropsSI("D", "T", T + dT, "Q", 1, target_state.fluid)
+                    rho_l_plus = PropsSI("D", "T", T + dT, "Q", 0, target_state.fluid)
                     drho_g_dT = (rho_g_plus - rho_sat_vap) / dT
                     drho_l_dT = (rho_l_plus - rho_sat_liq) / dT
                 except Exception as e:
@@ -2108,7 +2111,7 @@ class FeedforwardPressureEnforcer(InterTankCoupling):
                 c_v = alpha * cv_g + (1.0 - alpha) * cv_l + correction
             else:
                 # Single-phase: use standard cv
-                c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "PARAHYD")
+                c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, target_state.fluid)
 
             # Compute dP/dm with thermal effects
             dP_drho = PropsSI('d(P)/d(D)|T', 'T', T, 'Dmass', rho, 'hydrogen')

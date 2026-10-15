@@ -4,7 +4,7 @@ from typing import Optional
 
 
 
-def safe_pressure_from_T_rho(T: float, rho: float, fluid: str = "PARAHYD") -> float:
+def safe_pressure_from_T_rho(T: float, rho: float, fluid: str) -> float:
     try:
         if T is None or rho is None:
             return 1.0e5
@@ -37,7 +37,7 @@ def safe_enthalpy(
     P: Optional[float] = None,
     *,
     assume_gas_when_twophase: bool = True,
-    fluid: str = "PARAHYD",
+    fluid: str,
 ) -> float:
     try:
         if T is None or T <= 0:

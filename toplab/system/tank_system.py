@@ -29,6 +29,7 @@ from toplab.dynamics.edge_flow import EdgeFlow
 
 from .state_management import MultiTankState, MultiTankResults
 from toplab.coupling.inter_tank_coupling import PressureTriggeredValve, OHEXExtractionCoupling
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 from toplab.fluids.flow_physics import FlowPhysics
 from toplab.peripheral_components.factory import build_peripheral_component_chain
 
@@ -147,6 +148,7 @@ class TankSystem:
         self._min_densities = {}   # Per-tank minimum densities (non-CH2 tanks)
         self._min_pressures = {}   # Per-tank minimum pressures (CH2 tanks)
         self._tank_fluids = {}     # Per-tank fluid type string (upper-cased)
+        self._coolprop_fluids = {}  # Per-tank CoolProp fluid name
 
         # Setup tanks and coupling
         self._setup_tanks()
@@ -205,6 +207,7 @@ class TankSystem:
             tank_data = tank_spec.geometry_data() if tank_spec else {}
             fluid_type = tank_spec.fluid if tank_spec else ''
             self._tank_fluids[i] = fluid_type
+            self._coolprop_fluids[i] = tank_spec.coolprop if tank_spec else DEFAULT_COOLPROP_FLUID
 
             if fluid_type == 'CH2':
                 # CH2: stop when pressure drops to minimum_pressure
@@ -410,7 +413,8 @@ class TankSystem:
                     orifice_diameter=rule.get('flow_physics', {}).get('orifice_flow', {}).get('orifice_diameter_m', rule.get('orifice_diameter', 0.001)),
                     coupling_id=rule.get('coupling_id', 'pressure_governor'),
                     flow_physics=self.flow_physics,
-                    target_tank_config=target_tank_config
+                    target_tank_config=target_tank_config,
+                    fluid=self._coolprop_fluids[source_idx],
                 )
 
                 valve.source_tank = source_idx
@@ -919,7 +923,7 @@ class TankSystem:
                 print(f"  Tank {i+1}: specified mass {m_init:.2f} kg, "
                       f"density {density_init:.2f} kg/m³")
             else:
-                density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, "PARAHYD")
+                density_init = PropsSI("D", "P", tank_config.P_INIT, "T", tank_config.T_INIT, self._coolprop_fluids[i])
                 tank_volume = self._cached_tank_properties[i]['volume']
                 m_init = density_init * tank_volume
                 print(f"  Tank {i+1}: P={tank_config.P_INIT/1e5:.0f} bar, "
@@ -980,9 +984,9 @@ class TankSystem:
                 rho_i = m_i / max(self.tanks[i].volume, 1e-9)
                 try:
                     from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
-                    P_i = safe_pressure_from_T_rho(T_i, rho_i, "PARAHYD")
+                    P_i = safe_pressure_from_T_rho(T_i, rho_i, self._coolprop_fluids[i])
                 except Exception:
-                    P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, "PARAHYD")
+                    P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, self._coolprop_fluids[i])
                 thermal = self.thermal_models[i]
                 try:
                     Q_amb = thermal.compute_ambient_to_shell_heat_flux(T_sh)
@@ -1003,7 +1007,9 @@ class TankSystem:
             self._log_summary("\n".join(lines))
 
         # Build multi-tank state and compute derivatives
-        multi_state = MultiTankState.from_state_vector(y, self.tanks, t)
+        multi_state = MultiTankState.from_state_vector(
+            y, self.tanks, t, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
+        )
 
         n_tanks = len(self.tanks)
         dydt = np.zeros(5 * n_tanks)
@@ -1402,7 +1408,7 @@ class TankSystem:
             if self._tank_fluids.get(tank_idx, '') == 'CH2':
                 p_min = self._min_pressures[tank_idx]
 
-                def make_pressure_event(idx, p_min_pa, volume):
+                def make_pressure_event(idx, p_min_pa, volume, fluid):
                     from CoolProp.CoolProp import PropsSI as _PropsSI
 
                     def event(t, y):
@@ -1410,7 +1416,7 @@ class TankSystem:
                         T = float(y[idx * 5 + 1])
                         rho = m / max(float(volume), 1e-9)
                         try:
-                            P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), "PARAHYD")
+                            P = _PropsSI("P", "T", max(T, 14.0), "Dmass", max(rho, 1e-9), fluid)
                             return P - p_min_pa
                         except Exception:
                             return 1.0  # stay positive so a CoolProp error does not falsely trigger
@@ -1419,7 +1425,7 @@ class TankSystem:
                     event.direction = -1  # fire when pressure falls through p_min
                     return event
 
-                events.append(make_pressure_event(tank_idx, p_min, vol))
+                events.append(make_pressure_event(tank_idx, p_min, vol, self._coolprop_fluids[tank_idx]))
             else:
                 min_rho = self._min_densities[tank_idx]
 
@@ -1736,6 +1742,7 @@ class TankSystem:
             B_h   = fuel_cell_entry['_outlet_h']
             B_mdot = fuel_cell_entry['_mdot_gs']
 
+            mix_fluid = self._coolprop_fluids[main_discharge_entry['source_tank']]
             mix_mdot_gs = np.full(n_timesteps, np.nan)
             mix_T_K     = np.full(n_timesteps, np.nan)
             mix_P_bar   = np.full(n_timesteps, np.nan)
@@ -1756,7 +1763,7 @@ class TankSystem:
                     # Use average outlet pressure (both should be ~3 bar)
                     P_mix = (A_P[ts_idx] + B_P[ts_idx]) / 2.0
                     try:
-                        T_mix = PropsSI("T", "P", P_mix, "Hmass", h_mix, "PARAHYD")
+                        T_mix = PropsSI("T", "P", P_mix, "Hmass", h_mix, mix_fluid)
                     except Exception:
                         T_mix = np.nan
                     mix_mdot_gs[ts_idx] = m_total
@@ -1924,7 +1931,7 @@ class TankSystem:
                         rho_val = m_val / max(vol_val, 1e-9)
                         try:
                             from CoolProp.CoolProp import PropsSI as _P
-                            P_val = _P("P", "T", max(T_val, 14.0), "Dmass", max(rho_val, 1e-9), "PARAHYD")
+                            P_val = _P("P", "T", max(T_val, 14.0), "Dmass", max(rho_val, 1e-9), self._coolprop_fluids[tank_i])
                         except Exception:
                             continue
                         if P_val < self._min_pressures[tank_i]:
@@ -2000,6 +2007,7 @@ class TankSystem:
                     structure_temperature=solution.y[state_idx + 2, i],
                     insulation_temperature=solution.y[state_idx + 3, i],
                     shell_temperature=solution.y[state_idx + 4, i],
+                    fluid=self._coolprop_fluids[tank_idx],
                 )
 
                 # Recompute derived properties

@@ -29,6 +29,14 @@ class TankSpec:
     stopping_criteria: Dict[str, Any] = field(default_factory=dict)
     plotting: Dict[str, Any] = field(default_factory=dict)
     description: str = ""
+    coolprop_fluid: str = ""
+
+    @property
+    def coolprop(self) -> str:
+        """CoolProp fluid name used for every property call on this tank."""
+        from toplab.fluids.fluid import resolve_coolprop_fluid
+
+        return resolve_coolprop_fluid(self.fluid, self.coolprop_fluid or None)
 
     def geometry_data(self) -> Dict[str, Any]:
         """Flat geometry/initial-condition/limit dict (transitional; replaced by pure sizing)."""

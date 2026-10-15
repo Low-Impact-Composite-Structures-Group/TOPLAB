@@ -4,6 +4,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Protocol
 
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 from toplab.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
 
 
@@ -41,6 +42,7 @@ class IsochoricTankState:
     vent_rate: float = 0.0
     coupling_inflow_rate: float = 0.0
     coupling_outflow_rate: float = 0.0
+    fluid: str = DEFAULT_COOLPROP_FLUID
 
     @property
     def volume(self):
@@ -79,7 +81,7 @@ class IsochoricTankState:
 
     def get_hydrogen_properties(self):
         if self.hydrogen is None or self._needs_hydrogen_update():
-            requester = IsochoricHydrogenRequester()
+            requester = IsochoricHydrogenRequester(fluid=self.fluid)
             if self.pressure is None:
                 self.compute_pressure()
             self.hydrogen = requester.get_hydrogen_properties(
@@ -95,7 +97,7 @@ class IsochoricTankState:
                 raise ValueError(
                     f"Cannot compute pressure: H2 temperature {self.h2_temperature:.4f} K is non-positive"
                 )
-            self.pressure = safe_pressure_from_T_rho(self.h2_temperature, self.density, "PARAHYD")
+            self.pressure = safe_pressure_from_T_rho(self.h2_temperature, self.density, self.fluid)
 
     def _needs_hydrogen_update(self) -> bool:
         if self.hydrogen is None:
@@ -135,7 +137,7 @@ class IsochoricTankState:
 
         from CoolProp.CoolProp import PropsSI
 
-        return PropsSI("Cvmass", "T", self.h2_temperature, "Dmass", self.density, "PARAHYD")
+        return PropsSI("Cvmass", "T", self.h2_temperature, "Dmass", self.density, self.fluid)
 
 
 @dataclass
@@ -169,6 +171,7 @@ class IsochoricInitialState:
     shell_temperature: float
     pressure: float = None
     scenario: str = "DISCHARGE"
+    fluid: str = DEFAULT_COOLPROP_FLUID
 
     def to_isochoric_tank_state(self, tank: Tank) -> IsochoricTankState:
         return IsochoricTankState(
@@ -180,6 +183,7 @@ class IsochoricInitialState:
             shell_temperature=self.shell_temperature,
             pressure=self.pressure,
             scenario=self.scenario,
+            fluid=self.fluid,
         )
 
     def get_state_vector(self):

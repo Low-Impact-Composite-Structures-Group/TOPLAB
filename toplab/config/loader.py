@@ -91,7 +91,12 @@ def _parse_nodes(nodes: List[Dict[str, Any]]):
                 stopping_criteria=dict(node.get("stopping_criteria") or {}),
                 plotting=dict(node.get("plotting") or {}),
                 description=node.get("description", ""),
+                coolprop_fluid=str(node.get("coolprop_fluid", "")),
             ))
+            try:
+                tanks[-1].coolprop
+            except ValueError as exc:
+                raise ConfigError(f"Tank {node_id!r}: {exc}") from exc
         elif kind == "junction":
             role = str(node.get("junction_role") or node.get("role") or "").lower()
             junctions.append(JunctionSpec(node_id, role, {

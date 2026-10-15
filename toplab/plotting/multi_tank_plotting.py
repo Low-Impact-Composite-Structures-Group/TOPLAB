@@ -29,6 +29,7 @@ from toplab.plotting.plot_style_sb import (
 import toplab.plotting.plot_style_sb as plot_style
 
 # Multi-tank system data structures
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 from toplab.system.state_management import MultiTankResults
 
 
@@ -161,6 +162,7 @@ class DelftColourPlotter:
         return saved_files
 
     def plot_phase_colour_map(self,
+                              fluid: str = DEFAULT_COOLPROP_FLUID,
                               temperature_range: Tuple[float, float] = (15.0, 60.0),
                               density_range: Tuple[float, float] = (0.0, 90.0),
                               resolution: Tuple[int, int] = (400, 400),
@@ -225,14 +227,14 @@ class DelftColourPlotter:
 
         # Critical and triple points (with safe fallbacks)
         try:
-            Tcrit = float(PropsSI("Tcrit", "PARAHYD"))
-            Pcrit = float(PropsSI("pcrit", "PARAHYD"))
+            Tcrit = float(PropsSI("Tcrit", fluid))
+            Pcrit = float(PropsSI("pcrit", fluid))
         except Exception:
             Tcrit, Pcrit = 33.0, 1.3e6
 
         try:
-            Ttriple = float(PropsSI("Ttriple", "PARAHYD"))
-            Ptriple = float(PropsSI("ptriple", "PARAHYD"))
+            Ttriple = float(PropsSI("Ttriple", fluid))
+            Ptriple = float(PropsSI("ptriple", fluid))
         except Exception:
             Ttriple, Ptriple = 13.8, 7e3  # approximate values
 
@@ -247,8 +249,8 @@ class DelftColourPlotter:
         for i, T in enumerate(T_vals):
             if T < Tcrit:
                 try:
-                    rho_l_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 0, "PARAHYD"))
-                    rho_g_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 1, "PARAHYD"))
+                    rho_l_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 0, fluid))
+                    rho_g_sat[i] = float(PropsSI("Dmass", "T", T, "Q", 1, fluid))
                 except Exception:
                     # leave as NaN if CoolProp can't provide at extreme edges
                     pass
@@ -358,7 +360,7 @@ class DelftColourPlotter:
 
             # Extend saturation curves to critical point explicitly
             try:
-                rho_crit = float(PropsSI("rhocrit", "PARAHYD"))
+                rho_crit = float(PropsSI("rhocrit", fluid))
             except Exception:
                 rho_crit = None
             if rho_crit is not None and np.isfinite(rho_crit):
@@ -381,7 +383,7 @@ class DelftColourPlotter:
                 rhos_valid = []
                 for T in T_for_isobars:
                     try:
-                        rho = float(PropsSI("Dmass", "T", T, "P", ppa, "PARAHYD"))
+                        rho = float(PropsSI("Dmass", "T", T, "P", ppa, fluid))
                         if np.isfinite(rho) and (rho_min <= rho <= rho_max):
                             Ts_valid.append(T)
                             rhos_valid.append(rho)
@@ -422,7 +424,7 @@ class DelftColourPlotter:
         # Mark critical point
         if T_min <= Tcrit <= T_max:
             try:
-                rho_crit = float(PropsSI("rhocrit", "PARAHYD"))
+                rho_crit = float(PropsSI("rhocrit", fluid))
             except Exception:
                 rho_crit = 31.0  # approx kg/m³
             if rho_min <= rho_crit <= rho_max:
@@ -431,8 +433,8 @@ class DelftColourPlotter:
         # Mark triple point (optional)
         if T_min <= Ttriple <= T_max:
             try:
-                rho_l_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 0, "PARAHYD"))
-                rho_g_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 1, "PARAHYD"))
+                rho_l_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 0, fluid))
+                rho_g_tp = float(PropsSI("Dmass", "T", Ttriple, "Q", 1, fluid))
                 # Show as two markers at the same T
                 markers = []
                 if rho_min <= rho_l_tp <= rho_max:
@@ -2886,6 +2888,7 @@ class DelftColourPlotter:
         ylim_power: Optional[Tuple[float, float]] = None,
         ylim_energy: Optional[Tuple[float, float]] = None,
         legend_location: str = 'best',
+        fluid: str = DEFAULT_COOLPROP_FLUID,
     ) -> plt.Figure:
         """
         Plot instantaneous power [kW] and cumulative energy [MJ] for the
@@ -2945,8 +2948,8 @@ class DelftColourPlotter:
                 if np.isnan(T_in[i]) or np.isnan(T_out[i]):
                     continue
                 try:
-                    h_in  = PropsSI("Hmass", "P", P_in[i]  * 1e5, "T", T_in[i],  "PARAHYD")
-                    h_out = PropsSI("Hmass", "P", P_out[i] * 1e5, "T", T_out[i], "PARAHYD")
+                    h_in  = PropsSI("Hmass", "P", P_in[i]  * 1e5, "T", T_in[i],  fluid)
+                    h_out = PropsSI("Hmass", "P", P_out[i] * 1e5, "T", T_out[i], fluid)
                     power[i] = mdot * (h_out - h_in) / 1000.0  # W → kW
                 except Exception:
                     pass

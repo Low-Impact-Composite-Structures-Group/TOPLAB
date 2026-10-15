@@ -8,6 +8,8 @@ from typing import Optional
 from CoolProp.CoolProp import PropsSI
 
 
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
+
 @dataclass(frozen=True)
 class PeripheralFlowState:
     """Thermodynamic state of a coupling stream between tanks/components."""
@@ -15,7 +17,7 @@ class PeripheralFlowState:
     pressure: float
     temperature: float
     mass_flow_rate: float
-    fluid: str = "PARAHYD"
+    fluid: str = DEFAULT_COOLPROP_FLUID
     enthalpy: Optional[float] = None
     entropy: Optional[float] = None
     density: Optional[float] = None
@@ -56,7 +58,7 @@ class PeripheralFlowState:
         cls,
         tank_state,
         mass_flow_rate: float,
-        fluid: str = "PARAHYD",
+        fluid: Optional[str] = None,
     ) -> "PeripheralFlowState":
         pressure = tank_state.pressure
         if pressure is None and hasattr(tank_state, "compute_pressure"):
@@ -68,7 +70,7 @@ class PeripheralFlowState:
             pressure=pressure,
             temperature=tank_state.h2_temperature,
             mass_flow_rate=mass_flow_rate,
-            fluid=fluid,
+            fluid=fluid or getattr(tank_state, "fluid", DEFAULT_COOLPROP_FLUID),
             density=density,
         ).resolved()
 

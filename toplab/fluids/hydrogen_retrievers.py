@@ -12,7 +12,7 @@ from toplab.fluids.convective_mediums import Hydrogen, IsochoricHydrogen, TwoPha
 path = os.getcwd() + "/src/fluids/refprop/"
 CP.set_config_string(CP.ALTERNATIVE_REFPROP_PATH, path)
 
-HYDROGEN_FLUID = "PARAHYD"
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 
 
 class HydrogenRequester(Protocol):
@@ -28,7 +28,9 @@ class HydrogenRequester(Protocol):
 
 
 class SinglePhaseRequester(HydrogenRequester):
-    fluid = HYDROGEN_FLUID
+    def __init__(self, fluid: str = DEFAULT_COOLPROP_FLUID):
+        self.fluid = fluid
+
     properties = [
         "T", "P", "D", "V", "C", "L", "H", "U", "A", "d(D)/d(P)|T",
         "d(D)/d(T)|P", "d(H)/d(P)|T", "d(H)/d(T)|P", "d(P)/d(T)|D", "Phase",
@@ -89,7 +91,8 @@ class IsochoricHydrogenRequester(SinglePhaseRequester):
         "d(D)/d(T)|P", "d(H)/d(P)|T", "d(H)/d(T)|P", "d(P)/d(T)|D", "Phase",
     ]
 
-    def __init__(self, saturation_tolerance: float = 1e-3):
+    def __init__(self, saturation_tolerance: float = 1e-3, fluid: str = DEFAULT_COOLPROP_FLUID):
+        super().__init__(fluid)
         self.saturation_tolerance = saturation_tolerance
 
     def is_near_saturation(self, temperature: float, pressure: float) -> bool:
@@ -158,7 +161,7 @@ class HydrogenRequesterFactory:
 
 
 class PhaseRequester:
-    fluid = HYDROGEN_FLUID
+    fluid = DEFAULT_COOLPROP_FLUID
 
     def get_fluid_phase(self, temperature: float, pressure: float) -> str:
         critical_temperature = PropsSI("Tcrit", "", 0, "", 0, self.fluid)

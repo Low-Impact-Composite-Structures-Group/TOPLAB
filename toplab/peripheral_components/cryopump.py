@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 
 from CoolProp.CoolProp import PropsSI
 
+from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 from toplab.fluids.hydrogen_retrievers import HydrogenRetriever
 
 from .base import PeripheralComponent, PeripheralFlowState
@@ -18,6 +19,7 @@ class CryopumpParameters:
 
     reservoir_pressure: float = 3.0e5
     efficiency: float = 0.78
+    fluid: str = DEFAULT_COOLPROP_FLUID
 
 
 class CryoPumpModel(PeripheralComponent):
@@ -56,7 +58,7 @@ class CryoPumpModel(PeripheralComponent):
         if self.enable_cache:
             self._cache_misses += 1
 
-        fluid = "PARAHYD"
+        fluid = self.parameters.fluid
         P1 = self.parameters.reservoir_pressure
         P2 = tank_pressure
         eta_p = self.parameters.efficiency

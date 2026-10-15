@@ -64,21 +64,22 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
+        fluid = state.fluid
         m = max(state.fuel_mass, 1.0)
         T = max(state.h2_temperature, 1.0)
         rho = state.density
         p = state.pressure
 
         if state.hydrogen is None:
-            requester = IsochoricHydrogenRequester()
+            requester = IsochoricHydrogenRequester(fluid=fluid)
             hydrogen = requester.get_hydrogen_properties(p, T, rho)
         else:
             hydrogen = state.hydrogen
 
         try:
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
-            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, "PARAHYD")
-            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, "PARAHYD")
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
+            c_v = PropsSI("Cvmass", "T", T, "Dmass", rho, fluid)
+            dp_dT_rho = PropsSI('d(P)/d(T)|D', 'T', T, 'Dmass', rho, fluid)
         except:
             h = 0.0
             c_v = 14000.0
@@ -95,7 +96,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         h_term = 0.0
         for e in edge_flows:
             if e.is_inflow_for(tank_idx):
-                h_in = e.h if (e.edge_type == 'coupling' and e.h != 0.0) else self._compute_fuel_enthalpy(p, T)
+                h_in = e.h if (e.edge_type == 'coupling' and e.h != 0.0) else self._compute_fuel_enthalpy(p, T, fluid)
                 h_term += e.mdot * (h_in - h)
             # outflows carry h_tank  →  (h_edge − h_tank) = 0, no contribution
 
@@ -163,29 +164,29 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         else:
             return 0.0
 
-    def _compute_fuel_enthalpy(self, pressure: float, temperature: float) -> float:
+    def _compute_fuel_enthalpy(self, pressure: float, temperature: float, fluid: str) -> float:
         if self.scenario == "REFUEL":
-            return self._compute_cryopump_enthalpy(pressure, temperature)
+            return self._compute_cryopump_enthalpy(pressure, temperature, fluid)
         try:
-            return PropsSI("Hmass", "P", pressure, "T", temperature, "PARAHYD")
+            return PropsSI("Hmass", "P", pressure, "T", temperature, fluid)
         except ValueError:
             # (P, T) on the saturation curve — return saturated-vapour enthalpy
             # (single-phase model represents gas-phase tanks)
             try:
-                return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
+                return PropsSI("Hmass", "T", temperature, "Q", 1, fluid)
             except Exception:
                 return 14300.0 * temperature
         except Exception:
             return 14300.0 * temperature
 
-    def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float) -> float:
+    def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float, fluid: str) -> float:
         P1 = 3e5
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
-            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
+            h1 = PropsSI("H", "P", P1, "Q", 0, fluid)
+            s1 = PropsSI("S", "P", P1, "Q", 0, fluid)
+            h2s = PropsSI("H", "P", P2, "S", s1, fluid)
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:
@@ -211,26 +212,27 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         edge_flows: List[EdgeFlow],
         **kwargs,
     ) -> IsochoricStateDerivatives:
+        fluid = state.fluid
         m = max(state.fuel_mass, 1e-12)
         T = max(state.h2_temperature, 1.0)
         rho = state.density
 
         if state.hydrogen is None:
-            requester = IsochoricHydrogenRequester()
+            requester = IsochoricHydrogenRequester(fluid=fluid)
             hydrogen = requester.get_hydrogen_properties(state.pressure, T, rho)
         else:
             hydrogen = state.hydrogen
 
         try:
-            p_sat = PropsSI("P", "T", T, "Q", 0, "PARAHYD")
-            h = PropsSI("Hmass", "T", T, "Dmass", rho, "PARAHYD")
+            p_sat = PropsSI("P", "T", T, "Q", 0, fluid)
+            h = PropsSI("Hmass", "T", T, "Dmass", rho, fluid)
             x = hydrogen.vapor_fraction if hydrogen.vapor_fraction is not None else 0.0
-            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, "PARAHYD")
-            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, "PARAHYD")
-            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, "PARAHYD")
-            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, "PARAHYD")
-            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, "PARAHYD")
-            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, "PARAHYD")
+            c_v_liquid = PropsSI("Cvmass", "T", T, "Q", 0, fluid)
+            c_v_vapor  = PropsSI("Cvmass", "T", T, "Q", 1, fluid)
+            h_vapor    = PropsSI("Hmass",  "T", T, "Q", 1, fluid)
+            h_liquid   = PropsSI("Hmass",  "T", T, "Q", 0, fluid)
+            rho_vapor  = PropsSI("Dmass",  "T", T, "Q", 1, fluid)
+            rho_liquid = PropsSI("Dmass",  "T", T, "Q", 0, fluid)
             L_v       = h_vapor - h_liquid
             delta_v   = (1.0 / rho_vapor) - (1.0 / rho_liquid)
             dp_sat_dT = L_v / (T * delta_v)
@@ -239,12 +241,12 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             _dT = 0.05   # K, step for numerical saturation-curve derivative
             _Tlo, _Thi = max(T - _dT, 14.0), T + _dT
             _step = _Thi - _Tlo
-            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,"PARAHYD") -
-                         PropsSI("Dmass","T",_Tlo,"Q",0,"PARAHYD")) / _step
-            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,"PARAHYD") -
-                         PropsSI("Dmass","T",_Tlo,"Q",1,"PARAHYD")) / _step
-            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, "PARAHYD")
-            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, "PARAHYD")
+            drho_l_dT = (PropsSI("Dmass","T",_Thi,"Q",0,fluid) -
+                         PropsSI("Dmass","T",_Tlo,"Q",0,fluid)) / _step
+            drho_v_dT = (PropsSI("Dmass","T",_Thi,"Q",1,fluid) -
+                         PropsSI("Dmass","T",_Tlo,"Q",1,fluid)) / _step
+            dp_dT_rho_l = PropsSI("d(P)/d(T)|D", "T", T, "Q", 0, fluid)
+            dp_dT_rho_v = PropsSI("d(P)/d(T)|D", "T", T, "Q", 1, fluid)
             c_v2P_l = c_v_liquid + T * (dp_dT_rho_l - dp_sat_dT) * (-drho_l_dT / rho_liquid**2)
             c_v2P_v = c_v_vapor  + T * (dp_dT_rho_v - dp_sat_dT) * (-drho_v_dT / rho_vapor**2)
             c_v2P = (1.0 - x) * c_v2P_l + x * c_v2P_v
@@ -267,7 +269,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         # behaviour here so that the two-phase energy balance is unchanged from the
         # pre-EdgeFlow baseline.  The physically-correct CH2 enthalpy path belongs
         # in a future change once the full graph refactor is in place.
-        h_fuel = self._compute_fuel_enthalpy(p_sat, T)
+        h_fuel = self._compute_fuel_enthalpy(p_sat, T, fluid)
         h_term = 0.0
         for e in edge_flows:
             if e.is_inflow_for(tank_idx):
@@ -338,25 +340,25 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
         else:
             return 0.0
 
-    def _compute_fuel_enthalpy(self, pressure: float, temperature: float) -> float:
+    def _compute_fuel_enthalpy(self, pressure: float, temperature: float, fluid: str) -> float:
         if self.scenario == "REFUEL":
-            return self._compute_cryopump_enthalpy(pressure, temperature)
+            return self._compute_cryopump_enthalpy(pressure, temperature, fluid)
         # In two-phase equilibrium (P, T) is ambiguous — CoolProp cannot resolve
         # the phase from that pair alone.  Use saturated-vapour enthalpy instead,
         # which is the appropriate value for gas leaving a two-phase LH2 tank.
         try:
-            return PropsSI("Hmass", "T", temperature, "Q", 1, "PARAHYD")
+            return PropsSI("Hmass", "T", temperature, "Q", 1, fluid)
         except Exception:
             return 14300.0 * temperature  # ideal-gas fallback
 
-    def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float) -> float:
+    def _compute_cryopump_enthalpy(self, tank_pressure: float, tank_temperature: float, fluid: str) -> float:
         P1 = 3e5
         P2 = tank_pressure
         eta_p = 0.78
         try:
-            h1 = PropsSI("H", "P", P1, "Q", 0, "PARAHYD")
-            s1 = PropsSI("S", "P", P1, "Q", 0, "PARAHYD")
-            h2s = PropsSI("H", "P", P2, "S", s1, "PARAHYD")
+            h1 = PropsSI("H", "P", P1, "Q", 0, fluid)
+            s1 = PropsSI("S", "P", P1, "Q", 0, fluid)
+            h2s = PropsSI("H", "P", P2, "S", s1, fluid)
             h2 = h1 + (h2s - h1) / eta_p
             return h2
         except:

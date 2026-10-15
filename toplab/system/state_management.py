@@ -47,7 +47,8 @@ class MultiTankState:
                          state_vector: np.ndarray,
                          tank_objects: List[Any],
                          time: float = 0.0,
-                         flow_data: List[Dict] = None) -> 'MultiTankState':
+                         flow_data: List[Dict] = None,
+                         fluids: List[str] = None) -> 'MultiTankState':
         """Create MultiTankState from combined state vector"""
         n_tanks = len(tank_objects)
         if len(state_vector) != 5 * n_tanks:
@@ -63,6 +64,7 @@ class MultiTankState:
                 structure_temperature=state_vector[idx + 2],
                 insulation_temperature=state_vector[idx + 3],
                 shell_temperature=state_vector[idx + 4],
+                **({'fluid': fluids[i]} if fluids else {}),
             )
 
             # Add flow rate data if provided
