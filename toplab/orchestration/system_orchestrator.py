@@ -1380,8 +1380,18 @@ class SystemOrchestrator:
             raise ValueError("No results available. Run simulation first.")
 
         print("\nValidating simulation results...")
-        # Validation results - simplified for now
-        self.validation_results = {"overall": True, "message": "TankSystem validation not yet implemented"}
+        from toplab.post.mass_balance import check_mass_balance
+
+        rtol = 1e-3
+        balances = check_mass_balance(self.results)
+        for b in balances:
+            status = "ok" if b.passed(rtol) else "FAILED"
+            print(f"   Tank {b.tank_index + 1} mass balance: residual {b.residual:.4g} kg "
+                  f"({b.relative_residual:.2e} of initial mass) {status}")
+        self.validation_results = {
+            "overall": all(b.passed(rtol) for b in balances),
+            "mass_balance": balances,
+        }
 
         return self.validation_results
 
