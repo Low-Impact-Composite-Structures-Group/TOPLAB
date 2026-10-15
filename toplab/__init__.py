@@ -3,7 +3,7 @@
 __all__: list[str] = []
 
 try:
-	from .coupling.inter_tank_coupling import InterTankCoupling, PressureTriggeredValve
+	from .coupling import InterTankCoupling, PressureTriggeredValve
 	from .peripheral_components import Compressor, CryoPumpModel, IdealHeatExchanger
 	from .system.tank_system import TankSystem, TankSystemConfig, TankConfig
 	from .system.state_management import MultiTankState, MultiTankResults

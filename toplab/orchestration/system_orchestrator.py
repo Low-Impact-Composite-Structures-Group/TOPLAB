@@ -27,7 +27,6 @@ from toplab.config import AnalysisConfig, load_config
 from toplab.missions.factory import build_mission
 from toplab.missions.mission import Mission
 from toplab.network import SINK, Network
-from toplab.network.coupling_rules import to_tank_system_rules
 from toplab.sizing import TankDesign, size_tank
 
 # Multi-tank DAE physics engine
@@ -105,7 +104,7 @@ class SystemOrchestrator:
         self.tank_system = TankSystem(
             tank_geometries=self.tank_geometries,
             config=self.tank_system_config,
-            coupling_rules=to_tank_system_rules(self.couplings),
+            couplings=self.couplings,
             analysis_config=self.config,
             verbosity=self.verbosity,
         )
@@ -941,7 +940,7 @@ class SystemOrchestrator:
         # -------------------------------------------------------------------
         # Peripheral component chain plots (HEX, compressor, pump…)
         # -------------------------------------------------------------------
-        from toplab.coupling.inter_tank_coupling import ProportionalSplitCoupling, PressureTriggeredDischarge
+        from toplab.coupling import ProportionalSplitCoupling, PressureTriggeredDischarge
 
         # Only attempt if the tank_system has coupling valves
         if hasattr(self, 'tank_system') and self.tank_system is not None:
