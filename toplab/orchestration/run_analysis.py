@@ -65,7 +65,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         output={**config.output, 'save_plots': False, 'save_data': False, 'silent': True},
         dormancy_check=None,
     )
-    orchestrator = SystemOrchestrator(dormancy_case, verbosity='quiet')
+    orchestrator = SystemOrchestrator(dormancy_case, verbosity='quiet', sizing_config=config)
     results = orchestrator.run_simulation()
 
     actual_duration_h = float(results.times[-1]) / 3600.0

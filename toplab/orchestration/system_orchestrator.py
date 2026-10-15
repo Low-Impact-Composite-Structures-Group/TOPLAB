@@ -64,7 +64,8 @@ class SystemOrchestrator:
     """
 
     @silent_when_quiet
-    def __init__(self, config: AnalysisConfig = None, config_path: str = None, verbosity: str = "summary"):
+    def __init__(self, config: AnalysisConfig = None, config_path: str = None, verbosity: str = "summary",
+                 sizing_config: AnalysisConfig = None):
         self.verbosity = self._normalize_verbosity(verbosity)
 
         if config is None:
@@ -79,7 +80,19 @@ class SystemOrchestrator:
         self.mission_profile = self.missions[0]
         print(f"   Loaded {len(self.missions)} mission(s); primary profile: {config.missions[0].profile}")
 
-        self._streams = self._resolve_streams()
+        self._streams = self._resolve_streams(config, self.missions)
+
+        # Tanks are sized from ``sizing_config`` when given (e.g. a dormancy check re-using
+        # the discharge design); otherwise from the analysis itself.
+        if sizing_config is None:
+            self._sizing_streams = self._streams
+            self._sizing_primary = self.mission_profile
+            self._sizing_mission_type = config.missions[0].type
+        else:
+            sizing_missions = [build_mission(spec) for spec in sizing_config.missions]
+            self._sizing_streams = self._resolve_streams(sizing_config, sizing_missions, announce=False)
+            self._sizing_primary = sizing_missions[0]
+            self._sizing_mission_type = sizing_config.missions[0].type
 
         # Flat per-tank dicts. Sizing stores its calculated initial state back into these.
         self._tank_data = [tank.geometry_data() for tank in config.tanks]
@@ -122,24 +135,26 @@ class SystemOrchestrator:
         print(f"   Missions: {len(self.config.missions)}")
         print(f"   Analysis type: {self.config.name}")
 
-    def _resolve_streams(self) -> Dict[int, List[Stream]]:
+    def _resolve_streams(self, config: AnalysisConfig, missions: List[Any],
+                         announce: bool = True) -> Dict[int, List[Stream]]:
         """Route every mission to the tank(s) that serve it, via the network."""
         streams: Dict[int, List[Stream]] = {}
-        for spec, mission in zip(self.config.missions, self.missions):
+        for spec, mission in zip(config.missions, missions):
             for tank_index, fraction in self.network.demand_targets(spec.assigned_to_node).items():
                 tank_streams = streams.setdefault(tank_index, [])
                 label = spec.parameters.get('column_name', f"Stream {len(tank_streams) + 1}")
                 tank_streams.append(Stream(label, mission, fraction))
 
-        assigned = {spec.assigned_to_node for spec in self.config.missions}
+        assigned = {spec.assigned_to_node for spec in config.missions}
         for mixer_id, mixer in self.network.mixers.items():
             if mixer_id not in assigned:
                 raise ValueError(
                     f"Mixer node {mixer_id} has no mission: set 'assigned_to_node: {mixer_id}' "
                     f"on the mission(s) feeding it."
                 )
-            print(f"   Mixer {mixer_id}: tank shares " +
-                  ", ".join(f"Tank {tid}={f:.3f}" for tid, f in mixer.fractions.items()))
+            if announce:
+                print(f"   Mixer {mixer_id}: tank shares " +
+                      ", ".join(f"Tank {tid}={f:.3f}" for tid, f in mixer.fractions.items()))
         return streams
 
     @staticmethod
@@ -151,10 +166,10 @@ class SystemOrchestrator:
 
     def _required_fuel(self, tank_index: int) -> float:
         """Fuel [kg] the tank must carry: its share of every mission routed to it."""
-        streams = self._streams.get(tank_index)
+        streams = self._sizing_streams.get(tank_index)
         if not streams:
             # Tanks with no demand of their own are sized against the primary mission.
-            return self.mission_profile.required_fuel
+            return self._sizing_primary.required_fuel
         return sum(s.fraction * s.mission.required_fuel for s in streams)
 
     def _create_tank_geometries(self) -> List[Any]:
@@ -223,7 +238,7 @@ class SystemOrchestrator:
         print(f"   Sizing for fuel requirement: {required_fuel_mass:.2f} kg")
 
         # Tanks are always sized at discharge conditions, even for refuel/dormancy missions.
-        if self.config.missions[0].type != 'discharge':
+        if self._sizing_mission_type != 'discharge':
             geometry_data['initial_pressure'] = 400e5  # 400 bar - discharge pressure
             geometry_data['initial_density'] = 78.0    # kg/m³ - discharge density
 

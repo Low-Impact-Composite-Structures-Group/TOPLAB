@@ -150,3 +150,21 @@ output:
       xlim: null
       ylim: null
       legend_location: best
+
+dormancy_check:
+  enabled: true
+  duration_h: 12.0
+  maximum_loss_percent_per_hour: 1.0
+
+packaging:
+  generate_3d_plot: false
+  aft_fuselage_dimensions:
+    d1: 2.7
+    d2: 1.61
+    d3: 0.53
+    l1: 1.5
+    l2: 3.0
+    l3: 3.0
+    epsilon: 0.05
+    psi_1: 8.0
+    psi_2: 8.0
