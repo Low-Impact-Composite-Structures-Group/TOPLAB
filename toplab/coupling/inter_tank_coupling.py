@@ -11,6 +11,7 @@ from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
 import math
 from typing import List, Optional, Dict, Any
 from toplab.fluids.flow_physics import FlowPhysics
+from toplab.fluids.valve_flow import ValvePath, valve_mass_flow
 from toplab.peripheral_components.base import PeripheralFlowState
 from CoolProp.CoolProp import PropsSI
 
@@ -74,49 +75,26 @@ def _as_float(x: Any) -> float:
 
 
 class PressureTriggeredValve(InterTankCoupling):
-    """Pressure-triggered valve with choked flow physics, hysteresis control, and first-order dynamics."""
+    """Hysteresis valve between two tanks; flow from the adiabatic pipe/orifice/pipe model."""
 
     def __init__(self, source_idx: int, target_idx: int,
                  p_open: float, p_close: float,
-                 max_flow_rate: float = 0.005,
-                 orifice_diameter: float = 0.002,
+                 path: ValvePath,
                  coupling_id: str = None,
-                 flow_physics: Optional[FlowPhysics] = None,
                  valve_time_constant_s: float = 0.5):
         super().__init__(source_idx, target_idx, coupling_id)
-        # Correct pressure logic: p_open is activation threshold, p_close is deactivation threshold
-        self.p_open = p_open     # Valve opens when target pressure <= p_open
-        self.p_close = p_close   # Valve closes when target pressure >= p_close
-        self.max_flow_rate = max_flow_rate
-        self.orifice_diameter = orifice_diameter
+        # Opens when the target pressure falls to p_open, closes when it rises to p_close.
+        self.p_open = p_open
+        self.p_close = p_close
+        self.path = path
 
-        # Hysteresis thresholds for clear logic
-        self.activation_threshold = p_open    # Open valve when P_target ≤ this
-        self.deactivation_threshold = p_close # Close valve when P_target ≥ this
+        self.activation_threshold = p_open
+        self.deactivation_threshold = p_close
 
-        # First-order valve dynamics
-        self.valve_time_constant_s = valve_time_constant_s  # Time constant for opening/closing
-        self._valve_coefficient = 0.0  # Current valve opening (0 = closed, 1 = fully open)
-        self._last_coeff_time = None  # Last time coefficient was updated
-
-        # Flow physics calculator (configuration-driven)
-        # IMPORTANT: flow_physics should be provided for accurate flow calculations
-        # If None, raise a clear error directing user to configuration
-        if flow_physics is None:
-            raise ValueError(
-                f"PressureTriggeredValve requires 'flow_physics' configuration. "
-                f"Add a 'flow_physics' section to your coupling rule configuration with: "
-                f"discharge_coefficient, atmospheric_pressure, and safety parameters. "
-                f"See documentation for FlowPhysics configuration schema."
-            )
-        self.flow_physics = flow_physics
-
-        # Calculate effective area using flow physics
-        if not self.flow_physics.use_flow_coefficient:
-            orifice_area = math.pi * (orifice_diameter / 2)**2
-            self.effective_area = self.flow_physics.discharge_coefficient * orifice_area
-        else:
-            self.effective_area = self.flow_physics.flow_coefficient
+        # First-order valve dynamics; the opening scales the orifice area.
+        self.valve_time_constant_s = valve_time_constant_s
+        self._valve_coefficient = 0.0
+        self._last_coeff_time = None
 
         if p_close <= p_open:
             raise ValueError(f"deactivation_threshold ({p_close/1e5:.1f} bar) must be > activation_threshold ({p_open/1e5:.1f} bar)")
@@ -172,15 +150,14 @@ class PressureTriggeredValve(InterTankCoupling):
         return self._valve_coefficient > 1e-6  # Active if any opening
 
     def calculate_flow_rate(self, t: float, tank_states: List) -> float:
-        """Calculate flow rate using configuration-driven flow physics and valve coefficient."""
-        # If valve is fully closed, no flow
+        """Mass flow [kg/s] through the pipe/orifice/pipe path at the current valve opening."""
         if self._valve_coefficient <= 1e-6:
             return 0.0
 
         source_state = tank_states[self.source_idx]
         target_state = tank_states[self.target_idx]
 
-        if source_state.fuel_mass < 1.0:
+        if source_state.fuel_mass <= 0.0:
             return 0.0
 
         if source_state.pressure is None:
@@ -193,28 +170,15 @@ class PressureTriggeredValve(InterTankCoupling):
         if P1 <= P2:
             return 0.0
 
-        T1 = source_state.h2_temperature
-        rho1 = source_state.fuel_mass / source_state.tank.volume
-
-        # Calculate fully-open flow rate using configuration-driven flow physics
-        base_flow_rate = self.flow_physics.calculate_orifice_flow_rate(
-            upstream_pressure=P1,
-            downstream_pressure=P2,
-            upstream_temperature=T1,
-            upstream_density=rho1,
-            orifice_diameter=self.orifice_diameter
+        return valve_mass_flow(
+            self.path,
+            fluid=source_state.fluid,
+            p_source=P1,
+            temperature=source_state.h2_temperature,
+            density=source_state.fuel_mass / source_state.tank.volume,
+            p_target=P2,
+            opening=self._valve_coefficient,
         )
-
-        # Apply valve coefficient (modulates flow based on opening)
-        flow_rate = base_flow_rate * self._valve_coefficient
-
-        # Apply valve capacity limit
-        flow_rate = min(flow_rate, self.max_flow_rate)
-
-        # Apply safety limits
-        flow_rate = self.flow_physics.apply_safety_limits(flow_rate, source_state.fuel_mass)
-
-        return flow_rate
 
     def update_valve_state(self, target_pressure, t):
         """Update valve open/close state based on hysteresis logic

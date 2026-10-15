@@ -130,17 +130,14 @@ class TankSystem:
                         f"Failed to initialize flow physics from configuration. "
                         f"Check your 'physics:' section in the YAML file. Error: {e}"
                     ) from e
-            elif self.coupling_rules:
-                # Only raise error if we have coupling rules that need flow physics
+            elif any(r.get('type', 'pressure_triggered_valve') != 'pressure_triggered_valve'
+                     for r in self.coupling_rules):
+                # Pressure-triggered valves carry their own pipe/orifice model; the controlled
+                # couplings still use FlowPhysics (pending their own physics review).
                 raise ValueError(
-                    "No 'physics' section found in configuration, but coupling rules are defined. "
-                    "Flow physics configuration is required for multi-tank systems with coupling. "
-                    "Add a 'physics:' section to your YAML configuration file with orifice_flow, "
-                    "safety_limits, and other flow physics parameters."
+                    "No 'physics' section found in configuration, but controlled couplings that "
+                    "need flow physics are defined. Add a 'physics:' section to the YAML."
                 )
-            else:
-                # No coupling rules, no physics needed
-                print("   No coupling rules - flow physics not required")
 
         # Initialize caching system
         self._cached_tank_properties = {}
@@ -306,10 +303,8 @@ class TankSystem:
                     target_idx=target_idx,
                     p_open=rule.get('opening_pressure', 17e5),  # 17 bar default
                     p_close=rule.get('closing_pressure', 18e5),  # 18 bar default
-                    max_flow_rate=rule.get('max_flow_rate', 0.005),       # 5 g/s default (realistic for pressurization)
-                    orifice_diameter=rule.get('orifice_diameter', 0.001),  # 1 mm default (realistic for pressurization)
-                    flow_physics=self.flow_physics,  # Pass configuration-driven flow physics
-                    valve_time_constant_s=rule.get('valve_time_constant_s', 0.5)  # First-order dynamics time constant
+                    path=rule['valve_path'],
+                    valve_time_constant_s=rule.get('valve_time_constant_s', 0.5)
                 )
 
                 # Add tank name attributes expected by _calculate_coupling_flows
@@ -320,8 +315,7 @@ class TankSystem:
 
                 print(f"   🔗 Valve: Tank{source_idx+1} → Tank{target_idx+1}")
                 print(f"      Opens at {rule.get('opening_pressure', 17e5)/1e5:.0f} bar, closes at {rule.get('closing_pressure', 18e5)/1e5:.0f} bar")
-                print(f"      Max flow rate: {rule.get('max_flow_rate', 0.005)*1000:.1f} g/s")
-                print(f"      Orifice diameter: {rule.get('orifice_diameter', 0.001)*1000:.1f} mm")
+                print(f"      Orifice diameter: {rule['valve_path'].orifice_diameter_m*1000:.1f} mm")
 
             elif rule_type == 'mission_adaptive_pressure_valve':
                 # Create mission-adaptive pressure valve with dynamic thresholds

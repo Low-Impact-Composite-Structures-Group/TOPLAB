@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
+from toplab.fluids.valve_flow import ValvePath, path_from_options
 from toplab.network.network import CouplingEdge
 
 BAR = 1e5
@@ -35,6 +36,14 @@ def _valve_params(c: CouplingEdge, default_flow: float, default_orifice: float) 
         "max_flow_rate": flow.get("max_flow_rate_kg_s", default_flow),
         "orifice_diameter": flow.get("orifice_diameter_m", default_orifice),
     }
+
+
+def _valve_path(c: CouplingEdge, default_orifice: float) -> ValvePath:
+    """Pipe/orifice description of a pressure-triggered valve edge."""
+    if c.options.get("valve"):
+        return path_from_options(c.options)
+    flow = c.options.get("flow_parameters", {})
+    return ValvePath(orifice_diameter_m=float(flow.get("orifice_diameter_m", default_orifice)))
 
 
 def _controlled_valve(rule_type: str, default_id: str) -> Callable[[CouplingEdge], Dict[str, Any]]:
@@ -66,7 +75,7 @@ def _flow_controlled_pressurization(c: CouplingEdge) -> Dict[str, Any]:
         "target_tank": c.target,
         "opening_pressure": hysteresis["activation_threshold_bar"] * BAR,
         "closing_pressure": hysteresis["deactivation_threshold_bar"] * BAR,
-        **_valve_params(c, 0.05, 0.01),
+        "valve_path": _valve_path(c, 0.01),
     }
 
 
@@ -84,26 +93,13 @@ def _pressure_compensation(c: CouplingEdge) -> Dict[str, Any]:
         print(f"WARNING: Adjusting close threshold of '{c.edge_id}': {close_bar} <= {open_bar} bar -> +1 bar gap")
         close_bar = open_bar + 1.0
 
-    flow = c.options.get("flow_parameters", {})
-    if not flow:
-        physics = c.options.get("flow_physics", {})
-        orifice = safety = None
-        if isinstance(physics, dict):
-            orifice = physics.get("orifice_flow", {}).get("orifice_diameter_m")
-            safety = physics.get("safety_limits", {}).get("max_flow_rate_kg_s")
-        flow = {
-            "orifice_diameter_m": orifice if orifice is not None else 0.002,
-            "max_flow_rate_kg_s": safety if safety is not None else 0.10,
-        }
-
     return {
         "type": "pressure_triggered_valve",
         "source_tank": c.source,
         "target_tank": c.target,
         "opening_pressure": open_bar * BAR,
         "closing_pressure": close_bar * BAR,
-        "max_flow_rate": float(flow.get("max_flow_rate_kg_s", flow.get("max_flow_rate", 0.10))),
-        "orifice_diameter": float(flow.get("orifice_diameter_m", flow.get("orifice_diameter", 0.002))),
+        "valve_path": _valve_path(c, 0.002),
         "valve_time_constant_s": float(thresholds.get("valve_time_constant_s", 0.5)),
         "coupling_id": c.edge_id,
     }

@@ -78,11 +78,18 @@ network:
       pressure_open_bar: 16.0
       pressure_close_bar: 30.0
       valve_time_constant_s: 0.5
-    flow_physics:
-      orifice_flow:
-        orifice_diameter_m: 0.005
-      safety_limits:
-        max_flow_rate_kg_s: 0.056
+    # Placeholder piping values: replace with the real line sizes.
+    pipe_upstream:        # tank 1 -> valve
+      diameter_m: 0.01
+      length_m: 2.0
+      friction_factor: 0.02
+    valve:
+      orifice_diameter_m: 0.005
+      discharge_coefficient: 0.6
+    pipe_downstream:      # valve -> tank 2
+      diameter_m: 0.01
+      length_m: 1.0
+      friction_factor: 0.02
 mission:
   type: discharge
   profile: csv
@@ -94,28 +101,6 @@ mission:
     phase: gas
   ambient_temperature: 288.15
   assigned_to_node: 2
-physics:
-  fluid_properties:
-    use_coolprop: true
-    coolprop_fluid: H2
-    backup_properties:
-      specific_gas_constant: 4124.0
-      heat_capacity_ratio: 1.4
-      kinematic_viscosity: 1.55e-06
-      speed_of_sound: 1354.0
-  choked_flow:
-    enable_choked_flow: true
-    critical_pressure_ratio_override: null
-    sonic_velocity_factor: 1.0
-    choked_flow_pressure_factor: 2.0
-  safety_limits:
-    max_mass_transfer_fraction: 0.1
-    minimum_pressure_pa: 1000.0
-    maximum_velocity_ms: 2000.0
-  numerical:
-    pressure_tolerance_pa: 100.0
-    flow_rate_tolerance_kg_s: 1e-8
-    property_update_frequency: 1
 solver:
   method: LSODA
   rtol: 1e-4
