@@ -112,11 +112,9 @@ class TankSystem:
         self.dynamic_models = []
         self.coupling_valves = []
 
-        # Store coupling flows for post-processing (time -> {tank_idx: flow_rate})
-        self.coupling_flow_history = {}
-        # Gross (per-direction) coupling flows: time -> {tank_idx: {'inflow': float, 'outflow': float}}
-        self.coupling_gross_flow_history = {}
-        self._current_coupling_edge_flows = {}
+        # Per-edge flows [kg/s] at the accepted solution points (n_edges x n_points), set by run_analysis
+        self.edge_flow_history = np.zeros((0, 0))
+        self._edge_slices = []   # slice of the state vector owned by each edge
 
         # Initialize flow physics if configuration is available
         self.flow_physics = None
@@ -292,12 +290,21 @@ class TankSystem:
                 print(f"   🔗 {edge.coupling_type} '{edge.edge_id}': Tank{edge.source+1} → {target}")
             print(f"   {len(self.coupling_valves)} coupling rules configured")
 
+        start = 5 * len(self.config.tanks)
+        for edge in self.coupling_valves:
+            self._edge_slices.append(slice(start, start + edge.n_states))
+            start += edge.n_states
+
         # Cache tank properties to avoid repeated calculations during simulation
         for i, tank_geom in enumerate(self.tank_geometries):
             self._cached_tank_properties[i] = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
 
-    def _calculate_coupling_enthalpy(self, tank_idx: int, multi_state: MultiTankState) -> float:
-        inflow_edges = self._current_coupling_edge_flows.get(tank_idx, [])
+    def _calculate_coupling_enthalpy(self, tank_idx: int, multi_state: MultiTankState, edge_flows: List[float]) -> float:
+        inflow_edges = [
+            {'valve': edge, 'source_tank': edge.source_tank, 'flow_rate': flow}
+            for edge, flow in zip(self.coupling_valves, edge_flows)
+            if edge.target_tank == tank_idx and flow > 0.0
+        ]
         if not inflow_edges:
             return 0.0
 
@@ -646,13 +653,14 @@ class TankSystem:
 
         # Build multi-tank state and compute derivatives
         multi_state = MultiTankState.from_state_vector(
-            y, self.tanks, t, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
+            y[:5 * len(self.tanks)], self.tanks, t, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
         )
 
         n_tanks = len(self.tanks)
-        dydt = np.zeros(5 * n_tanks)
+        dydt = np.zeros(len(y))
 
-        coupling_flows = self._calculate_coupling_flows(multi_state, t)
+        edge_rates = self._edge_flow_rates(multi_state, t, y)
+        coupling_flows = self._net_coupling_flows(edge_rates)
 
         for i in range(n_tanks):
             tank_state = multi_state.tank_states[i]
@@ -667,7 +675,7 @@ class TankSystem:
             net_coupling_flow = coupling_flows[i]
             coupling_enthalpy = 0.0
             if net_coupling_flow > 0:
-                coupling_enthalpy = self._calculate_coupling_enthalpy(i, multi_state)
+                coupling_enthalpy = self._calculate_coupling_enthalpy(i, multi_state, edge_rates)
 
             def _as_float(val: Any) -> float:
                 if isinstance(val, (list, tuple)):
@@ -732,57 +740,52 @@ class TankSystem:
             dydt[idx + 3] = state_derivatives.insulation_temperature_derivative
             dydt[idx + 4] = state_derivatives.shell_temperature_derivative
 
+        for edge, sl in zip(self.coupling_valves, self._edge_slices):
+            if edge.n_states:
+                dydt[sl] = edge.state_derivatives(t, multi_state.tank_states, y[sl])
+
         return dydt
 
-    def _calculate_coupling_flows(self, multi_state: MultiTankState, t: float) -> Dict[int, float]:
-        """
-        Calculate net mass flow rate for each tank due to coupling.
+    def _edge_flow_rates(self, multi_state: MultiTankState, t: float, y: np.ndarray) -> List[float]:
+        """Mass flow [kg/s, >= 0] through each coupling edge; a pure function of (t, y) and the edge modes."""
+        return [max(0.0, float(edge.flow(t, multi_state.tank_states, y[sl])))
+                for edge, sl in zip(self.coupling_valves, self._edge_slices)]
 
-        Clean simple implementation - ALL coupling valves use same interface:
-        flow_rate = valve.calculate_flow(source_state, target_state, t)
-        """
-        # Initialize coupling flows for all tanks (positive = inflow, negative = outflow)
-        coupling_flows = {i: 0.0 for i in range(len(self.tanks))}
-        # Track gross inflow and outflow per tank (not NET) for accurate post-processing
-        gross_inflow = {i: 0.0 for i in range(len(self.tanks))}
-        gross_outflow = {i: 0.0 for i in range(len(self.tanks))}
-        self._current_coupling_edge_flows = {i: [] for i in range(len(self.tanks))}
+    def _net_coupling_flows(self, edge_rates: List[float]) -> Dict[int, float]:
+        """Net coupling mass flow per tank (positive = inflow)."""
+        net = {i: 0.0 for i in range(len(self.tanks))}
+        for edge, flow in zip(self.coupling_valves, edge_rates):
+            net[edge.source_tank] -= flow
+            if edge.target_tank >= 0:
+                net[edge.target_tank] += flow
+        return net
 
-        for valve in self.coupling_valves:
-            source_state = multi_state.tank_states[valve.source_tank]
+    def _gross_coupling_flows(self, edge_rates) -> Dict[int, Dict[str, float]]:
+        gross = {i: {'inflow': 0.0, 'outflow': 0.0} for i in range(len(self.tanks))}
+        for edge, flow in zip(self.coupling_valves, edge_rates):
+            gross[edge.source_tank]['outflow'] += flow
+            if edge.target_tank >= 0:
+                gross[edge.target_tank]['inflow'] += flow
+        return gross
 
-            # Handle OHEX extraction (no target tank)
-            if valve.target_tank == -1:
-                flow_rate = valve.calculate_flow(source_state, None, t)
-                if flow_rate > 0:
-                    coupling_flows[valve.source_tank] -= flow_rate
-                    gross_outflow[valve.source_tank] += flow_rate
-            else:
-                # Standard inter-tank coupling
-                target_state = multi_state.tank_states[valve.target_tank]
-                flow_rate = valve.calculate_flow(source_state, target_state, t)
+    def _edge_flows_at(self, t: float, y: np.ndarray) -> List[float]:
+        multi_state = MultiTankState.from_state_vector(
+            y[:5 * len(self.tanks)], self.tanks, t, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
+        )
+        return self._edge_flow_rates(multi_state, t, y)
 
-                if flow_rate > 0:
-                    coupling_flows[valve.source_tank] -= flow_rate
-                    coupling_flows[valve.target_tank] += flow_rate
-                    gross_outflow[valve.source_tank] += flow_rate
-                    gross_inflow[valve.target_tank] += flow_rate
-                    self._current_coupling_edge_flows[valve.target_tank].append({
-                        'valve': valve,
-                        'source_tank': valve.source_tank,
-                        'flow_rate': flow_rate,
-                    })
+    def _mode_switch_event(self, switch):
+        """Terminal event for an edge mode switch (a tank pressure crossing a threshold)."""
+        from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
+        idx, volume = switch.tank_idx, self._cached_tank_properties[switch.tank_idx]['volume']
+        fluid = self._coolprop_fluids[idx]
 
-        # Always store gross flows (including zero entries) so that the nearest-neighbour
-        # post-processing lookup never inherits a non-zero entry from a distant active period.
-        self.coupling_gross_flow_history[t] = {
-            i: {'inflow': gross_inflow[i], 'outflow': gross_outflow[i]}
-            for i in range(len(self.tanks))
-        }
-        if any(abs(flow) > 1e-9 for flow in coupling_flows.values()):
-            self.coupling_flow_history[t] = coupling_flows.copy()
+        def event(t, y):
+            return safe_pressure_from_T_rho(float(y[5 * idx + 1]), float(y[5 * idx]) / volume, fluid) - switch.pressure_pa
 
-        return coupling_flows
+        event.terminal = True
+        event.direction = switch.direction
+        return event
 
     def _get_outflow_rate(self, time: float, tank_index: int) -> float:
         """
@@ -1007,7 +1010,7 @@ class TankSystem:
                         target_pressure = tgt.pressure
 
                     try:
-                        mdot = float(valve.calculate_flow(source_state, None, t))
+                        mdot = float(self.edge_flow_history[self.coupling_valves.index(valve), ts_idx])
                     except Exception:
                         continue
                     if mdot <= 0.0:
@@ -1051,7 +1054,7 @@ class TankSystem:
 
                     # Main discharge: (1 - split_fraction) * full mission outflow
                     try:
-                        mdot_split = float(valve.calculate_flow(source_state, None, t))
+                        mdot_split = float(self.edge_flow_history[self.coupling_valves.index(valve), ts_idx])
                     except Exception:
                         continue
                     if mdot_split <= 0.0:
@@ -1229,8 +1232,6 @@ class TankSystem:
         self._log_summary(f"   Solver: {solver_method}")
 
         # Reset per-run history dicts so re-runs on the same object start clean
-        self.coupling_flow_history = {}
-        self.coupling_gross_flow_history = {}
 
         # Setup solver with configuration parameters
         solver_config = solver_config or {}
@@ -1277,6 +1278,13 @@ class TankSystem:
 
         # Create initial conditions
         y0 = self.create_initial_state()
+        initial_tanks = MultiTankState.from_state_vector(
+            y0, self.tanks, 0.0, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
+        )
+        edge_states = []
+        for edge in self.coupling_valves:
+            edge_states.extend(edge.initialize(initial_tanks.tank_states))
+        y0 = np.concatenate([y0, edge_states])
 
         # Integration setup - use mission duration from configuration
         duration_seconds = float(self.config.MISSION_DURATION)
@@ -1324,7 +1332,15 @@ class TankSystem:
 
         self._log_debug(f"   Solver parameters: timestep={timestep}s, rtol={rtol}, atol={atol}, max_step={max_step}")
 
-        solution = self.solver.integrate_full(**integration_params)
+        from toplab.solver.hybrid import integrate_with_mode_switches
+        t_span_ = integration_params.pop('t_span')
+        y0_ = integration_params.pop('y0')
+        stop_events = integration_params.pop('events')
+        solution = integrate_with_mode_switches(
+            self.solver, self.coupling_valves, stop_events, t_span_, y0_,
+            switch_event=self._mode_switch_event, edge_flows=self._edge_flows_at,
+            log=self._log_summary, **integration_params,
+        )
 
         # Fallback stopping check: if events were missed (e.g. due to ODE exceptions
         # corrupting LSODA's internal step), truncate at the first minimum-density
@@ -1373,6 +1389,7 @@ class TankSystem:
                 )
                 solution.t = solution.t[:truncate_step + 1]
                 solution.y = solution.y[:, :truncate_step + 1]
+                solution.edge_flows = solution.edge_flows[:, :truncate_step + 1]
 
         elapsed_time = time.time() - start_time
         self._log_summary(f"Integration completed in {elapsed_time:.1f}s")
@@ -1403,6 +1420,8 @@ class TankSystem:
                 stopped_early = True
         if not stopped_early:
             self._log_summary("   Mission completed: all tanks ran to the end of the mission profile.")
+
+        self.edge_flow_history = solution.edge_flows
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []
@@ -1458,12 +1477,7 @@ class TankSystem:
             # Calculate coupling flows now that all tank states are available
             if len(tank_states) > 1:  # Multi-tank system
                 # Use gross coupling flows from simulation (tracks inflow/outflow per tank separately)
-                gross_flows = {i: {'inflow': 0.0, 'outflow': 0.0} for i in range(len(tank_states))}
-
-                if self.coupling_gross_flow_history:
-                    closest_time = min(self.coupling_gross_flow_history.keys(),
-                                       key=lambda t: abs(t - current_time))
-                    gross_flows = self.coupling_gross_flow_history[closest_time].copy()
+                gross_flows = self._gross_coupling_flows(solution.edge_flows[:, i])
 
                 # Debug: Print coupling flows at this timestep
                 any_nonzero = any(

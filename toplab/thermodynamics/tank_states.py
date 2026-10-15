@@ -98,6 +98,7 @@ class IsochoricTankState:
                     f"Cannot compute pressure: H2 temperature {self.h2_temperature:.4f} K is non-positive"
                 )
             self.pressure = safe_pressure_from_T_rho(self.h2_temperature, self.density, self.fluid)
+        return self.pressure
 
     def _needs_hydrogen_update(self) -> bool:
         if self.hydrogen is None:

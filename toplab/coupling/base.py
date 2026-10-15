@@ -1,7 +1,7 @@
 """Base class and build context for inter-tank coupling edges."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from toplab.fluids.flow_physics import FlowPhysics
 from toplab.network.network import CouplingEdge
@@ -15,6 +15,20 @@ class EdgeContext:
     fluids: Dict[int, str]                           # CoolProp fluid per tank index
     flow_physics: Optional[FlowPhysics] = None       # only for the controlled valves (Phase 7)
     mission_data: Dict[str, Any] = field(default_factory=dict)  # time_s / flow_rate_kg_s of the primary mission
+
+
+@dataclass
+class ModeSwitch:
+    """A discrete mode change of an edge, triggered when a tank pressure crosses a threshold.
+
+    ``direction`` is +1 for a rising crossing and -1 for a falling one. The solver turns each switch
+    into a terminal event and calls ``apply`` when it fires, then restarts the integration.
+    """
+    tank_idx: int
+    pressure_pa: float
+    direction: int
+    apply: Callable[[], None]
+    label: str = ""
 
 
 class InterTankCoupling:
@@ -37,6 +51,28 @@ class InterTankCoupling:
         # Names the system uses when routing flows between tanks (target -1 = sink)
         self.source_tank = source_idx
         self.target_tank = target_idx
+
+    # --- Solver interface -------------------------------------------------------------------
+    # Edge-owned continuous states (e.g. valve opening) are appended to the system state vector.
+    # ``flow`` must be a pure function of (t, tank_states, x); discrete mode changes happen only
+    # through ``mode_switches`` events, never inside the right-hand side.
+    n_states = 0
+
+    def initialize(self, tank_states: List) -> List[float]:
+        """Set the initial mode from the t0 tank states and return the initial edge states."""
+        return []
+
+    def state_derivatives(self, t: float, tank_states: List, x) -> List[float]:
+        return []
+
+    def flow(self, t: float, tank_states: List, x) -> float:
+        """Mass flow [kg/s] from source to target (target -1 = sink)."""
+        target = tank_states[self.target_idx] if self.target_idx >= 0 else None
+        return self.calculate_flow(tank_states[self.source_idx], target, t)
+
+    def mode_switches(self) -> List[ModeSwitch]:
+        """Switches that can fire from the current mode."""
+        return []
 
     def evaluate(self, time_s, source_tank, dest_tank):
         """Evaluate the coupling (base implementation - should be overridden)."""

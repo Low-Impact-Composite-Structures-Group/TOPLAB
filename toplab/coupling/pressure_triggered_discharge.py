@@ -1,7 +1,7 @@
 """Hysteresis discharge valve from a tank to a sink."""
 
 from toplab.config.loader import ConfigError
-from toplab.coupling.base import EdgeContext, InterTankCoupling
+from toplab.coupling.base import EdgeContext, InterTankCoupling, ModeSwitch
 from toplab.coupling.registry import register_edge
 from toplab.network.network import CouplingEdge
 
@@ -48,11 +48,19 @@ class PressureTriggeredDischarge(InterTankCoupling):
         self._valve_open = False
         self.discharge_conditioning_chain = []  # components applied after discharge (before fuel cell)
 
-    def _update_valve_state(self, source_pressure: float) -> None:
-        if self._valve_open and source_pressure <= self.close_pressure:
-            self._valve_open = False
-        elif not self._valve_open and source_pressure >= self.open_pressure:
-            self._valve_open = True
+    def initialize(self, tank_states: list) -> list:
+        self._valve_open = tank_states[self.source_idx].compute_pressure() >= self.open_pressure
+        return []
+
+    def mode_switches(self) -> list:
+        if self._valve_open:
+            return [ModeSwitch(self.source_idx, self.close_pressure, -1,
+                               lambda: setattr(self, "_valve_open", False), f"{self.coupling_id} closes")]
+        return [ModeSwitch(self.source_idx, self.open_pressure, +1,
+                           lambda: setattr(self, "_valve_open", True), f"{self.coupling_id} opens")]
+
+    def flow(self, t: float, tank_states: list, x) -> float:
+        return self._compute_flow_rate(tank_states[self.source_idx].compute_pressure())
 
     def _compute_flow_rate(self, source_pressure: float) -> float:
         """Linear ramp from 0 at close_pressure to max_flow_rate at open_pressure."""
@@ -63,18 +71,7 @@ class PressureTriggeredDischarge(InterTankCoupling):
         return self.max_flow_rate * fraction
 
     def calculate_flow(self, source_state, target_state, t: float) -> float:
-        if hasattr(source_state, 'compute_pressure'):
-            source_state.compute_pressure()
-        p_src = getattr(source_state, 'pressure', None) or 0.0
-        self._update_valve_state(p_src)
-        return self._compute_flow_rate(p_src)
-
-    def calculate_flow_rate(self, t: float, tank_states: list) -> float:
-        src = tank_states[self.source_idx]
-        return self.calculate_flow(src, None, t)
-
-    def evaluate(self, time_s, source_tank, dest_tank):
-        return self.calculate_flow(source_tank, dest_tank, time_s)
+        return self._compute_flow_rate(source_state.compute_pressure())
 
     @classmethod
     def from_edge(cls, edge: CouplingEdge, ctx: EdgeContext) -> "PressureTriggeredDischarge":
