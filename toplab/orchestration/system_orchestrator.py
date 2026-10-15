@@ -28,10 +28,10 @@ from toplab.missions.factory import build_mission
 from toplab.missions.mission import Mission
 from toplab.network import SINK, Network
 from toplab.network.coupling_rules import to_tank_system_rules
+from toplab.sizing import TankDesign, size_tank
 
 # Multi-tank DAE physics engine
 from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig
-from toplab.utilities.tank_geometry import create_tank_from_fuel_mass
 from toplab.utilities.output_control import silent_when_quiet
 
 # Mission framework
@@ -87,17 +87,13 @@ class SystemOrchestrator:
         if sizing_config is None:
             self._sizing_streams = self._streams
             self._sizing_primary = self.mission_profile
-            self._sizing_mission_type = config.missions[0].type
         else:
             sizing_missions = [build_mission(spec) for spec in sizing_config.missions]
             self._sizing_streams = self._resolve_streams(sizing_config, sizing_missions, announce=False)
             self._sizing_primary = sizing_missions[0]
-            self._sizing_mission_type = sizing_config.missions[0].type
 
-        # Flat per-tank dicts. Sizing stores its calculated initial state back into these.
-        self._tank_data = [tank.geometry_data() for tank in config.tanks]
-
-        self.tank_geometries = self._create_tank_geometries()
+        self.designs = self._size_tanks()
+        self.tank_geometries = [d.geometry for d in self.designs]
         print(f"   Created {len(self.tank_geometries)} tank geometries")
 
         self.tank_system_config = self._create_tank_system_config()
@@ -172,154 +168,38 @@ class SystemOrchestrator:
             return self._sizing_primary.required_fuel
         return sum(s.fraction * s.mission.required_fuel for s in streams)
 
-    def _create_tank_geometries(self) -> List[Any]:
-        """Create tank geometries from the tank specs."""
-        tank_geometries = []
-
-        for tank_index, (tank, geometry_data) in enumerate(zip(self.config.tanks, self._tank_data)):
-            tank_id = tank.node_id
-            print(f"   Creating Tank {tank_id} geometry...")
-
-            phi = geometry_data.get('phi', 0.0)
-            initial_pressure = float(geometry_data['initial_pressure'])
-
-            if 'fuel_mass' in geometry_data:
-                fuel_mass = float(geometry_data['fuel_mass'])
-                initial_temperature = geometry_data.get('initial_temperature', 53.25)
-
-                tank_geom = create_tank_from_fuel_mass(
-                    fuel_mass=fuel_mass,
-                    initial_pressure=initial_pressure,
-                    initial_temperature=initial_temperature,
-                    operating_pressure=initial_pressure * 1.125,  # 12.5% margin
-                    phi=phi,
-                    safety_margin=1.1,
-                    liner_thickness=0.005,
-                    insulation_thickness=0.05
-                )
-                print(f"     From fuel mass: {fuel_mass}kg → V={tank_geom.volume:.4f}m³")
-
-            elif 'radius' in geometry_data:
-                from toplab.tank_design.tank_shapes import CapsuleTank
-                from toplab.materials.nist_materials import NISTMaterial
-
-                radius = float(geometry_data['radius'])
-                material = NISTMaterial.aluminum_6061T6_nist()
-                operating_pressure = geometry_data.get('venting_pressure', geometry_data['initial_pressure'])
-                tank_geom = CapsuleTank(radius=radius, material=material, operating_pressure=operating_pressure, phi=phi)
-                print(f"     From radius: {radius}m → V={tank_geom.volume:.4f}m³")
-
-            else:
-                from toplab.materials.nist_materials import NISTMaterial
-
-                material = NISTMaterial.aluminum_6061T6_nist()
-                operating_pressure = geometry_data.get('venting_pressure', 450e5)  # Default 450 bar
-                if 'venting_pressure' not in geometry_data:
-                    print(f"WARNING: Using fallback: venting_pressure = {operating_pressure/1e5:.0f} bar for Tank {tank_id} (consider adding to YAML config)")
-
-                tank_geom = self._create_mission_sized_tank(
-                    geometry_data, material, operating_pressure, self._required_fuel(tank_index),
-                    fluid=tank.coolprop)
-                print(f"     Mission-sized geometry: V={tank_geom.volume:.4f}m³")
-
-            tank_geometries.append(tank_geom)
-
-        return tank_geometries
-
-    def _create_mission_sized_tank(self, geometry_data, material, operating_pressure, required_fuel_mass, fluid):
-        """
-        Create a capsule tank sized to hold ``required_fuel_mass`` at the tank's initial state.
-
-        Stores the calculated initial temperature/density back into ``geometry_data``.
-        """
-        from CoolProp.CoolProp import PropsSI
-        import math
-
-        print(f"   Sizing for fuel requirement: {required_fuel_mass:.2f} kg")
-
-        # Tanks are always sized at discharge conditions, even for refuel/dormancy missions.
-        if self._sizing_mission_type != 'discharge':
-            geometry_data['initial_pressure'] = 400e5  # 400 bar - discharge pressure
-            geometry_data['initial_density'] = 78.0    # kg/m³ - discharge density
-
-        initial_pressure = float(geometry_data['initial_pressure'])  # Pa
-
-        if 'initial_density' in geometry_data:
-            target_density = float(geometry_data['initial_density'])  # kg/m³
-            try:
-                initial_temp = PropsSI("T", "P", initial_pressure, "D", target_density, fluid)
-                print(f"     Solved initial temperature: {initial_temp:.2f} K (from P={initial_pressure/1e5:.0f} bar, ρ={target_density:.1f} kg/m³)")
-            except Exception as e:
-                print(f"     Warning: Could not solve for temperature from P,ρ: {e}")
-                initial_temp = geometry_data.get('initial_temperature', 53.25)
-                target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, fluid)
-                print(f"     Using fallback: T={initial_temp:.2f} K, ρ={target_density:.1f} kg/m³")
-        else:
-            initial_temp = geometry_data.get('initial_temperature', 53.25)  # K
-            target_density = PropsSI("D", "P", initial_pressure, "T", initial_temp, fluid)
-            print(f"     Calculated density: {target_density:.2f} kg/m³ (from P={initial_pressure/1e5:.0f} bar, T={initial_temp:.1f} K)")
-
-        fill_fraction = geometry_data.get('fill_fraction', 0.90)  # 90% fill default
-        required_volume = required_fuel_mass / (target_density * fill_fraction)
-
-        phi = float(geometry_data.get('phi', 0.0))
-
-        # V = πr³(φ + 4/3), where φ = L/r and L is cylindrical section length.
-        volume_factor = math.pi * (max(phi, 0.0) + 4.0 / 3.0)
-        tank_radius = (required_volume / volume_factor) ** (1/3)
-
-        print(f"     Fill fraction: {fill_fraction:.0%}")
-        print(f"     Required volume: {required_volume:.4f} m³")
-        print(f"     Tank radius: {tank_radius:.3f} m")
-        print(f"     Tank phi (L/R): {phi:.3f}")
-
-        geometry_data['calculated_initial_temperature'] = initial_temp
-        geometry_data['calculated_initial_density'] = target_density
-
-        from toplab.tank_design.tank_shapes import CapsuleTank
-        return CapsuleTank(radius=tank_radius, material=material, operating_pressure=operating_pressure, phi=phi)
+    def _size_tanks(self) -> List[TankDesign]:
+        """Size every tank (pure); report what the sizer decided."""
+        designs = []
+        for tank_index, tank in enumerate(self.config.tanks):
+            print(f"   Sizing Tank {tank.node_id}...")
+            design = size_tank(tank, self._required_fuel(tank_index))
+            for note in design.notes:
+                print(f"     {note}")
+            print(f"     Geometry: V={design.geometry.volume:.4f} m³ ({design.method})")
+            designs.append(design)
+        return designs
 
     def _create_tank_system_config(self) -> TankSystemConfig:
         """Create TankSystemConfig from the typed config."""
         mission = self.config.missions[0]
 
         tank_configs = []
-        for tank, geometry_data in zip(self.config.tanks, self._tank_data):
-            tank_id = tank.node_id
-            initial_pressure = float(geometry_data['initial_pressure'])
-            venting_pressure = float(geometry_data.get('venting_pressure', initial_pressure * 1.125))
-            minimum_pressure = float(geometry_data.get('minimum_pressure', min(15e5, initial_pressure * 0.1)))
-            if 'minimum_pressure' not in geometry_data:
-                print(f"WARNING: Using fallback: minimum_pressure = {minimum_pressure/1e5:.1f} bar for Tank {tank_id} (calculated from initial_pressure)")
-
-            if 'calculated_initial_temperature' in geometry_data:
-                initial_temp = geometry_data['calculated_initial_temperature']
-            elif 'initial_temperature' in geometry_data:
-                initial_temp = geometry_data['initial_temperature']
-            elif 'initial_density' in geometry_data:
-                try:
-                    density = float(geometry_data['initial_density'])
-                    initial_temp = PropsSI("T", "P", initial_pressure, "D", density, tank.coolprop)
-                except Exception:
-                    initial_temp = 53.25  # Default cryogenic temperature
-            else:
-                initial_temp = 53.25  # Default
-
+        for tank, design in zip(self.config.tanks, self.designs):
             tank_configs.append(TankConfig(
-                P_INIT=initial_pressure,
-                T_INIT=initial_temp,
-                P_VENT=venting_pressure,
-                P_MIN=minimum_pressure,
-                MASS_INIT=geometry_data.get('initial_mass'),  # None if not specified
+                P_INIT=design.initial_pressure,
+                T_INIT=design.initial_temperature,
+                P_VENT=design.venting_pressure,
+                P_MIN=design.minimum_pressure,
+                MASS_INIT=design.initial_mass,
                 scenario=mission.type.upper(),  # DISCHARGE, REFUEL, DORMANCY
-                name=f"Tank{tank_id}"
+                name=f"Tank{tank.node_id}"
             ))
 
-            if tank.fluid == 'CH2':
-                p_stop_bar = float(geometry_data.get('minimum_pressure', 0)) / 1e5
-                print(f"   Tank {tank_id} config: P_init={initial_pressure/1e5:.0f}bar, T_init={initial_temp:.1f}K, P_stop={p_stop_bar:.1f}bar (CH2 pressure-based)")
-            else:
-                print(f"   Tank {tank_id} config: P_init={initial_pressure/1e5:.0f}bar, T_init={initial_temp:.1f}K, ρ_stop={geometry_data.get('minimum_density', 5.8):.1f}kg/m³")
+            stop = (f"P_stop={design.minimum_pressure / 1e5:.1f}bar (CH2 pressure-based)" if tank.fluid == 'CH2'
+                    else f"ρ_stop={tank.geometry_data().get('minimum_density', 5.8):.1f}kg/m³")
+            print(f"   Tank {tank.node_id} config: P_init={design.initial_pressure / 1e5:.0f}bar, "
+                  f"T_init={design.initial_temperature:.1f}K, {stop}")
 
         stopping_criteria = self.config.stopping_criteria
 
@@ -327,8 +207,8 @@ class SystemOrchestrator:
         if 'minimum_density' in stopping_criteria:
             minimum_density = float(stopping_criteria['minimum_density'])
         else:
-            non_ch2 = [d for t, d in zip(self.config.tanks, self._tank_data) if t.fluid != 'CH2']
-            ref_tank = non_ch2[0] if non_ch2 else self._tank_data[0]
+            non_ch2 = [t.geometry_data() for t in self.config.tanks if t.fluid != 'CH2']
+            ref_tank = non_ch2[0] if non_ch2 else self.config.tanks[0].geometry_data()
             minimum_density = float(ref_tank.get('minimum_density', 5.8))
             if 'minimum_density' not in ref_tank and non_ch2:
                 print(f"WARNING: Using fallback: minimum_density = {minimum_density} kg/m³ for stopping criteria (consider adding to YAML config)")
@@ -743,7 +623,7 @@ class SystemOrchestrator:
             print(f"   Plotting multi-tank evolution (overlay mode, {num_tanks} tanks)...")
 
             # Create reference lines from first tank configuration (for overlay mode)
-            tank_config_data = self._tank_data[0]
+            tank_config_data = self.config.tanks[0].geometry_data()
             ref_line_config = self.config.output_plots.get('reference_lines', {})
             reference_lines = plotter.create_reference_lines_from_config(tank_config_data, ref_line_config)
 
@@ -790,7 +670,7 @@ class SystemOrchestrator:
         # Generate per-tank plots (individual evolution plots if not overlaying, plus other plot types)
         for tank_idx in range(num_tanks):
             # Create reference lines from tank configuration
-            tank_config_data = self._tank_data[tank_idx]
+            tank_config_data = self.config.tanks[tank_idx].geometry_data()
             ref_line_config = self.config.output_plots.get('reference_lines', {})
             reference_lines = plotter.create_reference_lines_from_config(tank_config_data, ref_line_config)
 
@@ -1594,7 +1474,8 @@ class SystemOrchestrator:
         per_tank_blocks = []
         for tank_index, tank_geometry in enumerate(self.tank_geometries):
             tank_name = f"Tank_{tank_index + 1}"
-            tank_config = self._tank_data[tank_index]
+            tank_config = self.config.tanks[tank_index].geometry_data()
+            design = self.designs[tank_index]
             tank_material_config = self.config.tanks[tank_index].materials
             insulation_config = tank_material_config.get('insulation', {})
             initial_state = self.results.multi_tank_states[0].get_tank_state(tank_index)
@@ -1641,10 +1522,10 @@ class SystemOrchestrator:
             block.append(f"{tank_name.upper()}\n")
             block.append("-" * 80 + "\n")
             block.append(_line("Configured pressure [bar]:", _fmt(tank_config.get('initial_pressure', 0.0) / 1e5, 1)))
-            block.append(_line("Configured temperature [K]:", _fmt(tank_config.get('initial_temperature', tank_config.get('calculated_initial_temperature')), 2)))
-            block.append(_line("Configured density [kg/m^3]:", _fmt(tank_config.get('initial_density', tank_config.get('calculated_initial_density')), 2)))
-            block.append(_line("Minimum pressure [bar]:", _fmt(tank_config.get('minimum_pressure', 0.0) / 1e5, 1)))
-            block.append(_line("Venting pressure [bar]:", _fmt(tank_config.get('venting_pressure', 0.0) / 1e5, 1)))
+            block.append(_line("Configured temperature [K]:", _fmt(design.initial_temperature, 2)))
+            block.append(_line("Configured density [kg/m^3]:", _fmt(design.initial_density, 2)))
+            block.append(_line("Minimum pressure [bar]:", _fmt(design.minimum_pressure / 1e5, 1)))
+            block.append(_line("Venting pressure [bar]:", _fmt(design.venting_pressure / 1e5, 1)))
             block.append(_line("Inner volume [m^3]:", _fmt(inner_volume, 4)))
             block.append(_line("Outer volume [m^3]:", _fmt(outer_volume, 4)))
             block.append(_line("Tank radius [m]:", _fmt(getattr(tank_geometry, 'radius', 0.0), 3)))
