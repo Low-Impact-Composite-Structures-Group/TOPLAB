@@ -13,8 +13,9 @@ import numpy as np
 # Matplotlib is not required for core simulation; avoid hard dependency at import time
 from CoolProp.CoolProp import PropsSI
 from typing import List, Dict, Any, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from toplab.demand import Demand
 from toplab.tank_design.tank_shapes import CapsuleTank
 from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
 from toplab.materials.insulation_models import insulation_model_from_config
@@ -45,14 +46,6 @@ class TankConfig:
 
 
 @dataclass
-class MixerGroup:
-    """Mission demand shared by several tanks through a flow-distribution mixer."""
-    mixer_id: Any
-    fractions: Dict[int, float]   # tank_index (0-based) -> share of mixer demand
-    profiles: List[Any]           # mission profiles assigned to the mixer; demands are summed
-
-
-@dataclass
 class TankSystemConfig:
     """Configuration parameters for the tank system."""
     AMBIENT_TEMPERATURE: float = 298.15  # K
@@ -61,8 +54,8 @@ class TankSystemConfig:
     mission_profile: Any = None          # Mission profile for flow calculations
     minimum_density: float = 5.8         # Stopping density [kg/m³]
     target_density: float = None         # Target density for refuel missions [kg/m³]
-    per_tank_mission_profiles: Optional[Dict[int, Any]] = None  # tank_index (0-based) → Mission or List[Mission]
-    mixer_groups: Optional[List[MixerGroup]] = None
+    outflow_demands: Dict[int, Demand] = field(default_factory=dict)  # tank_index (0-based) → discharge demand
+    inflow_demands: Dict[int, Demand] = field(default_factory=dict)   # tank_index (0-based) → refuel demand
 
     def __post_init__(self):
         if self.tanks is None:
@@ -1414,155 +1407,11 @@ class TankSystem:
         """
         return self._get_flow_rate(time, tank_index, 'InFlow')
 
-    @staticmethod
-    def _eval_single_profile_flow(profile: Any, time: float, flow_type: str) -> float:
-        """Evaluate one mission profile's flow rate at *time* [s]. Returns kg/s (positive)."""
-        from toplab.missions.mission_sections import InFlow, OutFlow
-        flow_class = InFlow if flow_type == 'InFlow' else OutFlow
-        current_time = 0.0
-        for section in profile.sections:
-            section_end_time = current_time + section.duration
-            if time <= section_end_time:
-                section_time = time - current_time
-                for flow in section.fuel_flows:
-                    if not isinstance(flow, flow_class):
-                        continue
-                    if not hasattr(flow, 'mass_flow'):
-                        continue
-                    mf = flow.mass_flow
-                    if isinstance(mf, list):
-                        flow_values = [abs(r) for r in mf]
-                        if len(flow_values) == 1 or section.duration <= 0:
-                            return flow_values[0]
-                        progress = max(0.0, min(1.0, section_time / section.duration))
-                        array_pos = progress * (len(flow_values) - 1)
-                        idx = int(array_pos)
-                        if idx >= len(flow_values) - 1:
-                            return flow_values[-1]
-                        return flow_values[idx] + (flow_values[idx + 1] - flow_values[idx]) * (array_pos - idx)
-                    else:
-                        return abs(mf)
-                return 0.0
-            current_time = section_end_time
-        return 0.0
-
     def _get_flow_rate(self, time: float, tank_index: int, flow_type: str) -> float:
-        """
-        Get flow rate for specific tank at given time and flow type.
-
-        Args:
-            time: Current time [s]
-            tank_index: Tank index (0-based)
-            flow_type: 'InFlow' or 'OutFlow'
-
-        Returns:
-            Flow rate [kg/s] (positive)
-        """
-        for group in self.config.mixer_groups or []:
-            if tank_index in group.fractions:
-                demand = sum(self._eval_single_profile_flow(p, time, flow_type) for p in group.profiles)
-                return group.fractions[tank_index] * demand
-
-        if self.config.mission_profile is None and not self.config.per_tank_mission_profiles:
-            return 0.0
-
-        # Resolve which mission profile to use for this tank
-        per_tank = self.config.per_tank_mission_profiles
-        if per_tank and tank_index in per_tank:
-            active_profile = per_tank[tank_index]
-            # Multiple profiles assigned to the same tank node: sum contributions
-            if isinstance(active_profile, list):
-                return sum(
-                    TankSystem._eval_single_profile_flow(p, time, flow_type)
-                    for p in active_profile
-                )
-        elif self.config.mission_profile is not None:
-            # For single tank scenarios, the only tank gets the mission flow
-            # For multi-tank scenarios, check mission assignment
-            if len(self.tanks) == 1:
-                # Single tank case: the only tank gets all mission flows
-                active_profile = self.config.mission_profile
-            else:
-                # Multi-tank case: orchestrator handles mission assignment via method override
-                # This code path should not be reached when orchestrator is used
-                # Default fallback: only first tank gets mission flows
-                if tank_index != 0:
-                    return 0.0
-                active_profile = self.config.mission_profile
-        else:
-            return 0.0
-
-        try:
-            # Import flow types
-            from toplab.missions.mission_sections import InFlow, OutFlow
-
-            # Find which mission section we're in
-            current_time = 0.0
-
-            for section in active_profile.sections:
-                section_end_time = current_time + section.duration
-
-                if time <= section_end_time:
-                    # We're in this section - calculate flow rate
-                    section_time = time - current_time
-
-                    # Extract flows of the specified type from this section
-                    for flow in section.fuel_flows:
-                        # Check if this is the right flow type
-                        if flow_type == 'InFlow' and isinstance(flow, InFlow):
-                            target_flow = flow
-                        elif flow_type == 'OutFlow' and isinstance(flow, OutFlow):
-                            target_flow = flow
-                        else:
-                            continue
-
-                        # Extract flow rate
-                        if hasattr(target_flow, 'mass_flow'):
-                            if isinstance(target_flow.mass_flow, list):
-                                # Time-varying flow: proper handling of multi-point profiles
-                                if len(target_flow.mass_flow) == 1:
-                                    return abs(target_flow.mass_flow[0])
-                                elif len(target_flow.mass_flow) == 2:
-                                    # Two-point linear interpolation (original behavior)
-                                    start_rate = abs(target_flow.mass_flow[0])
-                                    end_rate = abs(target_flow.mass_flow[-1])
-                                    progress = section_time / section.duration if section.duration > 0 else 0
-                                    return start_rate + (end_rate - start_rate) * progress
-                                else:
-                                    # Multi-point profile: interpolate across the full array
-                                    flow_values = [abs(rate) for rate in target_flow.mass_flow]
-                                    if section.duration <= 0:
-                                        return flow_values[0]
-
-                                    # Calculate which segment we're in
-                                    progress = section_time / section.duration
-                                    progress = max(0.0, min(1.0, progress))  # Clamp to [0,1]
-
-                                    # Map progress to array index
-                                    array_pos = progress * (len(flow_values) - 1)
-                                    idx = int(array_pos)
-
-                                    if idx >= len(flow_values) - 1:
-                                        return flow_values[-1]
-
-                                    # Linear interpolation between adjacent points
-                                    frac = array_pos - idx
-                                    return flow_values[idx] + (flow_values[idx + 1] - flow_values[idx]) * frac
-                            else:
-                                # Constant flow rate
-                                return abs(target_flow.mass_flow)
-
-                    # No flows of this type in this section
-                    return 0.0
-
-                current_time = section_end_time
-
-            # Past mission end
-            return 0.0
-
-        except Exception as e:
-            print(f"WARNING: Error calculating discharge flow at t={time:.1f}s: {e}")
-            return 0.0
+        """Mission flow [kg/s, positive] into ('InFlow') or out of ('OutFlow') a tank."""
+        demands = self.config.inflow_demands if flow_type == 'InFlow' else self.config.outflow_demands
+        demand = demands.get(tank_index)
+        return demand.mass_flow(time) if demand is not None else 0.0
 
     def _create_min_density_events(self) -> list:
         """Create one terminal event per tank: pressure-based for CH2, density-based for all others."""

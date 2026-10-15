@@ -26,7 +26,7 @@ import numpy as np
 from toplab.configuration.scenario_configuration import ScenarioConfig
 
 # Multi-tank DAE physics engine
-from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig, MixerGroup
+from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig
 from toplab.utilities.tank_geometry import create_tank_from_fuel_mass
 from toplab.utilities.output_control import silent_when_quiet
 
@@ -625,6 +625,8 @@ class SystemOrchestrator:
         elif 'maximum_density' in stopping_criteria:
             target_density = float(stopping_criteria['maximum_density'])
 
+        outflow_demands, inflow_demands = self._build_demands()
+
         # Create system configuration with mission profile
         system_config = TankSystemConfig(
             AMBIENT_TEMPERATURE=mission.ambient_temperature,
@@ -633,8 +635,8 @@ class SystemOrchestrator:
             mission_profile=self.mission_profile,
             minimum_density=minimum_density,
             target_density=target_density,
-            per_tank_mission_profiles=getattr(self, 'per_tank_mission_profiles', None),
-            mixer_groups=self._build_mixer_groups(),
+            outflow_demands=outflow_demands,
+            inflow_demands=inflow_demands,
         )
 
         return system_config
@@ -642,9 +644,17 @@ class SystemOrchestrator:
     def _mixer_ids(self) -> set:
         return {g['mixer_id'] for g in getattr(self.scenario_config, 'mixer_groups', [])}
 
-    def _build_mixer_groups(self) -> Optional[List[MixerGroup]]:
-        """Translate config mixer groups into TankSystem groups (tank id N -> index N-1)."""
-        groups = []
+    def _build_demands(self):
+        """Per-tank (0-based index) outflow and inflow Demands from the assigned missions."""
+        from toplab.demand import SumDemand, inflow_demand, outflow_demand
+
+        def _combine(missions, scale=1.0):
+            out = SumDemand(outflow_demand(m) for m in missions)
+            inn = SumDemand(inflow_demand(m) for m in missions)
+            return (out.scaled(scale), inn.scaled(scale)) if scale != 1.0 else (out, inn)
+
+        outflows, inflows = {}, {}
+
         for g in getattr(self.scenario_config, 'mixer_groups', []):
             profiles = self._mixer_profiles.get(g['mixer_id'])
             if not profiles:
@@ -652,11 +662,22 @@ class SystemOrchestrator:
                     f"Mixer node {g['mixer_id']} has no mission: set 'assigned_to_node: {g['mixer_id']}' "
                     f"on the mission(s) feeding it."
                 )
-            fractions = {int(tid) - 1: f for tid, f in g['flow_fractions'].items()}
-            groups.append(MixerGroup(mixer_id=g['mixer_id'], fractions=fractions, profiles=profiles))
+            for tank_id, fraction in g['flow_fractions'].items():
+                outflows[int(tank_id) - 1], inflows[int(tank_id) - 1] = _combine(profiles, fraction)
             print(f"   Mixer {g['mixer_id']}: tank shares " +
                   ", ".join(f"Tank {tid}={f:.3f}" for tid, f in g['flow_fractions'].items()))
-        return groups or None
+
+        per_tank = getattr(self, 'per_tank_mission_profiles', None)
+        if per_tank:
+            for idx, profiles in per_tank.items():
+                profiles = profiles if isinstance(profiles, list) else [profiles]
+                outflows[idx], inflows[idx] = _combine(profiles)
+        elif not self._mixer_profiles:
+            assigned = self.scenario_config.mission_sequence.missions[0].assigned_to
+            idx = int(assigned) - 1 if assigned is not None else 0
+            outflows[idx], inflows[idx] = _combine([self.mission_profile])
+
+        return outflows, inflows
 
     def _mixer_fuel_share(self, tank_id) -> Optional[float]:
         """Mission fuel [kg] a mixer-fed tank must carry, or None if the tank is not on a mixer."""
@@ -1199,87 +1220,10 @@ class SystemOrchestrator:
         if mission_count > 1:
             print(f"     Multi-mission sequences detected ({mission_count} missions)")
 
-        # Apply mission assignment logic only when a single shared profile is used.
-        # When per-tank profiles are already in TankSystemConfig, dispatch is handled
-        # transparently by TankSystem._get_flow_rate — no monkey-patching needed.
-        if getattr(self, 'per_tank_mission_profiles', None):
-            print(f"     Multi-node mission dispatch active: "
-                  f"{len(self.per_tank_mission_profiles)} per-tank profiles configured")
-        elif self._mixer_profiles:
-            print(f"     Mixer mission dispatch active: {len(self._mixer_profiles)} mixer(s)")
-        else:
-            self._apply_mission_assignment()
+        for tank_idx, demand in sorted(self.tank_system.config.outflow_demands.items()):
+            print(f"     Tank {tank_idx + 1}: discharge demand {demand.total_mass():.2f} kg over {demand.duration:.0f} s")
 
         print(f"   ✓ Mission flow profile configured for DAE system")
-
-    def _apply_mission_assignment(self):
-        """Apply mission flows only to the assigned tank."""
-        mission = self.scenario_config.mission_sequence.missions[0]
-
-        if mission.assigned_to is not None:
-            assigned_tank_id = mission.assigned_to
-            # Convert tank ID to tank index (tank IDs are 1-based, indices are 0-based)
-            assigned_tank_index = assigned_tank_id - 1
-
-            print(f"     Mission assigned to Tank {assigned_tank_id} (index {assigned_tank_index})")
-
-            # Override the TankSystem's flow rate methods to apply mission only to assigned tank
-            # IMPORTANT: Don't interfere with coupling flows - only override base mission flows
-            original_get_outflow_rate = self.tank_system._get_outflow_rate
-
-            def mission_assigned_outflow_rate(time: float, tank_index: int):
-                """Get outflow rates with mission assignment logic."""
-                if tank_index == assigned_tank_index:
-                    # This tank executes the mission - apply mission profile flows
-                    if hasattr(self, 'mission_profile') and self.mission_profile is not None:
-                        return self._get_mission_flow_rate(time)
-                    else:
-                        # Fallback to original method for assigned tank
-                        return original_get_outflow_rate(time, tank_index)
-                else:
-                    # Other tanks have no mission outflow (but coupling can still happen)
-                    return 0.0
-
-            # Replace only the outflow method - let coupling handle inflows
-            self.tank_system._get_outflow_rate = mission_assigned_outflow_rate
-
-            print(f"     Mission flows applied to Tank {assigned_tank_id}")
-            print(f"     Coupling flows preserved for pressure compensation")
-        else:
-            print(f"     WARNING: No mission assignment specified - applying mission to all tanks")
-
-    def _get_mission_flow_rate(self, time: float) -> float:
-        """Get mission flow rate at given time from mission profile."""
-        if not hasattr(self, 'mission_profile') or self.mission_profile is None:
-            return 0.0
-
-        current_time = 0.0
-        for section in self.mission_profile.sections:
-            section_end_time = current_time + section.duration
-
-            if time <= section_end_time:
-                # We're in this section
-                section_time = time - current_time
-
-                # Get flow from this section
-                for flow in section.fuel_flows:
-                    if hasattr(flow, 'mass_flow'):
-                        if isinstance(flow.mass_flow, list):
-                            # Time-varying flow: linear interpolation
-                            start_rate = abs(flow.mass_flow[0])
-                            end_rate = abs(flow.mass_flow[-1])
-                            progress = section_time / section.duration if section.duration > 0 else 0
-                            return start_rate + (end_rate - start_rate) * progress
-                        else:
-                            # Constant flow
-                            return abs(flow.mass_flow)
-
-                return 0.0  # No flow found in this section
-
-            current_time = section_end_time
-
-        # Beyond mission duration
-        return 0.0
 
     @silent_when_quiet
     def run_simulation(self, solver_method: str = None, solver_config: dict = None) -> Any:
@@ -1556,41 +1500,14 @@ class SystemOrchestrator:
         stream_labels = getattr(self, '_per_tank_stream_labels', {})
         labels = stream_labels.get(tank_index, [f"Stream {i+1}" for i in range(len(profiles))])
 
-        from toplab.system.tank_system import TankSystem
+        from toplab.demand import outflow_demand
         times = self.results.times
         result = {}
         for profile, label in zip(profiles, labels):
-            flows_gs = np.array([
-                -TankSystem._eval_single_profile_flow(profile, t, 'OutFlow') * 1000.0
-                for t in times
-            ])
+            demand = outflow_demand(profile)
+            flows_gs = np.array([-demand.mass_flow(t) * 1000.0 for t in times])
             result[label] = flows_gs
         return result
-
-    def _get_mission_flow_rate_at_time(self, time_s: float) -> float:
-        """
-        Get mass flow rate from mission profile at specified time.
-
-        Args:
-            time_s: Time in seconds
-
-        Returns:
-            Mass flow rate [kg/s]
-        """
-        try:
-            # Get the first mission (ATR72 profile)
-            mission = self.scenario_config.mission_sequence.missions[0]
-
-            # Convert time to hours for mission lookup
-            time_h = time_s / 3600.0
-
-            # Get flow rate from mission profile (already in kg/s from unit conversion)
-            flow_rate = mission.get_flow_rate_at_time(time_h)
-
-            return flow_rate if flow_rate > 0 else 0.0
-
-        except Exception:
-            return 0.0
 
     @silent_when_quiet
     def generate_plots(self, save_path: str = None) -> Any:

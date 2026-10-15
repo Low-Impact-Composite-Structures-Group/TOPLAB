@@ -84,7 +84,8 @@ def test_mixer_splits_mission_flow_and_sizes_tanks(tmp_path):
     system = orchestrator.tank_system
 
     t = 500.0
-    total = system._eval_single_profile_flow(orchestrator.mission_profile, t, "OutFlow")
+    from toplab.demand import outflow_demand
+    total = outflow_demand(orchestrator.mission_profile).mass_flow(t)
     assert total > 0.0
     assert system._get_outflow_rate(t, 0) == pytest.approx(fractions[0] * total)
     assert system._get_outflow_rate(t, 1) == pytest.approx(fractions[1] * total)
