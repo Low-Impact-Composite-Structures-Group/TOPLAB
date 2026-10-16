@@ -1,0 +1,26 @@
+optimization:
+  name: two_tank_cch2_atr72_sqp
+  description: Maximise gravimetric efficiency of two CcH2 tanks (equal flow split) on the ATR72 mission
+  base_config: two_tank_cch2_config.yaml
+
+objective: eta_g
+
+# Aspect ratio (phi = 3) and insulation thickness stay at their base-config values.
+design_variables:
+  radius_1: {min: 0.30, max: 0.75, baseline: 0.55}
+  radius_2: {min: 0.30, max: 0.75, baseline: 0.55}
+
+dormancy:
+  hold_period_h: 12.0
+  maximum_vented_percentage: 12.0
+
+solver:
+  method: SLSQP
+  evaluation_progress: true
+  max_iter: 12
+  tol: 1.0e-6
+  feasibility_tolerance: 1.0e-3
+  finite_diff_step: 0.01
+
+output:
+  results_dir: output/results

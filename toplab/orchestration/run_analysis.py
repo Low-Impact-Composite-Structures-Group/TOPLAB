@@ -31,6 +31,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
 
     Uses ``config.dormancy_check``:
         enabled: bool
+        max_step_s: float (solver max step during the hold, default 300)
         duration_h: float (default 12.0)
         maximum_loss_percent_per_hour: float (required when enabled)
 
@@ -56,7 +57,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         type='dormancy',
         profile='constant_flow',
         ambient_temperature=ambient_temperature,
-        assigned_to_node=config.tank_ids[0],
+        assigned_to_node=config.missions[0].assigned_to_node if config.missions else config.tank_ids[0],
         options={'flow_rate': 0.0, 'duration': duration_h * 3600.0},
     )
     dormancy_case = replace(
@@ -64,6 +65,8 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         missions=[dormancy_mission],
         output={**config.output, 'save_plots': False, 'save_data': False, 'silent': True},
         dormancy_check=None,
+        # Zero-outflow thermal evolution is slow; the mission step cap is unnecessarily fine here.
+        solver={**config.solver, 'max_step': float(dormancy_config.get('max_step_s', 300.0))},
     )
     orchestrator = SystemOrchestrator(dormancy_case, verbosity='quiet', sizing_config=config)
     results = orchestrator.run_simulation()
@@ -82,6 +85,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         all_tanks_pass = all_tanks_pass and passed
         tank_results.append({
             'tank_index': tank_index,
+            'initial_mass_kg': initial_mass,
             'vented_mass_kg': vented_mass,
             'loss_percent_per_hour': loss_percent_per_hour,
             'passed': passed,

@@ -1,0 +1,128 @@
+analysis:
+  name: Two Tank CCH2 Mixer Baseline (optimisation base)
+  description: Two CcH2 tanks feeding the ATR72 mission through a mixer; radii are the design variables
+  version: '1.0'
+network:
+  nodes:
+  - node_id: 1
+    type: tank
+    description: Tank 1
+    fluid: CcH2
+    geometry:
+      phi: 3.0
+      radius: 0.6
+    initial_conditions:
+      pressure: 40000000.0
+      density: 80.0
+      temperature: 45.0
+    operating_limits:
+      minimum_pressure: 1500000.0
+      venting_pressure: 45000000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+        thickness: calculated
+      insulation:
+        thickness: 0.05
+        shell_thickness: 0.002
+        alpha_amb: 5.0
+        emissivity: 0.05
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: false
+    plotting: {}
+  - node_id: 2
+    type: tank
+    description: Tank 2
+    fluid: CcH2
+    geometry:
+      phi: 3.0
+      radius: 0.6
+    initial_conditions:
+      pressure: 40000000.0
+      density: 80.0
+      temperature: 45.0
+    operating_limits:
+      minimum_pressure: 1500000.0
+      venting_pressure: 45000000.0
+    materials:
+      liner:
+        nist_path: aluminum_6061T6_nist
+        thickness: 0.001
+      composite:
+        nist_path: carbon_epoxy_nist
+        winding_angle: 54.7
+        thickness: calculated
+      insulation:
+        thickness: 0.05
+        shell_thickness: 0.002
+        alpha_amb: 5.0
+        emissivity: 0.05
+      safety_margin: 1.25
+    stopping_criteria:
+      minimum_density: 5.8
+      use_density_stopping_events: false
+    plotting: {}
+  - node_id: 3
+    type: junction
+    junction_role: mixer
+  - node_id: 4
+    type: sink
+  edges:
+  - edge_id: tank1_to_mixer
+    connection_type: discharge
+    participants: {source: 1, target: 3}
+  - edge_id: tank2_to_mixer
+    connection_type: discharge
+    participants: {source: 2, target: 3}
+  - edge_id: mixer_to_powerplant
+    connection_type: discharge
+    participants: {source: 3, target: 4}
+mission:
+  type: discharge
+  profile: csv
+  parameters:
+    csv_file: ../../missions/atr72_fuel_flows.csv
+    cruise_altitude: 7010.0
+    standard_temperature: 273.15
+    mach_number: 0.0
+    phase: gas
+  ambient_temperature: 288.15
+  assigned_to_node: 3
+solver:
+  method: LSODA
+  rtol: 1e-6
+  atol: 1e-9
+  time_step: 0.1
+  max_step: 10.0
+  custom_config: false
+output:
+  silent: false
+  identifier: optimization_two_tank_cch2
+  save_plots: false
+  save_data: false
+  results_directory: output/results
+  plots_directory: output/plots
+
+dormancy_check:
+  enabled: true
+  duration_h: 12.0
+  maximum_loss_percent_per_hour: 1.0
+
+packaging:
+  generate_3d_plot: false
+  aft_fuselage_dimensions:
+    d1: 2.7
+    d2: 1.61
+    d3: 0.53
+    l1: 1.5
+    l2: 3.0
+    l3: 3.0
+    epsilon: 0.05
+    psi_1: 8.0
+    psi_2: 8.0

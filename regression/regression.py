@@ -24,6 +24,7 @@ EXAMPLES = {
     "single_tank_slh2": ROOT / "examples/single_tank_slh2/single_tank_slh2_config.yaml",
     "single_tank_cch2": ROOT / "examples/single_tank_cch2/single_tank_cch2_config.yaml",
     "coupled_ch2_cch2": ROOT / "examples/coupled_ch2_cch2/coupled_ch2_cch2_config.yaml",
+    "optimization_two_tank_cch2": ROOT / "examples/optimization_two_tank_cch2/two_tank_cch2_config.yaml",
     "coupled_ch2_lh2": ROOT / "examples/coupled_ch2_lh2/coupled_ch2_lh2_config.yaml",
 }
 N_SAMPLES = 60

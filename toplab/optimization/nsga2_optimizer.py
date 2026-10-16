@@ -2,26 +2,18 @@
 
 from __future__ import annotations
 
-import copy
 import csv
-import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 import numpy as np
-import yaml
 
 from toplab.config import load_config
+from toplab.optimization.evaluation import DesignVariable, TankDesign, apply_design
+from toplab.orchestration.run_analysis import run_dormancy_check
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
 from toplab.packaging.aft_placement import AftFuselageDimensions, place_tanks_in_aft
-
-
-@dataclass(frozen=True)
-class TankDesign:
-    radius: float
-    phi: float
-    insulation_thickness: float
 
 
 @dataclass
@@ -82,19 +74,20 @@ class SingleTankCandidateEvaluator:
     def __init__(self, config: NSGA2Config, packaging_dimensions: AftFuselageDimensions):
         self.config = config
         self.packaging_dimensions = packaging_dimensions
-        with config.base_config_path.open("r", encoding="utf-8") as stream:
-            self.base_config = yaml.safe_load(stream) or {}
+        self.base_config = load_config(config.base_config_path)
+        if len(self.base_config.tanks) != 1:
+            raise ValueError("The single-tank NSGA-II optimizer requires exactly one tank node.")
+        self.variables = [DesignVariable(1, name, 0.0, 0.0, 0.0)
+                          for name in ("radius", "phi", "insulation_thickness")]
 
     def evaluate(self, values: Sequence[float]) -> CandidateResult:
         design = decode_design_vector(values)
         result = CandidateResult(design=design)
 
         try:
-            discharge_config = self._build_candidate_config(design)
-            with self._temporary_config(discharge_config) as config_path:
-                scenario = load_config(config_path)
-                orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
-                simulation = orchestrator.run_simulation()
+            candidate = apply_design(self.base_config, self.variables, values)
+            orchestrator = SystemOrchestrator(candidate, verbosity="quiet")
+            simulation = orchestrator.run_simulation()
 
             result.target_mission_time_s = float(orchestrator.tank_system.config.MISSION_DURATION)
             result.mission_time_s = float(simulation.times[-1])
@@ -109,15 +102,11 @@ class SingleTankCandidateEvaluator:
             if result.discharge_residual > 0.0:
                 return result
 
-            dormancy_config = self._build_dormancy_config(discharge_config)
-            with self._temporary_config(dormancy_config) as config_path:
-                scenario = load_config(config_path)
-                dormancy_orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
-                dormancy = dormancy_orchestrator.run_simulation()
-
-            dormancy_initial = float(dormancy.multi_tank_states[0].get_tank_state(0).fuel_mass)
-            dormancy_final = float(dormancy.multi_tank_states[-1].get_tank_state(0).fuel_mass)
-            vented_mass = max(0.0, dormancy_initial - dormancy_final)
+            dormancy = run_dormancy_check(replace(candidate, dormancy_check={
+                "enabled": True, "duration_h": self.config.hold_period_s / 3600.0,
+                "maximum_loss_percent_per_hour": 100.0}), silent=True)
+            dormancy_initial = float(dormancy["tanks"][0]["initial_mass_kg"])
+            vented_mass = float(dormancy["tanks"][0]["vented_mass_kg"])
             result.f_vent = 100.0 * vented_mass / dormancy_initial if dormancy_initial > 0.0 else 0.0
             result.dormancy_residual = result.f_vent - self.config.maximum_vented_percentage
 
@@ -144,54 +133,6 @@ class SingleTankCandidateEvaluator:
         except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
             result.error = str(exc)
             return result
-
-    def _build_candidate_config(self, design: TankDesign) -> dict[str, Any]:
-        config = copy.deepcopy(self.base_config)
-        tank_nodes = [node for node in config.get("network", {}).get("nodes", []) if node.get("type") == "tank"]
-        if len(tank_nodes) != 1:
-            raise ValueError("The single-tank NSGA-II optimizer requires exactly one tank node.")
-        tank = tank_nodes[0]
-        geometry = tank.setdefault("geometry", {})
-        geometry.pop("mission_based_sizing", None)
-        geometry["radius"] = design.radius
-        geometry["phi"] = design.phi
-        tank.setdefault("materials", {}).setdefault("insulation", {})["thickness"] = design.insulation_thickness
-        config.setdefault("output", {}).update({"silent": True, "save_plots": False, "save_data": False})
-        config.pop("dormancy_check", None)
-        return config
-
-    def _build_dormancy_config(self, discharge_config: dict[str, Any]) -> dict[str, Any]:
-        config = copy.deepcopy(discharge_config)
-        config.pop("missions", None)
-        config["mission"] = {
-            "type": "dormancy",
-            "profile": "constant_flow",
-            "ambient_temperature": 288.15,
-            "assigned_to_node": 1,
-            "flow_rate": 0.0,
-            "duration": self.config.hold_period_s,
-        }
-        return config
-
-    def _temporary_config(self, config: dict[str, Any]):
-        return _TemporaryConfig(config, self.config.base_config_path.parent)
-
-
-class _TemporaryConfig:
-    def __init__(self, config: dict[str, Any], directory: Path):
-        self.config = config
-        self.directory = directory
-        self.path: Path | None = None
-
-    def __enter__(self) -> str:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", dir=self.directory, delete=False) as stream:
-            yaml.safe_dump(self.config, stream)
-            self.path = Path(stream.name)
-        return str(self.path)
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        if self.path is not None:
-            self.path.unlink(missing_ok=True)
 
 
 def build_optimizer_problem(config: NSGA2Config, packaging_dimensions: AftFuselageDimensions):

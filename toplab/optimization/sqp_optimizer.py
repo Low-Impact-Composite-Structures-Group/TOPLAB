@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import csv
 import itertools
-import re
-import tempfile
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,52 +12,10 @@ import numpy as np
 import yaml
 from scipy.optimize import minimize
 
-from toplab.packaging.aft_placement import AftFuselageDimensions, maximize_packaging_compaction
-
-
-@dataclass(frozen=True)
-class TankDesign:
-    radius: float
-    phi: float
-    insulation_thickness: float
-
-
-@dataclass
-class CandidateResult:
-    designs: list[TankDesign] = field(default_factory=list)
-    eta_g: float = 0.0
-    eta_v: float = 0.0
-    eta_vent: float = 0.0
-    zeta_p: float = 0.0
-    f_vent: float = 0.0
-    vented_mass_kg: float = 0.0
-    per_tank_vented_fraction: list[float] = field(default_factory=list)
-    discharge_residuals: list[float] = field(default_factory=list)
-    discharge_residual: float = 0.0
-    dormancy_residuals: list[float] = field(default_factory=list)
-    dormancy_residual: float = 0.0
-    packaging_feasible: bool = False
-    packages: bool = False
-    z_shift_star: float = 0.0
-    mission_completed: bool = False
-    initial_hydrogen_masses_kg: list[float] = field(default_factory=list)
-    final_hydrogen_masses_kg: list[float] = field(default_factory=list)
-    structural_masses_kg: list[float] = field(default_factory=list)
-    internal_volumes_m3: list[float] = field(default_factory=list)
-    external_volumes_m3: list[float] = field(default_factory=list)
-    placements: list[Any] = field(default_factory=list)
-    error: str | None = None
-
-    @property
-    def feasible(self) -> bool:
-        return (self.error is None and self.mission_completed and
-                self.discharge_residual <= 0.0 and self.dormancy_residual <= 0.0 and
-                self.packaging_feasible)
-
-    @property
-    def objectives(self) -> list[float]:
-        return [self.eta_g, self.eta_v, self.eta_vent, self.zeta_p]
-
+from toplab.config import load_config
+from toplab.optimization.evaluation import (
+    CandidateEvaluator, CandidateResult, DesignVariable, TankDesign,
+    parse_design_variables, venting_performance)
 
 EvalResult = CandidateResult
 
@@ -114,20 +68,6 @@ class SingleObjectiveResult:
     error: str | None = None
 
 
-def decode_design_vector(values: Sequence[float]) -> list[TankDesign]:
-    if len(values) == 0 or len(values) % 3:
-        raise ValueError("A design vector must contain three values per tank.")
-    return [TankDesign(float(values[i]), float(values[i + 1]), float(values[i + 2]))
-            for i in range(0, len(values), 3)]
-
-
-def venting_performance(vented_fraction: float, maximum_vented_fraction: float) -> float:
-    """Return the signed venting performance; values below zero are retained."""
-    if maximum_vented_fraction <= 0.0:
-        raise ValueError("maximum_vented_fraction must be positive.")
-    return 1.0 - float(vented_fraction) / float(maximum_vented_fraction)
-
-
 def epsilon_residuals(epsilon: EpsilonTriplet, result: CandidateResult) -> tuple[float, float, float]:
     """Return canonical g <= 0 residuals for the three epsilon constraints."""
     return (epsilon.eta_v - result.eta_v,
@@ -165,177 +105,6 @@ def constraint_residuals(result: CandidateResult,
             "g_epsilon_p": epsilon_values[2],
         })
     return residuals
-
-
-class SQPCandidateEvaluator:
-    """Evaluate discharge, dormancy, system metrics, and aft packaging once."""
-
-    def __init__(self, base_config_path: Path, packaging_dimensions: AftFuselageDimensions,
-                 maximum_vented_fraction: float, hold_period_s: float,
-                 progress: bool = True) -> None:
-        self.base_config_path = Path(base_config_path)
-        self.packaging_dimensions = packaging_dimensions
-        self.maximum_vented_fraction = float(maximum_vented_fraction)
-        self.hold_period_s = float(hold_period_s)
-        self.progress = bool(progress)
-        with self.base_config_path.open("r", encoding="utf-8") as stream:
-            self.base_config = yaml.safe_load(stream) or {}
-        self.evaluation_count = 0
-
-    def _progress(self, message: str) -> None:
-        if self.progress:
-            print(f"[SQP evaluation {self.evaluation_count}] {message}", flush=True)
-
-    def evaluate(self, values: Sequence[float]) -> CandidateResult:
-        designs = decode_design_vector(values)
-        result = CandidateResult(designs=designs)
-        self.evaluation_count += 1
-        vector = [float(value) for value in values]
-        started = time.perf_counter()
-        self._progress(f"start x={vector}")
-        try:
-            stage_started = time.perf_counter()
-            self._progress("discharge start")
-            discharge_config = self._build_candidate_config(designs)
-            with _TemporaryConfig(discharge_config, self.base_config_path.parent) as path:
-                from toplab.config import load_config
-                from toplab.orchestration.system_orchestrator import SystemOrchestrator
-                scenario = load_config(path)
-                orchestrator = SystemOrchestrator(scenario, verbosity="quiet")
-                discharge = orchestrator.run_simulation()
-            self._progress(
-                f"discharge done elapsed={time.perf_counter() - stage_started:.2f}s")
-
-            tank_count = len(orchestrator.tank_geometries)
-            target_s = float(orchestrator.tank_system.config.MISSION_DURATION)
-            actual_s = float(discharge.times[-1])
-            result.mission_completed = actual_s >= target_s
-            result.discharge_residuals = [target_s - actual_s] * tank_count
-            result.discharge_residual = max(result.discharge_residuals, default=0.0)
-            self._progress(
-                f"discharge metrics actual_s={actual_s:.3f} target_s={target_s:.3f} "
-                f"g_dis={result.discharge_residual:.3f}")
-            result.initial_hydrogen_masses_kg = [
-                float(discharge.multi_tank_states[0].get_tank_state(i).fuel_mass)
-                for i in range(tank_count)]
-            result.final_hydrogen_masses_kg = [
-                float(discharge.multi_tank_states[-1].get_tank_state(i).fuel_mass)
-                for i in range(tank_count)]
-            properties = orchestrator.tank_system._cached_tank_properties
-            result.structural_masses_kg = [
-                float(properties[i]["liner_mass"]) + float(properties[i]["wall_mass"])
-                for i in range(tank_count)]
-            result.internal_volumes_m3 = [float(properties[i]["volume"]) for i in range(tank_count)]
-            result.external_volumes_m3 = [float(properties[i]["outer_volume"]) for i in range(tank_count)]
-            self._calculate_system_metrics(result)
-
-            stage_started = time.perf_counter()
-            self._progress("dormancy start")
-            dormancy_config = self._build_dormancy_config(discharge_config)
-            with _TemporaryConfig(dormancy_config, self.base_config_path.parent) as path:
-                dormancy_scenario = load_config(path)
-                dormancy_orchestrator = SystemOrchestrator(dormancy_scenario, verbosity="quiet")
-                dormancy = dormancy_orchestrator.run_simulation()
-            self._progress(
-                f"dormancy done elapsed={time.perf_counter() - stage_started:.2f}s")
-            dormancy_initial = [
-                float(dormancy.multi_tank_states[0].get_tank_state(i).fuel_mass)
-                for i in range(tank_count)]
-            dormancy_final = [
-                float(dormancy.multi_tank_states[-1].get_tank_state(i).fuel_mass)
-                for i in range(tank_count)]
-            vented = [max(0.0, a - b) for a, b in zip(dormancy_initial, dormancy_final)]
-            result.vented_mass_kg = sum(vented)
-            total_initial = sum(dormancy_initial)
-            result.per_tank_vented_fraction = [
-                loss / initial if initial > 0.0 else 0.0
-                for loss, initial in zip(vented, dormancy_initial)]
-            result.f_vent = result.vented_mass_kg / total_initial if total_initial > 0.0 else 0.0
-            limit = self.maximum_vented_fraction
-            result.eta_vent = venting_performance(result.f_vent, limit) if limit > 0.0 else 0.0
-            result.dormancy_residuals = [
-                fraction / limit - 1.0 if limit > 0.0 else float("inf")
-                for fraction in result.per_tank_vented_fraction]
-            result.dormancy_residual = max(result.dormancy_residuals, default=0.0)
-            self._progress(
-                f"dormancy metrics f_vent={result.f_vent:.6g} "
-                f"eta_vent={result.eta_vent:.6g} g_dorm={result.dormancy_residual:.6g}")
-
-            stage_started = time.perf_counter()
-            self._progress("packaging start")
-            radii = [float(properties[i]["outer_diameter"]) / 2.0 for i in range(tank_count)]
-            half_lengths = [
-                float(properties[i].get("cylindrical_section_length", 0.0)) / 2.0
-                for i in range(tank_count)]
-            packaging = maximize_packaging_compaction(radii, half_lengths, self.packaging_dimensions)
-            result.packaging_feasible = bool(packaging.feasible)
-            result.packages = result.packaging_feasible
-            result.z_shift_star = float(packaging.z_shift)
-            result.zeta_p = float(packaging.zeta_p)
-            result.placements = packaging.placements
-            self._progress(
-                f"packaging done elapsed={time.perf_counter() - stage_started:.2f}s "
-                f"feasible={result.packaging_feasible} zeta_p={result.zeta_p:.6g}")
-        except Exception as exc:
-            result.error = f"{type(exc).__name__}: {exc}"
-            self._progress(f"error={result.error}")
-        self._progress(
-            f"done elapsed={time.perf_counter() - started:.2f}s "
-            f"objectives={result.objectives} feasible={result.feasible}")
-        return result
-
-    @staticmethod
-    def _calculate_system_metrics(result: CandidateResult) -> None:
-        hydrogen = sum(result.initial_hydrogen_masses_kg)
-        total_mass = hydrogen + sum(result.structural_masses_kg)
-        result.eta_g = hydrogen / total_mass if total_mass > 0.0 else 0.0
-        external = sum(result.external_volumes_m3)
-        result.eta_v = sum(result.internal_volumes_m3) / external if external > 0.0 else 0.0
-
-    def _build_candidate_config(self, designs: Sequence[TankDesign]) -> dict[str, Any]:
-        config = copy.deepcopy(self.base_config)
-        tanks = [node for node in config.get("network", {}).get("nodes", []) if node.get("type") == "tank"]
-        if len(tanks) != len(designs):
-            raise ValueError(f"Expected {len(designs)} tank nodes, found {len(tanks)}.")
-        for tank, design in zip(tanks, designs):
-            geometry = tank.setdefault("geometry", {})
-            geometry.pop("mission_based_sizing", None)
-            geometry["radius"] = design.radius
-            geometry["phi"] = design.phi
-            tank.setdefault("materials", {}).setdefault("insulation", {})["thickness"] = design.insulation_thickness
-        config.setdefault("output", {}).update({"silent": True, "save_plots": False, "save_data": False})
-        config.pop("dormancy_check", None)
-        return config
-
-    def _build_dormancy_config(self, discharge_config: dict[str, Any]) -> dict[str, Any]:
-        config = copy.deepcopy(discharge_config)
-        config.pop("missions", None)
-        config["mission"] = {
-            "type": "dormancy", "profile": "constant_flow", "ambient_temperature": 288.15,
-            "assigned_to_node": 1, "flow_rate": 0.0, "duration": self.hold_period_s}
-        return config
-
-
-class _TemporaryConfig:
-    def __init__(self, config: dict[str, Any], directory: Path) -> None:
-        self.config, self.directory, self.path = config, directory, None
-
-    def __enter__(self) -> str:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", dir=self.directory, delete=False) as stream:
-            yaml.safe_dump(self.config, stream)
-            self.path = Path(stream.name)
-        return str(self.path)
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        if self.path is not None:
-            self.path.unlink(missing_ok=True)
-
-
-def _packaging_dimensions(raw: dict[str, Any]) -> AftFuselageDimensions:
-    values = raw.get("packaging", {}).get("aft_fuselage_dimensions")
-    if not values:
-        raise ValueError("Base configuration must define packaging.aft_fuselage_dimensions.")
-    return AftFuselageDimensions(**{key: float(value) for key, value in values.items()})
 
 
 def _epsilon_values(raw: Any, name: str) -> list[float]:
@@ -388,54 +157,38 @@ class SQPOptimizer:
         if base_rel is None:
             raise ValueError("Optimization configuration must define base_config.")
         self.base_config_path = (self.opt_config_path.parent / base_rel).resolve()
-        with self.base_config_path.open("r", encoding="utf-8") as stream:
-            base_raw = yaml.safe_load(stream) or {}
-        self.base_raw = base_raw
-        self.evaluator = SQPCandidateEvaluator(
-            self.base_config_path, _packaging_dimensions(base_raw),
-            self._maximum_vented_fraction(base_raw, self.cfg), self._hold_period_s(base_raw, self.cfg),
+        self.base_config = load_config(self.base_config_path)
+        self.variables: list[DesignVariable] = parse_design_variables(self.cfg.get("design_variables", {}))
+        self.evaluator = CandidateEvaluator(
+            self.base_config, self.variables,
+            self._maximum_vented_fraction(self.base_config, self.cfg),
+            self._hold_period_s(self.base_config, self.cfg),
             progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", True)))
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
         self.history: list[dict[str, Any]] = []
         self._active_epsilon: EpsilonTriplet | None = None
 
     @staticmethod
-    def _hold_period_s(base_raw: dict[str, Any], optimizer_raw: dict[str, Any] | None = None) -> float:
+    def _hold_period_s(base: Any, optimizer_raw: dict[str, Any] | None = None) -> float:
         settings = (optimizer_raw or {}).get("dormancy", {})
-        hours = settings.get("hold_period_h", base_raw.get("dormancy_check", {}).get("duration_h"))
+        hours = settings.get("hold_period_h", (base.dormancy_check or {}).get("duration_h"))
+        if hours is None:
+            raise ValueError("Define dormancy.hold_period_h or dormancy_check.duration_h.")
         return float(hours) * 3600.0
 
     @staticmethod
-    def _maximum_vented_fraction(base_raw: dict[str, Any], optimizer_raw: dict[str, Any] | None = None) -> float:
+    def _maximum_vented_fraction(base: Any, optimizer_raw: dict[str, Any] | None = None) -> float:
         settings = (optimizer_raw or {}).get("dormancy", {})
         if "maximum_vented_percentage" in settings:
             return float(settings["maximum_vented_percentage"]) / 100.0
-        dormancy = base_raw.get("dormancy_check", {})
+        dormancy = base.dormancy_check or {}
         if "maximum_vented_percentage" in dormancy:
             return float(dormancy["maximum_vented_percentage"]) / 100.0
         return float(dormancy.get("maximum_loss_percent_per_hour", 0.0)) * float(dormancy.get("duration_h", 12.0)) / 100.0
 
-    def _variable_specs(self) -> list[dict[str, float]]:
-        variables = self.cfg.get("design_variables", {})
-        if all(name in variables for name in ("radius", "phi", "insulation_thickness")):
-            tanks = [node for node in self.base_raw.get("network", {}).get("nodes", []) if node.get("type") == "tank"]
-            return [variables[name] for _ in tanks for name in ("radius", "phi", "insulation_thickness")]
-        fields = ("radius", "phi", "insulation_thickness")
-        indexed: dict[int, dict[str, dict[str, float]]] = {}
-        for name, spec in variables.items():
-            match = re.fullmatch(r"(radius|r|phi|insulation_thickness|t_ins)_?(\d+)", name)
-            if match is None:
-                continue
-            field_name = {"r": "radius", "t_ins": "insulation_thickness"}.get(match.group(1), match.group(1))
-            indexed.setdefault(int(match.group(2)), {})[field_name] = spec
-        if indexed and all(all(field in indexed[tank] for field in fields) for tank in indexed):
-            return [indexed[tank][field] for tank in sorted(indexed) for field in fields]
-        return [variables[name] for name in variables]
-
     def _bounds_and_x0(self) -> tuple[list[tuple[float, float]], np.ndarray]:
-        specs = self._variable_specs()
-        return ([(float(spec["min"]), float(spec["max"])) for spec in specs],
-                np.asarray([float(spec["baseline"]) for spec in specs], dtype=float))
+        return ([(v.lower, v.upper) for v in self.variables],
+                np.asarray([v.baseline for v in self.variables], dtype=float))
 
     def _get(self, x: Sequence[float]) -> CandidateResult:
         key = tuple(float(value) for value in x)
@@ -448,6 +201,13 @@ class SQPOptimizer:
                 "candidate": self._cache[key],
             })
         return self._cache[key]
+
+    def _best_feasible(self, objective: str, tolerance: float) -> tuple[tuple[float, ...], CandidateResult] | None:
+        feasible = [(entry["x"], entry["candidate"]) for entry in self.history
+                    if entry["candidate"].feasible and all(
+                        value <= tolerance
+                        for value in physical_constraint_residuals(entry["candidate"]).values())]
+        return max(feasible, key=lambda item: getattr(item[1], objective), default=None)
 
     def solve_epsilon_subproblem(self, epsilon: EpsilonTriplet, x0: Sequence[float]) -> SQPSubproblemResult:
         bounds, _ = self._bounds_and_x0()
@@ -515,14 +275,23 @@ class SQPOptimizer:
             opt = minimize(lambda x: -float(getattr(self._get(x), objective)), clipped,
                            method="SLSQP", bounds=bounds, constraints=constraints,
                            options=options)
-            final = self._get(opt.x)
+            final, x_final = self._get(opt.x), np.asarray(opt.x, dtype=float)
             tolerance = float(solver.get("feasibility_tolerance", options["ftol"]))
-            feasible = bool(final.feasible and all(value <= tolerance for value in physical_residuals(opt.x)))
+            feasible = bool(final.feasible and all(value <= tolerance for value in physical_residuals(x_final)))
+            message = str(opt.message)
+            if not feasible:
+                # The packaging margin is non-smooth across its feasibility boundary, so
+                # SLSQP can stall on the infeasible side; fall back to the best feasible point seen.
+                best = self._best_feasible(objective, tolerance)
+                if best is not None:
+                    x_final, final = np.asarray(best[0], dtype=float), best[1]
+                    feasible = True
+                    message = f"best feasible evaluated point (SLSQP: {message})"
             return SingleObjectiveResult(
-                objective, clipped.tolist(), np.asarray(opt.x).tolist(), bool(opt.success),
-                int(opt.status), str(opt.message), int(getattr(opt, "nit", 0)),
+                objective, clipped.tolist(), x_final.tolist(), bool(opt.success),
+                int(opt.status), message, int(getattr(opt, "nit", 0)),
                 int(getattr(opt, "nfev", 0)), initial_candidate, final,
-                tuple(float(value) for value in physical_residuals(opt.x)),
+                tuple(float(value) for value in physical_residuals(x_final)),
                 len(self._cache), feasible)
         except Exception as exc:
             final = self._get(clipped)
@@ -552,15 +321,6 @@ class SQPOptimizer:
 
     def run(self) -> ParetoSweepResult:
         return self.run_epsilon_sweep()
-
-
-def evaluate_design(r1: float, r2: float, phi1: float, phi2: float,
-                    base_raw: dict, base_config_path: Path) -> CandidateResult:
-    """Compatibility helper for callers of the former two-tank wrapper."""
-    evaluator = SQPCandidateEvaluator(
-        base_config_path, _packaging_dimensions(base_raw),
-        SQPOptimizer._maximum_vented_fraction(base_raw), SQPOptimizer._hold_period_s(base_raw))
-    return evaluator.evaluate([r1, phi1, 0.026, r2, phi2, 0.026])
 
 
 def serialize_single_objective(result: SingleObjectiveResult, path: Path) -> None:
@@ -640,7 +400,6 @@ def serialize_sweep(result: ParetoSweepResult, path: Path, runs: Sequence[SQPSub
 
 
 __all__ = ["CandidateResult", "EpsilonTriplet", "EvalResult", "ParetoSweepResult", "SingleObjectiveResult",
-           "SQPCandidateEvaluator", "SQPOptimizer", "SQPSubproblemResult", "TankDesign",
-           "constraint_residuals", "decode_design_vector", "epsilon_residuals", "evaluate_design",
-           "physical_constraint_residuals", "serialize_evaluation_history",
+           "SQPOptimizer", "SQPSubproblemResult", "TankDesign",
+           "constraint_residuals", "epsilon_residuals", "physical_constraint_residuals", "serialize_evaluation_history",
            "serialize_single_objective", "serialize_sweep", "venting_performance"]
