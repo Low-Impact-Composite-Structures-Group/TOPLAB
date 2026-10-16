@@ -1,8 +1,6 @@
 analysis:
   name: Coupled CH2-CCH2 Multi-Tank System
-  description: 'Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K)
-    with pressure compensation coupling and Triathlon mission profile'
-  version: '1.0'
+  description: 'Two-tank coupled system: CH2 (700 bar, 330K) + CCH2 (400 bar, 53K) with pressure compensation coupling and ATR72 mission profile'
 network:
   nodes:
   - node_id: 1
