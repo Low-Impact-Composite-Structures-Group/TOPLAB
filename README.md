@@ -84,6 +84,51 @@ In practice, this means the codebase aims to make it easy to:
 3. Compare physical assumptions and design choices without duplicating solver logic.
 
 
+## Code Architecture
+
+Every analysis follows one pipeline: a YAML file becomes a typed config, the config is turned into a network and a demand, tanks are sized as pure functions, a pure right-hand side is integrated by a hybrid solver, and the finished run is bundled into a read-only `RunResult` that post-processing, reports and plots consume.
+
+```mermaid
+flowchart LR
+    YAML[/"YAML + mission CSV"/] --> CFG["config/<br/>load_config -> AnalysisConfig"]
+    CFG --> NET["network/<br/>Network, mixers, edges"]
+    CFG --> DEM["demand/<br/>Demand per mission"]
+    CFG --> SIZ["sizing/<br/>size_tank -> TankDesign"]
+    NET --> SYS
+    DEM --> SYS
+    SIZ --> SYS
+    subgraph SIM["simulation"]
+        SYS["system/<br/>TankSystem (pure RHS)"] --> HYB["solver/<br/>hybrid integration + stopping"]
+        CPL["coupling/<br/>edge registry, valves, iHEX"] --> SYS
+        FLU["fluids/<br/>fluid properties, valve_flow"] --> SYS
+        DYN["dynamics/ + thermodynamics/<br/>tank models"] --> SYS
+    end
+    HYB --> RR["orchestration/<br/>RunResult"]
+    RR --> POST["post/<br/>mass balance, iHEX, streams"]
+    RR --> REP["report/ + plotting/<br/>summary, figures"]
+    CFG --> OPT["optimization/<br/>CandidateEvaluator, SQP, NSGA-II"]
+    OPT -. "apply_design + dormancy + packaging" .-> SIM
+    PKG["packaging/<br/>aft_placement"] --> OPT
+```
+
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| Input | `config/` | Parse YAML into frozen, validated dataclasses (`AnalysisConfig`, `TankSpec`, `MissionSpec`, `EdgeSpec`). |
+| Topology | `network/` | Tank indexing, mixers with `flow_fraction`, coupling edges, demand routing. |
+| Demand | `demand/` | Single mission-flow interface (combined or GT/FC split) shared by every consumer. |
+| Design | `sizing/` | `size_tank(spec) -> TankDesign`, no side effects. |
+| Physics | `fluids/`, `dynamics/`, `thermodynamics/` | Fluid properties, single-phase and two-phase tank models, adiabatic pipe-orifice-pipe valve flow. |
+| Coupling | `coupling/` | Edge registry. An edge owns its extra states, its pure `flow(t, tank_states, x)` and its mode-switch events. |
+| System | `system/` | `TankSystem`: assembles the pure right-hand side from tanks and edges. |
+| Solver | `solver/` | Hybrid integration (continuous ODE plus terminal events for mode switches) and stopping criteria. |
+| Orchestration | `orchestration/` | `SystemOrchestrator` wires the pipeline; `RunResult` is the read-only output bundle. |
+| Output | `post/`, `report/`, `plotting/` | Mass-balance validation, iHEX sizing, stream data, summaries and figures. |
+| Packaging | `packaging/` | Aft-fuselage placement and packaging margin. |
+| Optimisation | `optimization/` | Design variables, shared `CandidateEvaluator` (discharge, dormancy, packaging), SQP and NSGA-II. |
+| Legacy | `legacy/` | Fenced-off feedforward pressure enforcer and old `FlowPhysics`; deprecated. |
+
+Optimisers never write temporary YAML files. A candidate design is produced by `apply_design` (a `dataclasses.replace` on the typed config) and evaluated in-process.
+
 ## Examples
 
 A selection of ready-to-run analyses lives under `examples/`. Each example
@@ -105,6 +150,7 @@ Available examples:
 | `single_tank_slh2` | Subcooled liquid hydrogen single-tank discharge |
 | `coupled_ch2_cch2` | CH2–CCH2 coupled system with pressure compensation |
 | `coupled_ch2_lh2` | CH2–LH2 coupled system with flow-controlled pressurisation |
+| `optimization_two_tank_cch2` | Two CcH2 tanks on the ATR72 mission: SQP (`driver_sqp_two_tank_cch2.py`) and NSGA-II (`driver_nsga2_two_tank_cch2.py`) over the tank radii |
 
 ## Analyses and Optimisation Studies
 
