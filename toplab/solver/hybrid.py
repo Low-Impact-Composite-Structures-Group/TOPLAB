@@ -20,6 +20,7 @@ def integrate_with_mode_switches(
     y0: np.ndarray,
     switch_event: Callable,
     edge_flows: Callable,
+    extras: Callable = None,
     log: Callable[[str], None] = lambda msg: None,
     **solver_kwargs,
 ):
@@ -28,12 +29,13 @@ def integrate_with_mode_switches(
     ``switch_event(mode_switch)`` builds a terminal event for an edge mode switch and
     ``edge_flows(t, y)`` returns the per-edge flows [kg/s] at an accepted point (evaluated with the
     mode that was active during the segment). Returns an object with ``t``, ``y``, ``edge_flows``
-    (n_edges x n_points) and ``t_events`` (one array per stop event).
+    (n_edges x n_points), ``extras`` (n_rows x n_points, from the optional
+    ``extras(t, y)`` callback evaluated at the same points) and ``t_events`` (one array per stop event).
     """
     t0, t_end = float(t_span[0]), float(t_span[1])
     n_stop = len(stop_events)
     stop_times = [[] for _ in stop_events]
-    times, states, flows = [], [], []
+    times, states, flows, extra_rows = [], [], [], []
 
     for _ in range(MAX_SWITCHES):
         switches = [s for edge in edges for s in edge.mode_switches()]
@@ -43,6 +45,9 @@ def integrate_with_mode_switches(
         # A restart repeats the switch point, which the previous segment already recorded.
         keep = slice(1, None) if times else slice(None)
         seg_flows = np.array([edge_flows(sol.t[i], sol.y[:, i]) for i in range(sol.t.size)]).reshape(sol.t.size, len(edges)).T
+        seg_extras = (np.array([extras(sol.t[i], sol.y[:, i]) for i in range(sol.t.size)]).reshape(sol.t.size, -1).T
+                      if extras else np.zeros((0, sol.t.size)))
+        extra_rows.append(seg_extras[:, keep])
         times.append(sol.t[keep])
         states.append(sol.y[:, keep])
         flows.append(seg_flows[:, keep])
@@ -67,5 +72,6 @@ def integrate_with_mode_switches(
         t=np.concatenate(times),
         y=np.concatenate(states, axis=1),
         edge_flows=np.concatenate(flows, axis=1),
+        extras=np.concatenate(extra_rows, axis=1),
         t_events=[np.asarray(t) for t in stop_times],
     )

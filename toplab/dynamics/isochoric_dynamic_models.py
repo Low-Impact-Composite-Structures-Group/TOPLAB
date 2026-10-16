@@ -21,14 +21,6 @@ from toplab.thermodynamics.tank_states import (
 from toplab.fluids.convective_mediums import IsochoricHydrogen
 from toplab.fluids.hydrogen_retrievers import IsochoricHydrogenRequester
 
-_heat_flow_data = None
-
-
-def set_heat_flow_data_collector(data_dict):
-    global _heat_flow_data
-    _heat_flow_data = data_dict
-
-
 class IsochoricDynamicModel(ABC):
     @abstractmethod
     def compute_state_derivatives(
@@ -122,14 +114,6 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         else:
             dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v)
 
-        if _heat_flow_data is not None:
-            _heat_flow_data['t'].append(time)
-            _heat_flow_data['qdot_disch'].append(actual_qdot_disch)
-            _heat_flow_data['qdot_ohex'].append(0.0)
-            _heat_flow_data['mdot_disch'].append(mdot_discharge)
-            _heat_flow_data['T'].append(T)
-            _heat_flow_data['rho'].append(rho)
-
         dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
@@ -139,7 +123,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
             shell_temperature_derivative=dT_shell_dt,
             heat_flux=Q_structure_to_h2,
-            discharge_heat_flux=Q_discharge,
+            discharge_heat_flux=actual_qdot_disch if actual_qdot_disch else Q_discharge,
         )
 
     def _determine_configuration(self, pressure: float) -> str:
@@ -299,14 +283,6 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             dT_dt = (h_term + work_term + Q_structure_to_h2 + Q_discharge) / (m * c_v2P)
             actual_qdot_disch = 0.0
 
-        if _heat_flow_data is not None:
-            _heat_flow_data['t'].append(time)
-            _heat_flow_data['qdot_disch'].append(actual_qdot_disch)
-            _heat_flow_data['qdot_ohex'].append(0.0)
-            _heat_flow_data['mdot_disch'].append(mdot_discharge)
-            _heat_flow_data['T'].append(T)
-            _heat_flow_data['rho'].append(rho)
-
         dT_shell_dt = kwargs.get('dT_shell_dt', 0.0)
 
         return IsochoricStateDerivatives(
@@ -316,7 +292,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             insulation_temperature_derivative=kwargs.get('dT_insulation_dt', 0.0),
             shell_temperature_derivative=dT_shell_dt,
             heat_flux=Q_structure_to_h2,
-            discharge_heat_flux=Q_discharge,
+            discharge_heat_flux=actual_qdot_disch if actual_qdot_disch else Q_discharge,
         )
 
     def _determine_configuration(self, pressure: float) -> str:
@@ -369,16 +345,12 @@ class IsochoricModelSwitcher:
     def __init__(self, scenario: str = "DISCHARGE", p_min: float = 15e5, p_vent: float = 450e5, tank_volume: float = 0.5):
         self.single_phase_model = SinglePhaseIsochoricModel(scenario, p_min, p_vent, tank_volume)
         self.two_phase_model = TwoPhaseIsochoricModel(scenario, p_min, p_vent, tank_volume)
-        self.model_history = []
 
     def select_model(self, state: IsochoricTankState) -> IsochoricDynamicModel:
         if self.two_phase_model.is_applicable(state):
             selected_model = self.two_phase_model
-            model_name = "two_phase"
         else:
             selected_model = self.single_phase_model
-            model_name = "single_phase"
-        self.model_history.append(model_name)
         return selected_model
 
     def compute_state_derivatives(

@@ -17,7 +17,7 @@ from pathlib import Path
 from toplab.configuration.scenario_configuration import ScenarioConfig
 from toplab.orchestration.system_orchestrator import SystemOrchestrator
 from toplab.coupling.inter_tank_coupling import PressureTriggeredValve
-from toplab.fluids.flow_physics import FlowPhysics
+from toplab.legacy.flow_physics import FlowPhysics
 # from multi_tank.system.multi_tank_state import MultiTankState  # Not needed for these tests
 
 

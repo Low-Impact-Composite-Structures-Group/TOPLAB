@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from toplab.fluids.flow_physics import FlowPhysics
+from toplab.legacy.flow_physics import FlowPhysics
 from toplab.network.network import CouplingEdge
 from toplab.peripheral_components.base import PeripheralFlowState
 

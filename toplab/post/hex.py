@@ -10,9 +10,10 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI
 
 from toplab.utilities.output_control import silent_when_quiet
+from toplab.orchestration.run_result import RunResult
 
 
-def calculate_ohex_requirements(run, tank_index: int = 0) -> List[float]:
+def calculate_ohex_requirements(run: RunResult, tank_index: int = 0) -> List[float]:
     """
     Calculate OHEX (Outboard Heat Exchanger) heat requirements.
 
@@ -101,65 +102,26 @@ def calculate_ohex_requirements(run, tank_index: int = 0) -> List[float]:
     return qdot_ohex
 
 
-def calculate_ihex_requirements(run, tank_index: int = 0) -> List[float]:
+def calculate_ihex_requirements(run: RunResult, tank_index: int = 0) -> List[float]:
     """
-    Extract iHEX requirements from DAE simulation data.
+    iHEX heat requirement [W] of one tank at every result time.
 
-    iHEX requirements come directly from the qdot_disch values calculated
-    during the DAE integration in the isochoric dynamic models.
-    This represents the Configuration B discharge heat requirement that
-    is computed as part of the energy balance to maintain pressure constraints.
-
-    Args:
-        tank_index: Index of tank to calculate for (currently unused - uses global heat flow data)
-
-    Returns:
-        List of iHEX heat requirements [W] for each time point from DAE simulation
+    This is the Configuration B discharge heat computed in the isochoric energy balance
+    (the heat needed to hold the pressure constraint). It is recorded per tank at each
+    accepted integration point, so it lines up one-to-one with ``run.results.times``.
     """
     if not run.results:
         return []
-
-    print(f"   Extracting iHEX requirements from DAE simulation data...")
-
-    # Check if heat flow data was collected during simulation
-    if not hasattr(run, 'heat_flow_data') or not run.heat_flow_data['qdot_disch']:
-        print("   WARNING: No heat flow data collected, returning zero iHEX requirements")
+    history = run.tank_system.discharge_heat_history
+    if history.shape != (len(run.tank_geometries), len(run.results.times)):
         return [0.0] * len(run.results.times)
-
-    # Get raw data from DAE integration
-    heat_times = run.heat_flow_data['t']
-    heat_qdot_disch = run.heat_flow_data['qdot_disch']
-
-    if len(heat_times) != len(heat_qdot_disch):
-        print(f"   WARNING: Heat flow time/data length mismatch: {len(heat_times)} vs {len(heat_qdot_disch)}")
-        return [0.0] * len(run.results.times)
-
-    if len(heat_times) == 0:
-        print("   WARNING: No heat flow data collected during integration")
-        return [0.0] * len(run.results.times)
-
-    # Interpolate heat flow data to match results timeline
-    import numpy as np
-    results_times = np.array(run.results.times)
-    heat_times_array = np.array(heat_times)
-    heat_qdot_array = np.array(heat_qdot_disch)
-
-    # Handle length mismatch by interpolation
-    if len(heat_times) != len(run.results.times):
-        print(f"   Interpolating heat flow data: {len(heat_times)} → {len(run.results.times)} points")
-        qdot_ihex = np.interp(results_times, heat_times_array, heat_qdot_array).tolist()
-    else:
-        qdot_ihex = heat_qdot_disch.copy()
-
-    # Statistics
-    valid_points = sum(1 for q in qdot_ihex if abs(q) > 1e-3)
-    max_q_ihex = max(abs(q) for q in qdot_ihex) if qdot_ihex else 0.0
-
-    print(f"   iHEX extracted from DAE: {valid_points}/{len(qdot_ihex)} points, max = {max_q_ihex:.0f}W")
+    qdot_ihex = history[tank_index].tolist()
+    peak = max((abs(q) for q in qdot_ihex), default=0.0)
+    print(f"   iHEX: {sum(abs(q) > 1e-3 for q in qdot_ihex)}/{len(qdot_ihex)} active points, max = {peak:.0f}W")
     return qdot_ihex
 
 
-def compute_per_stream_outflows(run, tank_index: int) -> Optional[Dict[str, np.ndarray]]:
+def compute_per_stream_outflows(run: RunResult, tank_index: int) -> Optional[Dict[str, np.ndarray]]:
     """
     For tanks with multiple discharge streams (e.g. FC + GT dual-flow), return a dict
     mapping each stream label → outflow array [g/s, negative convention] at simulation times.
@@ -167,7 +129,7 @@ def compute_per_stream_outflows(run, tank_index: int) -> Optional[Dict[str, np.n
     """
     if not run.results:
         return None
-    streams = run._streams.get(tank_index, [])
+    streams = run.streams.get(tank_index, [])
     if len(streams) < 2:
         return None
 

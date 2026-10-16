@@ -10,7 +10,7 @@ from toplab.coupling.base import EdgeContext, InterTankCoupling, as_float
 from toplab.coupling.registry import register_edge
 from toplab.network.network import CouplingEdge
 from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
-from toplab.fluids.flow_physics import FlowPhysics
+from toplab.legacy.flow_physics import FlowPhysics
 from toplab.peripheral_components.base import PeripheralFlowState
 
 

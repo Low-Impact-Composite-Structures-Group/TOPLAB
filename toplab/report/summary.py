@@ -9,9 +9,10 @@ from CoolProp.CoolProp import PropsSI
 from toplab.utilities.output_control import silent_when_quiet
 from toplab.post.hex import calculate_ohex_requirements, calculate_ihex_requirements
 from toplab.network import SINK
+from toplab.orchestration.run_result import RunResult
 
 
-def get_scenario_summary(run) -> Dict[str, Any]:
+def get_scenario_summary(run: RunResult) -> Dict[str, Any]:
     """Get comprehensive summary of the scenario configuration and results."""
     summary = {
         'scenario': {
@@ -67,7 +68,7 @@ def get_scenario_summary(run) -> Dict[str, Any]:
     return summary
 
 
-def get_comprehensive_analysis_summary(run) -> Dict[str, Any]:
+def get_comprehensive_analysis_summary(run: RunResult) -> Dict[str, Any]:
     """Get comprehensive analysis summary with all input/output parameters for benchmarking."""
     import numpy as np
 
@@ -83,7 +84,7 @@ def get_comprehensive_analysis_summary(run) -> Dict[str, Any]:
     for tank_idx in range(len(run.tank_geometries)):
         tank_name = f"Tank_{tank_idx + 1}"
         # Geometry and mass properties already computed during TankSystem initialisation
-        tank_props = run.tank_system._cached_tank_properties[tank_idx]
+        tank_props = run.tank_system.tank_properties(tank_idx)
 
         # TankSystemConfig holds the values actually used in the simulation
         tank_sys_cfg = run.tank_system.config.tanks[tank_idx]
@@ -103,10 +104,10 @@ def get_comprehensive_analysis_summary(run) -> Dict[str, Any]:
         vent_pressure_bar     = float(tank_sys_cfg.P_VENT) / 1e5
         min_pressure_bar      = float(tank_sys_cfg.P_MIN) / 1e5
 
-        if run.tank_system._tank_fluids.get(tank_idx, '') == 'CH2':
+        if run.tank_system.fluid_kind(tank_idx) == 'CH2':
             min_density_kg_m3 = 0.0  # CH2 uses pressure-based stopping
         else:
-            min_density_kg_m3 = float(run.tank_system._min_densities[tank_idx])
+            min_density_kg_m3 = run.tank_system.min_density(tank_idx)
 
         direct_inputs = {
             'initial_pressure_bar':   initial_pressure_bar,
@@ -403,7 +404,7 @@ def save_comprehensive_results(run) -> str:
     def _get_tank_props(tank_geometry: Any, tank_index: int) -> Dict[str, Any]:
         if hasattr(run, 'tank_system') and run.tank_system:
             try:
-                return run.tank_system._get_tank_properties(tank_geometry, f"Tank{tank_index + 1}", tank_index)
+                return run.tank_system.tank_properties(tank_index)
             except Exception:
                 return {}
         return {}

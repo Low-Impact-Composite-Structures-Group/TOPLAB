@@ -1,5 +1,5 @@
 """
-Copy of `src/fluids/flow_physics.py` colocated under multi_tank for self-contained imports.
+DEPRECATED: legacy flow physics, retained for the feedforward pressure enforcer only.
 """
 
 from typing import Dict, Any

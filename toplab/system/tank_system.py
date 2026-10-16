@@ -32,7 +32,7 @@ from toplab.coupling import EdgeContext, build_coupling
 from toplab.solver.stopping import StoppingCriteria
 from toplab.network.network import SINK, CouplingEdge
 from toplab.fluids.fluid import DEFAULT_COOLPROP_FLUID
-from toplab.fluids.flow_physics import FlowPhysics
+from toplab.legacy.flow_physics import FlowPhysics
 from toplab.peripheral_components.factory import build_peripheral_component_chain
 
 
@@ -52,7 +52,7 @@ class TankConfig:
 class TankSystemConfig:
     """Configuration parameters for the tank system."""
     AMBIENT_TEMPERATURE: float = 298.15  # K
-    MISSION_DURATION: float = NotImplementedError  # complain
+    MISSION_DURATION: Optional[float] = None  # [s]; required before run_analysis
     tanks: List[TankConfig] = None       # Tank configurations
     mission_profile: Any = None          # Mission profile for flow calculations
     minimum_density: float = 5.8         # Stopping density [kg/m³]
@@ -115,6 +115,7 @@ class TankSystem:
 
         # Per-edge flows [kg/s] at the accepted solution points (n_edges x n_points), set by run_analysis
         self.edge_flow_history = np.zeros((0, 0))
+        self.discharge_heat_history = np.zeros((0, 0))  # [W], n_tanks x n_points
         self._edge_slices = []   # slice of the state vector owned by each edge
 
         # Initialize flow physics if configuration is available
@@ -331,6 +332,18 @@ class TankSystem:
             return 0.0
 
         return enthalpy_flow / total_inflow
+
+    def tank_properties(self, tank_index: int) -> Dict[str, Any]:
+        """Geometry and mass properties computed when the system was built."""
+        return self._cached_tank_properties[tank_index]
+
+    def fluid_kind(self, tank_index: int) -> str:
+        """Configured fluid label of a tank (e.g. 'CH2', 'CcH2', 'SLH2')."""
+        return self._tank_fluids.get(tank_index, '')
+
+    def min_density(self, tank_index: int) -> float:
+        """Stopping density [kg/m3] of a tank."""
+        return float(self._min_densities[tank_index])
 
     def _get_tank_properties(self, tank: CapsuleTank, tank_id: str = "Unknown", tank_index: int = -1):
         """Calculate tank properties from SphericalTank geometry.
@@ -615,6 +628,10 @@ class TankSystem:
         State vector y = [m1, T_H2, T_struct, T_ins, T_shell, ..., mN, T_H2,N, T_struct,N, T_ins,N, T_shell,N].
         Each tank has five state variables.
         """
+        return self._rhs(t, y)[0]
+
+    def _rhs(self, t: float, y: np.ndarray):
+        """Return ``(dydt, discharge_heat)``; ``discharge_heat[i]`` is tank i's iHEX heat requirement [W]."""
         # Periodic heartbeat: one print per progress bucket (default every 60 s sim-time)
         progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
         if progress_bucket > getattr(self, '_ode_progress_bucket', -1):
@@ -659,6 +676,7 @@ class TankSystem:
 
         n_tanks = len(self.tanks)
         dydt = np.zeros(len(y))
+        discharge_heat = np.zeros(n_tanks)
 
         edge_rates = self._edge_flow_rates(multi_state, t, y)
         coupling_flows = self._net_coupling_flows(edge_rates)
@@ -734,6 +752,7 @@ class TankSystem:
                 tank_index=i,
             )
 
+            discharge_heat[i] = state_derivatives.discharge_heat_flux
             idx = i * 5
             dydt[idx]     = state_derivatives.fuel_mass_derivative
             dydt[idx + 1] = state_derivatives.h2_temperature_derivative
@@ -745,7 +764,7 @@ class TankSystem:
             if edge.n_states:
                 dydt[sl] = edge.state_derivatives(t, multi_state.tank_states, y[sl])
 
-        return dydt
+        return dydt, discharge_heat
 
     def _edge_flow_rates(self, multi_state: MultiTankState, t: float, y: np.ndarray) -> List[float]:
         """Mass flow [kg/s, >= 0] through each coupling edge; a pure function of (t, y) and the edge modes."""
@@ -774,6 +793,10 @@ class TankSystem:
             y[:5 * len(self.tanks)], self.tanks, t, fluids=[self._coolprop_fluids[i] for i in range(len(self.tanks))]
         )
         return self._edge_flow_rates(multi_state, t, y)
+
+    def _discharge_heat_at(self, t: float, y: np.ndarray) -> List[float]:
+        """Per-tank iHEX heat requirement [W] at an accepted point."""
+        return list(self._rhs(t, y)[1])
 
     def _mode_switch_event(self, switch):
         """Terminal event for an edge mode switch (a tank pressure crossing a threshold)."""
@@ -893,6 +916,8 @@ class TankSystem:
         y0 = np.concatenate([y0, edge_states])
 
         # Integration setup - use mission duration from configuration
+        if self.config.MISSION_DURATION is None:
+            raise ValueError("TankSystemConfig.MISSION_DURATION must be set before running an analysis.")
         duration_seconds = float(self.config.MISSION_DURATION)
 
         # Optional override (primarily for tests/smoke runs)
@@ -947,6 +972,7 @@ class TankSystem:
         solution = integrate_with_mode_switches(
             self.solver, self.coupling_valves, stop_events, t_span_, y0_,
             switch_event=self._mode_switch_event, edge_flows=self._edge_flows_at,
+            extras=self._discharge_heat_at,
             log=self._log_summary, **integration_params,
         )
 
@@ -966,6 +992,7 @@ class TankSystem:
             self._log_summary("   Mission completed: all tanks ran to the end of the mission profile.")
 
         self.edge_flow_history = solution.edge_flows
+        self.discharge_heat_history = solution.extras
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []
@@ -1022,23 +1049,6 @@ class TankSystem:
             if len(tank_states) > 1:  # Multi-tank system
                 # Use gross coupling flows from simulation (tracks inflow/outflow per tank separately)
                 gross_flows = self._gross_coupling_flows(solution.edge_flows[:, i])
-
-                # Debug: Print coupling flows at this timestep
-                any_nonzero = any(
-                    gross_flows[i]['inflow'] > 1e-6 or gross_flows[i]['outflow'] > 1e-6
-                    for i in gross_flows
-                )
-                # if any_nonzero:
-                #     parts = []
-                #     for i in gross_flows:
-                #         inf = gross_flows[i]['inflow']
-                #         out = gross_flows[i]['outflow']
-                #         if inf > 1e-6 or out > 1e-6:
-                #             parts.append(f"T{i}: +{inf*1000:.1f}/-{out*1000:.1f}g/s")
-                #     # print(f"  Post-processing t={current_time:.1f}s: {', '.join(parts)} (from history)")
-                # else:
-                    # if i < 5 or i % 200 == 0:
-                        # print(f"  Post-processing t={current_time:.1f}s: All coupling flows are zero")
 
                 # Update flow data with gross coupling flows and set tank state attributes
                 for tank_idx in range(len(tank_states)):

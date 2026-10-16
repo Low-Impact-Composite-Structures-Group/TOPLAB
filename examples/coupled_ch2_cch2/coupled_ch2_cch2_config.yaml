@@ -222,7 +222,7 @@ dormancy_check:
   maximum_loss_percent_per_hour: 1.0
 
 packaging:
-  generate_3d_plot: false
+  generate_3d_plot: true
   aft_fuselage_dimensions:
     d1: 2.7
     d2: 1.61

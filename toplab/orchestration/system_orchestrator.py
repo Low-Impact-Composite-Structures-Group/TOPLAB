@@ -31,13 +31,13 @@ from toplab.sizing import TankDesign, size_tank
 
 # Multi-tank DAE physics engine
 from toplab.system.tank_system import TankSystem, TankSystemConfig, TankConfig
+from toplab.orchestration.run_result import RunResult
 from toplab.utilities.output_control import silent_when_quiet
 
 # Mission framework
 from toplab.missions.isochoric_missions import DischargeMission
 
 # Heat flow data collection for iHEX calculation
-from toplab.dynamics.isochoric_dynamic_models import set_heat_flow_data_collector
 
 # Utilities
 from CoolProp.CoolProp import PropsSI
@@ -114,15 +114,6 @@ class SystemOrchestrator:
 
         self.results = None
 
-        # Heat flow data collection for iHEX calculations
-        self.heat_flow_data = {
-            't': [],           # Time [s]
-            'qdot_disch': [],  # Discharge heat rate [W] (iHEX requirements from DAE)
-            'qdot_ohex': [],   # oHEX heat rate [W] (calculated in post-processing)
-            'mdot_disch': [],  # Discharge mass flow rate [kg/s]
-            'T': [],           # Temperature [K]
-            'rho': []          # Density [kg/m³]
-        }
         self.validation_results = None
 
         print("System Orchestrator ready for mission execution!")
@@ -308,12 +299,6 @@ class SystemOrchestrator:
         start_time = time.time()
 
         try:
-            # Clear previous heat flow data and set up collector
-            for key in self.heat_flow_data:
-                self.heat_flow_data[key].clear()
-            set_heat_flow_data_collector(self.heat_flow_data)
-            print("   Heat flow data collector configured for iHEX extraction")
-
             # Run the MultiTankSystem DAE simulation
             self.results = self.tank_system.run_analysis(solver_method, solver_config)
 
@@ -324,12 +309,6 @@ class SystemOrchestrator:
             print(f"   Wall time: {wall_time:.2f} seconds")
             print(f"   Final time: {self.results.times[-1]/3600:.2f} hours")
             print(f"   Data points: {len(self.results.times)}")
-
-            # Debug heat flow data collection
-            qdot_disch_count = len(self.heat_flow_data['qdot_disch'])
-            qdot_disch_nonzero = sum(1 for q in self.heat_flow_data['qdot_disch'] if abs(q) > 1e-3)
-            max_qdot_disch = max(abs(q) for q in self.heat_flow_data['qdot_disch']) if self.heat_flow_data['qdot_disch'] else 0
-            print(f"   Heat flow data: {qdot_disch_count} points, {qdot_disch_nonzero} non-zero, max = {max_qdot_disch:.1f}W")
 
             # Display final states
             final_multi_state = self.results.multi_tank_states[-1]
@@ -372,28 +351,36 @@ class SystemOrchestrator:
 
         return self.validation_results
 
+    def run_result(self) -> RunResult:
+        """Snapshot of the finished run for post-processing and reporting."""
+        return RunResult(
+            config=self.config, network=self.network, results=self.results, designs=self.designs,
+            tank_geometries=self.tank_geometries, couplings=self.couplings, streams=self._streams,
+            mission_profile=self.mission_profile, tank_system=self.tank_system,
+            validation_results=self.validation_results)
+
     # --- Delegates: derived quantities, plots and reports live outside the orchestrator ---
 
     def generate_plots(self, save_path: str = None) -> Any:
         from toplab.report.plots import generate_plots
-        return generate_plots(self, save_path)
+        return generate_plots(self.run_result(), save_path)
 
     def get_scenario_summary(self) -> Dict[str, Any]:
         from toplab.report.summary import get_scenario_summary
-        return get_scenario_summary(self)
+        return get_scenario_summary(self.run_result())
 
     def get_comprehensive_analysis_summary(self) -> Dict[str, Any]:
         from toplab.report.summary import get_comprehensive_analysis_summary
-        return get_comprehensive_analysis_summary(self)
+        return get_comprehensive_analysis_summary(self.run_result())
 
     def print_scenario_summary(self):
         from toplab.report.summary import print_scenario_summary
-        print_scenario_summary(self)
+        print_scenario_summary(self.run_result())
 
     def print_comprehensive_analysis_summary(self):
         from toplab.report.summary import print_comprehensive_analysis_summary
-        print_comprehensive_analysis_summary(self)
+        print_comprehensive_analysis_summary(self.run_result())
 
     def save_comprehensive_results(self) -> str:
         from toplab.report.summary import save_comprehensive_results
-        return save_comprehensive_results(self)
+        return save_comprehensive_results(self.run_result())

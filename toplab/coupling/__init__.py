@@ -4,7 +4,7 @@ from toplab.coupling.base import EdgeContext, InterTankCoupling
 from toplab.coupling.registry import EDGE_TYPES, build_coupling, register_edge
 
 # Importing the modules registers their edge types.
-from toplab.coupling.feedforward_enforcer import FeedforwardPressureEnforcer
+from toplab.legacy.feedforward_enforcer import FeedforwardPressureEnforcer
 from toplab.coupling.ohex_extraction import OHEXExtractionCoupling
 from toplab.coupling.pressure_triggered_discharge import PressureTriggeredDischarge
 from toplab.coupling.pressure_triggered_valve import PressureTriggeredValve

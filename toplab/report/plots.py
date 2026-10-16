@@ -9,10 +9,11 @@ from CoolProp.CoolProp import PropsSI
 from toplab.utilities.output_control import silent_when_quiet
 from toplab.post.hex import calculate_ohex_requirements, calculate_ihex_requirements, compute_per_stream_outflows
 from toplab.post.streams import coupling_stream_history
+from toplab.orchestration.run_result import RunResult
 
 
 @silent_when_quiet
-def generate_plots(run, save_path: str = None) -> Any:
+def generate_plots(run: RunResult, save_path: str = None) -> Any:
     """
     Generate plots from simulation results.
 
@@ -84,7 +85,7 @@ def generate_plots(run, save_path: str = None) -> Any:
         return None
 
 
-def generate_single_mission_plots(run, plotter, save_path: str = None, figure_prefix: str = None):
+def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None, figure_prefix: str = None):
     """Generate plots for single mission analysis."""
     figures = []
 

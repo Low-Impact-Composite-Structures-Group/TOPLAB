@@ -82,6 +82,7 @@ class StoppingCriteria:
                     solution.t = solution.t[:step + 1]
                     solution.y = solution.y[:, :step + 1]
                     solution.edge_flows = solution.edge_flows[:, :step + 1]
+                    solution.extras = solution.extras[:, :step + 1]
                     t = solution.t[-1]
                     return (f"stopping event was not caught by solver; truncating solution at "
                             f"Tank {i + 1} stopping criterion (t={t:.1f}s, {t / 3600:.3f}h).")
