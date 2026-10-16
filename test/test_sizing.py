@@ -1,6 +1,6 @@
 import copy
-import glob
 import math
+from pathlib import Path
 
 import pytest
 
@@ -9,7 +9,7 @@ from toplab.sizing import size_tank
 
 
 def _spec():
-    path = glob.glob("examples/single_tank_cch2/*_config.yaml")[0]
+    path = Path(__file__).parent.parent / "examples/single_tank_cch2/single_tank_cch2_config.yaml"
     return load_config(path).tanks[0]
 
 
