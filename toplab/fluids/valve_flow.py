@@ -4,8 +4,10 @@ Model (steady, adiabatic, no shaft work, real-gas CoolProp properties of the flu
 leaving the source tank):
 
 * Stagnation enthalpy is conserved along the whole path: h0 = h + v^2/2 = h_source.
-* Each pipe removes stagnation pressure by Darcy-Weisbach, dp0 = (f L/D + K) rho v^2 / 2,
-  with rho evaluated at the pipe's static state (low-Mach approximation).
+* The upstream pipe removes stagnation pressure by Darcy-Weisbach, dp0 = (f L/D + K) rho v^2 / 2
+  (low-Mach approximation). The downstream pipe is adiabatic Fanno flow integrated from its exit
+  (tank pressure, or the sonic state if the pipe chokes) back to its inlet, so a choked line
+  limits the flow by its own inlet pressure rather than by the tank pressure.
 * The orifice is an isentropic real-gas nozzle from its inlet stagnation state, scaled by
   a discharge coefficient and the valve opening. Choking is detected as the maximum of
   rho*v over the available pressure range, so no ideal-gas critical ratio is used.
@@ -24,6 +26,7 @@ import CoolProp.CoolProp as CP
 from scipy.optimize import brentq, minimize_scalar
 
 LAMINAR_RE = 2300.0
+MACH_CAP = 10.0
 
 
 @lru_cache(maxsize=None)
@@ -124,6 +127,65 @@ def _pipe_stagnation_loss(pipe: PipeSpec, mdot: float, p: float, h0: float, flui
     return (f * pipe.length_m / pipe.diameter_m + pipe.loss_coefficient) * 0.5 * rho * v * v
 
 
+def _pipe_state(pipe: PipeSpec, mass_flux: float, p: float, h0: float, st):
+    """(rho, Mach, mu) of the adiabatic pipe flow at static pressure ``p`` and mass flux G [kg/m^2/s]."""
+    h = h0
+    try:
+        for _ in range(4):
+            st.update(CP.HmassP_INPUTS, h, p)
+            h = h0 - 0.5 * (mass_flux / st.rhomass()) ** 2
+        st.update(CP.HmassP_INPUTS, h, p)
+    except ValueError:
+        # The kinetic energy exceeds the available enthalpy: far beyond sonic.
+        return math.nan, MACH_CAP, math.nan
+    rho = st.rhomass()
+    return rho, min(MACH_CAP, mass_flux / (rho * st.speed_sound())), st.viscosity()
+
+
+def _downstream_inlet_pressure(pipe: PipeSpec, mdot: float, p_target: float, h0: float, fluid: str) -> float:
+    """Static pressure at the inlet of the pipe that discharges into the target tank [Pa].
+
+    Adiabatic Fanno flow of a real gas. The exit static pressure is the tank pressure unless the
+    flow would be supersonic there, in which case the pipe is choked and the exit sits at M = 1
+    (higher than the tank pressure). From the exit the momentum equation is integrated upstream in
+    pressure, dx = (1 - M^2) * 2 rho D / (f G^2) dp, until the pipe length is used up.
+    Returns inf if the flow cannot be carried by the pipe.
+    """
+    st = _state(fluid)
+    G = mdot / pipe.area
+    try:
+        p_exit = p_target
+        if G > 0.0 and _pipe_state(pipe, G, p_exit, h0, st)[1] >= 1.0:
+            lo, hi = p_target, 2.0 * p_target
+            while _pipe_state(pipe, G, hi, h0, st)[1] >= 1.0:
+                lo, hi = hi, 2.0 * hi
+                if hi > 1e10:
+                    return math.inf
+            p_exit = brentq(lambda p: _pipe_state(pipe, G, p, h0, st)[1] - 1.0, lo, hi, rtol=1e-8)
+
+        def integrand(p: float) -> float:
+            rho, mach, mu = _pipe_state(pipe, G, p, h0, st)
+            f = _friction_factor(pipe, G * pipe.diameter_m / mu)
+            return (1.0 - mach * mach) * 2.0 * rho * pipe.diameter_m / (f * G * G)
+
+        p, remaining, g_prev = p_exit, pipe.length_m, integrand(p_exit)
+        while remaining > 0.0:
+            p_next = p * 1.02
+            g_next = integrand(p_next)
+            piece = 0.5 * (g_prev + g_next) * (p_next - p)
+            if piece >= remaining:
+                p += (p_next - p) * remaining / piece
+                remaining = 0.0
+            else:
+                p, remaining, g_prev = p_next, remaining - piece, g_next
+            if p > 1e10:
+                return math.inf
+        rho, mach, _ = _pipe_state(pipe, G, p, h0, st)
+        return p + pipe.loss_coefficient * 0.5 * rho * (G / rho) ** 2
+    except ValueError:
+        return math.inf
+
+
 def _nozzle_mass_flux(p_in: float, h0: float, p_back: float, fluid: str) -> float:
     """Mass flux rho*v [kg/m^2/s] of an isentropic real-gas expansion p_in -> p_back (choked if limited)."""
     if p_back >= p_in:
@@ -159,8 +221,8 @@ def valve_mass_flow(path: ValvePath, fluid: str, p_source: float, temperature: f
         if path.upstream is not None:
             p_in -= _pipe_stagnation_loss(path.upstream, mdot, p_source, h0, fluid)
         p_back = p_target
-        if path.downstream is not None:
-            p_back += _pipe_stagnation_loss(path.downstream, mdot, p_target, h0, fluid)
+        if path.downstream is not None and mdot > 0.0:
+            p_back = _downstream_inlet_pressure(path.downstream, mdot, p_target, h0, fluid)
         if p_back >= p_in:
             return 0.0
         return area * _nozzle_mass_flux(p_in, h0, p_back, fluid)

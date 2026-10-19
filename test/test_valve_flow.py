@@ -37,3 +37,19 @@ def test_path_from_options_accepts_area_or_diameter():
     assert a.orifice_area == pytest.approx(1.0e-4)
     with pytest.raises(ValueError):
         path_from_options({"valve": {}})
+
+
+def test_piped_flow_follows_source_pressure_and_not_back_pressure():
+    """A choked downstream line must not make the flow grow with tank-2 pressure or with falling tank-1 pressure."""
+    import CoolProp.CoolProp as CP
+    from toplab.fluids.valve_flow import PipeSpec, ValvePath, valve_mass_flow
+
+    path = ValvePath(5e-3, 0.64, PipeSpec(5.64e-3, 0.0, 0.02), PipeSpec(5.64e-3, 0.5, 0.022))
+
+    def flow(p1_bar, p2_bar, T=250.0):
+        rho = CP.PropsSI("D", "T", T, "P", p1_bar * 1e5, "hydrogen")
+        return valve_mass_flow(path, "hydrogen", p1_bar * 1e5, T, rho, p2_bar * 1e5)
+
+    assert flow(100, 20) >= flow(100, 30) - 1e-9
+    flows = [flow(p, 25) for p in (300, 200, 100, 50)]
+    assert all(a > b for a, b in zip(flows, flows[1:]))
