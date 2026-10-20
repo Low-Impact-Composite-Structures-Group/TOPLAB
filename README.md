@@ -152,6 +152,42 @@ Available examples:
 | `coupled_ch2_lh2` | CH2–LH2 coupled system with flow-controlled pressurisation |
 | `optimization_two_tank_cch2` | Two CcH2 tanks on the ATR72 mission: SQP (`driver_sqp_two_tank_cch2.py`) and NSGA-II (`driver_nsga2_two_tank_cch2.py`) over the tank radii |
 
+The NASA Modified Lockheed MLI heat-flux correlation can be inspected with
+`python examples/modified_lockheed_mli.py`. It prints component heat fluxes for
+representative cryogenic temperatures and thicknesses, plots total heat flux,
+and reports a residual-gas pressure sensitivity. The script saves the figures
+as `examples/output/modified_lockheed_thickness_sweep.png` and
+`examples/output/modified_lockheed_pressure_sensitivity.png`.
+
+The Modified Lockheed model is a semi-empirical MLI correlation returning
+`q` in W/m². Temperatures are in K, layer density is in layers/cm, and
+physical insulation thickness is in m, and interstitial pressure is in torr.
+`Cs`, `Cr`, and `Cg` are empirical constants; the published Modified Lockheed
+defaults are `Cs = 2.4e-4`, `Cr = 4.944e-10`, and `Cg = 1.46e4`, with
+`epsilon = 0.031`. Its default
+degradation factor `Df = 1` represents ideal blanket performance; practical
+tank-applied MLI may require a degradation factor to account for seams,
+penetrations, edges, and installation imperfections. Configure this option as
+`model: modified_lockheed` in the insulation block; available correlation
+settings include `layer_density`, `pressure_torr`, `emissivity_mli`,
+`degradation_factor`, `Cs`, `Cr`, and `Cg`. Effective insulation
+`density` and constant `specific_heat` continue to use the existing lumped
+thermal-mass treatment.
+
+The outer shell is configured with `alpha_shell` (ambient convective coefficient)
+and `emissivity_shell`. The legacy names `alpha_amb` and `emissivity` are still
+accepted for the shell; `emissivity` only refers to the MLI emissivity when
+`emissivity_shell` is also given.
+
+The supported insulation selections are foam (`foam` or `rohacell`) and
+`modified_lockheed`. The previous equivalent MLI conductivity-fit option
+(`mli`) is not working and is rejected by configuration loading; it is
+retained only as historical code and is not covered by tests.
+
+Reference: Hastings, L. J., Hedayat, A., and Brown, T. M.,
+"Analytical Modeling and Test Correlation of Variable Density Multilayer
+Insulation for Cryogenic Storage," NASA/TM-2004-213175.
+
 ## Analyses and Optimisation Studies
 
 Full analysis and optimisation case sets live in the companion repository

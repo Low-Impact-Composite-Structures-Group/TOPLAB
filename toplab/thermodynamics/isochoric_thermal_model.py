@@ -6,7 +6,7 @@ The InsulatedTankThermalModel implements the five-state thermal network:
     H2  ←(Q_structure_to_h2)←  structure  ←(Q_insulation_to_structure)←
     insulation  ←(Q_shell_to_insulation)←  shell  ←(Q_ambient_to_shell)← ambient
 
-Structure (liner + composite), insulation (Rohacell foam), and shell each carry
+Structure (liner + composite), insulation, and shell each carry
 an ODE state. The insulation layer is divided at its equal-resistance midpoint;
 each half-layer heat flow integrates the temperature-dependent conductivity.
 
@@ -46,7 +46,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     Five-state tank thermal model with transient insulation.
 
     Geometry layers (inside → outside):
-      fluid | liner + wall (structure) | Rohacell foam (insulation) | Al shell | ambient
+      fluid | liner + wall (structure) | insulation | Al shell | ambient
 
         ODEs:
             dT_structure/dt  = (Q_insulation_to_structure − Q_structure_to_h2) / C_structure
@@ -149,11 +149,27 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         return alpha_s * self.A_in * (state.structure_temperature - state.h2_temperature)
 
     # ------------------------------------------------------------------
-    # Insulation: Rohacell foam (variable-conductivity Fourier conduction)
+    # Insulation: variable-conductivity Fourier conduction
     # ------------------------------------------------------------------
 
     def _integrated_conductivity(self, temperature_low: float, temperature_high: float) -> float:
-        return self.insulation_model.integrated_conductivity(temperature_low, temperature_high)
+        integrated_conductivity = self.insulation_model.integrated_conductivity
+        if integrated_conductivity is None:
+            raise RuntimeError("This insulation model does not define integrated conductivity")
+        return integrated_conductivity(temperature_low, temperature_high)
+
+    def _modified_lockheed_heat_rate(
+        self,
+        T_hot: float,
+        T_cold: float,
+        geometry_factor: float,
+    ) -> float:
+        heat_flux = self.insulation_model.heat_flux
+        if heat_flux is None:
+            raise RuntimeError("This insulation model does not define a heat-flux correlation")
+        half_thickness = 0.5 * (self.r_shell - self.r_structure)
+        effective_area = geometry_factor * half_thickness
+        return heat_flux(T_hot, T_cold, half_thickness) * effective_area
 
     def compute_shell_to_insulation_heat_flux(self, shell_temperature: float, insulation_temperature: float) -> float:
         """Heat flow from shell to insulation [W]. Positive when shell is warmer."""
@@ -161,6 +177,10 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
             2.0 * math.pi * self.L / math.log(self.r_shell / self.r_m_cyl)
             + 4.0 * math.pi * self.r_shell * self.r_m_sph / (self.r_shell - self.r_m_sph)
         )
+        if self.insulation_model.heat_flux is not None:
+            return self._modified_lockheed_heat_rate(
+                shell_temperature, insulation_temperature, geometry_factor
+            )
         return geometry_factor * self._integrated_conductivity(insulation_temperature, shell_temperature)
 
     def compute_insulation_to_structure_heat_flux(self, insulation_temperature: float, structure_temperature: float) -> float:
@@ -169,6 +189,10 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
             2.0 * math.pi * self.L / math.log(self.r_m_cyl / self.r_structure)
             + 4.0 * math.pi * self.r_structure * self.r_m_sph / (self.r_m_sph - self.r_structure)
         )
+        if self.insulation_model.heat_flux is not None:
+            return self._modified_lockheed_heat_rate(
+                insulation_temperature, structure_temperature, geometry_factor
+            )
         return geometry_factor * self._integrated_conductivity(structure_temperature, insulation_temperature)
 
     def determine_initial_insulation_temperature(

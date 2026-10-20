@@ -14,6 +14,7 @@ import pytest
 import numpy as np
 
 from toplab.materials.rohacell_properties import thermal_conductivity as rohacell_k, DENSITY as ROHACELL_DENSITY
+from toplab.materials.insulation_models import ROHACELL, insulation_model_from_config
 from toplab.materials.nist_materials import NISTMetal, NISTComposite
 from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
 from toplab.thermodynamics.tank_states import (
@@ -36,6 +37,7 @@ def _make_thermal_model(
     alpha_amb=5.0,
     emissivity=0.05,
     T_amb=288.15,
+    insulation_model=None,
 ):
     liner = NISTMetal.aluminum_6061T6_nist()
     wall = NISTComposite.carbon_epoxy_nist()
@@ -50,7 +52,10 @@ def _make_thermal_model(
 
     liner_mass = _layer_mass(liner.density, r_inner, r_inner + 0.003)
     wall_mass  = _layer_mass(wall.density,  r_inner + 0.003, r_structure)
-    foam_mass = _layer_mass(ROHACELL_DENSITY, r_structure, r_shell)
+    insulation_density = (
+        insulation_model.density if insulation_model is not None else ROHACELL_DENSITY
+    )
+    foam_mass = _layer_mass(insulation_density, r_structure, r_shell)
     shell_mass = _layer_mass(liner.density, r_shell, r_shell + t_shell)
 
     return InsulatedTankThermalModel(
@@ -70,6 +75,7 @@ def _make_thermal_model(
         liner_material=liner,
         wall_material=wall,
         shell_material=liner,
+        insulation_model=insulation_model or ROHACELL,
     )
 
 
@@ -196,6 +202,45 @@ class TestInsulatedTankThermalModel:
         Q_thin  = model_thin.compute_shell_to_insulation_heat_flux(288.0, 174.0)
         Q_thick = model_thick.compute_shell_to_insulation_heat_flux(288.0, 174.0)
         assert Q_thick < Q_thin
+
+    def test_modified_lockheed_option_drives_existing_half_layer_heat_flows(self):
+        insulation_model = insulation_model_from_config(
+            {"model": "modified_lockheed", "pressure_torr": 1.0e-5}
+        )
+        model = _make_thermal_model(insulation_model=insulation_model)
+        half_thickness = 0.5 * (model.r_shell - model.r_structure)
+        geometry_factor = (
+            2.0 * math.pi * model.L / math.log(model.r_shell / model.r_m_cyl)
+            + 4.0
+            * math.pi
+            * model.r_shell
+            * model.r_m_sph
+            / (model.r_shell - model.r_m_sph)
+        )
+        expected = (
+            insulation_model.heat_flux(288.0, 174.0, half_thickness)
+            * geometry_factor
+            * half_thickness
+        )
+        assert model.compute_shell_to_insulation_heat_flux(288.0, 174.0) == pytest.approx(
+            expected
+        )
+        inner_geometry_factor = (
+            2.0 * math.pi * model.L / math.log(model.r_m_cyl / model.r_structure)
+            + 4.0
+            * math.pi
+            * model.r_structure
+            * model.r_m_sph
+            / (model.r_m_sph - model.r_structure)
+        )
+        expected_inner = (
+            insulation_model.heat_flux(174.0, 60.0, half_thickness)
+            * inner_geometry_factor
+            * half_thickness
+        )
+        assert model.compute_insulation_to_structure_heat_flux(
+            174.0, 60.0
+        ) == pytest.approx(expected_inner)
 
     def test_structure_to_h2_heat_flow_positive_when_structure_is_warmer(self):
         model = _make_thermal_model()

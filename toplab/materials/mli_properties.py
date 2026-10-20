@@ -1,5 +1,9 @@
 """
-MLI surrogate: lumped equivalent insulation model.
+Legacy equivalent-MLI surrogate; not supported by insulation model selection.
+
+This formulation is retained for historical reference only. Its default
+coefficients do not reproduce the expected heat-leak values, so use the
+Modified Lockheed correlation for configured MLI simulations.
 
 The bulk equivalent conductivity is fitted as
 

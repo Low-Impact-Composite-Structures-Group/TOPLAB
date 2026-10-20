@@ -13,6 +13,8 @@ A, B >= 0 keep k_eq positive and the integral monotonic in T_hot and T_cold.
 Run once, then copy the printed values into mli_properties.py (DEFAULT_A/B)
 or the YAML insulation block. Not imported by the simulation.
 
+Equivalent MLI surrogate is not currently supported. This file does nothing at the moment.
+
 Usage:
     python fit_mli_coefficients.py                 # built-in data points
     python fit_mli_coefficients.py data.csv        # CSV with the columns in COLUMNS
