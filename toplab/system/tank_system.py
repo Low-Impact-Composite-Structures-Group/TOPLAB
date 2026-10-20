@@ -796,7 +796,16 @@ class TankSystem:
 
     def _discharge_heat_at(self, t: float, y: np.ndarray) -> List[float]:
         """Per-tank iHEX heat requirement [W] at an accepted point."""
-        return list(self._rhs(t, y)[1])
+        models = [sub for m in self.dynamic_models for sub in (m.single_phase_model, m.two_phase_model)]
+        saved = [(m, getattr(m, '_last_config', None)) for m in models]
+        for m in models:
+            m.stateless_config = True
+        try:
+            return list(self._rhs(t, y)[1])
+        finally:
+            for m, last in saved:
+                m.stateless_config = False
+                m._last_config = last
 
     def _mode_switch_event(self, switch):
         """Terminal event for an edge mode switch (a tank pressure crossing a threshold)."""

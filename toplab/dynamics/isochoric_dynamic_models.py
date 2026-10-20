@@ -127,7 +127,13 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
         )
 
     def _determine_configuration(self, pressure: float) -> str:
-        p_min_hysteresis = self.p_min * 0.05
+        p_min_hysteresis = self.p_min * 0.01
+        if getattr(self, 'stateless_config', False):
+            # Post-hoc re-evaluation (iHEX history): RK stage trials during
+            # integration latch _last_config, so replay must not depend on it.
+            if pressure >= self.p_vent:
+                return "C"
+            return "B" if pressure <= self.p_min + p_min_hysteresis else "A"
         current_config = getattr(self, '_last_config', 'A')
         if pressure >= self.p_vent:
             config = "C"
@@ -137,9 +143,6 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             config = "B"
         else:
             config = "A"
-        # Track whether this model has ever operated in Config A so that the
-        # ode_system throttling only fires for tanks that naturally entered
-        # Config B from above p_min (not via a two-phase → single-phase transition).
         return config
 
     def _get_vent_flow_rate(self, config: str, p: float) -> float:
@@ -298,6 +301,11 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
     def _determine_configuration(self, pressure: float) -> str:
         """Select the pressure configuration without solver-step chatter."""
         p_min_hysteresis = self.p_min * 0.05
+        if getattr(self, "stateless_config", False):
+            # Post-hoc re-evaluation (iHEX history) must not depend on _last_config.
+            if pressure >= self.p_vent:
+                return "C"
+            return "B" if pressure <= self.p_min + p_min_hysteresis else "A"
         current_config = getattr(self, "_last_config", "A")
         if pressure >= self.p_vent:
             config = "C"
