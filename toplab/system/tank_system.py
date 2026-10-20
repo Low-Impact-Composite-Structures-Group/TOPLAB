@@ -466,7 +466,7 @@ class TankSystem:
         volume = tank.volume
         inner_surface_area = tank.surface_area
         cylinder_length = tank.cylindrical_section_length
-        # A_shell = 2π r_shell L + 4π r_shell² (per governing equations, at foam-shell interface)
+        # A_shell = 2π r_shell L + 4π r_shell² (at the insulation-shell interface)
         outer_surface_area = 2 * math.pi * r_shell * cylinder_length + 4 * math.pi * r_shell ** 2
         outer_volume = (4 / 3) * math.pi * r_shell_outer ** 3 + math.pi * r_shell_outer ** 2 * cylinder_length
 
@@ -495,7 +495,7 @@ class TankSystem:
         print(f"  Liner:   {liner_material.name}, {thickness_liner*1000:.1f} mm, {liner_mass:.1f} kg")
         print(f"  Wall:    {composite_material.name}, {thickness_wall*1000:.1f} mm "
               f"({math.degrees(composite_material.winding_angle):.1f}°), {wall_mass:.1f} kg")
-        print(f"  Foam:    {insulation_model.name}, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
+        print(f"  Insulation: {insulation_model.name}, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
         print(f"  Shell:   {liner_material.name}, {shell_thickness*1000:.1f} mm, {shell_mass:.1f} kg")
         dry_mass = liner_mass + wall_mass + foam_mass + shell_mass
         print(f"  Total dry mass: {dry_mass:.1f} kg")

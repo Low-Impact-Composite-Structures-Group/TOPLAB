@@ -36,12 +36,16 @@ def make_mli_model(
 
 
 def insulation_model_from_config(insulation_config: Optional[Mapping]) -> InsulationModel:
-    """Build the model from the YAML ``insulation`` block (``model``: rohacell | mli)."""
+    """Build the insulation model from the YAML ``insulation`` block.
+
+    ``model`` is the preferred selector; ``type`` is accepted for existing
+    configurations. ``foam`` and ``rohacell`` both select the Rohacell model.
+    """
     cfg = insulation_config or {}
-    model = str(cfg.get("model", "rohacell")).lower()
-    if model == "rohacell":
+    model = str(cfg.get("model", cfg.get("type", "foam"))).strip().lower()
+    if model in {"foam", "rohacell"}:
         return ROHACELL
     if model == "mli":
         kwargs = {k: float(cfg[k]) for k in ("A", "B", "density", "specific_heat") if k in cfg}
         return make_mli_model(**kwargs)
-    raise ValueError(f"Unknown insulation model '{model}' (expected 'rohacell' or 'mli')")
+    raise ValueError(f"Unknown insulation model '{model}' (expected 'foam' or 'mli')")

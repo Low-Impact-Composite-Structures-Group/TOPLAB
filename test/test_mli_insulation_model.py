@@ -1,3 +1,6 @@
+import math
+from pathlib import Path
+
 import pytest
 
 from toplab.materials.insulation_models import ROHACELL, insulation_model_from_config
@@ -22,10 +25,32 @@ def test_integral_matches_numeric_integration_of_k_eq():
 
 def test_config_selection_and_overrides():
     assert insulation_model_from_config({}) is ROHACELL
+    assert insulation_model_from_config({"model": "foam"}) is ROHACELL
+    assert insulation_model_from_config({"model": "rohacell"}) is ROHACELL
+    assert insulation_model_from_config({"type": "foam"}) is ROHACELL
     mli = insulation_model_from_config({"model": "mli", "density": 250.0, "specific_heat": 900.0})
     assert mli.density == 250.0 and mli.specific_heat(77.0) == 900.0
+    assert insulation_model_from_config({"type": "mli"}).name == "MLI (equivalent)"
     with pytest.raises(ValueError):
         insulation_model_from_config({"model": "foo"})
+
+
+def test_cch2_mli_study_builds_tank_system():
+    from toplab.config import load_config
+    from toplab.orchestration.system_orchestrator import SystemOrchestrator
+
+    config_path = (
+        Path(__file__).resolve().parents[2]
+        / "toplab-apps/analysis/mli_study/cch2/input.yaml"
+    )
+    orchestrator = SystemOrchestrator(load_config(config_path), verbosity="quiet")
+
+    thermal_model = orchestrator.tank_system.thermal_models[0]
+    assert thermal_model.insulation_model.name == "MLI (equivalent)"
+    assert thermal_model.r_shell > thermal_model.r_structure
+    assert all(math.isfinite(value) for value in orchestrator.tank_system.create_initial_state())
+    results = orchestrator.run_simulation()
+    assert results.times[-1] > 0.0
 
 
 def test_reproduces_fit_table_heat_leak():
