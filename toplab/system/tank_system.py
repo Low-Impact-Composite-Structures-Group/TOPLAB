@@ -393,14 +393,16 @@ class TankSystem:
             raise RuntimeError(f"'insulation.shell_thickness' not specified in configuration for tank {tank_id_yaml}")
         shell_thickness = float(shell_thickness)
 
-        alpha_amb = insulation_config.get('alpha_amb')
+        # `alpha_shell`/`emissivity_shell` are preferred; the legacy `alpha_amb`/`emissivity`
+        # names are still accepted for existing configurations.
+        alpha_amb = insulation_config.get('alpha_shell', insulation_config.get('alpha_amb'))
         if alpha_amb is None:
-            raise RuntimeError(f"'insulation.alpha_amb' not specified in configuration for tank {tank_id_yaml}")
+            raise RuntimeError(f"'insulation.alpha_shell' not specified in configuration for tank {tank_id_yaml}")
         alpha_amb = float(alpha_amb)
 
-        emissivity_shell = insulation_config.get('emissivity')
+        emissivity_shell = insulation_config.get('emissivity_shell', insulation_config.get('emissivity'))
         if emissivity_shell is None:
-            raise RuntimeError(f"'insulation.emissivity' not specified in configuration for tank {tank_id_yaml}")
+            raise RuntimeError(f"'insulation.emissivity_shell' not specified in configuration for tank {tank_id_yaml}")
         emissivity_shell = float(emissivity_shell)
 
         # Get design parameters from configuration - NO HARDCODED VALUES
