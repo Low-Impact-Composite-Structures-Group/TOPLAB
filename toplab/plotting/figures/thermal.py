@@ -16,7 +16,7 @@ from toplab.system.state_management import MultiTankResults
 
 
 class ThermalFigures:
-    def plot_thermal_heat_flows(
+    def plot_heat_flows(
             self,
             results: MultiTankResults,
             thermal_model: Any,

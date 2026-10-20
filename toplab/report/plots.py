@@ -322,7 +322,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 thermal_flow_filename = thermal_flow_config.get('filename', 'thermal_heat_flows')
                 thermal_flow_save_path = save_dir / f"{base_name}_{thermal_flow_filename}_tank{tank_idx + 1}{save_ext}"
 
-            thermal_flow_fig = plotter.plot_thermal_heat_flows(
+            thermal_flow_fig = plotter.plot_heat_flows(
                 results=run.results,
                 thermal_model=run.tank_system.thermal_models[tank_idx],
                 tank_index=tank_idx,
