@@ -633,7 +633,7 @@ class TankSystem:
         return self._rhs(t, y)[0]
 
     def _rhs(self, t: float, y: np.ndarray):
-        """Return ``(dydt, discharge_heat)``; ``discharge_heat[i]`` is tank i's iHEX heat requirement [W]."""
+        """Return ``(dydt, discharge_heat, vent_flow)``; per tank i: iHEX heat requirement [W] and vent rate [kg/s]."""
         # Periodic heartbeat: one print per progress bucket (default every 60 s sim-time)
         progress_bucket = int(max(0.0, t) // self._ode_progress_interval_s)
         if progress_bucket > getattr(self, '_ode_progress_bucket', -1):
@@ -679,6 +679,7 @@ class TankSystem:
         n_tanks = len(self.tanks)
         dydt = np.zeros(len(y))
         discharge_heat = np.zeros(n_tanks)
+        vent_flow = np.zeros(n_tanks)
 
         edge_rates = self._edge_flow_rates(multi_state, t, y)
         coupling_flows = self._net_coupling_flows(edge_rates)
@@ -755,6 +756,7 @@ class TankSystem:
             )
 
             discharge_heat[i] = state_derivatives.discharge_heat_flux
+            vent_flow[i] = state_derivatives.vent_flow
             idx = i * 5
             dydt[idx]     = state_derivatives.fuel_mass_derivative
             dydt[idx + 1] = state_derivatives.h2_temperature_derivative
@@ -766,7 +768,7 @@ class TankSystem:
             if edge.n_states:
                 dydt[sl] = edge.state_derivatives(t, multi_state.tank_states, y[sl])
 
-        return dydt, discharge_heat
+        return dydt, discharge_heat, vent_flow
 
     def _edge_flow_rates(self, multi_state: MultiTankState, t: float, y: np.ndarray) -> List[float]:
         """Mass flow [kg/s, >= 0] through each coupling edge; a pure function of (t, y) and the edge modes."""
@@ -797,13 +799,14 @@ class TankSystem:
         return self._edge_flow_rates(multi_state, t, y)
 
     def _discharge_heat_at(self, t: float, y: np.ndarray) -> List[float]:
-        """Per-tank iHEX heat requirement [W] at an accepted point."""
+        """Per-tank iHEX heat [W] followed by per-tank vent rate [kg/s] at an accepted point."""
         models = [sub for m in self.dynamic_models for sub in (m.single_phase_model, m.two_phase_model)]
         saved = [(m, getattr(m, '_last_config', None)) for m in models]
         for m in models:
             m.stateless_config = True
         try:
-            return list(self._rhs(t, y)[1])
+            _, heat, vent = self._rhs(t, y)
+            return list(heat) + list(vent)
         finally:
             for m, last in saved:
                 m.stateless_config = False
@@ -1003,7 +1006,9 @@ class TankSystem:
             self._log_summary("   Mission completed: all tanks ran to the end of the mission profile.")
 
         self.edge_flow_history = solution.edge_flows
-        self.discharge_heat_history = solution.extras
+        n_tanks = len(self.tanks)
+        self.discharge_heat_history = solution.extras[:n_tanks]
+        self.vent_rate_history = solution.extras[n_tanks:2 * n_tanks]
 
         # Convert solution to MultiTankState objects
         multi_tank_states = []
@@ -1036,7 +1041,7 @@ class TankSystem:
                 discharge_flow = self._get_outflow_rate(current_time, tank_idx)
                 inflow_rate = 0.0  # No inflow for discharge scenario
                 outflow_rate = discharge_flow  # Discharge is outflow
-                vent_rate = 0.0  # TODO: Implement venting logic if needed
+                vent_rate = float(self.vent_rate_history[tank_idx, i])
 
                 # Store basic flow data for this tank at this time step (coupling flows calculated later)
                 flow_data.append({

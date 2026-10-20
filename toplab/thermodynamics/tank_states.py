@@ -150,6 +150,7 @@ class IsochoricStateDerivatives:
     shell_temperature_derivative: float
     heat_flux: float = 0.0
     discharge_heat_flux: float = 0.0
+    vent_flow: float = 0.0
     alpha_s: float = 0.0
 
     @property

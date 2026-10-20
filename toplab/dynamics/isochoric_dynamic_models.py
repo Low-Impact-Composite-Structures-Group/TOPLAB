@@ -124,6 +124,7 @@ class SinglePhaseIsochoricModel(IsochoricDynamicModel):
             shell_temperature_derivative=dT_shell_dt,
             heat_flux=Q_structure_to_h2,
             discharge_heat_flux=actual_qdot_disch if actual_qdot_disch else Q_discharge,
+            vent_flow=mdot_vent,
         )
 
     def _determine_configuration(self, pressure: float) -> str:
@@ -296,6 +297,7 @@ class TwoPhaseIsochoricModel(IsochoricDynamicModel):
             shell_temperature_derivative=dT_shell_dt,
             heat_flux=Q_structure_to_h2,
             discharge_heat_flux=actual_qdot_disch if actual_qdot_disch else Q_discharge,
+            vent_flow=mdot_vent,
         )
 
     def _determine_configuration(self, pressure: float) -> str:
