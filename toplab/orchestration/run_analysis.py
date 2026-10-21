@@ -33,7 +33,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         enabled: bool
         max_step_s: float (solver max step during the hold, default 300)
         duration_h: float (default 12.0)
-        maximum_loss_percent_per_hour: float (required when enabled)
+        maximum_loss_percent: float (required when enabled)
 
     Returns:
         dict with 'ran' (bool), 'passed' (bool), and 'tanks' (per-tank details),
@@ -44,13 +44,13 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         return {'ran': False}
 
     duration_h = float(dormancy_config.get('duration_h', 12.0))
-    maximum_loss_percent_per_hour = float(dormancy_config.get('maximum_loss_percent_per_hour'))
+    maximum_loss_percent = float(dormancy_config.get('maximum_loss_percent'))
     ambient_temperature = config.missions[0].ambient_temperature if config.missions else 288.15
 
     if not silent:
         print(f"\n{'=' * 80}")
         print(f"DORMANCY VENTING CHECK ({duration_h:.1f} h) - same initial conditions as discharge")
-        print(f"Requirement: no more than {maximum_loss_percent_per_hour:.3f}% of initial fuel mass vented per hour")
+        print(f"Requirement: no more than {maximum_loss_percent:.3f}% of initial fuel mass vented during dormancy.")
         print('=' * 80)
 
     dormancy_mission = MissionSpec(
@@ -78,22 +78,22 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         initial_mass = results.multi_tank_states[0].get_tank_state(tank_index).fuel_mass
         final_mass = results.multi_tank_states[-1].get_tank_state(tank_index).fuel_mass
         vented_mass = max(0.0, initial_mass - final_mass)
-        loss_percent_per_hour = (
-            100.0 * vented_mass / initial_mass / actual_duration_h if actual_duration_h > 0.0 else float('inf')
+        loss_percent = (
+            100.0 * vented_mass / initial_mass
         )
-        passed = loss_percent_per_hour <= maximum_loss_percent_per_hour
+        passed = loss_percent <= maximum_loss_percent
         all_tanks_pass = all_tanks_pass and passed
         tank_results.append({
             'tank_index': tank_index,
             'initial_mass_kg': initial_mass,
             'vented_mass_kg': vented_mass,
-            'loss_percent_per_hour': loss_percent_per_hour,
+            'loss_percent': loss_percent,
             'passed': passed,
         })
         if not silent:
             status = 'PASS' if passed else 'FAIL'
             print(f"  Tank {tank_index + 1}: vented {vented_mass:.3f} kg over {actual_duration_h:.2f} h "
-                  f"({loss_percent_per_hour:.4f}%/h, limit {maximum_loss_percent_per_hour:.3f}%/h) - {status}")
+                  f"({loss_percent:.4f}% of initial mass, limit {maximum_loss_percent:.3f}%) - {status}")
 
     if not silent:
         verdict = 'PASS' if all_tanks_pass else 'FAIL'
