@@ -68,7 +68,7 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         # Zero-outflow thermal evolution is slow; the mission step cap is unnecessarily fine here.
         solver={**config.solver, 'max_step': float(dormancy_config.get('max_step_s', 300.0))},
     )
-    orchestrator = SystemOrchestrator(dormancy_case, verbosity='quiet', sizing_config=config)
+    orchestrator = SystemOrchestrator(dormancy_case, verbosity='summary', sizing_config=config)
     results = orchestrator.run_simulation()
 
     actual_duration_h = float(results.times[-1]) / 3600.0
