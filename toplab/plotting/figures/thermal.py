@@ -24,50 +24,54 @@ class ThermalFigures:
             save_path: Optional[str] = None,
             xlim: Optional[Tuple[float, float]] = None,
             ylim: Optional[Tuple[float, float]] = None,
-            legend_location: str = 'best') -> plt.Figure:
+            legend_location: str = 'best',
+            include: Dict[str, bool] = None) -> plt.Figure:
         """Plot the heat flow through each layer of a tank thermal network."""
         if tank_index >= results.n_tanks:
             raise ValueError(f"Tank index {tank_index} exceeds available tanks ({results.n_tanks})")
 
-        print(f"Plotting thermal heat flows for Tank {tank_index + 1}...")
+        print(f"Plotting heat flows for Tank {tank_index + 1}...")
         times_hours = results.times / 3600.0
+
+        # only include the heat flows that are specified in the include dictionary
         heat_flows = {
-            'Ambient to shell': [],
-            'Shell to insulation': [],
-            'Insulation to structure': [],
-            # 'Structure to H2': [],
+            'Ambient to shell': [] if include.get('Ambient to shell', True) else None,
+            'Shell to insulation': [] if include.get('Shell to insulation', True) else None,
+            'Insulation to structure': [] if include.get('Insulation to structure', True) else None,
+            'Structure to H2': [] if include.get('Structure to H2', False) else None,
         }
 
         for time, multi_state in zip(results.times, results.multi_tank_states):
             state = multi_state.get_tank_state(tank_index)
             heat_flows['Ambient to shell'].append(
                 thermal_model.compute_ambient_to_shell_heat_flux(state.shell_temperature)
-            )
+            ) if heat_flows['Ambient to shell'] is not None else None
             heat_flows['Shell to insulation'].append(
                 thermal_model.compute_shell_to_insulation_heat_flux(
                     state.shell_temperature, state.insulation_temperature
                 )
-            )
+            ) if heat_flows['Shell to insulation'] is not None else None
             heat_flows['Insulation to structure'].append(
                 thermal_model.compute_insulation_to_structure_heat_flux(
                     state.insulation_temperature, state.structure_temperature
                 )
-            )
-            # heat_flows['Structure to H2'].append(
-            #     thermal_model.compute_structure_to_h2_heat_flux(time, state)
-            # )
+            ) if heat_flows['Insulation to structure'] is not None else None
+            heat_flows['Structure to H2'].append(
+                thermal_model.compute_structure_to_h2_heat_flux(time, state)
+            ) if heat_flows['Structure to H2'] is not None else None
 
         fig, ax = plt.subplots(figsize=(12, 6))
         line_styles = ['-', '--', '-.', ':']
         for series_index, (label, values) in enumerate(heat_flows.items()):
-            ax.plot(
-                times_hours,
-                values,
-                color=self.color_palette[series_index % len(self.color_palette)],
-                linewidth=2,
-                linestyle=line_styles[series_index],
-                label=label,
-            )
+            if values is not None:
+                ax.plot(
+                    times_hours,
+                    values,
+                    color=self.color_palette[series_index % len(self.color_palette)],
+                    linewidth=2,
+                    linestyle=line_styles[series_index],
+                    label=label,
+                )
 
         ax.set_xlabel('Time [hours]')
         ax.set_ylabel('Heat flow [W]')
@@ -87,7 +91,7 @@ class ThermalFigures:
         if save_path:
             self._save_figure(fig, save_path, dpi=900)
 
-        print(f"   Thermal heat-flow plot completed")
+        print(f"   Heat flow plot completed")
         return fig
 
     def plot_heat_exchanger_requirements(self,

@@ -311,7 +311,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
             figures.append(mf_fig)
 
         # Generate thermal-network heat-flow plot for this tank
-        thermal_flow_config = run.config.output_plots.get('thermal_heat_flows', {})
+        thermal_flow_config = run.config.output_plots.get('heat_flows', {})
         if thermal_flow_config.get('enabled', True):
             thermal_flow_save_path = None
             if save_path:
@@ -319,8 +319,16 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 save_dir = Path(save_path).parent
                 save_ext = Path(save_path).suffix or '.png'
                 base_name = figure_prefix if figure_prefix else Path(save_path).stem
-                thermal_flow_filename = thermal_flow_config.get('filename', 'thermal_heat_flows')
+                thermal_flow_filename = thermal_flow_config.get('filename', 'heat_flows')
                 thermal_flow_save_path = save_dir / f"{base_name}_{thermal_flow_filename}_tank{tank_idx + 1}{save_ext}"
+
+            #store the include dictionary for the heat flow plot
+            include_dict = {
+                'Ambient to shell': thermal_flow_config.get('include', {}).get('amb_to_shell', True),
+                'Shell to insulation': thermal_flow_config.get('include', {}).get('shell_to_insulation', True),
+                'Insulation to structure': thermal_flow_config.get('include', {}).get('insulation_to_structure', True),
+                'Structure to H2': thermal_flow_config.get('include', {}).get('structure_to_h2', True),
+            }
 
             thermal_flow_fig = plotter.plot_heat_flows(
                 results=run.results,
@@ -330,6 +338,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 xlim=thermal_flow_config.get('xlim'),
                 ylim=thermal_flow_config.get('ylim'),
                 legend_location=thermal_flow_config.get('legend_location', 'best'),
+                include=include_dict,
             )
             figures.append(thermal_flow_fig)
 
@@ -411,7 +420,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
 
     # Count plots generated
     mass_flows_enabled = run.config.output_plots.get('mass_flows', {}).get('enabled', True)
-    thermal_heat_flows_enabled = run.config.output_plots.get('thermal_heat_flows', {}).get('enabled', True)
+    heat_flows_enabled = run.config.output_plots.get('heat_flows', {}).get('enabled', True)
     heat_exchanger_enabled = run.config.output_plots.get('heat_exchanger_requirements', {}).get('enabled', False)
 
     # -------------------------------------------------------------------
@@ -518,7 +527,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
     plots_per_tank = 2  # Always: evolution + density-temperature
     if mass_flows_enabled:
         plots_per_tank += 1
-    if thermal_heat_flows_enabled:
+    if heat_flows_enabled:
         plots_per_tank += 1
     if heat_exchanger_enabled:
         plots_per_tank += 1
@@ -530,7 +539,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
     plot_types = ['evolution', 'density-temperature']
     if mass_flows_enabled:
         plot_types.append('mass flows')
-    if thermal_heat_flows_enabled:
+    if heat_flows_enabled:
         plot_types.append('thermal heat flows')
     if heat_exchanger_enabled:
         plot_types.append('heat exchanger requirements')
