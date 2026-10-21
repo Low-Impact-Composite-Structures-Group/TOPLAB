@@ -150,7 +150,7 @@ Available examples:
 | `single_tank_slh2` | Subcooled liquid hydrogen single-tank discharge |
 | `coupled_ch2_cch2` | CH2–CCH2 coupled system with pressure compensation |
 | `coupled_ch2_lh2` | CH2–LH2 coupled system with flow-controlled pressurisation |
-| `optimization_two_tank_cch2` | Two CcH2 tanks on the ATR72 mission: SQP (`driver_sqp_two_tank_cch2.py`) and NSGA-II (`driver_nsga2_two_tank_cch2.py`) over the tank radii |
+| `optimization_two_tank_cch2` | Two CcH2 tanks on the ATR72 mission: SQP (`python -m toplab.optimization.runners sqp two_tank_cch2_sqp.yaml`) and NSGA-II (`driver_nsga2_two_tank_cch2.py`) over the tank radii |
 
 The NASA Modified Lockheed MLI heat-flux correlation can be inspected with
 `python examples/modified_lockheed_mli.py`. It prints component heat fluxes for

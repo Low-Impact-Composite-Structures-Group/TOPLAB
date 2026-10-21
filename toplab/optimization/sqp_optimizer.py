@@ -1,58 +1,36 @@
-"""Multi-tank SLSQP optimization with epsilon-constraint Pareto sweeps."""
+"""SLSQP optimisation: one objective, optional epsilon constraints on the others.
+
+A problem maximises one of ``eta_g``, ``eta_v``, ``eta_vent`` or ``zeta_p`` over any
+non-empty subset of the design variables (radius, phi, insulation thickness, per tank)
+subject to the physical constraints (discharge, dormancy venting, aft packaging).
+
+* No ``epsilon_constraints`` -> a single-objective solve.
+* ``epsilon_constraints`` on any of the other metrics -> the epsilon-constraint method:
+  one solve per point of the Cartesian grid of epsilon values (``metric >= epsilon``),
+  warm-started from the previous feasible solution, plus the non-dominated set.
+* ``objective`` may be a list; each objective is then optimised in turn.
+"""
 
 from __future__ import annotations
 
-import csv
 import itertools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
-import yaml
 from scipy.optimize import minimize
 
-from toplab.config import load_config
 from toplab.optimization.evaluation import (
-    CandidateEvaluator, CandidateResult, DesignVariable, TankDesign,
-    parse_design_variables, venting_performance)
-
-EvalResult = CandidateResult
-
-
-@dataclass(frozen=True)
-class EpsilonTriplet:
-    eta_v: float
-    eta_vent: float
-    zeta_p: float
+    FAILED_VIOLATION, OBJECTIVES, RESIDUAL_NAMES, CandidateResult, OptimizationProblem,
+    candidate_row, load_problem, physical_residuals)
 
 
 @dataclass
-class SQPSubproblemResult:
-    epsilon: EpsilonTriplet
-    x0: list[float]
-    x: list[float]
-    success: bool
-    status: int
-    message: str
-    nit: int
-    nfev: int
-    candidate: CandidateResult
-    feasible: bool
-    error: str | None = None
-
-
-@dataclass
-class ParetoSweepResult:
-    epsilons: list[EpsilonTriplet]
-    subproblems: list[SQPSubproblemResult]
-    pareto: list[SQPSubproblemResult]
-    candidate_evaluations: int
-
-
-@dataclass
-class SingleObjectiveResult:
+class SQPRun:
+    """Outcome of one SLSQP solve (one objective, one epsilon point)."""
     objective: str
+    epsilon: dict[str, float]
     x0: list[float]
     x: list[float]
     success: bool
@@ -60,346 +38,236 @@ class SingleObjectiveResult:
     message: str
     nit: int
     nfev: int
-    initial_candidate: CandidateResult
+    initial: CandidateResult
     candidate: CandidateResult
-    physical_residuals: tuple[float, float, float]
-    unique_evaluations: int
+    residuals: dict[str, float]
     feasible: bool
     error: str | None = None
 
-
-def epsilon_residuals(epsilon: EpsilonTriplet, result: CandidateResult) -> tuple[float, float, float]:
-    """Return canonical g <= 0 residuals for the three epsilon constraints."""
-    return (epsilon.eta_v - result.eta_v,
-            epsilon.eta_vent - result.eta_vent,
-            epsilon.zeta_p - result.zeta_p)
+    @property
+    def value(self) -> float:
+        return float(getattr(self.candidate, self.objective))
 
 
-def physical_constraint_residuals(result: CandidateResult) -> dict[str, float]:
-    """Return named physical residuals; every value <= 0 is feasible.
+@dataclass
+class SQPResult:
+    objective: str
+    runs: list[SQPRun]
+    pareto: list[SQPRun]
 
-    ``g_dis`` is a time shortfall in seconds. ``g_dorm`` is the largest
-    per-tank vented fraction divided by its allowed fraction, minus one.
-    ``g_packaging`` is the signed compaction-margin constraint. Since
-    ``zeta_p`` is positive for feasible forward compaction and negative for an
-    unshifted placement violation, ``-zeta_p <= 0`` is the smooth packaging
-    proxy used by SLSQP. The Boolean placement result remains a final validity
-    guard because the placement search itself is sampled and numerical.
+    @property
+    def best(self) -> SQPRun | None:
+        """Feasible run with the highest objective value."""
+        return max((run for run in self.runs if run.feasible), key=lambda run: run.value, default=None)
+
+
+def epsilon_grid(raw: Mapping[str, Any] | None, objective: str) -> list[dict[str, float]]:
+    """Cartesian product of the configured epsilon values, excluding the objective itself.
+
+    Each entry is ``{metric: {values: [...]}}``, ``{metric: {min, max, count}}`` or a bare
+    number/list. An empty grid yields ``[{}]`` (a plain single-objective solve).
     """
-    return {
-        "g_dis": float(result.discharge_residual),
-        "g_dorm": float(result.dormancy_residual),
-        "g_packaging": -float(result.zeta_p),
-    }
-
-
-def constraint_residuals(result: CandidateResult,
-                          epsilon: EpsilonTriplet | None = None) -> dict[str, float]:
-    """Return all active constraints using the canonical ``g <= 0`` sign."""
-    residuals = physical_constraint_residuals(result)
-    if epsilon is not None:
-        epsilon_values = epsilon_residuals(epsilon, result)
-        residuals.update({
-            "g_epsilon_v": epsilon_values[0],
-            "g_epsilon_vent": epsilon_values[1],
-            "g_epsilon_p": epsilon_values[2],
-        })
-    return residuals
-
-
-def _epsilon_values(raw: Any, name: str) -> list[float]:
-    spec = raw.get(name, {}) if isinstance(raw, dict) else {}
-    if isinstance(spec, dict) and "values" in spec:
-        values = [float(value) for value in spec["values"]]
-    elif isinstance(spec, dict) and {"min", "max", "count"} <= set(spec):
-        values = np.linspace(float(spec["min"]), float(spec["max"]), int(spec["count"])).tolist()
-    else:
-        values = []
-    if not values:
-        raise ValueError(f"epsilon_constraints.{name} must define values or min/max/count.")
-    return values
-
-
-def _non_dominated(results: Sequence[SQPSubproblemResult], tolerance: float = 1e-8) -> list[SQPSubproblemResult]:
-    kept = []
-    for candidate in results:
-        metrics = np.asarray(candidate.candidate.objectives)
-        dominated = any(
-            other is not candidate
-            and np.all(np.asarray(other.candidate.objectives) >= metrics - tolerance)
-            and np.any(np.asarray(other.candidate.objectives) > metrics + tolerance)
-            for other in results)
-        if not dominated:
-            kept.append(candidate)
-    return kept
-
-
-def _unique_results(results: Sequence[SQPSubproblemResult], tolerance: float = 1e-8) -> list[SQPSubproblemResult]:
-    unique: list[SQPSubproblemResult] = []
-    for candidate in results:
-        metrics = np.asarray(candidate.candidate.objectives)
-        if any(np.all(np.abs(metrics - np.asarray(other.candidate.objectives)) <= tolerance)
-               and np.all(np.abs(np.asarray(candidate.x) - np.asarray(other.x)) <= tolerance)
-               for other in unique):
+    axes: dict[str, list[float]] = {}
+    for name, spec in (raw or {}).items():
+        if name not in OBJECTIVES:
+            raise ValueError(f"epsilon_constraints.{name} is not one of {OBJECTIVES}.")
+        if name == objective:
             continue
-        unique.append(candidate)
-    return unique
+        if isinstance(spec, Mapping) and "values" in spec:
+            values = [float(v) for v in spec["values"]]
+        elif isinstance(spec, Mapping) and {"min", "max", "count"} <= set(spec):
+            values = np.linspace(float(spec["min"]), float(spec["max"]), int(spec["count"])).tolist()
+        elif isinstance(spec, (int, float)):
+            values = [float(spec)]
+        elif isinstance(spec, (list, tuple)):
+            values = [float(v) for v in spec]
+        else:
+            values = []
+        if not values:
+            raise ValueError(f"epsilon_constraints.{name} must define values or min/max/count.")
+        axes[name] = values
+    return [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
+
+
+def non_dominated(runs: Sequence[SQPRun], metrics: Sequence[str], tolerance: float = 1e-8) -> list[SQPRun]:
+    """Unique runs not dominated in ``metrics`` (all maximised)."""
+    points = [np.asarray([getattr(run.candidate, m) for m in metrics]) for run in runs]
+    kept: list[int] = []
+    for i, p in enumerate(points):
+        dominated = any(np.all(q >= p - tolerance) and np.any(q > p + tolerance)
+                        for j, q in enumerate(points) if j != i)
+        duplicate = any(np.all(np.abs(points[j] - p) <= tolerance) for j in kept)
+        if not dominated and not duplicate:
+            kept.append(i)
+    return [runs[i] for i in kept]
 
 
 class SQPOptimizer:
-    """Run one epsilon-constrained SLSQP problem or a configured sweep."""
+    """Run SLSQP for the objective(s) and epsilon grid defined in an optimisation YAML."""
 
-    def __init__(self, opt_config_path: Path):
-        self.opt_config_path = Path(opt_config_path)
-        with self.opt_config_path.open("r", encoding="utf-8") as stream:
-            self.cfg = yaml.safe_load(stream) or {}
-        base_rel = self.cfg.get("base_config", self.cfg.get("optimization", {}).get("base_config"))
-        if base_rel is None:
-            raise ValueError("Optimization configuration must define base_config.")
-        self.base_config_path = (self.opt_config_path.parent / base_rel).resolve()
-        self.base_config = load_config(self.base_config_path)
-        self.variables: list[DesignVariable] = parse_design_variables(self.cfg.get("design_variables", {}))
-        self.evaluator = CandidateEvaluator(
-            self.base_config, self.variables,
-            self._maximum_vented_fraction(self.base_config, self.cfg),
-            self._hold_period_s(self.base_config, self.cfg),
-            progress=bool(self.cfg.get("solver", {}).get("evaluation_progress", True)))
+    def __init__(self, opt_config_path: Path | str, evaluator: Any = None) -> None:
+        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator)
+        self.cfg = self.problem.cfg
+        self.variables = self.problem.variables
+        self.evaluator = self.problem.evaluator
+        self.solver: dict[str, Any] = self.cfg.get("solver", {}) or {}
+        self.objectives = self._parse_objectives(self.cfg.get("objective"))
+        method = str(self.solver.get("method", "SLSQP")).upper()
+        if method != "SLSQP":
+            raise ValueError(f"solver.method must be SLSQP, got '{method}'.")
+        self._step = self._finite_difference_step()
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
+        self._solve_keys: set[tuple[float, ...]] = set()
         self.history: list[dict[str, Any]] = []
-        self._active_epsilon: EpsilonTriplet | None = None
+        self._active: tuple[str, dict[str, float]] = ("", {})
 
     @staticmethod
-    def _hold_period_s(base: Any, optimizer_raw: dict[str, Any] | None = None) -> float:
-        settings = (optimizer_raw or {}).get("dormancy", {})
-        hours = settings.get("hold_period_h", (base.dormancy_check or {}).get("duration_h"))
-        if hours is None:
-            raise ValueError("Define dormancy.hold_period_h or dormancy_check.duration_h.")
-        return float(hours) * 3600.0
+    def _parse_objectives(raw: Any) -> list[str]:
+        names = [raw] if isinstance(raw, str) else list(raw or [])
+        if not names:
+            raise ValueError(f"Define 'objective' as one of {OBJECTIVES} (or a list of them).")
+        unknown = [n for n in names if n not in OBJECTIVES]
+        if unknown:
+            raise ValueError(f"Unknown objective(s) {unknown}; choose from {OBJECTIVES}.")
+        return names
 
-    @staticmethod
-    def _maximum_vented_fraction(base: Any, optimizer_raw: dict[str, Any] | None = None) -> float:
-        settings = (optimizer_raw or {}).get("dormancy", {})
-        if "maximum_vented_percentage" in settings:
-            return float(settings["maximum_vented_percentage"]) / 100.0
-        dormancy = base.dormancy_check or {}
-        if "maximum_vented_percentage" in dormancy:
-            return float(dormancy["maximum_vented_percentage"]) / 100.0
-        return float(dormancy.get("maximum_loss_percent_per_hour", 0.0)) * float(dormancy.get("duration_h", 12.0)) / 100.0
-
-    def _bounds_and_x0(self) -> tuple[list[tuple[float, float]], np.ndarray]:
-        return ([(v.lower, v.upper) for v in self.variables],
-                np.asarray([v.baseline for v in self.variables], dtype=float))
+    def _finite_difference_step(self) -> Any:
+        """Scalar, list in variable order, or dict keyed by variable name or parameter."""
+        raw = self.solver.get("finite_diff_step")
+        if raw is None:
+            return None
+        if isinstance(raw, Mapping):
+            steps = []
+            for v in self.variables:
+                key = v.name if v.name in raw else v.parameter
+                if key not in raw:
+                    raise ValueError(f"solver.finite_diff_step has no entry for '{v.name}' or '{v.parameter}'.")
+                steps.append(float(raw[key]))
+            return steps
+        if isinstance(raw, (list, tuple)):
+            if len(raw) != len(self.variables):
+                raise ValueError(f"solver.finite_diff_step has {len(raw)} entries for "
+                                 f"{len(self.variables)} design variables {[v.name for v in self.variables]}.")
+            return [float(s) for s in raw]
+        return float(raw)
 
     def _get(self, x: Sequence[float]) -> CandidateResult:
         key = tuple(float(value) for value in x)
         if key not in self._cache:
-            self._cache[key] = self.evaluator.evaluate(key)
-            self.history.append({
-                "evaluation": len(self.history) + 1,
-                "epsilon": self._active_epsilon,
-                "x": key,
-                "candidate": self._cache[key],
-            })
+            candidate = self._cache[key] = self.evaluator.evaluate(key)
+            self.history.append({"evaluation": len(self.history) + 1, "objective": self._active[0],
+                                 "epsilon": dict(self._active[1]), "x": key, "candidate": candidate})
+        self._solve_keys.add(key)
         return self._cache[key]
 
-    def _best_feasible(self, objective: str, tolerance: float) -> tuple[tuple[float, ...], CandidateResult] | None:
-        feasible = [(entry["x"], entry["candidate"]) for entry in self.history
-                    if entry["candidate"].feasible and all(
-                        value <= tolerance
-                        for value in physical_constraint_residuals(entry["candidate"]).values())]
-        return max(feasible, key=lambda item: getattr(item[1], objective), default=None)
+    @staticmethod
+    def residuals(candidate: CandidateResult, epsilon: Mapping[str, float]) -> dict[str, float]:
+        """Physical constraints plus ``g_epsilon_<metric> = epsilon - metric``; all ``<= 0`` when feasible."""
+        values = physical_residuals(candidate)
+        for name, bound in epsilon.items():
+            values[f"g_epsilon_{name}"] = (FAILED_VIOLATION if candidate.error is not None
+                                           else bound - float(getattr(candidate, name)))
+        return values
 
-    def solve_epsilon_subproblem(self, epsilon: EpsilonTriplet, x0: Sequence[float]) -> SQPSubproblemResult:
-        bounds, _ = self._bounds_and_x0()
-        clipped = np.clip(np.asarray(x0, dtype=float), [b[0] for b in bounds], [b[1] for b in bounds])
-        self._active_epsilon = epsilon
+    def _best_seen(self, objective: str, epsilon: Mapping[str, float], tol: float):
+        best = None
+        for key in self._solve_keys:
+            c = self._cache[key]
+            if c.feasible and all(v <= tol for v in self.residuals(c, epsilon).values()):
+                if best is None or getattr(c, objective) > getattr(best[1], objective):
+                    best = (key, c)
+        return best
 
-        def residuals(x: Sequence[float]) -> tuple[float, ...]:
-            result = self._get(x)
-            values = constraint_residuals(result, epsilon)
-            return tuple(values[name] for name in (
-                "g_dis", "g_dorm", "g_epsilon_v", "g_epsilon_vent",
-                "g_epsilon_p", "g_packaging"))
+    def solve(self, objective: str, epsilon: Mapping[str, float] | None = None,
+              x0: Sequence[float] | None = None) -> SQPRun:
+        """Maximise ``objective`` subject to physical constraints and ``metric >= epsilon[metric]``."""
+        if objective not in OBJECTIVES:
+            raise ValueError(f"objective must be one of {OBJECTIVES}")
+        epsilon = dict(epsilon or {})
+        if objective in epsilon:
+            raise ValueError("The objective cannot also carry an epsilon constraint.")
+        solver = self.solver
+        bounds = self.problem.bounds
+        lower, upper = (np.asarray(b) for b in zip(*bounds))
+        start = np.clip(self.problem.baseline if x0 is None else np.asarray(x0, dtype=float), lower, upper)
+        names = [*RESIDUAL_NAMES, *(f"g_epsilon_{n}" for n in epsilon)]
+        self._active, self._solve_keys = (objective, epsilon), set()
 
-        constraints = [{"type": "ineq", "fun": lambda x, i=i: -residuals(x)[i]} for i in range(6)]
-        solver = self.cfg.get("solver", {})
-        options = {"maxiter": int(solver.get("max_iter", solver.get("maxiter", 100))),
-                   "ftol": float(solver.get("tol", solver.get("ftol", 1e-8))),
-                   "disp": bool(solver.get("disp", False))}
-        if "finite_diff_step" in solver:
-            options["eps"] = solver["finite_diff_step"]
+        def g(x: Sequence[float]) -> np.ndarray:
+            values = self.residuals(self._get(x), epsilon)
+            return np.asarray([values[n] for n in names])
+
+        tol = float(solver.get("tol", solver.get("ftol", 1e-8)))
+        options: dict[str, Any] = {"maxiter": int(solver.get("max_iter", solver.get("maxiter", 100))),
+                                   "ftol": tol, "disp": bool(solver.get("disp", False))}
+        if self._step is not None:
+            options["eps"] = self._step
+        feasibility_tolerance = float(solver.get("feasibility_tolerance", tol))
+
+        initial = self._get(start)
+        if initial.error is not None:
+            raise RuntimeError(f"Starting design {start.tolist()} failed to evaluate: {initial.error}")
         try:
-            opt = minimize(lambda x: -self._get(x).eta_g, clipped, method="SLSQP",
-                           bounds=bounds, constraints=constraints, options=options)
-            final = self._get(opt.x)
-            # SLSQP status is an optimizer diagnostic, not the physical
-            # feasibility test. A useful endpoint can satisfy every TOPLAB
-            # constraint even when SLSQP stops at its iteration limit.
-            feasibility_tolerance = float(solver.get("feasibility_tolerance", options["ftol"]))
-            final_residuals = residuals(opt.x)
-            feasible = bool(final.feasible and all(
-                value <= feasibility_tolerance for value in final_residuals))
-            return SQPSubproblemResult(epsilon, clipped.tolist(), np.asarray(opt.x).tolist(),
-                                       bool(opt.success), int(opt.status), str(opt.message),
-                                       int(getattr(opt, "nit", 0)), int(getattr(opt, "nfev", 0)),
-                                       final, feasible)
+            opt = minimize(lambda x: -float(getattr(self._get(x), objective)), start, method="SLSQP",
+                           bounds=bounds, options=options,
+                           constraints=[{"type": "ineq", "fun": lambda x: -g(x)}])
+            x_final, message = np.asarray(opt.x, dtype=float), str(opt.message)
+            success, status = bool(opt.success), int(opt.status)
+            nit, nfev, error = int(getattr(opt, "nit", 0)), int(getattr(opt, "nfev", 0)), None
         except Exception as exc:
-            final = self._get(clipped)
-            return SQPSubproblemResult(epsilon, clipped.tolist(), clipped.tolist(), False, -1,
-                                       str(exc), 0, 0, final, False, str(exc))
+            x_final, message, success, status, nit, nfev, error = start, str(exc), False, -1, 0, 0, str(exc)
+        final = self._get(x_final)
+        feasible = bool(final.feasible and all(v <= feasibility_tolerance for v in g(x_final)))
+        if not feasible:
+            # Packaging is non-smooth at its feasibility boundary, so SLSQP can stall just
+            # outside it; fall back to the best feasible point this solve evaluated.
+            best = self._best_seen(objective, epsilon, feasibility_tolerance)
+            if best is not None:
+                x_final, final, feasible = np.asarray(best[0]), best[1], True
+                message = f"best feasible evaluated point (SLSQP: {message})"
+        return SQPRun(objective, epsilon, start.tolist(), x_final.tolist(), success, status, message,
+                      nit, nfev, initial, final, self.residuals(final, epsilon), feasible, error)
 
-    def solve_single_objective(self, objective: str, x0: Sequence[float] | None = None) -> SingleObjectiveResult:
-        """Maximize one performance metric subject to physical constraints."""
-        objective_names = {"eta_g", "eta_v", "eta_vent", "zeta_p"}
-        if objective not in objective_names:
-            raise ValueError(f"objective must be one of {sorted(objective_names)}")
-
-        bounds, baseline = self._bounds_and_x0()
-        initial = baseline if x0 is None else np.asarray(x0, dtype=float)
-        clipped = np.clip(initial, [b[0] for b in bounds], [b[1] for b in bounds])
-
-        def physical_residuals(x: Sequence[float]) -> tuple[float, ...]:
-            values = physical_constraint_residuals(self._get(x))
-            return tuple(values[name] for name in ("g_dis", "g_dorm", "g_packaging"))
-
-        constraints = [{"type": "ineq", "fun": lambda x, i=i: -physical_residuals(x)[i]} for i in range(3)]
-        solver = self.cfg.get("solver", {})
-        options = {"maxiter": int(solver.get("max_iter", solver.get("maxiter", 100))),
-                   "ftol": float(solver.get("tol", solver.get("ftol", 1e-8))),
-                   "disp": bool(solver.get("disp", False))}
-        if "finite_diff_step" in solver:
-            options["eps"] = solver["finite_diff_step"]
-
-        try:
-            initial_candidate = self._get(clipped)
-            opt = minimize(lambda x: -float(getattr(self._get(x), objective)), clipped,
-                           method="SLSQP", bounds=bounds, constraints=constraints,
-                           options=options)
-            final, x_final = self._get(opt.x), np.asarray(opt.x, dtype=float)
-            tolerance = float(solver.get("feasibility_tolerance", options["ftol"]))
-            feasible = bool(final.feasible and all(value <= tolerance for value in physical_residuals(x_final)))
-            message = str(opt.message)
-            if not feasible:
-                # The packaging margin is non-smooth across its feasibility boundary, so
-                # SLSQP can stall on the infeasible side; fall back to the best feasible point seen.
-                best = self._best_feasible(objective, tolerance)
-                if best is not None:
-                    x_final, final = np.asarray(best[0], dtype=float), best[1]
-                    feasible = True
-                    message = f"best feasible evaluated point (SLSQP: {message})"
-            return SingleObjectiveResult(
-                objective, clipped.tolist(), x_final.tolist(), bool(opt.success),
-                int(opt.status), message, int(getattr(opt, "nit", 0)),
-                int(getattr(opt, "nfev", 0)), initial_candidate, final,
-                tuple(float(value) for value in physical_residuals(x_final)),
-                len(self._cache), feasible)
-        except Exception as exc:
-            final = self._get(clipped)
-            initial_candidate = self._get(clipped)
-            return SingleObjectiveResult(objective, clipped.tolist(), clipped.tolist(), False,
-                                         -1, str(exc), 0, 0, initial_candidate, final,
-                                         tuple(float(value) for value in physical_residuals(clipped)),
-                                         len(self._cache), False, str(exc))
-
-    def run_epsilon_sweep(self) -> ParetoSweepResult:
-        epsilon_raw = self.cfg.get("epsilon_constraints", {})
-        epsilons = [EpsilonTriplet(*values) for values in itertools.product(
-            _epsilon_values(epsilon_raw, "eta_v"),
-            _epsilon_values(epsilon_raw, "eta_vent"),
-            _epsilon_values(epsilon_raw, "zeta_p"))]
-        bounds, baseline = self._bounds_and_x0()
-        previous = baseline
-        successful, results = [], []
-        for epsilon in epsilons:
-            run = self.solve_epsilon_subproblem(epsilon, previous)
-            results.append(run)
+    def run_objective(self, objective: str) -> SQPResult:
+        """Solve the epsilon grid for one objective (a single solve when the grid is empty)."""
+        grid = epsilon_grid(self.cfg.get("epsilon_constraints"), objective)
+        previous, runs = None, []
+        for epsilon in grid:
+            run = self.solve(objective, epsilon, previous)
+            runs.append(run)
             if run.feasible:
-                previous = np.clip(run.x, [b[0] for b in bounds], [b[1] for b in bounds])
-                successful.append(run)
-        unique = _unique_results(successful)
-        return ParetoSweepResult(epsilons, results, _non_dominated(unique), self.evaluator.evaluation_count)
+                previous = run.x
+        feasible = [run for run in runs if run.feasible]
+        metrics = [objective, *runs[0].epsilon]
+        return SQPResult(objective, runs, non_dominated(feasible, metrics) if len(metrics) > 1 else feasible)
 
-    def run(self) -> ParetoSweepResult:
-        return self.run_epsilon_sweep()
-
-
-def serialize_single_objective(result: SingleObjectiveResult, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    row = {
-        "objective": result.objective, "x0": result.x0, "x": result.x,
-        "success": result.success, "feasible": result.feasible,
-        "status": result.status, "message": result.message,
-        "nit": result.nit, "nfev": result.nfev,
-        "unique_evaluations": result.unique_evaluations,
-        "g_dis": result.physical_residuals[0],
-        "g_dorm": result.physical_residuals[1],
-        "g_packaging": result.physical_residuals[2],
-        "error": result.error or result.candidate.error or "",
-        "initial_eta_g": result.initial_candidate.eta_g,
-        "initial_eta_v": result.initial_candidate.eta_v,
-        "initial_eta_vent": result.initial_candidate.eta_vent,
-        "initial_zeta_p": result.initial_candidate.zeta_p,
-        "eta_g": result.candidate.eta_g, "eta_v": result.candidate.eta_v,
-        "eta_vent": result.candidate.eta_vent, "zeta_p": result.candidate.zeta_p,
-        "z_shift_star": result.candidate.z_shift_star,
-        "packaging_feasible": result.candidate.packaging_feasible,
-    }
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(row))
-        writer.writeheader()
-        writer.writerow(row)
+    def run(self) -> list[SQPResult]:
+        return [self.run_objective(objective) for objective in self.objectives]
 
 
-def serialize_evaluation_history(optimizer: SQPOptimizer, path: Path) -> None:
-    """Write every unique candidate evaluated, in order, tagged with the active epsilon triplet."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+def run_rows(optimizer: SQPOptimizer, runs: Sequence[SQPRun]) -> list[dict[str, Any]]:
+    """Flat CSV rows for solves: objective, epsilon point, design, metrics, residuals, solver status."""
     rows = []
-    for entry in optimizer.history:
-        candidate, epsilon = entry["candidate"], entry["epsilon"]
-        rows.append({
-            "evaluation": entry["evaluation"],
-            "epsilon_v": "" if epsilon is None else epsilon.eta_v,
-            "epsilon_vent": "" if epsilon is None else epsilon.eta_vent,
-            "epsilon_p": "" if epsilon is None else epsilon.zeta_p,
-            "x": list(entry["x"]), "eta_g": candidate.eta_g, "eta_v": candidate.eta_v,
-            "eta_vent": candidate.eta_vent, "zeta_p": candidate.zeta_p,
-            "g_dis": candidate.discharge_residual, "g_dorm": candidate.dormancy_residual,
-            "g_packaging": physical_constraint_residuals(candidate)["g_packaging"],
-            "packaging_feasible": candidate.packaging_feasible,
-            "feasible": candidate.feasible, "error": candidate.error or "",
-        })
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        fieldnames = list(rows[0]) if rows else ["evaluation"]
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    for run in runs:
+        row: dict[str, Any] = {"objective": run.objective,
+                               **{f"eps_{k}": v for k, v in run.epsilon.items()}}
+        row.update(candidate_row(optimizer.variables, run.x, run.candidate))
+        row.update({k: v for k, v in run.residuals.items() if k.startswith("g_epsilon_")})
+        row.update({"success": run.success, "status": run.status, "nit": run.nit, "nfev": run.nfev,
+                    "message": run.message, f"initial_{run.objective}": getattr(run.initial, run.objective)})
+        if run.error:
+            row["error"] = run.error
+        rows.append(row)
+    return rows
 
 
-def serialize_sweep(result: ParetoSweepResult, path: Path, runs: Sequence[SQPSubproblemResult] | None = None) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    selected = result.subproblems if runs is None else runs
-    rows = [{
-        "epsilon_v": run.epsilon.eta_v, "epsilon_vent": run.epsilon.eta_vent,
-        "epsilon_p": run.epsilon.zeta_p, "x": run.x, "success": run.success,
-        "feasible": run.feasible, "status": run.status, "message": run.message,
-        "eta_g": run.candidate.eta_g, "eta_v": run.candidate.eta_v,
-        "eta_vent": run.candidate.eta_vent, "zeta_p": run.candidate.zeta_p,
-        "z_shift_star": run.candidate.z_shift_star,
-        "g_dis": run.candidate.discharge_residual,
-        "g_dorm": run.candidate.dormancy_residual,
-        "g_packaging": physical_constraint_residuals(run.candidate)["g_packaging"],
-        "g_epsilon_v": run.epsilon.eta_v - run.candidate.eta_v,
-        "g_epsilon_vent": run.epsilon.eta_vent - run.candidate.eta_vent,
-        "g_epsilon_p": run.epsilon.zeta_p - run.candidate.zeta_p,
-        "packaging_feasible": run.candidate.packaging_feasible,
-    } for run in selected]
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]) if rows else ["epsilon_v"])
-        writer.writeheader()
-        writer.writerows(rows)
+def history_rows(optimizer: SQPOptimizer) -> list[dict[str, Any]]:
+    """Every unique evaluation in order, tagged with its objective and epsilon point."""
+    return [{"evaluation": e["evaluation"], "objective": e["objective"],
+             **{f"eps_{k}": v for k, v in e["epsilon"].items()},
+             **candidate_row(optimizer.variables, e["x"], e["candidate"])}
+            for e in optimizer.history]
 
 
-__all__ = ["CandidateResult", "EpsilonTriplet", "EvalResult", "ParetoSweepResult", "SingleObjectiveResult",
-           "SQPOptimizer", "SQPSubproblemResult", "TankDesign",
-           "constraint_residuals", "epsilon_residuals", "physical_constraint_residuals", "serialize_evaluation_history",
-           "serialize_single_objective", "serialize_sweep", "venting_performance"]
+__all__ = ["SQPOptimizer", "SQPResult", "SQPRun", "epsilon_grid", "history_rows",
+           "non_dominated", "run_rows"]

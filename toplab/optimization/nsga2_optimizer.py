@@ -7,24 +7,16 @@ maximised (``eta_g``, ``eta_v``, ``eta_vent``, ``zeta_p``); pymoo minimises, so 
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 from pymoo.core.problem import ElementwiseProblem
-import yaml
 
-from toplab.config import load_config
 from toplab.optimization.evaluation import (
-    CandidateEvaluator, CandidateResult, DesignVariable, parse_design_variables)
-from toplab.optimization.sqp_optimizer import SQPOptimizer
-
-OBJECTIVES = ("eta_g", "eta_v", "eta_vent", "zeta_p")
-# Penalty for candidates that failed to evaluate; large enough to rank below any real violation.
-FAILED_VIOLATION = 1.0e3
-SECONDS_PER_HOUR = 3600.0
+    OBJECTIVES, CandidateResult, DesignVariable, OptimizationProblem,
+    candidate_row, load_problem, physical_residuals, write_rows)
 
 
 @dataclass(frozen=True)
@@ -39,10 +31,11 @@ class NSGA2Settings:
 
 def constraint_vector(result: CandidateResult) -> list[float]:
     """Inequality constraints ``g <= 0``: discharge shortfall [h], dormancy margin, packaging margin."""
-    if result.error is not None:
-        return [FAILED_VIOLATION] * 3
-    packaging = -result.zeta_p if result.packaging_feasible else max(1.0, -result.zeta_p)
-    return [result.discharge_residual / SECONDS_PER_HOUR, result.dormancy_residual, packaging]
+    g = physical_residuals(result)
+    if result.error is None and not result.packaging_feasible:
+        # An unplaceable design must rank below every placeable one regardless of zeta_p.
+        g["g_packaging"] = max(1.0, g["g_packaging"])
+    return list(g.values())
 
 
 def objective_vector(result: CandidateResult, objectives: Sequence[str]) -> list[float]:
@@ -81,16 +74,13 @@ class NSGA2Optimizer:
 
     def __init__(self, opt_config_path: Path, evaluator: Any = None) -> None:
         self.opt_config_path = Path(opt_config_path)
-        with self.opt_config_path.open("r", encoding="utf-8") as stream:
-            self.cfg = yaml.safe_load(stream) or {}
-        base_rel = self.cfg.get("optimization", {}).get("base_config", self.cfg.get("base_config"))
-        if base_rel is None:
-            raise ValueError("Optimization configuration must define base_config.")
-        self.base_config_path = (self.opt_config_path.parent / base_rel).resolve()
-        self.base_config = load_config(self.base_config_path)
-        self.variables = parse_design_variables(self.cfg.get("design_variables", {}))
+        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator)
+        self.cfg = self.problem.cfg
+        self.variables = self.problem.variables
+        self.base_config = self.problem.base_config
+        self.evaluator = self.problem.evaluator
 
-        raw = self.cfg.get("nsga2", {})
+        raw = self.cfg.get("nsga2", {}) or {}
         objectives = tuple(raw.get("objectives", NSGA2Settings.objectives))
         if not objectives or set(objectives) - set(OBJECTIVES):
             raise ValueError(f"nsga2.objectives must be a non-empty subset of {OBJECTIVES}.")
@@ -101,11 +91,6 @@ class NSGA2Optimizer:
             eliminate_duplicates=bool(raw.get("eliminate_duplicates", True)),
             objectives=objectives,
             n_workers=int(raw.get("n_workers", 1)))
-        self.evaluator = evaluator or CandidateEvaluator(
-            self.base_config, self.variables,
-            SQPOptimizer._maximum_vented_fraction(self.base_config, self.cfg),
-            SQPOptimizer._hold_period_s(self.base_config, self.cfg),
-            progress=bool(raw.get("evaluation_progress", True)))
 
     def initial_population(self) -> np.ndarray:
         """Random sample inside the bounds with the baseline design as the first member."""
@@ -156,33 +141,24 @@ class NSGA2Optimizer:
         return NSGA2Result(self.variables, self.settings.objectives, pareto_x, pareto, history)
 
 
-def _row(variables: Sequence[DesignVariable], x: Sequence[float], candidate: CandidateResult) -> dict[str, Any]:
-    row = {v.name: float(value) for v, value in zip(variables, x)}
-    row.update({name: getattr(candidate, name) for name in OBJECTIVES})
-    row.update({"f_vent": candidate.f_vent, "g_dis": candidate.discharge_residual,
-                "g_dorm": candidate.dormancy_residual, "packaging_feasible": candidate.packaging_feasible,
-                "feasible": candidate.feasible, "error": candidate.error or ""})
-    return row
+def pareto_rows(result: NSGA2Result) -> list[dict[str, Any]]:
+    return [candidate_row(result.variables, x, c) for x, c in zip(result.pareto_x, result.pareto)]
 
 
-def _write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]) if rows else ["empty"])
-        writer.writeheader()
-        writer.writerows(rows)
+def history_rows(result: NSGA2Result) -> list[dict[str, Any]]:
+    return [{"evaluation": i + 1, **candidate_row(result.variables, x, c)}
+            for i, (x, c) in enumerate(result.history)]
 
 
 def write_history(path: Path, result: NSGA2Result) -> None:
     """Every evaluated candidate, in evaluation order."""
-    _write_rows(path, [{"evaluation": i + 1, **_row(result.variables, x, c)}
-                       for i, (x, c) in enumerate(result.history)])
+    write_rows(path, history_rows(result))
 
 
 def write_pareto(path: Path, result: NSGA2Result) -> None:
-    """The non-dominated feasible set found by the run."""
-    _write_rows(path, [_row(result.variables, x, c) for x, c in zip(result.pareto_x, result.pareto)])
+    """The non-dominated set returned by the run (feasible whenever any feasible design exists)."""
+    write_rows(path, pareto_rows(result))
 
 
 __all__ = ["NSGA2Optimizer", "NSGA2Result", "NSGA2Settings", "OBJECTIVES", "constraint_vector",
-           "objective_vector", "write_history", "write_pareto"]
+           "history_rows", "objective_vector", "pareto_rows", "write_history", "write_pareto"]
