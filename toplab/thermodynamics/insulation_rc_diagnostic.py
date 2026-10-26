@@ -22,15 +22,11 @@ class InsulationRCModel:
     def __init__(self, tank_model: InsulatedTankThermalModel, node_count: int):
         if node_count < 1:
             raise ValueError("node_count must be at least 1")
-        if tank_model.insulation_model.integrated_conductivity is None:
+        insulation = tank_model.insulation_model
+        if insulation.integrated_conductivity is None and insulation.heat_flux is None:
             raise ValueError(
                 "The radial RC diagnostic requires an insulation model with "
-                "integrated_conductivity"
-            )
-        if tank_model.insulation_model.heat_flux is not None:
-            raise ValueError(
-                "The radial RC diagnostic does not support heat-flux-only "
-                "insulation models"
+                "integrated_conductivity or heat_flux"
             )
 
         self.tank_model = tank_model
@@ -114,7 +110,17 @@ class InsulationRCModel:
         inner_temperature: float,
         outer_temperature: float,
     ) -> float:
-        return self._segment_geometry_factor(inner_radius, outer_radius) * (
+        geometry_factor = self._segment_geometry_factor(inner_radius, outer_radius)
+        heat_flux = self.tank_model.insulation_model.heat_flux
+        if heat_flux is not None:
+            # Flux correlations (MLI) take T_hot >= T_cold and the segment
+            # thickness; the sign gives the direction (outward-to-inward > 0).
+            thickness = outer_radius - inner_radius
+            hot = max(inner_temperature, outer_temperature)
+            cold = min(inner_temperature, outer_temperature)
+            sign = 1.0 if outer_temperature >= inner_temperature else -1.0
+            return sign * float(heat_flux(hot, cold, thickness)) * geometry_factor * thickness
+        return geometry_factor * (
             self._integrated_conductivity(inner_temperature, outer_temperature)
         )
 
