@@ -11,6 +11,7 @@ import csv
 import json
 import numpy as np
 from pathlib import Path
+from scipy.integrate import trapezoid
 
 DENSITY = 51.1  # kg/m³
 
@@ -75,7 +76,7 @@ def integrated_thermal_conductivity(temperature_low: float, temperature_high: fl
         [upper],
     ))
     conductivities = np.interp(temperatures, T_arr, k_arr)
-    return sign * float(np.trapz(conductivities, temperatures))
+    return sign * float(trapezoid(conductivities, temperatures))
 
 
 def specific_heat(temperature: float) -> float:
