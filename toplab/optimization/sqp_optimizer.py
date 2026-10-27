@@ -119,6 +119,7 @@ class SQPOptimizer:
         self._cache: dict[tuple[float, ...], CandidateResult] = {}
         self._solve_keys: set[tuple[float, ...]] = set()
         self.history: list[dict[str, Any]] = []
+        self.live_log = None  # optional RowLogger; every evaluation is appended as it completes
         self._active: tuple[str, dict[str, float]] = ("", {})
 
     @staticmethod
@@ -157,6 +158,8 @@ class SQPOptimizer:
             candidate = self._cache[key] = self.evaluator.evaluate(key)
             self.history.append({"evaluation": len(self.history) + 1, "objective": self._active[0],
                                  "epsilon": dict(self._active[1]), "x": key, "candidate": candidate})
+            if self.live_log is not None:
+                self.live_log.append(history_rows(self, self.history[-1:])[0])
         self._solve_keys.add(key)
         return self._cache[key]
 
@@ -261,12 +264,12 @@ def run_rows(optimizer: SQPOptimizer, runs: Sequence[SQPRun]) -> list[dict[str, 
     return rows
 
 
-def history_rows(optimizer: SQPOptimizer) -> list[dict[str, Any]]:
+def history_rows(optimizer: SQPOptimizer, entries: Sequence[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Every unique evaluation in order, tagged with its objective and epsilon point."""
     return [{"evaluation": e["evaluation"], "objective": e["objective"],
              **{f"eps_{k}": v for k, v in e["epsilon"].items()},
              **candidate_row(optimizer.variables, e["x"], e["candidate"])}
-            for e in optimizer.history]
+            for e in (optimizer.history if entries is None else entries)]
 
 
 __all__ = ["SQPOptimizer", "SQPResult", "SQPRun", "epsilon_grid", "history_rows",

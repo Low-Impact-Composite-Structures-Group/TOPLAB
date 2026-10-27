@@ -10,6 +10,9 @@ Under MPI rank 0 drives NSGA-II and the other ranks evaluate designs (use at lea
 
 Results go to ``output.results_dir`` (relative to the YAML):
 
+Evaluation CSVs (``sqp_evaluations.csv``, ``nsga2_history.csv``) are appended to as each
+evaluation finishes, so a crashed run keeps its progress; the other files are written at the end.
+
 * SQP: ``sqp_runs.csv`` (every solve), ``sqp_pareto.csv`` (when epsilon constraints are
   configured), ``sqp_evaluations.csv`` (every model evaluation), ``plots/*.png``.
 * NSGA-II: ``nsga2_history.csv``, ``nsga2_pareto.csv``, ``plots/*.png``.
@@ -20,7 +23,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from toplab.optimization.evaluation import load_problem, write_rows
+from toplab.optimization.evaluation import RowLogger, load_problem, write_rows
 
 
 def run_sqp(config_path: Path | str, plot: bool = True):
@@ -28,6 +31,7 @@ def run_sqp(config_path: Path | str, plot: bool = True):
     from toplab.optimization.sqp_optimizer import SQPOptimizer, history_rows, run_rows
 
     optimizer = SQPOptimizer(config_path)
+    optimizer.live_log = RowLogger(optimizer.problem.results_dir / "sqp_evaluations.csv")
     results = optimizer.run()
     out = optimizer.problem.results_dir
     runs = [run for result in results for run in result.runs]
@@ -56,6 +60,7 @@ def run_nsga2(config_path: Path | str, plot: bool = True):
     from toplab.optimization.nsga2_optimizer import NSGA2Optimizer, write_history, write_pareto
 
     optimizer = NSGA2Optimizer(config_path)
+    optimizer.live_log = RowLogger(optimizer.problem.results_dir / "nsga2_history.csv")
     result = optimizer.run()
     if result is None:  # MPI worker rank
         return None

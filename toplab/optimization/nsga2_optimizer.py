@@ -54,8 +54,13 @@ class NSGA2Result:
     history: list[tuple[tuple[float, ...], CandidateResult]] = field(default_factory=list)
 
 
-def _evaluate_batch_serial(evaluator, X: np.ndarray) -> list[CandidateResult]:
-    return [evaluator.evaluate(x) for x in X]
+def _evaluate_batch_serial(evaluator, X: np.ndarray, on_result=None) -> list[CandidateResult]:
+    results = []
+    for i, x in enumerate(X):
+        results.append(evaluator.evaluate(x))
+        if on_result is not None:
+            on_result(i, results[-1])
+    return results
 
 
 class MPIEvaluator:
@@ -89,9 +94,10 @@ class MPIEvaluator:
                 reply = (idx, None, traceback.format_exc())
             self.comm.send(reply, dest=0, tag=self.TAG_WORK)
 
-    def map(self, X: np.ndarray) -> list[CandidateResult]:
+    def map(self, X: np.ndarray, on_result=None) -> list[CandidateResult]:
+        """Evaluate ``X``; ``on_result(index, result)`` fires on rank 0 as each result arrives."""
         if self.size == 1:
-            return _evaluate_batch_serial(self.evaluator, X)
+            return _evaluate_batch_serial(self.evaluator, X, on_result)
         from mpi4py import MPI
         results: list[Any] = [None] * len(X)
         errors: list[str] = []
@@ -108,6 +114,8 @@ class MPIEvaluator:
                 errors.append(err)
             else:
                 results[idx] = result
+                if on_result is not None:
+                    on_result(idx, result)
             if next_task < len(X) and not errors:
                 self.comm.send((next_task, X[next_task]), dest=status.Get_source(), tag=self.TAG_WORK)
                 next_task += 1
@@ -126,13 +134,15 @@ class TankDesignProblem(Problem):
 
     def __init__(self, batch_evaluator, variables, objectives, **kwargs):
         self.batch_evaluator, self.objective_names = batch_evaluator, tuple(objectives)
+        self.variables = variables
         super().__init__(
             n_var=len(variables), n_obj=len(objectives), n_ieq_constr=3,
             xl=np.array([v.lower for v in variables], dtype=float),
             xu=np.array([v.upper for v in variables], dtype=float), **kwargs)
 
     def _evaluate(self, X, out, *args, **kwargs):
-        candidates = self.batch_evaluator(np.atleast_2d(X))
+        X = np.atleast_2d(X)
+        candidates = self.batch_evaluator(X)
         out["F"] = np.array([objective_vector(c, self.objective_names) for c in candidates], dtype=float)
         out["G"] = np.array([constraint_vector(c) for c in candidates], dtype=float)
         cand = np.empty(len(candidates), dtype=object)
@@ -151,6 +161,7 @@ class NSGA2Optimizer:
         self.variables = self.problem.variables
         self.base_config = self.problem.base_config
         self.evaluator = self.problem.evaluator
+        self.live_log = None  # optional RowLogger; every evaluation is appended as it completes
 
         raw = self.cfg.get("nsga2", {}) or {}
         objectives = tuple(raw.get("objectives", NSGA2Settings.objectives))
@@ -198,7 +209,17 @@ class NSGA2Optimizer:
             mpi.serve()
             return None
 
-        batch = mpi.map if mpi is not None else (lambda X: _evaluate_batch_serial(self.evaluator, X))
+        raw_batch = mpi.map if mpi is not None else (
+            lambda X, on_result=None: _evaluate_batch_serial(self.evaluator, X, on_result))
+        counter = [0]
+
+        def batch(X):
+            def log(i, candidate):
+                counter[0] += 1
+                self.live_log.append({"evaluation": counter[0],
+                                      **candidate_row(self.variables, X[i], candidate)})
+            return raw_batch(X, log if self.live_log is not None else None)
+
         try:
             problem = TankDesignProblem(batch, self.variables, self.settings.objectives)
             algorithm = NSGA2(pop_size=self.settings.population_size,

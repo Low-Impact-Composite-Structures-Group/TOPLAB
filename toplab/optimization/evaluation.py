@@ -362,3 +362,29 @@ def write_rows(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         writer = csv.DictWriter(stream, fieldnames=fieldnames or ["empty"])
         writer.writeheader()
         writer.writerows(rows)
+
+
+class RowLogger:
+    """Append rows to a CSV as they are produced so a crash loses nothing.
+
+    The file is created (truncating any old one) on the first row, flushed and fsynced after
+    every row. If a later row introduces a new column the file is rewritten with the wider header.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self._rows: list[Mapping[str, Any]] = []
+        self._fieldnames: list[str] = []
+
+    def append(self, row: Mapping[str, Any]) -> None:
+        import os
+        new = [key for key in row if key not in self._fieldnames]
+        self._rows.append(row)
+        if new or not self._fieldnames:
+            self._fieldnames += new
+            write_rows(self.path, self._rows)
+            return
+        with self.path.open("a", newline="", encoding="utf-8") as stream:
+            csv.DictWriter(stream, fieldnames=self._fieldnames).writerow(row)
+            stream.flush()
+            os.fsync(stream.fileno())
