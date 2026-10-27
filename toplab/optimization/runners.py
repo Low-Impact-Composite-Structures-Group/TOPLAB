@@ -15,7 +15,7 @@ evaluation finishes, so a crashed run keeps its progress; the other files are wr
 
 * SQP: ``sqp_runs.csv`` (every solve), ``sqp_pareto.csv`` (when epsilon constraints are
   configured), ``sqp_evaluations.csv`` (every model evaluation), ``plots/*.png``.
-* NSGA-II: ``nsga2_history.csv``, ``nsga2_pareto.csv``, ``plots/*.png``.
+* NSGA-II: ``nsga2_history.csv``, ``nsga2_pareto.csv``, ``plots/*.png`` and ``plots/*.html`` (3D Pareto views).
 """
 
 from __future__ import annotations
@@ -95,13 +95,14 @@ def plot_sqp(config_path: Path | str) -> list[Path]:
 
 def plot_nsga2(config_path: Path | str) -> list[Path]:
     from toplab.optimization.nsga2_optimizer import NSGA2Settings
-    from toplab.plotting.optimization_plots import plot_pareto, read_rows
+    from toplab.plotting.optimization_plots import plot_pareto, plot_pareto_3d, read_rows
 
     problem = load_problem(config_path, evaluator=object())
     objectives = (problem.cfg.get("nsga2") or {}).get("objectives", NSGA2Settings.objectives)
     out = problem.results_dir
-    return plot_pareto(read_rows(out / "nsga2_pareto.csv"), read_rows(out / "nsga2_history.csv"),
-                       objectives, out / "plots", "nsga2")
+    pareto, history = read_rows(out / "nsga2_pareto.csv"), read_rows(out / "nsga2_history.csv")
+    return (plot_pareto(pareto, history, objectives, out / "plots", "nsga2")
+            + plot_pareto_3d(pareto, history, objectives, out / "plots", "nsga2"))
 
 
 def main(argv: list[str] | None = None) -> None:

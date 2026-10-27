@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import re
 from pathlib import Path
 from typing import Sequence
@@ -96,4 +97,57 @@ def plot_pareto(pareto: Sequence[dict], history: Sequence[dict], objectives: Seq
             fig.savefig(path, dpi=200)
             plt.close(fig)
             written.append(path)
+    return written
+
+
+def plot_pareto_3d(pareto: Sequence[dict], history: Sequence[dict], objectives: Sequence[str],
+                   output_dir: Path | str, prefix: str) -> list[Path]:
+    """Interactive 3D objective-space HTML for every 3-subset of ``objectives``.
+
+    Feasible history is grey, the Pareto set is coloured by the objective left out of the
+    triple (when there is one). Hover shows the design variables and all objectives.
+    """
+    import plotly.graph_objects as go
+
+    objectives = [o for o in objectives if o in OBJECTIVES]
+    if len(objectives) < 3:
+        return []
+    history = [r for r in history if r["feasible"] is True]
+    variables = variable_columns(pareto or history)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def hover(row: dict) -> str:
+        parts = [f"{v} = {row[v]:.5g}" for v in variables] + [f"{o} = {row[o]:.5g}" for o in objectives]
+        return "<br>".join(parts)
+
+    written = []
+    for triple in itertools.combinations(objectives, 3):
+        fig = go.Figure()
+        if history:
+            fig.add_trace(go.Scatter3d(
+                x=[r[triple[0]] for r in history], y=[r[triple[1]] for r in history],
+                z=[r[triple[2]] for r in history], mode="markers", name="feasible evaluations",
+                text=[hover(r) for r in history], hovertemplate="%{text}<extra>feasible</extra>",
+                marker=dict(size=3, color="lightgray", opacity=0.5)))
+        left_out = [o for o in objectives if o not in triple]
+        marker = dict(size=6, line=dict(width=1, color="black"))
+        if left_out:
+            marker.update(color=[r[left_out[0]] for r in pareto], colorscale="Turbo", showscale=True,
+                          colorbar=dict(title=left_out[0]))
+        else:
+            marker.update(color="crimson")
+        fig.add_trace(go.Scatter3d(
+            x=[r[triple[0]] for r in pareto], y=[r[triple[1]] for r in pareto],
+            z=[r[triple[2]] for r in pareto], mode="markers", name="Pareto set",
+            text=[hover(r) for r in pareto], hovertemplate="%{text}<extra>Pareto</extra>",
+            marker=marker))
+        fig.update_layout(
+            title=f"Pareto set: {', '.join(triple)}", template="plotly_white", height=750,
+            scene=dict(xaxis_title=_LABELS[triple[0]], yaxis_title=_LABELS[triple[1]],
+                       zaxis_title=_LABELS[triple[2]]),
+            legend=dict(orientation="h", y=1.02))
+        path = output_dir / f"{prefix}_pareto3d_{'_'.join(triple)}.html"
+        fig.write_html(path, include_plotlyjs="cdn")
+        written.append(path)
     return written
