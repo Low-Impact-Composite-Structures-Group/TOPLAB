@@ -4,6 +4,9 @@ Command line::
 
     python -m toplab.optimization.runners sqp   path/to/sqp.yaml [--plot-only]
     python -m toplab.optimization.runners nsga2 path/to/nsga2.yaml [--plot-only]
+    mpirun -n 16 python -m toplab.optimization.runners nsga2 path/to/nsga2.yaml --no-plot
+
+Under MPI rank 0 drives NSGA-II and the other ranks evaluate designs (use at least 2 ranks).
 
 Results go to ``output.results_dir`` (relative to the YAML):
 
@@ -54,6 +57,8 @@ def run_nsga2(config_path: Path | str, plot: bool = True):
 
     optimizer = NSGA2Optimizer(config_path)
     result = optimizer.run()
+    if result is None:  # MPI worker rank
+        return None
     out = optimizer.problem.results_dir
     write_history(out / "nsga2_history.csv", result)
     write_pareto(out / "nsga2_pareto.csv", result)

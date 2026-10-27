@@ -25,3 +25,4 @@ dependencies:
   - networkx
   - plotly
   - kaleido
+  - mpi4py
