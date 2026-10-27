@@ -316,6 +316,10 @@ class OptimizationProblem:
 
     @property
     def results_dir(self) -> Path:
+        """``$TOPLAB_RESULTS_DIR`` if set (e.g. a cluster scratch folder), else ``output.results_dir``."""
+        override = os.environ.get("TOPLAB_RESULTS_DIR")
+        if override:
+            return Path(override).resolve()
         output = self.cfg.get("output", {}) or {}
         directory = Path(output.get("results_dir", output.get("results_directory", "output")))
         return directory if directory.is_absolute() else (self.path.parent / directory).resolve()
