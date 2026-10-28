@@ -420,3 +420,81 @@ class ComponentFigures:
 
         print("   Fuel cell inlet plot completed")
         return fig
+
+    def plot_mixer_flows(
+        self,
+        history,
+        save_path: Optional[str] = None,
+        xlim: Optional[Tuple[float, float]] = None,
+        legend_location: str = 'best',
+    ) -> plt.Figure:
+        """
+        Flow into and out of one mixer junction (a ``toplab.post.mixer.MixerStreamHistory``).
+
+        Panels: mass flow (each inlet, merged outlet, requested demand), temperature and pressure
+        (each inlet stream and the merged stream), mixer mass balance (inlets - demand) and
+        enthalpy balance (outlet - inlets) as a residual, and cumulative mass per stream.
+        """
+        print(f"Plotting mixer {history.mixer_id} flows...")
+        colors = self.color_palette
+        t = history.times_h
+
+        fig, axes = plt.subplots(5, 1, figsize=(10, 14), sharex=True)
+        ax_mdot, ax_temp, ax_pres, ax_res, ax_cum = axes
+
+        for k, inlet in enumerate(history.inlets):
+            color, label = colors[k % len(colors)], f"Tank {inlet.tank_id}"
+            ax_mdot.plot(t, inlet.mdot_gs, color=color, linewidth=1.5, linestyle='--', label=label)
+            ax_temp.plot(t, np.where(inlet.mdot_gs > 0, inlet.temperature_K, np.nan),
+                         color=color, linewidth=1.5, linestyle='--', label=label)
+            ax_pres.plot(t, np.where(inlet.mdot_gs > 0, inlet.pressure_bar, np.nan),
+                         color=color, linewidth=1.5, linestyle='--', label=label)
+
+        merged_color = colors[len(history.inlets) % len(colors)]
+        ax_mdot.plot(t, history.mdot_gs, color=merged_color, linewidth=2.2, label='Mixer outlet')
+        ax_mdot.plot(t, history.demand_gs, color='black', linewidth=1.0, linestyle=':', label='Requested demand')
+        ax_temp.plot(t, history.temperature_K, color=merged_color, linewidth=2.2, label='Mixer outlet')
+        ax_pres.plot(t, history.pressure_bar, color=merged_color, linewidth=2.2, label='Mixer outlet')
+
+        ax_res.plot(t, history.mass_residual_gs, color=colors[0 % len(colors)], linewidth=1.5,
+                    label='Mass: inlets - demand [g/s]')
+        ax_res.set_ylabel('Mass residual [g/s]')
+        ax_res_h = ax_res.twinx()
+        ax_res_h.plot(t, history.enthalpy_residual_W, color=colors[1 % len(colors)], linewidth=1.5,
+                      linestyle='--', label='Enthalpy: outlet - inlets [W]')
+        ax_res_h.set_ylabel('Enthalpy-flux residual [W]')
+        lines = ax_res.get_lines() + ax_res_h.get_lines()
+        ax_res.legend(lines, [line.get_label() for line in lines], fontsize=plot_style.LEGEND_FONT_SIZE,
+                      loc=legend_location, frameon=True, framealpha=0.9, edgecolor='black')
+
+        for name, mass in history.cumulative_mass_kg().items():
+            style = {'outlet': dict(color=merged_color, linewidth=2.2),
+                     'demand': dict(color='black', linewidth=1.0, linestyle=':')}.get(name)
+            if style is None:
+                k = [i.tank_id for i in history.inlets].index(int(name.split('_')[1]))
+                style = dict(color=colors[k % len(colors)], linewidth=1.5, linestyle='--')
+            ax_cum.plot(t, mass, label=name.replace('_', ' ').capitalize(), **style)
+
+        ax_mdot.set_ylabel('Mass Flow [g/s]')
+        ax_temp.set_ylabel('Temperature [K]')
+        ax_pres.set_ylabel('Pressure [bar]')
+        ax_cum.set_ylabel('Cumulative mass [kg]')
+        ax_cum.set_xlabel('Time [hours]')
+
+        for ax in axes:
+            ax.grid(True, alpha=0.3)
+            if xlim is not None:
+                ax.set_xlim(xlim)
+        for ax in (ax_mdot, ax_temp, ax_pres, ax_cum):
+            ax.legend(fontsize=plot_style.LEGEND_FONT_SIZE, loc=legend_location, frameon=True,
+                      framealpha=0.9, edgecolor='black')
+
+        plt.suptitle(f"Mixer {history.mixer_id} — Flow In and Out", fontsize=FONT_SIZE + 1,
+                     fontweight='bold', y=1.01)
+        plt.tight_layout()
+
+        if save_path:
+            self._save_figure(fig, save_path, dpi=900)
+
+        print("   Mixer flow plot completed")
+        return fig

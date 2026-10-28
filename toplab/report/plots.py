@@ -522,6 +522,31 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
             print(f"   WARNING: Fuel cell inlet plot failed: {e}")
             import traceback
             traceback.print_exc()
+
+        # --- Flow-distribution mixer plots: one per mixer junction ---
+        _mx_cfg = run.config.output_plots.get('mixer_flows', {})
+        if run.network.mixers and _mx_cfg.get('enabled', True):
+            try:
+                from pathlib import Path
+                from toplab.post.mixer import mixer_stream_history
+                for mixer_history in mixer_stream_history(run.network, run.tank_system, run.results):
+                    mx_save_path = None
+                    if save_path:
+                        base_name = figure_prefix if figure_prefix else Path(save_path).stem
+                        mx_fname = _mx_cfg.get('filename', 'mixer_flows')
+                        mx_save_path = (Path(save_path).parent /
+                                        f"{base_name}_{mx_fname}_{mixer_history.mixer_id}"
+                                        f"{Path(save_path).suffix or '.png'}")
+                    figures.append(plotter.plot_mixer_flows(
+                        mixer_history,
+                        save_path=str(mx_save_path) if mx_save_path else None,
+                        xlim=_mx_cfg.get('xlim', None),
+                        legend_location=_mx_cfg.get('legend_location', 'best'),
+                    ))
+            except Exception as e:
+                print(f"   WARNING: Mixer flow plot failed: {e}")
+                import traceback
+                traceback.print_exc()
     # -------------------------------------------------------------------
 
     plots_per_tank = 2  # Always: evolution + density-temperature

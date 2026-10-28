@@ -18,9 +18,14 @@ SINK = -1  # target index of a coupling edge that discharges out of the system
 
 @dataclass(frozen=True)
 class Mixer:
-    """Junction that merges tank outflows; ``fractions`` maps tank node id -> share (sums to 1)."""
+    """Junction that merges tank outflows; ``fractions`` maps tank node id -> share (sums to 1).
+
+    ``outlet_pressure`` [Pa] is the pressure the merged stream is throttled to (junction option
+    ``outlet_pressure_bar``); ``None`` means the lowest inlet pressure at each instant.
+    """
     node_id: NodeId
     fractions: Dict[NodeId, float]
+    outlet_pressure: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +125,11 @@ class Network:
                     raise ConfigError(
                         f"Mixer {node_id!r}: flow_fraction values must sum to 1 (got {sum(fractions):.6g})"
                     )
-            mixers[node_id] = Mixer(node_id, dict(zip(sources, fractions)))
+            outlet_bar = junction.options.get("outlet_pressure_bar")
+            if outlet_bar is not None and float(outlet_bar) <= 0.0:
+                raise ConfigError(f"Mixer {node_id!r}: outlet_pressure_bar must be > 0")
+            mixers[node_id] = Mixer(node_id, dict(zip(sources, fractions)),
+                                    None if outlet_bar is None else float(outlet_bar) * 1e5)
         return mixers
 
     # -- coupling edges ------------------------------------------------------------------------
