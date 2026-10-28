@@ -9,6 +9,7 @@ not an objective: it only enters through the dormancy constraint ``g_dorm``.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -262,8 +263,11 @@ class NSGA2Optimizer:
             mpi_size = MPI.COMM_WORLD.Get_size()
             if mpi_size > 1:
                 mpi = MPIEvaluator(self.evaluator)
-        except ImportError:
+        except ImportError as exc:
             mpi_size = None
+            if launcher_world_size() > 1:
+                raise RuntimeError(f"mpi4py cannot be imported by {sys.executable} ({exc}); install it "
+                                   "in that environment, built against the mpirun in use.") from exc
         check_mpi_world(launcher_world_size(), mpi_size)
         if mpi is not None and mpi.rank != 0:
             mpi.serve()
