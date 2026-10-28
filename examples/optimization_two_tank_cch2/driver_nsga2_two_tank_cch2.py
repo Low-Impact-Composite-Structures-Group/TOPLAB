@@ -20,8 +20,8 @@ def plot_front(result, path: Path) -> None:
         ax.scatter([c.eta_g for _, c in feasible], [c.eta_v for _, c in feasible],
                    c="lightgray", s=25, label="feasible evaluations")
     front = ax.scatter([c.eta_g for c in result.pareto], [c.eta_v for c in result.pareto],
-                       c=[c.eta_vent for c in result.pareto], cmap="viridis", s=60, label="Pareto set")
-    fig.colorbar(front, ax=ax, label="venting performance eta_vent")
+                       c=[c.zeta_p for c in result.pareto], cmap="viridis", s=60, label="Pareto set")
+    fig.colorbar(front, ax=ax, label="packaging performance zeta_p")
     ax.set_xlabel("gravimetric efficiency eta_g")
     ax.set_ylabel("volumetric efficiency eta_v")
     ax.legend()
@@ -43,7 +43,7 @@ def main():
     print(f"\nEvaluations: {len(result.history)}   Pareto-optimal designs: {len(result.pareto)}")
     for x, c in zip(result.pareto_x, result.pareto):
         print("  ", {n: round(float(v), 4) for n, v in zip(names, x)},
-              f"eta_g={c.eta_g:.4f} eta_v={c.eta_v:.4f} eta_vent={c.eta_vent:.4f}")
+              f"eta_g={c.eta_g:.4f} eta_v={c.eta_v:.4f} zeta_p={c.zeta_p:.4f}")
     return result
 
 

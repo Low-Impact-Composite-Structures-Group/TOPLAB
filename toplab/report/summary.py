@@ -135,13 +135,15 @@ def get_comprehensive_analysis_summary(run: RunResult) -> Dict[str, Any]:
         }
 
         # === DIRECT OUTPUTS ===
-        tank_radius_m    = float(tank_props['radius'])
+        tank_radius_m    = float(tank_props['inner_radius'])
         tank_diameter_m  = float(tank_props['inner_diameter'])
         surface_area_m2  = float(tank_props['inner_surface_area'])
         wall_thickness_m = float(tank_props['thickness_wall'])
         liner_mass_kg    = float(tank_props['liner_mass'])
         wall_mass_kg     = float(tank_props['wall_mass'])
-        total_tank_mass_kg = liner_mass_kg + wall_mass_kg
+        insulation_mass_kg = float(tank_props.get('foam_mass', 0.0))
+        shell_mass_kg    = float(tank_props.get('shell_mass', 0.0))
+        total_tank_mass_kg = liner_mass_kg + wall_mass_kg + insulation_mass_kg + shell_mass_kg
         fuel_mass_kg     = float(initial_state.fuel_mass)
 
         direct_outputs = {
@@ -153,6 +155,8 @@ def get_comprehensive_analysis_summary(run: RunResult) -> Dict[str, Any]:
             'fuel_mass_kg':        fuel_mass_kg,
             'liner_mass_kg':       liner_mass_kg,
             'wall_mass_kg':        wall_mass_kg,
+            'insulation_mass_kg':  insulation_mass_kg,
+            'shell_mass_kg':       shell_mass_kg,
             'total_tank_mass_kg':  total_tank_mass_kg,
         }
 
@@ -168,9 +172,8 @@ def get_comprehensive_analysis_summary(run: RunResult) -> Dict[str, Any]:
                 time_to_vent_hours = float(times_array[i]) / 3600.0
                 break
 
-        # Gravimetric efficiency = fuel / (fuel + structure)
-        structure_mass = liner_mass_kg + wall_mass_kg
-        mass_efficiency = fuel_mass_kg / (fuel_mass_kg + structure_mass)
+        # Gravimetric efficiency = fuel / (fuel + dry mass), dry mass incl. insulation and outer shell
+        mass_efficiency = fuel_mass_kg / (fuel_mass_kg + total_tank_mass_kg)
 
         # Volumetric efficiency = inner volume / outer volume (capsule-correct, from tank_props)
         outer_volume_m3 = float(tank_props['outer_volume'])
@@ -283,6 +286,8 @@ def print_comprehensive_analysis_summary(run):
             ('fuel_mass_kg', 'kg', 'Fuel Mass'),
             ('liner_mass_kg', 'kg', 'Liner Mass'),
             ('wall_mass_kg', 'kg', 'Wall Mass'),
+            ('insulation_mass_kg', 'kg', 'Insulation Mass'),
+            ('shell_mass_kg', 'kg', 'Outer Shell Mass'),
             ('total_tank_mass_kg', 'kg', 'Total Tank Mass')
         ]),
         ("POSTPROCESSED OUTPUTS", [

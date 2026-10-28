@@ -2,7 +2,8 @@
 
 Uses the same design-variable list and :class:`CandidateEvaluator` as the SQP optimiser, so any
 number of tanks and any of radius / phi / insulation thickness can be explored. Objectives are
-maximised (``eta_g``, ``eta_v``, ``eta_vent``, ``zeta_p``); pymoo minimises, so they are negated.
+maximised (``eta_g``, ``eta_v``, ``zeta_p``); pymoo minimises, so they are negated. Venting is
+not an objective: it only enters through the dormancy constraint ``g_dorm``.
 """
 
 from __future__ import annotations
@@ -15,19 +16,55 @@ from typing import Any, Sequence
 import numpy as np
 from pymoo.core.problem import Problem
 
+from toplab.optimization.convergence import ConvergenceSettings, NSGA2Termination
 from toplab.optimization.evaluation import (
-    OBJECTIVES, CandidateResult, DesignVariable, OptimizationProblem,
+    NSGA2_OBJECTIVES, CandidateResult, DesignVariable, OptimizationProblem,
     candidate_row, load_problem, physical_residuals, write_rows)
 
 
 @dataclass(frozen=True)
 class NSGA2Settings:
     population_size: int = 8
-    generations: int = 3
+    generations: int = 3  # hard cap on generations (the run length when convergence is disabled)
     seed: int | None = None
     eliminate_duplicates: bool = True
-    objectives: tuple[str, ...] = ("eta_g", "eta_v", "eta_vent")
+    objectives: tuple[str, ...] = NSGA2_OBJECTIVES
+    convergence: ConvergenceSettings = ConvergenceSettings()
     n_workers: int = 1  # ignored: parallelism comes from the MPI world size (mpirun -n N)
+
+
+def candidate_status(c: CandidateResult) -> str:
+    """One-word feasibility status: why a candidate is (in)feasible."""
+    if c.error is not None:
+        return "error"
+    if c.discharge_failed or c.discharge_residual > 0.0 or not c.mission_completed:
+        return "discharge_infeasible"
+    if c.dormancy_residual > 0.0:
+        return "dormancy_infeasible"
+    if not c.packaging_feasible:
+        return "packaging_infeasible"
+    return "feasible"
+
+
+# History column groups, in file order. Unavailable quantities are blank, never zero.
+ID_COLUMNS = ("evaluation", "worker_rank", "pid")
+SIZED_COLUMNS = ("t_ins_star",)
+DIAGNOSTIC_COLUMNS = ("eta_vent", "f_vent", "n_dormancy_evals", "sizing_status")
+CONSTRAINT_COLUMNS = ("g_dis", "g_dorm", "g_packaging")
+STATUS_COLUMNS = ("status", "feasible", "packaging_feasible", "discharge_failed", "error")
+
+
+def nsga2_row(variables: Sequence[DesignVariable], x: Sequence[float], c: CandidateResult) -> dict[str, Any]:
+    """One history/Pareto row grouped as: ids | design variables (r, phi) | sized t_ins* |
+    objectives | diagnostics | constraints | feasibility status."""
+    flat = {**candidate_row(variables, x, c), "evaluation": c.eval_id, "worker_rank": c.worker_rank,
+            "pid": c.pid, "status": candidate_status(c)}
+    names = [v.name for v in variables]
+    order = [*ID_COLUMNS, *names, *SIZED_COLUMNS, *NSGA2_OBJECTIVES, *DIAGNOSTIC_COLUMNS,
+             *CONSTRAINT_COLUMNS, *STATUS_COLUMNS]
+    row = {key: flat[key] for key in order if key in flat}
+    row.update({key: value for key, value in flat.items() if key not in row})
+    return row
 
 
 def launcher_world_size() -> int:
@@ -75,6 +112,8 @@ class NSGA2Result:
     pareto_x: np.ndarray
     pareto: list[CandidateResult]
     history: list[tuple[tuple[float, ...], CandidateResult]] = field(default_factory=list)
+    termination_reason: str = ""  # "converged" or "max_generations"
+    convergence_trace: list[dict[str, Any]] = field(default_factory=list)  # per-generation front movement
 
 
 def _evaluate_batch_serial(evaluator, X: np.ndarray, on_result=None) -> list[CandidateResult]:
@@ -179,7 +218,8 @@ class NSGA2Optimizer:
 
     def __init__(self, opt_config_path: Path, evaluator: Any = None) -> None:
         self.opt_config_path = Path(opt_config_path)
-        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator, skip_after_discharge_failure=True)
+        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator, skip_after_discharge_failure=True,
+                                                    size_insulation_internally=True)
         self.cfg = self.problem.cfg
         self.variables = self.problem.variables
         self.base_config = self.problem.base_config
@@ -188,14 +228,16 @@ class NSGA2Optimizer:
 
         raw = self.cfg.get("nsga2", {}) or {}
         objectives = tuple(raw.get("objectives", NSGA2Settings.objectives))
-        if not objectives or set(objectives) - set(OBJECTIVES):
-            raise ValueError(f"nsga2.objectives must be a non-empty subset of {OBJECTIVES}.")
+        if not objectives or set(objectives) - set(NSGA2_OBJECTIVES):
+            raise ValueError(f"nsga2.objectives must be a non-empty subset of {NSGA2_OBJECTIVES}; "
+                             "venting is a dormancy constraint, not an objective.")
         self.settings = NSGA2Settings(
             population_size=int(raw.get("population_size", 8)),
             generations=int(raw.get("generations", 3)),
             seed=raw.get("seed"),
             eliminate_duplicates=bool(raw.get("eliminate_duplicates", True)),
             objectives=objectives,
+            convergence=ConvergenceSettings.from_config(raw.get("convergence")),
             n_workers=int(raw.get("n_workers", 1)))
 
     def initial_population(self) -> np.ndarray:
@@ -240,9 +282,7 @@ class NSGA2Optimizer:
             def log(i, candidate):
                 candidate.eval_id = first + i
                 if self.live_log is not None:
-                    self.live_log.append({"evaluation": candidate.eval_id,
-                                          **candidate_row(self.variables, X[i], candidate),
-                                          "worker_rank": candidate.worker_rank, "pid": candidate.pid})
+                    self.live_log.append(nsga2_row(self.variables, X[i], candidate))
 
             results = raw_batch(X, log)
             for i, candidate in enumerate(results):
@@ -255,29 +295,31 @@ class NSGA2Optimizer:
             algorithm = NSGA2(pop_size=self.settings.population_size,
                               eliminate_duplicates=self.settings.eliminate_duplicates,
                               sampling=self.initial_population())
-            result = minimize(problem, algorithm, termination=("n_gen", self.settings.generations),
+            termination = NSGA2Termination(self.settings.generations, self.settings.convergence)
+            result = minimize(problem, algorithm, termination=termination,
                               seed=self.settings.seed, verbose=False)
+            termination = result.algorithm.termination  # pymoo works on a copy
         finally:
             if mpi is not None:
                 mpi.shutdown()
 
         if result.X is None:
             return NSGA2Result(self.variables, self.settings.objectives,
-                               np.empty((0, len(self.variables))), [], history)
+                               np.empty((0, len(self.variables))), [], history,
+                               termination.reason, termination.trace)
         pareto_x = np.atleast_2d(result.X)
         by_x = {x: c for x, c in history}
         pareto = [by_x[tuple(float(v) for v in x)] for x in pareto_x]
-        return NSGA2Result(self.variables, self.settings.objectives, pareto_x, pareto, history)
+        return NSGA2Result(self.variables, self.settings.objectives, pareto_x, pareto, history,
+                           termination.reason, termination.trace)
 
 
 def pareto_rows(result: NSGA2Result) -> list[dict[str, Any]]:
-    return [candidate_row(result.variables, x, c) for x, c in zip(result.pareto_x, result.pareto)]
+    return [nsga2_row(result.variables, x, c) for x, c in zip(result.pareto_x, result.pareto)]
 
 
 def history_rows(result: NSGA2Result) -> list[dict[str, Any]]:
-    return [{"evaluation": c.eval_id, **candidate_row(result.variables, x, c),
-             "worker_rank": c.worker_rank, "pid": c.pid}
-            for x, c in result.history]
+    return [nsga2_row(result.variables, x, c) for x, c in result.history]
 
 
 def write_history(path: Path, result: NSGA2Result) -> None:
@@ -285,10 +327,16 @@ def write_history(path: Path, result: NSGA2Result) -> None:
     write_rows(path, history_rows(result))
 
 
+def write_convergence(path: Path, result: NSGA2Result) -> None:
+    """Per-generation front movement and streak (empty when convergence checking is disabled)."""
+    write_rows(path, result.convergence_trace)
+
+
 def write_pareto(path: Path, result: NSGA2Result) -> None:
     """The non-dominated set returned by the run (feasible whenever any feasible design exists)."""
     write_rows(path, pareto_rows(result))
 
 
-__all__ = ["MPIEvaluator", "NSGA2Optimizer", "NSGA2Result", "NSGA2Settings", "OBJECTIVES", "constraint_vector",
-           "history_rows", "objective_vector", "pareto_rows", "write_history", "write_pareto"]
+__all__ = ["MPIEvaluator", "NSGA2Optimizer", "NSGA2Result", "NSGA2Settings", "NSGA2_OBJECTIVES", "constraint_vector",
+           "history_rows", "objective_vector", "pareto_rows", "write_convergence", "write_history",
+           "write_pareto"]

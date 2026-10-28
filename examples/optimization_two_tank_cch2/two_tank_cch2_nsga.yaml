@@ -3,17 +3,24 @@ optimization:
   description: Pareto front of eta_g, eta_v and venting performance for two CcH2 tanks (equal flow split) on the ATR72 mission
   base_config: two_tank_cch2_config.yaml
 
-# Aspect ratio (phi = 3) and insulation thickness stay at their base-config values.
+# Aspect ratio (phi = 3) stays at its base-config value; insulation is sized internally (below).
 design_variables:
   radius_1: {min: 0.30, max: 0.75, baseline: 0.55}
   radius_2: {min: 0.30, max: 0.75, baseline: 0.55}
+
+# Insulation thickness is not evolved: for every candidate it is sized to the thinnest value on this
+# grid [m] that meets the dormancy requirement (binary search). All tanks share the sized thickness.
+insulation_sizing:
+  t_min: 0.0
+  t_max: 0.050
+  resolution: 0.0025
 
 dormancy:
   hold_period_h: 12.0
   maximum_vented_percentage: 12.0
 
 nsga2:
-  objectives: [eta_g, eta_v, eta_vent]
+  objectives: [eta_g, eta_v, zeta_p]
   population_size: 12
   generations: 6
   seed: 1

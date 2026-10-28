@@ -57,7 +57,8 @@ def run_sqp(config_path: Path | str, plot: bool = True):
 
 
 def run_nsga2(config_path: Path | str, plot: bool = True):
-    from toplab.optimization.nsga2_optimizer import NSGA2Optimizer, write_history, write_pareto
+    from toplab.optimization.nsga2_optimizer import (
+        NSGA2Optimizer, write_convergence, write_history, write_pareto)
 
     optimizer = NSGA2Optimizer(config_path)
     optimizer.live_log = RowLogger(optimizer.problem.results_dir / "nsga2_history.csv")
@@ -67,8 +68,11 @@ def run_nsga2(config_path: Path | str, plot: bool = True):
     out = optimizer.problem.results_dir
     write_history(out / "nsga2_history.csv", result)
     write_pareto(out / "nsga2_pareto.csv", result)
+    if result.convergence_trace:
+        write_convergence(out / "nsga2_convergence.csv", result)
     names = [v.name for v in result.variables]
-    print(f"\nEvaluations: {len(result.history)}   Pareto designs: {len(result.pareto)}")
+    print(f"\nEvaluations: {len(result.history)}   Pareto designs: {len(result.pareto)}   "
+          f"Stopped: {result.termination_reason}")
     for x, c in zip(result.pareto_x, result.pareto):
         design = {n: round(float(v), 5) for n, v in zip(names, x)}
         print("  ", design, {o: round(getattr(c, o), 4) for o in result.objectives}, f"feasible={c.feasible}")

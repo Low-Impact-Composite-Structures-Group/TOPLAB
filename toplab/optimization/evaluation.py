@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import csv
 import contextlib
+import math
 import os
 import re
 import sys
@@ -22,10 +23,15 @@ import numpy as np
 import yaml
 
 from toplab.config import AnalysisConfig, load_config
+from toplab.optimization.insulation_sizing import (
+    DormancyPoint, InsulationGrid, size_insulation)
 from toplab.packaging.aft_placement import AftFuselageDimensions, maximize_packaging_compaction
 
 PARAMETERS = ("radius", "phi", "insulation_thickness")
+# Every metric reported per candidate (SQP may target any of them).
 OBJECTIVES = ("eta_g", "eta_v", "eta_vent", "zeta_p")
+# Metrics NSGA-II maximises. Venting is a dormancy constraint (g_dorm), not an objective.
+NSGA2_OBJECTIVES = ("eta_g", "eta_v", "zeta_p")
 RESIDUAL_NAMES = ("g_dis", "g_dorm", "g_packaging")
 _ALIASES = {"r": "radius", "t_ins": "insulation_thickness"}
 # Residual assigned to every constraint of a candidate that failed to evaluate.
@@ -108,6 +114,16 @@ def apply_design(config: AnalysisConfig, variables: Sequence[DesignVariable],
                    output={**config.output, "silent": True, "save_plots": False, "save_data": False})
 
 
+def with_insulation(config: AnalysisConfig, thickness: float) -> AnalysisConfig:
+    """Return a copy of ``config`` with every tank's insulation set to ``thickness`` [m]."""
+    tanks = []
+    for tank in config.tanks:
+        materials = copy.deepcopy(tank.materials)
+        materials.setdefault("insulation", {})["thickness"] = float(thickness)
+        tanks.append(replace(tank, materials=materials))
+    return replace(config, tanks=tanks)
+
+
 def packaging_dimensions(config: AnalysisConfig) -> AftFuselageDimensions:
     values = (config.packaging or {}).get("aft_fuselage_dimensions")
     if not values:
@@ -135,7 +151,10 @@ class CandidateResult:
     mission_completed: bool = False
     initial_hydrogen_masses_kg: list[float] = field(default_factory=list)
     final_hydrogen_masses_kg: list[float] = field(default_factory=list)
-    structural_masses_kg: list[float] = field(default_factory=list)
+    structural_masses_kg: list[float] = field(default_factory=list)  # liner + composite wall
+    insulation_masses_kg: list[float] = field(default_factory=list)
+    shell_masses_kg: list[float] = field(default_factory=list)
+    dry_masses_kg: list[float] = field(default_factory=list)  # structure + insulation + outer shell
     internal_volumes_m3: list[float] = field(default_factory=list)
     external_volumes_m3: list[float] = field(default_factory=list)
     placements: list[Any] = field(default_factory=list)
@@ -145,6 +164,11 @@ class CandidateResult:
     # Set when discharge proves the mission cannot be completed and the dormancy and packaging
     # analyses were therefore not run: their fields below are placeholders, not results.
     discharge_failed: bool = False
+    # Internal insulation sizing (NSGA-II): the thickness used for the whole design, how it was
+    # found and how many dormancy simulations that took. ``None`` when thickness is not sized.
+    t_ins_star: float | None = None
+    sizing_status: str = ""
+    n_dormancy_evals: int = 0
     eval_id: int = 0
     worker_rank: int = 0
     pid: int = 0
@@ -223,7 +247,8 @@ class CandidateEvaluator:
 
     def __init__(self, base_config: AnalysisConfig, variables: Sequence[DesignVariable],
                  maximum_vented_fraction: float, hold_period_s: float, progress: bool = True,
-                 skip_after_discharge_failure: bool = False) -> None:
+                 skip_after_discharge_failure: bool = False,
+                 insulation_grid: InsulationGrid | None = None) -> None:
         self.base_config = base_config
         self.variables = list(variables)
         self.packaging_dimensions = packaging_dimensions(base_config)
@@ -232,8 +257,12 @@ class CandidateEvaluator:
         self.progress = bool(progress)
         # Skip dormancy and packaging when the mission is not completed (NSGA-II only).
         self.skip_after_discharge_failure = bool(skip_after_discharge_failure)
+        # When set, insulation is sized internally on this grid instead of being a design variable.
+        self.insulation_grid = insulation_grid
         self.evaluation_count = 0
         self._stdout = sys.stdout
+
+    insulation_grid: InsulationGrid | None = None
 
     def _progress(self, message: str) -> None:
         if self.progress:
@@ -257,78 +286,155 @@ class CandidateEvaluator:
                            float(candidate.tanks[i].materials.get("insulation", {}).get("thickness", 0.0)))
                 for i, g in enumerate(orchestrator.tank_geometries)]
 
-    def _evaluate(self, values: Sequence[float]) -> CandidateResult:
-        from toplab.orchestration.run_analysis import run_dormancy_check
+    def _run_discharge(self, candidate: AnalysisConfig, result: CandidateResult) -> Any:
+        """Run the mission; fill the discharge fields, ``eta_g`` and ``eta_v``. Returns the orchestrator."""
         from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
+        orchestrator = SystemOrchestrator(candidate, verbosity="quiet")
+        discharge = orchestrator.run_simulation()
+        tank_count = len(orchestrator.tank_geometries)
+        target_s = float(orchestrator.tank_system.config.MISSION_DURATION)
+        actual_s = float(discharge.times[-1])
+        result.mission_completed = actual_s >= target_s
+        result.discharge_residuals = [target_s - actual_s] * tank_count
+        result.discharge_residual = max(result.discharge_residuals, default=0.0)
+        result.initial_hydrogen_masses_kg = [
+            float(discharge.multi_tank_states[0].get_tank_state(i).fuel_mass) for i in range(tank_count)]
+        result.final_hydrogen_masses_kg = [
+            float(discharge.multi_tank_states[-1].get_tank_state(i).fuel_mass) for i in range(tank_count)]
+        properties = orchestrator.tank_system._cached_tank_properties
+        result.structural_masses_kg = [
+            float(properties[i]["liner_mass"]) + float(properties[i]["wall_mass"])
+            for i in range(tank_count)]
+        result.insulation_masses_kg = [float(properties[i]["foam_mass"]) for i in range(tank_count)]
+        result.shell_masses_kg = [float(properties[i]["shell_mass"]) for i in range(tank_count)]
+        result.dry_masses_kg = [s + f + o for s, f, o in zip(
+            result.structural_masses_kg, result.insulation_masses_kg, result.shell_masses_kg)]
+        result.internal_volumes_m3 = [float(properties[i]["volume"]) for i in range(tank_count)]
+        result.external_volumes_m3 = [float(properties[i]["outer_volume"]) for i in range(tank_count)]
+        hydrogen = sum(result.initial_hydrogen_masses_kg)
+        # Same system definition as the report: fuel / (fuel + total dry mass incl. insulation and shell).
+        total_mass = hydrogen + sum(result.dry_masses_kg)
+        result.eta_g = hydrogen / total_mass if total_mass > 0.0 else 0.0
+        external = sum(result.external_volumes_m3)
+        result.eta_v = sum(result.internal_volumes_m3) / external if external > 0.0 else 0.0
+        self._progress(f"discharge actual_s={actual_s:.1f} target_s={target_s:.1f} eta_g={result.eta_g:.4f} "
+                       f"eta_v={result.eta_v:.4f}")
+        return orchestrator
+
+    def _run_dormancy(self, candidate: AnalysisConfig) -> DormancyPoint:
+        """Run the dormancy hold; ``g_dorm`` is the worst per-tank vented fraction over its limit, minus one."""
+        from toplab.orchestration.run_analysis import run_dormancy_check
+
+        dormancy_case = replace(candidate, dormancy_check={
+            "enabled": True, "duration_h": self.hold_period_s / 3600.0, "maximum_loss_percent": 100.0})
+        dormancy = run_dormancy_check(dormancy_case, silent=True)
+        initial = [t["initial_mass_kg"] for t in dormancy["tanks"]]
+        vented = [t["vented_mass_kg"] for t in dormancy["tanks"]]
+        fractions = [v / m if m > 0.0 else 0.0 for v, m in zip(vented, initial)]
+        limit = self.maximum_vented_fraction
+        residuals = [f / limit - 1.0 for f in fractions]
+        f_vent = sum(vented) / sum(initial) if sum(initial) > 0.0 else 0.0
+        return DormancyPoint(max(residuals, default=0.0), f_vent,
+                             {"vented_mass_kg": sum(vented), "per_tank_vented_fraction": fractions,
+                              "residuals": residuals})
+
+    @staticmethod
+    def _record_dormancy(result: CandidateResult, point: DormancyPoint, limit: float) -> None:
+        data = point.data
+        result.vented_mass_kg = data["vented_mass_kg"]
+        result.per_tank_vented_fraction = data["per_tank_vented_fraction"]
+        result.f_vent = point.f_vent
+        result.eta_vent = venting_performance(point.f_vent, limit)
+        result.dormancy_residuals = data["residuals"]
+        result.dormancy_residual = point.g_dorm
+
+    def _run_packaging(self, orchestrator: Any, result: CandidateResult) -> None:
+        properties = orchestrator.tank_system._cached_tank_properties
+        tank_count = len(orchestrator.tank_geometries)
+        radii = [float(properties[i]["outer_diameter"]) / 2.0 for i in range(tank_count)]
+        half_lengths = [float(properties[i].get("cylindrical_section_length", 0.0)) / 2.0
+                        for i in range(tank_count)]
+        packaging = maximize_packaging_compaction(radii, half_lengths, self.packaging_dimensions)
+        result.packaging_feasible = result.packages = bool(packaging.feasible)
+        result.z_shift_star = float(packaging.z_shift)
+        result.zeta_p = float(packaging.zeta_p)
+        result.placements = packaging.placements
+
+    def _evaluate(self, values: Sequence[float]) -> CandidateResult:
         result = CandidateResult()
         self.evaluation_count += 1
         started = time.perf_counter()
         self._progress(f"start x={[float(v) for v in values]}")
         try:
             candidate = apply_design(self.base_config, self.variables, values)
-            orchestrator = SystemOrchestrator(candidate, verbosity="quiet")
-            discharge = orchestrator.run_simulation()
-            tank_count = len(orchestrator.tank_geometries)
-
-            target_s = float(orchestrator.tank_system.config.MISSION_DURATION)
-            actual_s = float(discharge.times[-1])
-            result.mission_completed = actual_s >= target_s
-            result.discharge_residuals = [target_s - actual_s] * tank_count
-            result.discharge_residual = max(result.discharge_residuals, default=0.0)
-            result.initial_hydrogen_masses_kg = [
-                float(discharge.multi_tank_states[0].get_tank_state(i).fuel_mass) for i in range(tank_count)]
-            result.final_hydrogen_masses_kg = [
-                float(discharge.multi_tank_states[-1].get_tank_state(i).fuel_mass) for i in range(tank_count)]
-            properties = orchestrator.tank_system._cached_tank_properties
-            result.structural_masses_kg = [
-                float(properties[i]["liner_mass"]) + float(properties[i]["wall_mass"])
-                for i in range(tank_count)]
-            result.internal_volumes_m3 = [float(properties[i]["volume"]) for i in range(tank_count)]
-            result.external_volumes_m3 = [float(properties[i]["outer_volume"]) for i in range(tank_count)]
-            hydrogen = sum(result.initial_hydrogen_masses_kg)
-            total_mass = hydrogen + sum(result.structural_masses_kg)
-            result.eta_g = hydrogen / total_mass if total_mass > 0.0 else 0.0
-            external = sum(result.external_volumes_m3)
-            result.eta_v = sum(result.internal_volumes_m3) / external if external > 0.0 else 0.0
-            self._progress(f"discharge actual_s={actual_s:.1f} target_s={target_s:.1f} eta_g={result.eta_g:.4f}")
-
-            if self.skip_after_discharge_failure and not result.mission_completed:
-                result.discharge_failed = True
-                result.designs = self._designs(candidate, orchestrator)
-                self._progress("discharge failed: dormancy and packaging skipped")
-                return result
-
-            dormancy_case = replace(candidate, dormancy_check={
-                "enabled": True, "duration_h": self.hold_period_s / 3600.0,
-                "maximum_loss_percent": 100.0})
-            dormancy = run_dormancy_check(dormancy_case, silent=True)
-            initial = [t["initial_mass_kg"] for t in dormancy["tanks"]]
-            vented = [t["vented_mass_kg"] for t in dormancy["tanks"]]
-            result.vented_mass_kg = sum(vented)
-            result.per_tank_vented_fraction = [v / m if m > 0.0 else 0.0 for v, m in zip(vented, initial)]
-            result.f_vent = result.vented_mass_kg / sum(initial) if sum(initial) > 0.0 else 0.0
-            limit = self.maximum_vented_fraction
-            result.eta_vent = venting_performance(result.f_vent, limit)
-            result.dormancy_residuals = [f / limit - 1.0 for f in result.per_tank_vented_fraction]
-            result.dormancy_residual = max(result.dormancy_residuals, default=0.0)
-            self._progress(f"dormancy f_vent={result.f_vent:.6g} g_dorm={result.dormancy_residual:.6g}")
-
-            radii = [float(properties[i]["outer_diameter"]) / 2.0 for i in range(tank_count)]
-            half_lengths = [float(properties[i].get("cylindrical_section_length", 0.0)) / 2.0
-                            for i in range(tank_count)]
-            packaging = maximize_packaging_compaction(radii, half_lengths, self.packaging_dimensions)
-            result.packaging_feasible = result.packages = bool(packaging.feasible)
-            result.z_shift_star = float(packaging.z_shift)
-            result.zeta_p = float(packaging.zeta_p)
-            result.placements = packaging.placements
-            result.designs = self._designs(candidate, orchestrator)
+            if self.insulation_grid is not None:
+                self._evaluate_sized(candidate, result)
+            else:
+                self._evaluate_fixed(candidate, result)
         except Exception as exc:
             result.error = f"{type(exc).__name__}: {exc}"
             self._progress(f"error={result.error}")
         self._progress(f"done elapsed={time.perf_counter() - started:.1f}s "
                        f"objectives={result.objectives} feasible={result.feasible}")
         return result
+
+    def _evaluate_fixed(self, candidate: AnalysisConfig, result: CandidateResult) -> None:
+        """Insulation comes from the candidate itself (design variable or base config)."""
+        orchestrator = self._run_discharge(candidate, result)
+        if self.skip_after_discharge_failure and not result.mission_completed:
+            result.discharge_failed = True
+            result.designs = self._designs(candidate, orchestrator)
+            self._progress("discharge failed: dormancy and packaging skipped")
+            return
+        point = self._run_dormancy(candidate)
+        self._record_dormancy(result, point, self.maximum_vented_fraction)
+        result.n_dormancy_evals = 1
+        self._progress(f"dormancy f_vent={result.f_vent:.6g} g_dorm={result.dormancy_residual:.6g}")
+        self._run_packaging(orchestrator, result)
+        result.designs = self._designs(candidate, orchestrator)
+
+    def _evaluate_sized(self, candidate: AnalysisConfig, result: CandidateResult) -> None:
+        """Discharge check, discrete insulation sizing, then the full design at ``t_ins*``.
+
+        Order: discharge (screen) -> dormancy (sizing) -> discharge again only if ``t*`` differs
+        from the screening thickness -> packaging, so packaging never precedes the dynamic analyses.
+        """
+        grid = self.insulation_grid
+        # The thinnest insulation the model can simulate screens the mission; t = 0 cannot be built.
+        screen = next(t for t in grid.values if t > 0.0)
+        screening = self._run_discharge(with_insulation(candidate, screen), result)
+        if self.skip_after_discharge_failure and not result.mission_completed:
+            result.discharge_failed = True
+            result.t_ins_star = screen
+            result.sizing_status = "discharge_failed"
+            result.designs = self._designs(with_insulation(candidate, screen), screening)
+            self._progress("discharge failed: insulation sizing, dormancy and packaging skipped")
+            return
+
+        simulations = [0]
+
+        def dormancy_at(thickness: float) -> DormancyPoint:
+            if thickness <= 0.0:
+                # A bare tank cannot be modelled (shell radius equals structure radius): it counts as violating.
+                return DormancyPoint(math.inf, math.nan)
+            simulations[0] += 1
+            point = self._run_dormancy(with_insulation(candidate, thickness))
+            self._progress(f"sizing t_ins={thickness * 1e3:.2f} mm f_vent={point.f_vent:.6g} "
+                           f"g_dorm={point.g_dorm:.6g}")
+            return point
+
+        sizing = size_insulation(dormancy_at, grid)
+        final = with_insulation(candidate, sizing.t_ins)
+        orchestrator = screening if sizing.t_ins == screen else self._run_discharge(final, result)
+        result.t_ins_star = sizing.t_ins
+        result.sizing_status = sizing.status
+        result.n_dormancy_evals = simulations[0]
+        self._record_dormancy(result, sizing.point, self.maximum_vented_fraction)
+        self._progress(f"sized t_ins*={sizing.t_ins * 1e3:.2f} mm status={sizing.status} "
+                       f"dormancy_evals={simulations[0]}")
+        self._run_packaging(orchestrator, result)
+        result.designs = self._designs(final, orchestrator)
 
 
 @dataclass
@@ -360,7 +466,8 @@ class OptimizationProblem:
 
 
 def load_problem(path: Path | str, evaluator: Any = None,
-                 skip_after_discharge_failure: bool = False) -> OptimizationProblem:
+                 skip_after_discharge_failure: bool = False,
+                 size_insulation_internally: bool = False) -> OptimizationProblem:
     """Load an optimisation YAML, its base config, design variables and evaluator.
 
     ``evaluator`` replaces the real :class:`CandidateEvaluator` (used by tests).
@@ -373,12 +480,21 @@ def load_problem(path: Path | str, evaluator: Any = None,
         raise ValueError("Optimization configuration must define base_config.")
     base_config = load_config((path.parent / base_rel).resolve())
     variables = parse_design_variables(cfg.get("design_variables", {}) or {})
+    grid = None
+    if size_insulation_internally:
+        thickness = [v.name for v in variables if v.parameter == "insulation_thickness"]
+        if thickness:
+            raise ValueError(
+                f"Insulation thickness is sized internally and cannot be a design variable "
+                f"(remove {thickness}); configure the 'insulation_sizing' section instead.")
+        grid = InsulationGrid.from_config(cfg.get("insulation_sizing"))
     if evaluator is None:
         hold_s, limit = dormancy_limits(base_config, cfg)
         progress = next((bool(cfg[k]["evaluation_progress"]) for k in ("solver", "nsga2")
                          if "evaluation_progress" in (cfg.get(k) or {})), True)
         evaluator = CandidateEvaluator(base_config, variables, limit, hold_s, progress=progress,
-                                      skip_after_discharge_failure=skip_after_discharge_failure)
+                                      skip_after_discharge_failure=skip_after_discharge_failure,
+                                      insulation_grid=grid)
     return OptimizationProblem(path, cfg, base_config, variables, evaluator)
 
 
@@ -388,6 +504,9 @@ def candidate_row(variables: Sequence[DesignVariable], x: Sequence[float],
     row: dict[str, Any] = {v.name: float(value) for v, value in zip(variables, x)}
     row.update({name: getattr(candidate, name) for name in OBJECTIVES})
     row.update(physical_residuals(candidate))
+    if candidate.t_ins_star is not None:
+        row.update({"t_ins_star": candidate.t_ins_star, "sizing_status": candidate.sizing_status,
+                    "n_dormancy_evals": candidate.n_dormancy_evals})
     row.update({"f_vent": candidate.f_vent, "packaging_feasible": candidate.packaging_feasible,
                 "feasible": candidate.feasible, "discharge_failed": candidate.discharge_failed,
                 "error": candidate.error or ""})

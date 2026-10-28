@@ -27,8 +27,8 @@ class FakeEvaluator:
 
 
 def test_objective_vector_negates_maximised_metrics():
-    r = CandidateResult(eta_g=0.5, eta_v=0.3, eta_vent=0.9)
-    assert objective_vector(r, ("eta_g", "eta_vent")) == [-0.5, -0.9]
+    r = CandidateResult(eta_g=0.5, eta_v=0.3, zeta_p=0.9)
+    assert objective_vector(r, ("eta_g", "zeta_p")) == [-0.5, -0.9]
 
 
 def test_failed_candidate_is_heavily_penalised():
@@ -52,7 +52,7 @@ def test_initial_population_contains_baseline_and_respects_bounds():
 
 
 def test_unknown_objective_rejected(tmp_path):
-    text = NSGA_YAML.read_text().replace("eta_vent]", "bogus]", 1)
+    text = NSGA_YAML.read_text().replace("zeta_p]", "bogus]", 1)
     bad = NSGA_YAML.parent / "_bad_nsga.yaml"
     bad.write_text(text)
     try:
@@ -108,3 +108,77 @@ def test_mpi_world_mismatch_is_rejected():
     for mpi_size in (1, None):
         with pytest.raises(RuntimeError, match="not communicating"):
             check_mpi_world(8, mpi_size)
+
+
+def test_eta_vent_is_not_an_nsga2_objective(tmp_path):
+    from toplab.optimization.evaluation import NSGA2_OBJECTIVES
+    from toplab.optimization.nsga2_optimizer import NSGA2Settings
+
+    assert NSGA2_OBJECTIVES == ("eta_g", "eta_v", "zeta_p")
+    assert NSGA2Settings.objectives == NSGA2_OBJECTIVES
+    assert NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator()).settings.objectives == NSGA2_OBJECTIVES
+
+    bad = NSGA_YAML.parent / "_vent_nsga.yaml"
+    bad.write_text(NSGA_YAML.read_text().replace("zeta_p]", "zeta_p, eta_vent]", 1))
+    try:
+        with pytest.raises(ValueError, match="venting"):
+            NSGA2Optimizer(bad, evaluator=FakeEvaluator())
+    finally:
+        bad.unlink()
+
+
+def test_pymoo_problem_has_three_objectives_and_vent_remains_a_diagnostic(tmp_path):
+    from toplab.optimization.evaluation import candidate_row
+    from toplab.optimization.nsga2_optimizer import TankDesignProblem
+
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator())
+    problem = TankDesignProblem(lambda X: [opt.evaluator.evaluate(x) for x in X], opt.variables,
+                                opt.settings.objectives)
+    assert problem.n_obj == 3 and problem.n_ieq_constr == 3
+    out = {}
+    problem._evaluate(opt.initial_population()[:2], out)
+    assert out["F"].shape == (2, 3)
+
+    c = CandidateResult(eta_g=0.5, eta_v=0.4, zeta_p=0.2, f_vent=0.01, vented_mass_kg=0.3,
+                        packaging_feasible=True, mission_completed=True)
+    row = candidate_row(opt.variables, opt.initial_population()[0], c)
+    assert row["f_vent"] == 0.01
+
+
+def _run(generations, **conv):
+    from toplab.optimization.convergence import ConvergenceSettings
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator())
+    opt.settings = dataclasses.replace(opt.settings, population_size=10, generations=generations, seed=3,
+                                       convergence=ConvergenceSettings(**conv))
+    return opt.run()
+
+
+def test_fixed_generations_when_convergence_disabled():
+    result = _run(4)
+    assert result.termination_reason == "max_generations"
+    assert result.convergence_trace == []
+    assert len(result.history) <= 10 * 4
+
+
+def test_converges_before_the_cap():
+    result = _run(200, enabled=True, tolerance=0.5, period=2)
+    assert result.termination_reason == "converged"
+    assert len(result.convergence_trace) < 200
+    assert result.convergence_trace[-1]["streak"] >= 2
+
+
+def test_cap_applies_when_not_converged():
+    result = _run(3, enabled=True, tolerance=1e-12, period=5)
+    assert result.termination_reason == "max_generations"
+
+
+def test_min_generations_delays_stopping():
+    result = _run(200, enabled=True, tolerance=0.5, period=1, min_generations=8)
+    assert len(result.convergence_trace) >= 8
+
+
+def test_convergence_settings_validated():
+    from toplab.optimization.convergence import ConvergenceSettings
+    for bad in ({"tolerance": 0}, {"period": 0}, {"min_generations": -1}):
+        with pytest.raises(ValueError):
+            ConvergenceSettings.from_config(bad)
