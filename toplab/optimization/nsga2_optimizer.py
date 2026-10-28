@@ -7,6 +7,7 @@ maximised (``eta_g``, ``eta_v``, ``eta_vent``, ``zeta_p``); pymoo minimises, so 
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -29,10 +30,31 @@ class NSGA2Settings:
     n_workers: int = 1  # ignored: parallelism comes from the MPI world size (mpirun -n N)
 
 
+def launcher_world_size() -> int:
+    """World size announced by the MPI launcher environment (1 if not launched under MPI)."""
+    for key in ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMIX_SIZE", "SLURM_NTASKS"):
+        if os.environ.get(key, "").isdigit():
+            return int(os.environ[key])
+    return 1
+
+
+def check_mpi_world(launcher_size: int, mpi_size: int | None) -> None:
+    """Fail loudly if the launcher started N>1 processes that are not one MPI world.
+
+    Otherwise every process silently runs the full optimisation (same seed, same designs)
+    and appends to the same history file, repeating every expensive evaluation N times.
+    """
+    if launcher_size > 1 and (mpi_size is None or mpi_size != launcher_size):
+        raise RuntimeError(
+            f"Launcher started {launcher_size} processes but mpi4py reports a world of "
+            f"{mpi_size}; the processes are not communicating, so each would run the whole "
+            "optimisation independently. Check that mpi4py is built against the mpirun in use.")
+
+
 def constraint_vector(result: CandidateResult) -> list[float]:
     """Inequality constraints ``g <= 0``: discharge shortfall [h], dormancy margin, packaging margin."""
     g = physical_residuals(result)
-    if result.error is None and not result.packaging_feasible:
+    if result.error is None and not result.discharge_failed and not result.packaging_feasible:
         # An unplaceable design must rank below every placeable one regardless of zeta_p.
         g["g_packaging"] = max(1.0, g["g_packaging"])
     return list(g.values())
@@ -40,7 +62,8 @@ def constraint_vector(result: CandidateResult) -> list[float]:
 
 def objective_vector(result: CandidateResult, objectives: Sequence[str]) -> list[float]:
     """Minimisation form of the requested (maximised) metrics."""
-    if result.error is not None:
+    if result.error is not None or result.discharge_failed:
+        # Placeholder worst values: the candidate is rejected through its constraint violation.
         return [0.0] * len(objectives)
     return [-float(getattr(result, name)) for name in objectives]
 
@@ -156,7 +179,7 @@ class NSGA2Optimizer:
 
     def __init__(self, opt_config_path: Path, evaluator: Any = None) -> None:
         self.opt_config_path = Path(opt_config_path)
-        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator)
+        self.problem: OptimizationProblem = load_problem(opt_config_path, evaluator, skip_after_discharge_failure=True)
         self.cfg = self.problem.cfg
         self.variables = self.problem.variables
         self.base_config = self.problem.base_config
@@ -187,24 +210,19 @@ class NSGA2Optimizer:
     def run(self) -> NSGA2Result | None:
         """Run NSGA-II. Under MPI, non-root ranks serve evaluations and return ``None``."""
         from pymoo.algorithms.moo.nsga2 import NSGA2
-        from pymoo.core.callback import Callback
         from pymoo.optimize import minimize
 
         history: list[tuple[tuple[float, ...], CandidateResult]] = []
 
-        class Collect(Callback):
-            def notify(self, algorithm):
-                evaluated = algorithm.off if algorithm.off is not None and len(algorithm.off) else algorithm.pop
-                for individual in evaluated:
-                    history.append((tuple(float(v) for v in individual.X), individual.get("candidate")))
-
         mpi = None
         try:
             from mpi4py import MPI
-            if MPI.COMM_WORLD.Get_size() > 1:
+            mpi_size = MPI.COMM_WORLD.Get_size()
+            if mpi_size > 1:
                 mpi = MPIEvaluator(self.evaluator)
         except ImportError:
-            pass
+            mpi_size = None
+        check_mpi_world(launcher_world_size(), mpi_size)
         if mpi is not None and mpi.rank != 0:
             mpi.serve()
             return None
@@ -214,11 +232,23 @@ class NSGA2Optimizer:
         counter = [0]
 
         def batch(X):
+            # Evaluation ids are issued here, on rank 0, in dispatch order; the history is
+            # recorded here too, so one executed candidate is exactly one history entry.
+            first = counter[0] + 1
+            counter[0] += len(X)
+
             def log(i, candidate):
-                counter[0] += 1
-                self.live_log.append({"evaluation": counter[0],
-                                      **candidate_row(self.variables, X[i], candidate)})
-            return raw_batch(X, log if self.live_log is not None else None)
+                candidate.eval_id = first + i
+                if self.live_log is not None:
+                    self.live_log.append({"evaluation": candidate.eval_id,
+                                          **candidate_row(self.variables, X[i], candidate),
+                                          "worker_rank": candidate.worker_rank, "pid": candidate.pid})
+
+            results = raw_batch(X, log)
+            for i, candidate in enumerate(results):
+                candidate.eval_id = first + i
+                history.append((tuple(float(v) for v in X[i]), candidate))
+            return results
 
         try:
             problem = TankDesignProblem(batch, self.variables, self.settings.objectives)
@@ -226,7 +256,7 @@ class NSGA2Optimizer:
                               eliminate_duplicates=self.settings.eliminate_duplicates,
                               sampling=self.initial_population())
             result = minimize(problem, algorithm, termination=("n_gen", self.settings.generations),
-                              seed=self.settings.seed, callback=Collect(), verbose=False)
+                              seed=self.settings.seed, verbose=False)
         finally:
             if mpi is not None:
                 mpi.shutdown()
@@ -245,8 +275,9 @@ def pareto_rows(result: NSGA2Result) -> list[dict[str, Any]]:
 
 
 def history_rows(result: NSGA2Result) -> list[dict[str, Any]]:
-    return [{"evaluation": i + 1, **candidate_row(result.variables, x, c)}
-            for i, (x, c) in enumerate(result.history)]
+    return [{"evaluation": c.eval_id, **candidate_row(result.variables, x, c),
+             "worker_rank": c.worker_rank, "pid": c.pid}
+            for x, c in result.history]
 
 
 def write_history(path: Path, result: NSGA2Result) -> None:

@@ -73,3 +73,38 @@ def test_run_with_fake_evaluator_returns_nondominated_set(tmp_path):
     path = tmp_path / "pareto.csv"
     write_pareto(path, result)
     assert len(path.read_text().strip().splitlines()) == len(result.pareto) + 1
+
+
+class CountingEvaluator(FakeEvaluator):
+    def __init__(self):
+        self.calls = 0
+
+    def evaluate(self, x):
+        self.calls += 1
+        return super().evaluate(x)
+
+
+def test_one_history_row_and_unique_id_per_executed_candidate(tmp_path):
+    from toplab.optimization.evaluation import RowLogger
+    from toplab.optimization.nsga2_optimizer import history_rows
+
+    evaluator = CountingEvaluator()
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=evaluator)
+    opt.settings = dataclasses.replace(opt.settings, population_size=10, generations=4, seed=3)
+    opt.live_log = RowLogger(tmp_path / "live.csv")
+    result = opt.run()
+    rows = history_rows(result)
+    ids = [r["evaluation"] for r in rows]
+    assert evaluator.calls == len(result.history) == len(opt.live_log._rows) == len(rows)
+    assert ids == list(range(1, evaluator.calls + 1))
+    assert [r["evaluation"] for r in opt.live_log._rows] == ids
+
+
+def test_mpi_world_mismatch_is_rejected():
+    from toplab.optimization.nsga2_optimizer import check_mpi_world
+
+    check_mpi_world(1, 1)
+    check_mpi_world(8, 8)
+    for mpi_size in (1, None):
+        with pytest.raises(RuntimeError, match="not communicating"):
+            check_mpi_world(8, mpi_size)

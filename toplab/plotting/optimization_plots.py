@@ -40,7 +40,7 @@ def pareto_from_history(history: Sequence[dict], objectives: Sequence[str]) -> l
     variables = variable_columns(history)
     unique: dict[tuple, dict] = {}
     for row in history:
-        if not row.get("error"):
+        if not row.get("error") and all(isinstance(row.get(o), float) for o in objectives):
             unique.setdefault(tuple(row[v] for v in variables), row)
     rows = list(unique.values())
     rows = [r for r in rows if r.get("feasible") is True] or rows

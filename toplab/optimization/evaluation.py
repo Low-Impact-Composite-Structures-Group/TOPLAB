@@ -140,6 +140,14 @@ class CandidateResult:
     external_volumes_m3: list[float] = field(default_factory=list)
     placements: list[Any] = field(default_factory=list)
     error: str | None = None
+    # Provenance: ``eval_id`` is assigned once by the optimiser driver (rank 0) per executed
+    # candidate; ``worker_rank``/``pid`` record where the analysis actually ran.
+    # Set when discharge proves the mission cannot be completed and the dormancy and packaging
+    # analyses were therefore not run: their fields below are placeholders, not results.
+    discharge_failed: bool = False
+    eval_id: int = 0
+    worker_rank: int = 0
+    pid: int = 0
 
     @property
     def feasible(self) -> bool:
@@ -162,6 +170,10 @@ def physical_residuals(result: CandidateResult) -> dict[str, float]:
     """
     if result.error is not None:
         return {name: FAILED_VIOLATION for name in RESIDUAL_NAMES}
+    if result.discharge_failed:
+        # Rejected through g_dis alone; the unevaluated constraints must not add violation.
+        return {"g_dis": float(result.discharge_residual) / SECONDS_PER_HOUR,
+                "g_dorm": 0.0, "g_packaging": 0.0}
     return {"g_dis": float(result.discharge_residual) / SECONDS_PER_HOUR,
             "g_dorm": float(result.dormancy_residual),
             "g_packaging": -float(result.zeta_p)}
@@ -198,17 +210,28 @@ def venting_performance(vented_fraction: float, maximum_vented_fraction: float) 
     return 1.0 - float(vented_fraction) / float(maximum_vented_fraction)
 
 
+def _mpi_rank() -> int:
+    try:
+        from mpi4py import MPI
+        return int(MPI.COMM_WORLD.Get_rank())
+    except ImportError:
+        return 0
+
+
 class CandidateEvaluator:
     """Evaluate discharge, dormancy, system metrics and aft packaging for one design."""
 
     def __init__(self, base_config: AnalysisConfig, variables: Sequence[DesignVariable],
-                 maximum_vented_fraction: float, hold_period_s: float, progress: bool = True) -> None:
+                 maximum_vented_fraction: float, hold_period_s: float, progress: bool = True,
+                 skip_after_discharge_failure: bool = False) -> None:
         self.base_config = base_config
         self.variables = list(variables)
         self.packaging_dimensions = packaging_dimensions(base_config)
         self.maximum_vented_fraction = float(maximum_vented_fraction)
         self.hold_period_s = float(hold_period_s)
         self.progress = bool(progress)
+        # Skip dormancy and packaging when the mission is not completed (NSGA-II only).
+        self.skip_after_discharge_failure = bool(skip_after_discharge_failure)
         self.evaluation_count = 0
         self._stdout = sys.stdout
 
@@ -223,7 +246,16 @@ class CandidateEvaluator:
         """
         self._stdout = sys.stdout
         with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
-            return self._evaluate(values)
+            result = self._evaluate(values)
+        result.pid = os.getpid()
+        result.worker_rank = _mpi_rank()
+        return result
+
+    @staticmethod
+    def _designs(candidate: AnalysisConfig, orchestrator: Any) -> list[TankDesign]:
+        return [TankDesign(float(g.radius), float(g.phi),
+                           float(candidate.tanks[i].materials.get("insulation", {}).get("thickness", 0.0)))
+                for i, g in enumerate(orchestrator.tank_geometries)]
 
     def _evaluate(self, values: Sequence[float]) -> CandidateResult:
         from toplab.orchestration.run_analysis import run_dormancy_check
@@ -261,6 +293,12 @@ class CandidateEvaluator:
             result.eta_v = sum(result.internal_volumes_m3) / external if external > 0.0 else 0.0
             self._progress(f"discharge actual_s={actual_s:.1f} target_s={target_s:.1f} eta_g={result.eta_g:.4f}")
 
+            if self.skip_after_discharge_failure and not result.mission_completed:
+                result.discharge_failed = True
+                result.designs = self._designs(candidate, orchestrator)
+                self._progress("discharge failed: dormancy and packaging skipped")
+                return result
+
             dormancy_case = replace(candidate, dormancy_check={
                 "enabled": True, "duration_h": self.hold_period_s / 3600.0,
                 "maximum_loss_percent": 100.0})
@@ -284,11 +322,7 @@ class CandidateEvaluator:
             result.z_shift_star = float(packaging.z_shift)
             result.zeta_p = float(packaging.zeta_p)
             result.placements = packaging.placements
-            result.designs = [
-                TankDesign(float(g.radius), float(g.phi),
-                           float(candidate.tanks[i].materials
-                                 .get("insulation", {}).get("thickness", 0.0)))
-                for i, g in enumerate(orchestrator.tank_geometries)]
+            result.designs = self._designs(candidate, orchestrator)
         except Exception as exc:
             result.error = f"{type(exc).__name__}: {exc}"
             self._progress(f"error={result.error}")
@@ -325,7 +359,8 @@ class OptimizationProblem:
         return directory if directory.is_absolute() else (self.path.parent / directory).resolve()
 
 
-def load_problem(path: Path | str, evaluator: Any = None) -> OptimizationProblem:
+def load_problem(path: Path | str, evaluator: Any = None,
+                 skip_after_discharge_failure: bool = False) -> OptimizationProblem:
     """Load an optimisation YAML, its base config, design variables and evaluator.
 
     ``evaluator`` replaces the real :class:`CandidateEvaluator` (used by tests).
@@ -342,7 +377,8 @@ def load_problem(path: Path | str, evaluator: Any = None) -> OptimizationProblem
         hold_s, limit = dormancy_limits(base_config, cfg)
         progress = next((bool(cfg[k]["evaluation_progress"]) for k in ("solver", "nsga2")
                          if "evaluation_progress" in (cfg.get(k) or {})), True)
-        evaluator = CandidateEvaluator(base_config, variables, limit, hold_s, progress=progress)
+        evaluator = CandidateEvaluator(base_config, variables, limit, hold_s, progress=progress,
+                                      skip_after_discharge_failure=skip_after_discharge_failure)
     return OptimizationProblem(path, cfg, base_config, variables, evaluator)
 
 
@@ -353,7 +389,12 @@ def candidate_row(variables: Sequence[DesignVariable], x: Sequence[float],
     row.update({name: getattr(candidate, name) for name in OBJECTIVES})
     row.update(physical_residuals(candidate))
     row.update({"f_vent": candidate.f_vent, "packaging_feasible": candidate.packaging_feasible,
-                "feasible": candidate.feasible, "error": candidate.error or ""})
+                "feasible": candidate.feasible, "discharge_failed": candidate.discharge_failed,
+                "error": candidate.error or ""})
+    if candidate.discharge_failed:
+        # Blank cells mark quantities that were never computed (not zero results).
+        for name in ("eta_vent", "zeta_p", "g_dorm", "g_packaging", "f_vent", "packaging_feasible"):
+            row[name] = ""
     return row
 
 
