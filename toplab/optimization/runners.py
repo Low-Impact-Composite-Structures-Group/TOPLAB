@@ -93,16 +93,28 @@ def plot_sqp(config_path: Path | str) -> list[Path]:
     return written
 
 
-def plot_nsga2(config_path: Path | str) -> list[Path]:
+def plot_nsga2(config_path: Path | str, incomplete: bool = False) -> list[Path]:
+    """Plot NSGA-II results. With ``incomplete`` the Pareto set is rebuilt from the history CSV
+    (written to ``nsga2_pareto_incomplete.csv``) for runs that stopped before finishing."""
     from toplab.optimization.nsga2_optimizer import NSGA2Settings
-    from toplab.plotting.optimization_plots import plot_pareto, plot_pareto_3d, read_rows
+    from toplab.plotting.optimization_plots import (pareto_from_history, plot_pareto, plot_pareto_3d,
+                                                    read_rows)
 
     problem = load_problem(config_path, evaluator=object())
     objectives = (problem.cfg.get("nsga2") or {}).get("objectives", NSGA2Settings.objectives)
     out = problem.results_dir
-    pareto, history = read_rows(out / "nsga2_pareto.csv"), read_rows(out / "nsga2_history.csv")
-    return (plot_pareto(pareto, history, objectives, out / "plots", "nsga2")
-            + plot_pareto_3d(pareto, history, objectives, out / "plots", "nsga2"))
+    history = read_rows(out / "nsga2_history.csv")
+    if incomplete:
+        pareto = pareto_from_history(history, objectives)
+        for row in pareto:
+            row["evaluation"] = int(row["evaluation"])
+        write_rows(out / "nsga2_pareto_incomplete.csv", pareto)
+        print(f"Incomplete run: {len(pareto)} non-dominated designs from {len(history)} history rows")
+        prefix = "nsga2_incomplete"
+    else:
+        pareto, prefix = read_rows(out / "nsga2_pareto.csv"), "nsga2"
+    return (plot_pareto(pareto, history, objectives, out / "plots", prefix)
+            + plot_pareto_3d(pareto, history, objectives, out / "plots", prefix))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -110,10 +122,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("method", choices=("sqp", "nsga2"))
     parser.add_argument("config", type=Path)
     parser.add_argument("--plot-only", action="store_true", help="re-plot existing CSVs")
+    parser.add_argument("--incomplete", action="store_true",
+                        help="with --plot-only (nsga2): rebuild the Pareto set from nsga2_history.csv")
     parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args(argv)
     if args.plot_only:
-        paths = (plot_sqp if args.method == "sqp" else plot_nsga2)(args.config)
+        if args.incomplete and args.method != "nsga2":
+            parser.error("--incomplete is only supported for nsga2")
+        paths = plot_sqp(args.config) if args.method == "sqp" else plot_nsga2(args.config, args.incomplete)
         print("\n".join(str(p) for p in paths))
     else:
         (run_sqp if args.method == "sqp" else run_nsga2)(args.config, plot=not args.no_plot)

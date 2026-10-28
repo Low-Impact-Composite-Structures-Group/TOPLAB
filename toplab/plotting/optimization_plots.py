@@ -30,6 +30,29 @@ def read_rows(path: Path | str) -> list[dict]:
     return rows
 
 
+def pareto_from_history(history: Sequence[dict], objectives: Sequence[str]) -> list[dict]:
+    """Non-dominated rows (all objectives maximised) of an evaluation history.
+
+    Used when a run was interrupted and no Pareto CSV exists. Duplicate designs (same variable
+    values) are collapsed and failed evaluations dropped. As in the NSGA-II result, only feasible
+    designs are considered when at least one exists.
+    """
+    variables = variable_columns(history)
+    unique: dict[tuple, dict] = {}
+    for row in history:
+        if not row.get("error"):
+            unique.setdefault(tuple(row[v] for v in variables), row)
+    rows = list(unique.values())
+    rows = [r for r in rows if r.get("feasible") is True] or rows
+    values = [tuple(r[o] for o in objectives) for r in rows]
+
+    def dominated(i: int) -> bool:
+        return any(all(a >= b for a, b in zip(values[j], values[i])) and values[j] != values[i]
+                   for j in range(len(rows)) if j != i)
+
+    return [r for i, r in enumerate(rows) if not dominated(i)]
+
+
 def variable_columns(rows: Sequence[dict]) -> list[str]:
     return [key for key in (rows[0] if rows else {}) if _VARIABLE.fullmatch(key)]
 
