@@ -226,6 +226,7 @@ class NSGA2Optimizer:
         self.base_config = self.problem.base_config
         self.evaluator = self.problem.evaluator
         self.live_log = None  # optional RowLogger; every evaluation is appended as it completes
+        self.convergence_log = None  # optional RowLogger; one row per generation as it completes
 
         raw = self.cfg.get("nsga2", {}) or {}
         objectives = tuple(raw.get("objectives", NSGA2Settings.objectives))
@@ -299,7 +300,9 @@ class NSGA2Optimizer:
             algorithm = NSGA2(pop_size=self.settings.population_size,
                               eliminate_duplicates=self.settings.eliminate_duplicates,
                               sampling=self.initial_population())
-            termination = NSGA2Termination(self.settings.generations, self.settings.convergence)
+            termination = NSGA2Termination(
+                self.settings.generations, self.settings.convergence,
+                on_generation=self.convergence_log.append if self.convergence_log is not None else None)
             result = minimize(problem, algorithm, termination=termination,
                               seed=self.settings.seed, verbose=False)
             termination = result.algorithm.termination  # pymoo works on a copy

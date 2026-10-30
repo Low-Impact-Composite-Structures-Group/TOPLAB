@@ -62,13 +62,14 @@ def run_nsga2(config_path: Path | str, plot: bool = True):
 
     optimizer = NSGA2Optimizer(config_path)
     optimizer.live_log = RowLogger(optimizer.problem.results_dir / "nsga2_history.csv")
+    optimizer.convergence_log = RowLogger(optimizer.problem.results_dir / "nsga2_convergence.csv")
     result = optimizer.run()
     if result is None:  # MPI worker rank
         return None
     out = optimizer.problem.results_dir
     write_history(out / "nsga2_history.csv", result)
     write_pareto(out / "nsga2_pareto.csv", result)
-    if result.convergence_trace:
+    if result.convergence_trace:  # rewritten from the full trace; identical to the live file
         write_convergence(out / "nsga2_convergence.csv", result)
     names = [v.name for v in result.variables]
     print(f"\nEvaluations: {len(result.history)}   Pareto designs: {len(result.pareto)}   "

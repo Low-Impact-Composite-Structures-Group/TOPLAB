@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from pymoo.core.termination import Termination
 from pymoo.termination.ftol import MultiObjectiveSpaceTermination
@@ -63,8 +63,10 @@ class _FrontMovement(MultiObjectiveSpaceTermination):
 class NSGA2Termination(Termination):
     """Stop at ``max_generations`` or, if enabled, when the front has converged."""
 
-    def __init__(self, max_generations: int, convergence: ConvergenceSettings | None = None) -> None:
+    def __init__(self, max_generations: int, convergence: ConvergenceSettings | None = None,
+                 on_generation: Callable[[dict[str, Any]], None] | None = None) -> None:
         super().__init__()
+        self.on_generation = on_generation  # called with each trace row as soon as it is known
         if max_generations < 1:
             raise ValueError("nsga2.generations must be at least 1.")
         self.max_generations = int(max_generations)
@@ -80,8 +82,11 @@ class NSGA2Termination(Termination):
         if settings.enabled:
             within = self._movement.update(algorithm) >= 1.0
             self.streak = self.streak + 1 if within else 0
-            self.trace.append({"generation": generation, "front_movement": self._movement.last_movement,
-                               "streak": self.streak})
+            row = {"generation": generation, "front_movement": self._movement.last_movement,
+                   "streak": self.streak}
+            self.trace.append(row)
+            if self.on_generation is not None:
+                self.on_generation(row)
         if settings.enabled and generation >= settings.min_generations and self.streak >= settings.period:
             self.reason = CONVERGED
             return 1.0

@@ -182,3 +182,17 @@ def test_convergence_settings_validated():
     for bad in ({"tolerance": 0}, {"period": 0}, {"min_generations": -1}):
         with pytest.raises(ValueError):
             ConvergenceSettings.from_config(bad)
+
+
+def test_convergence_trace_is_logged_live_to_the_csv(tmp_path):
+    from toplab.optimization.convergence import ConvergenceSettings
+    from toplab.optimization.evaluation import RowLogger
+    path = tmp_path / "nsga2_convergence.csv"
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator())
+    opt.settings = dataclasses.replace(opt.settings, population_size=10, generations=6, seed=3,
+                                       convergence=ConvergenceSettings(enabled=True, tolerance=1e-12, period=50))
+    opt.convergence_log = RowLogger(path)
+    result = opt.run()
+    lines = path.read_text().strip().splitlines()
+    assert lines[0] == "generation,front_movement,streak"
+    assert len(lines) - 1 == len(result.convergence_trace) == 6
