@@ -318,8 +318,9 @@ class CandidateEvaluator:
         result.eta_g = hydrogen / total_mass if total_mass > 0.0 else 0.0
         external = sum(result.external_volumes_m3)
         result.eta_v = sum(result.internal_volumes_m3) / external if external > 0.0 else 0.0
-        self._progress(f"discharge actual_s={actual_s:.1f} target_s={target_s:.1f} eta_g={result.eta_g:.4f} "
-                       f"eta_v={result.eta_v:.4f}")
+        outcome = "mission completed" if result.mission_completed else "mission NOT completed"
+        self._progress(f"  discharge done: {outcome} (actual {actual_s:.1f} s, target {target_s:.1f} s), "
+                       f"eta_g={result.eta_g:.4f}, eta_v={result.eta_v:.4f}")
         return orchestrator
 
     def _run_dormancy(self, candidate: AnalysisConfig) -> DormancyPoint:
@@ -365,7 +366,7 @@ class CandidateEvaluator:
         result = CandidateResult()
         self.evaluation_count += 1
         started = time.perf_counter()
-        self._progress(f"start x={[float(v) for v in values]}")
+        self._progress(f"start, design vector x={[float(v) for v in values]}")
         try:
             candidate = apply_design(self.base_config, self.variables, values)
             if self.insulation_grid is not None:
@@ -381,17 +382,22 @@ class CandidateEvaluator:
 
     def _evaluate_fixed(self, candidate: AnalysisConfig, result: CandidateResult) -> None:
         """Insulation comes from the candidate itself (design variable or base config)."""
+        self._progress("step 1 of 3: discharge")
         orchestrator = self._run_discharge(candidate, result)
         if self.skip_after_discharge_failure and not result.mission_completed:
             result.discharge_failed = True
             result.designs = self._designs(candidate, orchestrator)
-            self._progress("discharge failed: dormancy and packaging skipped")
+            self._progress("step 2 of 3: dormancy skipped, discharge failed")
+            self._progress("step 3 of 3: packaging skipped, discharge failed")
             return
+        self._progress("step 2 of 3: dormancy")
         point = self._run_dormancy(candidate)
         self._record_dormancy(result, point, self.maximum_vented_fraction)
         result.n_dormancy_evals = 1
-        self._progress(f"dormancy f_vent={result.f_vent:.6g} g_dorm={result.dormancy_residual:.6g}")
+        self._progress(f"  dormancy done: f_vent={result.f_vent:.6g}, g_dorm={result.dormancy_residual:.6g}")
+        self._progress("step 3 of 3: packaging")
         self._run_packaging(orchestrator, result)
+        self._progress(f"  packaging done: feasible={result.packaging_feasible}, zeta_p={result.zeta_p:.4f}")
         result.designs = self._designs(candidate, orchestrator)
 
     def _evaluate_sized(self, candidate: AnalysisConfig, result: CandidateResult) -> None:
@@ -403,15 +409,18 @@ class CandidateEvaluator:
         grid = self.insulation_grid
         # The thinnest insulation the model can simulate screens the mission; t = 0 cannot be built.
         screen = next(t for t in grid.values if t > 0.0)
+        self._progress(f"step 1 of 3: discharge (screening at {screen * 1e3:.2f} mm insulation)")
         screening = self._run_discharge(with_insulation(candidate, screen), result)
         if self.skip_after_discharge_failure and not result.mission_completed:
             result.discharge_failed = True
             result.t_ins_star = screen
             result.sizing_status = "discharge_failed"
             result.designs = self._designs(with_insulation(candidate, screen), screening)
-            self._progress("discharge failed: insulation sizing, dormancy and packaging skipped")
+            self._progress("step 2 of 3: dormancy skipped, discharge failed")
+            self._progress("step 3 of 3: packaging skipped, discharge failed")
             return
 
+        self._progress("step 2 of 3: dormancy (insulation sizing by bisection)")
         simulations = [0]
 
         def dormancy_at(thickness: float) -> DormancyPoint:
@@ -420,20 +429,26 @@ class CandidateEvaluator:
                 return DormancyPoint(math.inf, math.nan)
             simulations[0] += 1
             point = self._run_dormancy(with_insulation(candidate, thickness))
-            self._progress(f"sizing t_ins={thickness * 1e3:.2f} mm f_vent={point.f_vent:.6g} "
-                           f"g_dorm={point.g_dorm:.6g}")
+            self._progress(f"  bisection {simulations[0]}: t_ins={thickness * 1e3:.2f} mm, "
+                           f"f_vent={point.f_vent:.6g}, g_dorm={point.g_dorm:.6g}")
             return point
 
         sizing = size_insulation(dormancy_at, grid)
         final = with_insulation(candidate, sizing.t_ins)
-        orchestrator = screening if sizing.t_ins == screen else self._run_discharge(final, result)
+        if sizing.t_ins == screen:
+            orchestrator = screening
+        else:
+            self._progress(f"  re-running discharge at t_ins*={sizing.t_ins * 1e3:.2f} mm")
+            orchestrator = self._run_discharge(final, result)
         result.t_ins_star = sizing.t_ins
         result.sizing_status = sizing.status
         result.n_dormancy_evals = simulations[0]
         self._record_dormancy(result, sizing.point, self.maximum_vented_fraction)
-        self._progress(f"sized t_ins*={sizing.t_ins * 1e3:.2f} mm status={sizing.status} "
-                       f"dormancy_evals={simulations[0]}")
+        self._progress(f"  dormancy complete after {simulations[0]} bisections: "
+                       f"t_ins*={sizing.t_ins * 1e3:.2f} mm ({sizing.status})")
+        self._progress("step 3 of 3: packaging")
         self._run_packaging(orchestrator, result)
+        self._progress(f"  packaging done: feasible={result.packaging_feasible}, zeta_p={result.zeta_p:.4f}")
         result.designs = self._designs(final, orchestrator)
 
 
