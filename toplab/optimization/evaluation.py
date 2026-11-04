@@ -38,6 +38,8 @@ _ALIASES = {"r": "radius", "t_ins": "insulation_thickness"}
 # Residual assigned to every constraint of a candidate that failed to evaluate.
 FAILED_VIOLATION = 1.0e3
 SECONDS_PER_HOUR = 3600.0
+# Wall-clock limit for one candidate evaluation; ``evaluation_timeout_s`` in the YAML overrides it.
+DEFAULT_EVALUATION_TIMEOUT_S = 600.0
 
 
 @dataclass(frozen=True)
@@ -304,7 +306,9 @@ class CandidateEvaluator:
     def __init__(self, base_config: AnalysisConfig, variables: Sequence[DesignVariable],
                  maximum_vented_fraction: float, hold_period_s: float, progress: bool = True,
                  skip_after_discharge_failure: bool = False,
-                 insulation_grid: InsulationGrid | None = None) -> None:
+                 insulation_grid: InsulationGrid | None = None,
+                 evaluation_timeout_s: float | None = DEFAULT_EVALUATION_TIMEOUT_S) -> None:
+        self.evaluation_timeout_s = evaluation_timeout_s
         self.base_config = base_config
         self.variables = list(variables)
         self.packaging_dimensions = packaging_dimensions(base_config)
@@ -319,6 +323,7 @@ class CandidateEvaluator:
         self._stdout = sys.stdout
 
     insulation_grid: InsulationGrid | None = None
+    evaluation_timeout_s: float | None = None
 
     def _progress(self, message: str) -> None:
         if self.progress:
@@ -328,13 +333,61 @@ class CandidateEvaluator:
         """Evaluate one design; failures are captured in ``CandidateResult.error``.
 
         The simulation's own console output is suppressed; only progress lines are shown.
+        With ``evaluation_timeout_s`` set, the evaluation runs in a child process that is killed
+        when the limit is exceeded and the candidate is reported as an error.
         """
         self._stdout = sys.stdout
-        with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
-            result = self._evaluate(values)
+        if self.evaluation_timeout_s:
+            result = self._evaluate_with_timeout(values)
+        else:
+            result = self._evaluate_quiet(values)
         result.pid = os.getpid()
         result.worker_rank = _mpi_rank()
         return result
+
+    def _evaluate_quiet(self, values: Sequence[float]) -> CandidateResult:
+        with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull):
+            return self._evaluate(values)
+
+    def _evaluate_with_timeout(self, values: Sequence[float]) -> CandidateResult:
+        # A hung solver sits in compiled code, where signals cannot interrupt it, so the
+        # evaluation runs in a forked child that can always be killed.
+        import multiprocessing
+
+        context = multiprocessing.get_context("fork")
+        receiver, sender = context.Pipe(duplex=False)
+
+        def child() -> None:
+            try:
+                sender.send(self._evaluate_quiet(values))
+            except BaseException as exc:  # unpicklable or unexpected failure
+                sender.send(f"{type(exc).__name__}: {exc}")
+            finally:
+                sender.close()
+                os._exit(0)
+
+        process = context.Process(target=child, daemon=True)
+        process.start()
+        sender.close()
+        timeout = float(self.evaluation_timeout_s)
+        payload: Any = None
+        if receiver.poll(timeout):
+            try:
+                payload = receiver.recv()
+            except EOFError:
+                payload = "evaluation process died without returning a result"
+        else:
+            payload = TimeoutError(f"evaluation exceeded the {timeout:g} s time limit and was killed")
+        receiver.close()
+        if process.is_alive():
+            process.kill()
+        process.join()
+        self.evaluation_count += 1
+        if isinstance(payload, CandidateResult):
+            return payload
+        message = f"{type(payload).__name__}: {payload}" if isinstance(payload, Exception) else str(payload)
+        self._progress(f"error={message}")
+        return CandidateResult(error=message)
 
     @staticmethod
     def _designs(candidate: AnalysisConfig, orchestrator: Any) -> list[TankDesign]:
@@ -536,6 +589,14 @@ class OptimizationProblem:
         return directory if directory.is_absolute() else (self.path.parent / directory).resolve()
 
 
+def _timeout(cfg: Mapping[str, Any]) -> float | None:
+    """``evaluation_timeout_s`` from the optimisation YAML (0 or null disables the limit)."""
+    value = cfg.get("evaluation_timeout_s", DEFAULT_EVALUATION_TIMEOUT_S)
+    if value is None or float(value) <= 0.0:
+        return None
+    return float(value)
+
+
 def load_problem(path: Path | str, evaluator: Any = None,
                  skip_after_discharge_failure: bool = False,
                  size_insulation_internally: bool = False) -> OptimizationProblem:
@@ -566,7 +627,8 @@ def load_problem(path: Path | str, evaluator: Any = None,
                          if "evaluation_progress" in (cfg.get(k) or {})), True)
         evaluator = CandidateEvaluator(base_config, variables, limit, hold_s, progress=progress,
                                       skip_after_discharge_failure=skip_after_discharge_failure,
-                                      insulation_grid=grid)
+                                      insulation_grid=grid,
+                                      evaluation_timeout_s=_timeout(cfg))
     return OptimizationProblem(path, cfg, base_config, variables, evaluator)
 
 

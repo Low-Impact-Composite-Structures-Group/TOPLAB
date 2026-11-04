@@ -196,3 +196,27 @@ def test_convergence_trace_is_logged_live_to_the_csv(tmp_path):
     lines = path.read_text().strip().splitlines()
     assert lines[0] == "generation,front_movement,streak"
     assert len(lines) - 1 == len(result.convergence_trace) == 6
+
+
+def test_hung_evaluation_is_killed_and_reported_as_error():
+    import time
+    from toplab.optimization.evaluation import CandidateEvaluator
+
+    ev = CandidateEvaluator.__new__(CandidateEvaluator)
+    ev.progress, ev.evaluation_count, ev._stdout, ev.evaluation_timeout_s = False, 0, None, 0.5
+    ev._evaluate = lambda values: time.sleep(60)
+    started = time.perf_counter()
+    result = ev.evaluate([1.0])
+    assert time.perf_counter() - started < 10
+    assert "time limit" in result.error and not result.feasible
+    assert ev.evaluation_count == 1
+
+
+def test_finished_evaluation_returns_through_timeout_process():
+    from toplab.optimization.evaluation import CandidateEvaluator
+
+    ev = CandidateEvaluator.__new__(CandidateEvaluator)
+    ev.progress, ev.evaluation_count, ev._stdout, ev.evaluation_timeout_s = False, 0, None, 30.0
+    ev._evaluate = lambda values: CandidateResult(eta_g=0.25)
+    result = ev.evaluate([1.0])
+    assert result.eta_g == 0.25 and result.error is None
