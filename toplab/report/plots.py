@@ -10,6 +10,7 @@ from toplab.utilities.output_control import silent_when_quiet
 from toplab.post.hex import calculate_ohex_requirements, calculate_ihex_requirements, compute_per_stream_outflows
 from toplab.post.streams import coupling_stream_history
 from toplab.orchestration.run_result import RunResult
+from toplab.report.plot_data import export_figures
 
 
 @silent_when_quiet
@@ -140,6 +141,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
             legend_locations=legend_locations
         )
         figures.append(fig)
+        export_figures(run, 'tank_states', fig, overlay_save_path)
 
     # Generate per-tank plots (individual evolution plots if not overlaying, plus other plot types)
     for tank_idx in range(num_tanks):
@@ -209,6 +211,9 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 figures.extend(result_figs.values())
             else:
                 figures.append(result_figs)
+            export_figures(
+                run, 'tank_states', result_figs,
+                str(save_dir / filename_prefix) if (separate_figures and save_dir) else tank_save_path)
 
         # Generate density-temperature plot for this tank
         dt_save_path = None
@@ -270,6 +275,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
             legend_location=legend_location
         )
         figures.append(dt_fig)
+        export_figures(run, 'density_temperature', dt_fig, dt_save_path)
 
         # Get mass flow plot configuration
         mf_config = run.config.output_plots.get('mass_flows', {})
@@ -309,6 +315,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 per_stream_outflows=per_stream,
             )
             figures.append(mf_fig)
+            export_figures(run, 'mass_flows', mf_fig, mf_save_path)
 
         # Generate thermal-network heat-flow plot for this tank
         thermal_flow_config = run.config.output_plots.get('heat_flows', {})
@@ -341,6 +348,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 include=include_dict,
             )
             figures.append(thermal_flow_fig)
+            export_figures(run, 'heat_flows', thermal_flow_fig, thermal_flow_save_path)
 
         # Get heat exchanger plot configuration
         hex_config = run.config.output_plots.get('heat_exchanger_requirements', {})
@@ -386,6 +394,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 legend_location=legend_location
             )
             figures.append(hex_fig)
+            export_figures(run, 'heat_exchanger_requirements', hex_fig, hex_save_path)
 
     # Generate pressure requirements plot for mission-adaptive systems (not per-tank)
     pressure_req_config = run.config.output_plots.get('pressure_requirements', {})
@@ -415,6 +424,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                 save_path=str(pressure_req_save_path) if pressure_req_save_path else None
             )
             figures.append(pressure_req_fig)
+            export_figures(run, 'pressure_requirements', pressure_req_fig, pressure_req_save_path)
         except Exception as e:
             print(f"   WARNING: Pressure requirements plot failed: {e}")
 
@@ -453,6 +463,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                     save_path=str(pc_save_path) if pc_save_path else None,
                 )
                 figures.append(pc_fig)
+                export_figures(run, 'peripheral_components', pc_fig, pc_save_path)
 
                 # --- HEX / compressor power & energy plot ---
                 try:
@@ -478,6 +489,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                             fluid=run.config.tanks[sh['source_tank']].coolprop,
                         )
                         figures.append(pwr_fig)
+                        export_figures(run, 'hex_compressor_power', pwr_fig, pwr_save_path)
                 except Exception as _pwr_e:
                     print(f"   WARNING: HEX/compressor power plot failed: {_pwr_e}")
 
@@ -518,6 +530,7 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                         legend_location=_fc_cfg.get('legend_location', 'best'),
                     )
                     figures.append(fc_fig)
+                    export_figures(run, 'fuel_cell_inlet', fc_fig, fc_save_path)
         except Exception as e:
             print(f"   WARNING: Fuel cell inlet plot failed: {e}")
             import traceback
@@ -537,12 +550,14 @@ def generate_single_mission_plots(run: RunResult, plotter, save_path: str = None
                         mx_save_path = (Path(save_path).parent /
                                         f"{base_name}_{mx_fname}_{mixer_history.mixer_id}"
                                         f"{Path(save_path).suffix or '.png'}")
-                    figures.append(plotter.plot_mixer_flows(
+                    mx_fig = plotter.plot_mixer_flows(
                         mixer_history,
                         save_path=str(mx_save_path) if mx_save_path else None,
                         xlim=_mx_cfg.get('xlim', None),
                         legend_location=_mx_cfg.get('legend_location', 'best'),
-                    ))
+                    )
+                    figures.append(mx_fig)
+                    export_figures(run, 'mixer_flows', mx_fig, mx_save_path)
             except Exception as e:
                 print(f"   WARNING: Mixer flow plot failed: {e}")
                 import traceback
