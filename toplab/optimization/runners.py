@@ -100,7 +100,8 @@ def plot_sqp(config_path: Path | str) -> list[Path]:
 
 def plot_nsga2(config_path: Path | str, incomplete: bool = False) -> list[Path]:
     """Plot NSGA-II results. With ``incomplete`` the Pareto set is rebuilt from the history CSV
-    (written to ``nsga2_pareto_incomplete.csv``) for runs that stopped before finishing."""
+    (written to ``nsga2_pareto_incomplete.csv``) for runs that stopped before finishing. Plot
+    files are named exactly as for a completed run."""
     from toplab.optimization.nsga2_optimizer import NSGA2Settings
     from toplab.plotting.optimization_plots import (pareto_from_history, plot_pareto, plot_pareto_3d,
                                                     read_rows)
@@ -115,9 +116,9 @@ def plot_nsga2(config_path: Path | str, incomplete: bool = False) -> list[Path]:
             row["evaluation"] = int(row["evaluation"])
         write_rows(out / "nsga2_pareto_incomplete.csv", pareto)
         print(f"Incomplete run: {len(pareto)} non-dominated designs from {len(history)} history rows")
-        prefix = "nsga2_incomplete"
     else:
-        pareto, prefix = read_rows(out / "nsga2_pareto.csv"), "nsga2"
+        pareto = read_rows(out / "nsga2_pareto.csv")
+    prefix = "nsga2"
     return (plot_pareto(pareto, history, objectives, out / "plots", prefix)
             + plot_pareto_3d(pareto, history, objectives, out / "plots", prefix))
 
