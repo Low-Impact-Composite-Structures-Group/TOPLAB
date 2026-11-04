@@ -1,3 +1,4 @@
+import pytest
 import math
 
 from toplab.packaging.aft_placement import (
@@ -104,18 +105,24 @@ def test_single_large_tank_starts_in_cylindrical_section_and_fits():
     assert result.placements[0].max_violation <= 1e-10
 
 
-def test_infeasible_compaction_has_negative_signed_zeta_proxy():
-    dims = AftFuselageDimensions(
-        d1=2.16,
-        d2=1.17,
-        d3=0.328,
-        l1=2.067,
-        l2=1.8,
-        l3=3.407,
-        epsilon=0.05,
+def _dims():
+    return AftFuselageDimensions(
+        d1=2.16, d2=1.17, d3=0.328, l1=2.067, l2=1.8, l3=3.407, epsilon=0.05,
     )
 
-    result = maximize_packaging_compaction([2.0], [0.1], dims)
+
+def test_infeasible_compaction_shifts_datum_aft():
+    dims = _dims()
+    # Fits the cylinder radially, but is too long for the unshifted domain.
+    result = maximize_packaging_compaction([0.9], [4.0], dims)
 
     assert not result.feasible
-    assert result.zeta_p < 0.0
+    assert result.z_shift < 0.0
+    assert result.zeta_p == result.z_shift / dims.l1
+    assert min(p.center[2] - p.half_total_length for p in result.placements) >= result.z_shift - 1e-6
+    assert all(p.max_violation <= 1e-10 for p in result.placements)
+
+
+def test_tank_wider_than_cylinder_raises():
+    with pytest.raises(ValueError, match="no datum shift"):
+        maximize_packaging_compaction([2.0], [0.1], _dims())

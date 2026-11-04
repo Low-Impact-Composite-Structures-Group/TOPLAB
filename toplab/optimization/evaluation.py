@@ -25,7 +25,8 @@ import yaml
 from toplab.config import AnalysisConfig, load_config
 from toplab.optimization.insulation_sizing import (
     DormancyPoint, InsulationGrid, size_insulation)
-from toplab.packaging.aft_placement import AftFuselageDimensions, maximize_packaging_compaction
+from toplab.packaging.aft_placement import (
+    AftFuselageDimensions, check_tank_radii_fit, maximize_packaging_compaction)
 
 PARAMETERS = ("radius", "phi", "insulation_thickness")
 # Every metric reported per candidate (SQP may target any of them).
@@ -129,6 +130,61 @@ def packaging_dimensions(config: AnalysisConfig) -> AftFuselageDimensions:
     if not values:
         raise ValueError("Base configuration must define packaging.aft_fuselage_dimensions.")
     return AftFuselageDimensions(**{key: float(value) for key, value in values.items()})
+
+
+def maximum_outer_radii(config: AnalysisConfig, variables: Sequence[DesignVariable],
+                        max_insulation: float | None = None) -> list[float]:
+    """Largest outer envelope radius [m] each tank can reach within the design bounds.
+
+    Sums inner radius at its upper bound, liner, netting-analysis composite wall at that
+    radius, the thickest insulation and the outer shell. ``max_insulation`` is the upper
+    bound of an internally sized insulation grid; otherwise the thickness design variable's
+    upper bound, or the configured thickness, is used.
+    """
+    from toplab.tank_design.structural_models import CompositeCylinder, CompositeSphericalEndCap
+
+    radii = []
+    for index, tank in enumerate(config.tanks, 1):
+        bounds = {v.parameter: v for v in variables if v.tank == index}
+        radius_var = bounds.get("radius")
+        radius = radius_var.upper if radius_var else tank.geometry.get("radius")
+        if radius is None:
+            raise ValueError(f"Tank {index} has no radius in the base configuration to bound.")
+        materials = tank.materials
+        insulation = materials.get("insulation", {})
+        if max_insulation is not None:
+            t_ins = max_insulation
+        elif "insulation_thickness" in bounds:
+            t_ins = bounds["insulation_thickness"].upper
+        else:
+            t_ins = float(insulation["thickness"])
+        pressure = float(tank.initial_conditions["pressure"]) * float(materials["safety_margin"])
+        composite = tank.nist_materials()["composite"]
+
+        class _Section:
+            pass
+        section = _Section()
+        section.radius, section.material = float(radius), composite
+        wall = max(CompositeCylinder().compute_thickness(section, pressure),
+                   CompositeSphericalEndCap().compute_thickness(section, pressure))
+        radii.append(float(radius) + float(materials["liner"]["thickness"]) + wall
+                     + t_ins + float(insulation["shell_thickness"]))
+    return radii
+
+
+def check_packaging_bounds(config: AnalysisConfig, variables: Sequence[DesignVariable],
+                           max_insulation: float | None = None) -> None:
+    """Reject design bounds that could produce a tank wider than the fuselage cylinder.
+
+    Such a design cannot be packaged at any datum shift, so the run is refused up front.
+    """
+    if not (config.packaging or {}).get("aft_fuselage_dimensions"):
+        return
+    dims = packaging_dimensions(config)
+    try:
+        check_tank_radii_fit(maximum_outer_radii(config, variables, max_insulation), dims)
+    except ValueError as exc:
+        raise ValueError(f"Design variable bounds are not packageable: {exc}") from exc
 
 
 @dataclass
@@ -504,6 +560,7 @@ def load_problem(path: Path | str, evaluator: Any = None,
                 f"(remove {thickness}); configure the 'insulation_sizing' section instead.")
         grid = InsulationGrid.from_config(cfg.get("insulation_sizing"))
     if evaluator is None:
+        check_packaging_bounds(base_config, variables, grid.t_max if grid is not None else None)
         hold_s, limit = dormancy_limits(base_config, cfg)
         progress = next((bool(cfg[k]["evaluation_progress"]) for k in ("solver", "nsga2")
                          if "evaluation_progress" in (cfg.get(k) or {})), True)

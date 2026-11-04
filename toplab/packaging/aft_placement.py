@@ -85,8 +85,12 @@ class AftFuselageDimensions:
         return self.l1 + self.l2
 
     def radius_at(self, z: float) -> float:
-        """Return fuselage radius at global axial coordinate ``z`` [m]."""
-        if not 0.0 <= z <= self.total_length:
+        """Return fuselage radius at global axial coordinate ``z`` [m].
+
+        The cylinder is extended to ``z < 0`` so that a datum plane shifted
+        aft of the bulkhead can be evaluated.
+        """
+        if z > self.total_length:
             return 0.0
 
         if z <= self.l1:
@@ -101,9 +105,9 @@ class AftFuselageDimensions:
 
     def center_y_at(self, z: float) -> float:
         """Return y-coordinate of the local cross-section centre [m]."""
-        if not 0.0 <= z <= self.total_length:
+        if z > self.total_length:
             raise ValueError(
-                f"z = {z} lies outside [0, {self.total_length}]."
+                f"z = {z} lies beyond the fuselage end {self.total_length}."
             )
 
         if z <= self.l1:
@@ -123,9 +127,9 @@ class AftFuselageDimensions:
 
     def tangent_at(self, z: float) -> Vector3:
         """Return the preferred local tank-axis direction at ``z``."""
-        if not 0.0 <= z <= self.total_length:
+        if z > self.total_length:
             raise ValueError(
-                f"z = {z} lies outside [0, {self.total_length}]."
+                f"z = {z} lies beyond the fuselage end {self.total_length}."
             )
 
         if z <= self.l1:
@@ -213,10 +217,11 @@ class TankPlacement:
 class AftPlacementResult:
     """Full placement result.
 
-    ``zeta_p`` is a signed packaging margin proxy. Positive values indicate
-    feasible forward compaction, zero is the unshifted feasibility boundary,
-    and negative values quantify the unshifted placement violation relative to
-    the cylindrical-section length.
+    ``zeta_p = z_shift / l1`` is a signed packaging margin. Positive values
+    indicate feasible forward compaction, zero is the unshifted feasibility
+    boundary, and negative values give the distance the datum plane must be
+    moved aft (the tanks penetrate the bulkhead, with the cylinder extended
+    to z < 0) relative to the cylindrical-section length.
     """
 
     feasible: bool
@@ -840,8 +845,8 @@ def place_tanks_in_aft(
             "outer_radii and half_cyl_lengths must have the same length."
         )
 
-    if not 0.0 <= z_min <= dims.l1:
-        raise ValueError("z_min must lie within the cylindrical section [0, l1].")
+    if z_min > dims.l1:
+        raise ValueError("z_min must not exceed the cylindrical-section length l1.")
 
     if initial_step <= 0.0 or minimum_step <= 0.0:
         raise ValueError("Placement step sizes must be positive.")
@@ -982,6 +987,38 @@ def place_tanks_in_aft(
     )
 
 
+def max_required_aft_shift(
+    outer_radii: Sequence[float],
+    half_cyl_lengths: Sequence[float],
+    dims: AftFuselageDimensions,
+) -> float:
+    """Aft datum shift [m] that always suffices if every tank fits the cylinder.
+
+    With the cylinder extended aft, tanks stacked end to end along its axis
+    are feasible once the domain is as long as the summed tank lengths plus
+    clearances.
+    """
+    return sum(
+        2.0 * (r + h) + dims.epsilon
+        for r, h in zip(outer_radii, half_cyl_lengths)
+    ) + dims.epsilon
+
+
+def check_tank_radii_fit(
+    outer_radii: Sequence[float],
+    dims: AftFuselageDimensions,
+) -> None:
+    """Raise ``ValueError`` if a tank cannot fit the cylinder at any shift."""
+    limit = 0.5 * dims.d1 - dims.epsilon
+    for index, radius in enumerate(outer_radii, 1):
+        if radius > limit:
+            raise ValueError(
+                f"Tank {index} outer radius {radius:.4f} m exceeds the usable "
+                f"cylindrical-section radius {limit:.4f} m (d1/2 - epsilon); "
+                "no datum shift can accommodate it. Reduce the radius bounds."
+            )
+
+
 def maximize_packaging_compaction(
     outer_radii: Sequence[float],
     half_cyl_lengths: Sequence[float],
@@ -991,17 +1028,18 @@ def maximize_packaging_compaction(
     max_bisection_iterations: int = 40,
     **placement_kwargs,
 ) -> AftPlacementResult:
-    """Maximize the forward bulkhead shift while retaining a feasible placement.
+    """Find the signed datum shift ``z_shift`` and ``zeta_p = z_shift / dims.l1``.
 
-    The physical fuselage geometry is unchanged. ``z_shift`` is a clipping
-    plane imposed within the cylindrical section, so the admissible axial
-    domain is [z_shift, dims.total_length]. The returned performance metric is
-    ``zeta_p = z_shift / dims.l1``.
+    The physical fuselage geometry is unchanged. ``z_shift`` is the position of
+    the datum plane in the cylindrical section, so the admissible axial domain
+    is [z_shift, dims.total_length]. Positive values are forward compaction.
 
-    If the unshifted geometry is infeasible, the unshifted result is returned
-    with ``z_shift = 0`` and a negative ``zeta_p`` based on the largest
-    remaining placement violation. This signed extension preserves a useful
-    optimization signal across the feasibility boundary.
+    If the unshifted geometry is infeasible, the datum plane is moved aft
+    (``z_shift < 0``, cylinder extended) until a placement exists; violations
+    therefore stick out through the bulkhead, never into the narrowing cone.
+    The returned result then has ``feasible = False`` (the unshifted design does
+    not fit) and ``zeta_p < 0`` equal to minus the required shift over ``l1``.
+    Tanks wider than the cylinder raise ``ValueError``.
     """
     if z_tolerance <= 0.0:
         raise ValueError("z_tolerance must be positive.")
@@ -1009,18 +1047,41 @@ def maximize_packaging_compaction(
         raise ValueError("max_bisection_iterations must be positive.")
     if dims.l1 <= 0.0:
         raise ValueError("dims.l1 must be positive to define zeta_p.")
+    check_tank_radii_fit(outer_radii, dims)
 
     base = place_tanks_in_aft(
         outer_radii, half_cyl_lengths, dims, z_min=0.0, **placement_kwargs
     )
     if not base.feasible:
-        max_violation = max(
-            (placement.max_violation for placement in base.placements),
-            default=0.0,
+        d_max = max_required_aft_shift(outer_radii, half_cyl_lengths, dims)
+        far = place_tanks_in_aft(
+            outer_radii, half_cyl_lengths, dims, z_min=-d_max, **placement_kwargs
         )
-        base.zeta_p = -max_violation / dims.l1
-        base.message += " Compaction search skipped because z_shift = 0 is infeasible."
-        return base
+        if not far.feasible:
+            raise RuntimeError(
+                f"No placement found even with the datum shifted {d_max:.4g} m aft."
+            )
+        lo, hi = 0.0, d_max  # required aft shift: infeasible at lo, feasible at hi
+        best = far
+        iteration = 0
+        while (hi - lo) > z_tolerance and iteration < max_bisection_iterations:
+            iteration += 1
+            mid = 0.5 * (lo + hi)
+            trial = place_tanks_in_aft(
+                outer_radii, half_cyl_lengths, dims, z_min=-mid, **placement_kwargs
+            )
+            if trial.feasible:
+                hi = mid
+                best = trial
+            else:
+                lo = mid
+        best.feasible = False
+        best.message = (
+            f"Unshifted placement infeasible; datum moved aft by {-best.z_shift:.6g} m "
+            f"(zeta_p = {best.zeta_p:.6f}) after {iteration} bisection iterations. "
+            + best.message
+        )
+        return best
 
     upper = place_tanks_in_aft(
         outer_radii, half_cyl_lengths, dims, z_min=dims.l1, **placement_kwargs
