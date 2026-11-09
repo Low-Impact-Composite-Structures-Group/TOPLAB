@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 
 from toplab.demand import Demand
 from toplab.tank_design.tank_shapes import CapsuleTank
-from toplab.thermodynamics.isochoric_thermal_model import InsulatedTankThermalModel
+from toplab.thermodynamics.isochoric_thermal_model import (
+    TRANSIENT_LUMPED,
+    InsulatedTankThermalModel,
+)
 from toplab.materials.insulation_models import insulation_model_from_config
 from ..solver import (
     LSODASolver, RK45Solver, RadauSolver, DOP853Solver, BDFSolver, RK4FixedSolver
@@ -481,6 +484,7 @@ class TankSystem:
         liner_mass = _layer_mass(liner_material.density, inner_radius, liner_outer_radius)
         wall_mass  = _layer_mass(composite_material.density, liner_outer_radius, wall_outer_radius)
         insulation_model = insulation_model_from_config(insulation_config)
+        insulation_mode = str(insulation_config.get('thermal_mode', TRANSIENT_LUMPED)).strip().lower()
         foam_mass  = _layer_mass(insulation_model.density, r_structure, r_shell)
         shell_mass = _layer_mass(liner_material.density, r_shell, r_shell_outer)  # same Al as liner
 
@@ -536,6 +540,7 @@ class TankSystem:
             'wall_mass': wall_mass,
             'foam_mass': foam_mass,
             'insulation_model': insulation_model,
+            'insulation_mode': insulation_mode,
             'shell_mass': shell_mass,
             'liner_material': liner_material,
             'wall_material': composite_material,
@@ -566,6 +571,7 @@ class TankSystem:
             wall_material=tank_properties['wall_material'],
             shell_material=tank_properties['shell_material'],
             insulation_model=tank_properties['insulation_model'],
+            insulation_mode=tank_properties.get('insulation_mode', TRANSIENT_LUMPED),
         )
 
     def create_initial_state(self) -> np.ndarray:
@@ -655,8 +661,12 @@ class TankSystem:
                 thermal = self.thermal_models[i]
                 try:
                     Q_amb = thermal.compute_ambient_to_shell_heat_flux(T_sh)
-                    Q_sh_ins = thermal.compute_shell_to_insulation_heat_flux(T_sh, T_ins)
-                    Q_ins_str = thermal.compute_insulation_to_structure_heat_flux(T_ins, T_s)
+                    if thermal.is_quasi_steady:
+                        Q_sh_ins = Q_ins_str = thermal.compute_blanket_heat_flow(T_sh, T_s)
+                        T_ins = thermal.reconstruct_insulation_temperature(T_sh, T_s)
+                    else:
+                        Q_sh_ins = thermal.compute_shell_to_insulation_heat_flux(T_sh, T_ins)
+                        Q_ins_str = thermal.compute_insulation_to_structure_heat_flux(T_ins, T_s)
                     alpha_s = thermal.get_alpha_s(T_i, T_s, P_i)
                     Q_str = alpha_s * thermal.A_in * (T_s - T_i)
                     heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_sh-ins={Q_sh_ins:+.1f}W  "
@@ -1005,6 +1015,13 @@ class TankSystem:
         if not reasons:
             self._log_summary("   Mission completed: all tanks ran to the end of the mission profile.")
 
+        for tank_idx, thermal_model in enumerate(self.thermal_models):
+            if thermal_model.is_quasi_steady:
+                self._log_summary(
+                    f"   Tank {tank_idx + 1}: quasi-steady MLI - insulation temperature is algebraically "
+                    "reconstructed from shell and structure temperatures, not an integrated state."
+                )
+
         self.edge_flow_history = solution.edge_flows
         n_tanks = len(self.tanks)
         self.discharge_heat_history = solution.extras[:n_tanks]
@@ -1032,6 +1049,12 @@ class TankSystem:
                     shell_temperature=solution.y[state_idx + 4, i],
                     fluid=self._coolprop_fluids[tank_idx],
                 )
+                thermal_model = self.thermal_models[tank_idx]
+                if thermal_model.is_quasi_steady:
+                    # Not an integrated state: algebraic mid-blanket temperature for reporting.
+                    tank_state.insulation_temperature = thermal_model.reconstruct_insulation_temperature(
+                        tank_state.shell_temperature, tank_state.structure_temperature
+                    )
 
                 # Recompute derived properties
                 tank_state.compute_pressure()

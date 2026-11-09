@@ -46,15 +46,12 @@ class ThermalFigures:
             heat_flows['Ambient to shell'].append(
                 thermal_model.compute_ambient_to_shell_heat_flux(state.shell_temperature)
             ) if heat_flows['Ambient to shell'] is not None else None
+            q_shell_to_insulation, q_insulation_to_structure = thermal_model.compute_insulation_heat_flows(state)
             heat_flows['Shell to insulation'].append(
-                thermal_model.compute_shell_to_insulation_heat_flux(
-                    state.shell_temperature, state.insulation_temperature
-                )
+                q_shell_to_insulation
             ) if heat_flows['Shell to insulation'] is not None else None
             heat_flows['Insulation to structure'].append(
-                thermal_model.compute_insulation_to_structure_heat_flux(
-                    state.insulation_temperature, state.structure_temperature
-                )
+                q_insulation_to_structure
             ) if heat_flows['Insulation to structure'] is not None else None
             heat_flows['Structure to H2'].append(
                 thermal_model.compute_structure_to_h2_heat_flux(time, state)

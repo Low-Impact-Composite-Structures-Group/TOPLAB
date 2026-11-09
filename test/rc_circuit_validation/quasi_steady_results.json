@@ -1,0 +1,129 @@
+{
+  "limit_fraction": 0.001,
+  "F1_equilibrated": {
+    "A": {
+      "vented_kg": 0.0,
+      "vented_fraction": 0.0,
+      "onset_h": null,
+      "final_pressure_mpa": 1.8746473122482747,
+      "final_t_h2_k": 25.356416607565325,
+      "final_t_struct_k": 25.370422875160386,
+      "cumulative_h2_heat_kj": 751.7860217795057,
+      "cpu_s": 0.9492819160223007,
+      "final_t_ins_k": 140.9626735363982
+    },
+    "B": {
+      "vented_kg": 0.0,
+      "vented_fraction": 0.0,
+      "onset_h": null,
+      "final_pressure_mpa": 1.874627694396824,
+      "final_t_h2_k": 25.356391145053834,
+      "final_t_struct_k": 25.370408623119484,
+      "cumulative_h2_heat_kj": 751.7354798201816,
+      "cpu_s": 0.8754593750927597,
+      "final_t_ins_k": null
+    },
+    "C": {
+      "vented_kg": 0.0,
+      "vented_fraction": 0.0,
+      "onset_h": null,
+      "final_pressure_mpa": 1.8755172663673767,
+      "final_t_h2_k": 25.357545743870563,
+      "final_t_struct_k": 25.37159741457994,
+      "cumulative_h2_heat_kj": 754.067697577223,
+      "cpu_s": 0.84926937520504,
+      "final_t_ins_k": null
+    }
+  },
+  "F1_production": {
+    "transient_lumped": {
+      "vented_kg": 0.0,
+      "final_pressure_mpa": 1.8746473122482747,
+      "final_t_h2_k": 25.356416607565325,
+      "cpu_s": 2.8139559170231223
+    },
+    "quasi_steady": {
+      "vented_kg": 0.0,
+      "final_pressure_mpa": 1.8755172663673767,
+      "final_t_h2_k": 25.357545743870563,
+      "cpu_s": 2.8453367908950895
+    }
+  },
+  "F2_post_refuel": {
+    "A": {
+      "vented_kg": 0.05662634459486071,
+      "vented_fraction": 0.00016973094569713143,
+      "onset_h": 11.5,
+      "final_pressure_mpa": 2.0041257750730908,
+      "final_t_h2_k": 25.532924953817204,
+      "final_t_struct_k": 25.55203099790904,
+      "cumulative_h2_heat_kj": 1125.1807248103898,
+      "cpu_s": 0.9880257088225335,
+      "final_t_ins_k": 217.2673383189459
+    },
+    "B": {
+      "vented_kg": 0.0,
+      "vented_fraction": 0.0,
+      "onset_h": null,
+      "final_pressure_mpa": 1.874627694396824,
+      "final_t_h2_k": 25.356391145053834,
+      "final_t_struct_k": 25.370408623119484,
+      "cumulative_h2_heat_kj": 751.7354798201816,
+      "cpu_s": 0.8624135409481823,
+      "final_t_ins_k": null
+    },
+    "C": {
+      "vented_kg": 0.0,
+      "vented_fraction": 0.0,
+      "onset_h": null,
+      "final_pressure_mpa": 1.8755172663673767,
+      "final_t_h2_k": 25.357545743870563,
+      "final_t_struct_k": 25.37159741457994,
+      "cumulative_h2_heat_kj": 754.067697577223,
+      "cpu_s": 0.8763163748662919,
+      "final_t_ins_k": null
+    }
+  },
+  "F3_sweep_vented_fraction": {
+    "thickness_mm": [
+      10,
+      15,
+      20,
+      25,
+      30,
+      35,
+      40,
+      45,
+      50,
+      60
+    ],
+    "A": [
+      0.00865682194962685,
+      0.004045946482554572,
+      0.0017458878422892167,
+      0.0003676373525307128,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "C": [
+      0.008709579429943297,
+      0.004080396245270248,
+      0.0017710441840367121,
+      0.0003871053123197853,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "F3_minimum_thickness_mm": {
+    "A": 22.43359375,
+    "C": 22.548828125
+  }
+}

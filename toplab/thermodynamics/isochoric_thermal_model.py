@@ -7,7 +7,9 @@ The InsulatedTankThermalModel implements the five-state thermal network:
     insulation  ←(Q_shell_to_insulation)←  shell  ←(Q_ambient_to_shell)← ambient
 
 Structure (liner + composite), insulation, and shell each carry
-an ODE state. The insulation layer is divided at its equal-resistance midpoint;
+an ODE state (``insulation_mode="transient_lumped"``, the default). For Modified Lockheed MLI,
+``insulation_mode="quasi_steady"`` evaluates the correlation once across the full blanket and
+removes insulation thermal storage; the insulation state slot is then a non-integrated placeholder. The insulation layer is divided at its equal-resistance midpoint;
 each half-layer heat flow integrates the temperature-dependent conductivity.
 
 Author: Dante Raso
@@ -21,6 +23,10 @@ from scipy.optimize import brentq
 from toplab.thermodynamics.tank_states import IsochoricTankState
 from toplab.materials.nist_materials import NISTMaterial
 from toplab.materials.insulation_models import ROHACELL, InsulationModel
+
+TRANSIENT_LUMPED = "transient_lumped"
+QUASI_STEADY = "quasi_steady"
+INSULATION_MODES = (TRANSIENT_LUMPED, QUASI_STEADY)
 
 
 class IsochoricThermalModel(ABC):
@@ -82,7 +88,18 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         wall_material: NISTMaterial,
         shell_material: NISTMaterial,
         insulation_model: InsulationModel = ROHACELL,
+        insulation_mode: str = TRANSIENT_LUMPED,
     ):
+        if insulation_mode not in INSULATION_MODES:
+            raise ValueError(
+                f"Unknown insulation thermal mode '{insulation_mode}' "
+                f"(expected one of {INSULATION_MODES})"
+            )
+        if insulation_mode == QUASI_STEADY and insulation_model.heat_flux is None:
+            raise ValueError(
+                "insulation.thermal_mode 'quasi_steady' is only supported for "
+                "Modified Lockheed MLI; foam must use 'transient_lumped'"
+            )
         if r_shell <= r_structure:
             raise ValueError(
                 f"Shell radius {r_shell:.4f} m must be greater than structure radius "
@@ -98,6 +115,7 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         self.m_wall = wall_mass
         self.m_foam = foam_mass
         self.insulation_model = insulation_model
+        self.insulation_mode = insulation_mode
         self.m_shell = shell_mass
         self.T_amb = ambient_temperature
         self.alpha_amb = alpha_amb
@@ -215,6 +233,46 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         )
 
     # ------------------------------------------------------------------
+    # Quasi-steady MLI: Modified Lockheed across the full blanket
+    # ------------------------------------------------------------------
+
+    @property
+    def is_quasi_steady(self) -> bool:
+        return self.insulation_mode == QUASI_STEADY
+
+    def compute_blanket_heat_flow(self, shell_temperature: float, structure_temperature: float) -> float:
+        """Heat flow shell -> structure through the whole blanket [W] (quasi-steady MLI).
+
+        One Modified Lockheed evaluation over the full thickness with the same cylinder + sphere
+        geometry factors as the two half-blanket expressions (their series resistances combine to
+        these full-span factors). Positive when the shell is warmer.
+        """
+        heat_flux = self.insulation_model.heat_flux
+        thickness = self.r_shell - self.r_structure
+        geometry_factor = (
+            2.0 * math.pi * self.L / math.log(self.r_shell / self.r_structure)
+            + 4.0 * math.pi * self.r_shell * self.r_structure / thickness
+        )
+        hot = max(shell_temperature, structure_temperature)
+        cold = min(shell_temperature, structure_temperature)
+        sign = 1.0 if shell_temperature >= structure_temperature else -1.0
+        return sign * heat_flux(hot, cold, thickness) * geometry_factor * thickness
+
+    def reconstruct_insulation_temperature(self, shell_temperature: float, structure_temperature: float) -> float:
+        """Algebraic mid-blanket temperature [K] for the two-half-blanket balance (reporting only)."""
+        return self.determine_initial_insulation_temperature(structure_temperature, shell_temperature)
+
+    def compute_insulation_heat_flows(self, state: IsochoricTankState) -> tuple:
+        """``(Q_shell_to_insulation, Q_insulation_to_structure)`` [W] for the current formulation."""
+        if self.is_quasi_steady:
+            q = self.compute_blanket_heat_flow(state.shell_temperature, state.structure_temperature)
+            return q, q
+        return (
+            self.compute_shell_to_insulation_heat_flux(state.shell_temperature, state.insulation_temperature),
+            self.compute_insulation_to_structure_heat_flux(state.insulation_temperature, state.structure_temperature),
+        )
+
+    # ------------------------------------------------------------------
     # Ambient: convection + radiation to/from shell
     # ------------------------------------------------------------------
 
@@ -236,9 +294,14 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     ) -> float:
         """dT_structure/dt [K/s]. Structure gains from insulation and loses to H2."""
         structure_temperature = state.structure_temperature
-        Q_insulation_to_structure = self.compute_insulation_to_structure_heat_flux(
-            state.insulation_temperature, structure_temperature
-        )
+        if self.is_quasi_steady:
+            Q_insulation_to_structure = self.compute_blanket_heat_flow(
+                state.shell_temperature, structure_temperature
+            )
+        else:
+            Q_insulation_to_structure = self.compute_insulation_to_structure_heat_flux(
+                state.insulation_temperature, structure_temperature
+            )
         Q_structure_to_h2 = self.compute_structure_to_h2_heat_flux(time, state, **kwargs)
         T_bounded = max(4.0, min(structure_temperature, 400.0))
         c_liner = float(self.liner_material.determine_specific_heat(T_bounded))
@@ -249,7 +312,14 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
     def compute_insulation_temperature_derivative(
         self, time: float, state: IsochoricTankState, **kwargs
     ) -> float:
-        """dT_insulation/dt [K/s]."""
+        """dT_insulation/dt [K/s].
+
+        Quasi-steady MLI has no insulation thermal energy storage: the state slot is a
+        non-integrated placeholder (zero derivative) and the temperature is reconstructed
+        algebraically for reporting (``reconstruct_insulation_temperature``).
+        """
+        if self.is_quasi_steady:
+            return 0.0
         insulation_temperature = state.insulation_temperature
         Q_shell_to_insulation = self.compute_shell_to_insulation_heat_flux(
             state.shell_temperature, insulation_temperature
@@ -266,9 +336,14 @@ class InsulatedTankThermalModel(IsochoricThermalModel):
         """dT_shell/dt [K/s]. Shell gains from ambient and loses to insulation."""
         shell_temperature = state.shell_temperature
         Q_ambient_to_shell = self.compute_ambient_to_shell_heat_flux(shell_temperature)
-        Q_shell_to_insulation = self.compute_shell_to_insulation_heat_flux(
-            shell_temperature, state.insulation_temperature
-        )
+        if self.is_quasi_steady:
+            Q_shell_to_insulation = self.compute_blanket_heat_flow(
+                shell_temperature, state.structure_temperature
+            )
+        else:
+            Q_shell_to_insulation = self.compute_shell_to_insulation_heat_flux(
+                shell_temperature, state.insulation_temperature
+            )
         T_bounded = max(4.0, min(shell_temperature, 400.0))
         c_shell = float(self.shell_material.determine_specific_heat(T_bounded))
         return (Q_ambient_to_shell - Q_shell_to_insulation) / (self.m_shell * c_shell)
