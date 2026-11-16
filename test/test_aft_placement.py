@@ -3,6 +3,14 @@ import math
 
 from toplab.packaging.aft_placement import (
     AftFuselageDimensions,
+    TankGeometry,
+    _capsule_surface_gap,
+    _capsule_radius_at_offset,
+    _containment_violation,
+    _evaluate_placement,
+    _segment_distance,
+    _transverse_basis,
+    max_required_aft_shift,
     maximize_packaging_compaction,
     place_tanks_in_aft,
 )
@@ -126,3 +134,81 @@ def test_infeasible_compaction_shifts_datum_aft():
 def test_tank_wider_than_cylinder_raises():
     with pytest.raises(ValueError, match="no datum shift"):
         maximize_packaging_compaction([2.0], [0.1], _dims())
+
+
+@pytest.mark.parametrize("point,expected", [((0, 0, 1), 0.0), ((0, 0, 3), 1.0), ((1, 0, 1), 1.0)])
+def test_segment_distance_is_symmetric_for_spheres(point, expected):
+    a, b = (0, 0, -2), (0, 0, 2)
+    assert _segment_distance(a, b, point, point) == pytest.approx(expected)
+    assert _segment_distance(point, point, a, b) == pytest.approx(expected)
+    assert _segment_distance(point, point, point, point) == pytest.approx(0.0)
+
+
+def test_sphere_inside_capsule_is_not_accepted():
+    dims = AftFuselageDimensions(4, 4, 4, 8, 1, 1, 0.05)
+    centers = [(0, 0, 3), (0, 0, 4)]
+    geometries = [TankGeometry(0.5, 2), TankGeometry(0.4, 0)]
+    axis = (0, 0, 1)
+    assert _capsule_surface_gap(centers[0], axis, geometries[0], centers[1], axis, geometries[1]) == pytest.approx(-0.9)
+    assert not _evaluate_placement(centers, geometries, dims, 0, 80, 24)[0]
+
+
+@pytest.mark.parametrize("z", [0.51, 9.49])
+def test_end_plane_clearance_is_enforced(z):
+    dims = AftFuselageDimensions(4, 4, 4, 8, 1, 1, 0.05)
+    feasible, violations = _evaluate_placement([(0, 0, z)], [TankGeometry(0.5, 0)], dims, 0, 80, 24)
+    assert not feasible
+    assert violations[0] == pytest.approx(0.04)
+
+
+@pytest.mark.parametrize("center,axis", [
+    ((0.1, 0.0, -0.5), (0.0, 0.0, 1.0)),
+    ((0.2, 0.3, 2.8), (0.0, math.sin(math.radians(12)), math.cos(math.radians(12)))),
+    ((-0.1, 0.5, 6.8), (0.0, math.sin(math.radians(9)), math.cos(math.radians(9)))),
+])
+def test_vectorized_containment_matches_scalar_sampling(center, axis):
+    dims = AftFuselageDimensions(2.16, 1.17, 0.328, 2.067, 1.8, 3.407, 0.05, 12, 9)
+    geometry = TankGeometry(0.4, 0.7)
+    z_min = -2.0
+    extent = abs(axis[2]) * geometry.half_cyl_length + geometry.outer_radius
+    expected = max(z_min + dims.epsilon - (center[2] - extent),
+                   center[2] + extent + dims.epsilon - dims.total_length)
+    e1, e2 = _transverse_basis(axis)
+    for i in range(41):
+        delta = -geometry.half_total_length + 2 * geometry.half_total_length * i / 40
+        radius = _capsule_radius_at_offset(delta, geometry.outer_radius, geometry.half_cyl_length)
+        for j in range(24):
+            phi = 2 * math.pi * j / 24
+            point = tuple(center[k] + axis[k] * delta + radius * (e1[k] * math.cos(phi) +
+                                                                    e2[k] * math.sin(phi))
+                          for k in range(3))
+            z = point[2]
+            if z_min <= z <= dims.total_length:
+                expected = max(expected, math.hypot(point[0], point[1] - dims.center_y_at(z)) -
+                               dims.radius_at(z) + dims.epsilon)
+    assert _containment_violation(center, axis, geometry, dims, z_min, 40, 24) == pytest.approx(expected, abs=1e-12)
+
+
+def test_four_tank_extended_cylinder_has_constructive_placement():
+    dims = AftFuselageDimensions(2.16, 1.17, 0.328, 2.067, 1.8, 3.407, 0.05, 12, 9)
+    radii, half_lengths = [0.7272] * 4, [0.0] * 4
+    shift = max_required_aft_shift(radii, half_lengths, dims)
+    result = place_tanks_in_aft(radii, half_lengths, dims, z_min=-shift)
+    assert result.feasible
+    assert "cylinder_stack" in result.message
+    assert all(p.s_leftmost_pole >= -shift + dims.epsilon - 1e-10 for p in result.placements)
+
+
+def test_two_small_tanks_can_be_placed_in_unshifted_fuselage():
+    result = place_tanks_in_aft([0.45, 0.45], [0.2, 0.2], _dims())
+    assert result.feasible
+    assert all(p.max_violation <= 1e-10 for p in result.placements)
+
+
+def test_compaction_fallback_returns_infeasible_margin_for_four_spheres():
+    dims = AftFuselageDimensions(2.16, 1.17, 0.328, 2.067, 1.8, 3.407, 0.05, 12, 9)
+    result = maximize_packaging_compaction([0.7272] * 4, [0.0] * 4, z_tolerance=0.1,
+                                          dims=dims, n_axial_samples=20, n_circumferential_samples=12)
+    assert not result.feasible
+    assert result.zeta_p < 0
+    assert all(p.feasible for p in result.placements)

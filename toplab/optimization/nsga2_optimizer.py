@@ -50,7 +50,7 @@ def candidate_status(c: CandidateResult) -> str:
 # History column groups, in file order. Unavailable quantities are blank, never zero.
 ID_COLUMNS = ("evaluation", "worker_rank", "pid")
 SIZED_COLUMNS = ("t_ins_star",)
-DIAGNOSTIC_COLUMNS = ("eta_vent", "f_vent", "n_dormancy_evals", "sizing_status")
+DIAGNOSTIC_COLUMNS = ("eta_vent", "f_vent", "n_dormancy_evals", "sizing_status", "packaging_screened")
 CONSTRAINT_COLUMNS = ("g_dis", "g_dorm", "g_packaging")
 STATUS_COLUMNS = ("status", "feasible", "packaging_feasible", "discharge_failed", "error")
 
@@ -90,11 +90,14 @@ def check_mpi_world(launcher_size: int, mpi_size: int | None) -> None:
 
 
 def constraint_vector(result: CandidateResult) -> list[float]:
-    """Inequality constraints ``g <= 0``: discharge shortfall [h], dormancy margin, packaging margin."""
+    """Inequality constraints: mission fraction shortfall, dormancy margin, packaging margin."""
     g = physical_residuals(result)
-    if result.error is None and not result.discharge_failed and not result.packaging_feasible:
-        # An unplaceable design must rank below every placeable one regardless of zeta_p.
-        g["g_packaging"] = max(1.0, g["g_packaging"])
+    if result.error is None:
+        if result.mission_duration_s > 0.0:
+            g["g_dis"] = result.discharge_residual / result.mission_duration_s
+        if (result.packaging_evaluated or not result.discharge_failed) and not result.packaging_feasible:
+            # A failed search is never feasible even at a numerically zero margin.
+            g["g_packaging"] = max(1e-9, g["g_packaging"])
     return list(g.values())
 
 

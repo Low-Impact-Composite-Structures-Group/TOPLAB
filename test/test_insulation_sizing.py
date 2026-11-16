@@ -158,7 +158,7 @@ def stubs(monkeypatch):
         f = vent_model(t)
         return {"tanks": [{"initial_mass_kg": 10.0, "vented_mass_kg": 10.0 * min(f, 1.0)}]}
 
-    def packaging(radii, half_lengths, dims):
+    def packaging(radii, half_lengths, dims, **kwargs):
         log.packaging.append(list(radii))
         return SimpleNamespace(feasible=True, z_shift=0.0, zeta_p=0.2, placements=[])
 
@@ -179,6 +179,7 @@ def _evaluator(grid=GRID, skip=True):
     ev.maximum_vented_fraction, ev.hold_period_s = LIMIT, 3600.0
     ev.progress, ev.evaluation_count, ev._stdout = False, 0, None
     ev.skip_after_discharge_failure, ev.insulation_grid = skip, grid
+    ev.placement_options = {}
     return ev
 
 
@@ -220,11 +221,12 @@ def test_dormancy_infeasible_design_is_rejected_by_constraint_not_objectives(stu
     assert evaluation.physical_residuals(result)["g_dorm"] > 0.0
 
 
-def test_discharge_infeasible_candidate_runs_no_dormancy_and_no_packaging(stubs):
+def test_discharge_infeasible_candidate_screens_packaging_without_dormancy(stubs):
     _Orchestrator.actual_s = 0.5 * MISSION_S
     result = _evaluator().evaluate([0.5, 2.0])
-    assert stubs.dormancy == [] and stubs.packaging == []
+    assert stubs.dormancy == [] and stubs.packaging == [[pytest.approx(0.5025)]]
     assert result.discharge_failed and result.n_dormancy_evals == 0
+    assert result.packaging_screened and result.packaging_evaluated
     assert evaluation.physical_residuals(result)["g_dis"] > 0.0
 
 
@@ -323,7 +325,7 @@ def test_history_columns_are_grouped_and_unavailable_values_are_blank():
                          packaging_feasible=True, mission_completed=True, eval_id=3)
     keys = list(nsga2_row(variables, [0.5, 2.0], ok))
     groups = [["evaluation"], ["radius_1", "phi_1"], ["t_ins_star"], ["eta_g", "eta_v", "zeta_p"],
-              ["eta_vent", "f_vent", "n_dormancy_evals", "sizing_status"],
+              ["eta_vent", "f_vent", "n_dormancy_evals", "sizing_status", "packaging_screened"],
               ["g_dis", "g_dorm", "g_packaging"], ["status", "feasible"]]
     positions = [[keys.index(k) for k in g] for g in groups]
     assert all(p == sorted(p) for p in positions)

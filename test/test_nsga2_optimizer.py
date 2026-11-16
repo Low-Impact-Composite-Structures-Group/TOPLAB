@@ -40,7 +40,9 @@ def test_constraint_vector_signs():
     ok = CandidateResult(discharge_residual=-3600.0, dormancy_residual=-0.2, zeta_p=0.3, packaging_feasible=True)
     assert constraint_vector(ok) == pytest.approx([-1.0, -0.2, -0.3])
     no_fit = CandidateResult(zeta_p=0.1, packaging_feasible=False)
-    assert constraint_vector(no_fit)[2] >= 1.0
+    assert constraint_vector(no_fit)[2] > 0.0
+    shifted = CandidateResult(zeta_p=-0.1, packaging_feasible=False)
+    assert constraint_vector(shifted)[2] == pytest.approx(0.1)
 
 
 def test_initial_population_contains_baseline_and_respects_bounds():

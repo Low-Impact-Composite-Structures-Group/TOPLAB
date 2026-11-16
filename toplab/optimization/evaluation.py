@@ -201,9 +201,12 @@ class CandidateResult:
     per_tank_vented_fraction: list[float] = field(default_factory=list)
     discharge_residuals: list[float] = field(default_factory=list)
     discharge_residual: float = 0.0
+    mission_duration_s: float = 0.0
     dormancy_residuals: list[float] = field(default_factory=list)
     dormancy_residual: float = 0.0
     packaging_feasible: bool = False
+    packaging_evaluated: bool = False
+    packaging_screened: bool = False
     packages: bool = False
     z_shift_star: float = 0.0
     mission_completed: bool = False
@@ -219,8 +222,7 @@ class CandidateResult:
     error: str | None = None
     # Provenance: ``eval_id`` is assigned once by the optimiser driver (rank 0) per executed
     # candidate; ``worker_rank``/``pid`` record where the analysis actually ran.
-    # Set when discharge proves the mission cannot be completed and the dormancy and packaging
-    # analyses were therefore not run: their fields below are placeholders, not results.
+    # Set when discharge fails and dormancy sizing is skipped.
     discharge_failed: bool = False
     # Internal insulation sizing (NSGA-II): the thickness used for the whole design, how it was
     # found and how many dormancy simulations that took. ``None`` when thickness is not sized.
@@ -253,9 +255,10 @@ def physical_residuals(result: CandidateResult) -> dict[str, float]:
     if result.error is not None:
         return {name: FAILED_VIOLATION for name in RESIDUAL_NAMES}
     if result.discharge_failed:
-        # Rejected through g_dis alone; the unevaluated constraints must not add violation.
+        # Dormancy is unknown; packaging may have been screened at the initial thickness.
         return {"g_dis": float(result.discharge_residual) / SECONDS_PER_HOUR,
-                "g_dorm": 0.0, "g_packaging": 0.0}
+                "g_dorm": 0.0,
+                "g_packaging": -float(result.zeta_p) if result.packaging_evaluated else 0.0}
     return {"g_dis": float(result.discharge_residual) / SECONDS_PER_HOUR,
             "g_dorm": float(result.dormancy_residual),
             "g_packaging": -float(result.zeta_p)}
@@ -315,8 +318,15 @@ class CandidateEvaluator:
         self.maximum_vented_fraction = float(maximum_vented_fraction)
         self.hold_period_s = float(hold_period_s)
         self.progress = bool(progress)
-        # Skip dormancy and packaging when the mission is not completed (NSGA-II only).
+        # Skip dormancy when the mission is not completed (NSGA-II only).
         self.skip_after_discharge_failure = bool(skip_after_discharge_failure)
+        settings = (base_config.packaging or {}).get("placement", {})
+        converters = {
+            "max_iterations": int, "initial_step": float, "minimum_step": float,
+            "step_reduction": float, "n_axial_samples": int, "n_circumferential_samples": int,
+        }
+        self.placement_options = {key: convert(settings[key]) for key, convert in converters.items()
+                                  if key in settings}
         # When set, insulation is sized internally on this grid instead of being a design variable.
         self.insulation_grid = insulation_grid
         self.evaluation_count = 0
@@ -404,6 +414,7 @@ class CandidateEvaluator:
         tank_count = len(orchestrator.tank_geometries)
         target_s = float(orchestrator.tank_system.config.MISSION_DURATION)
         actual_s = float(discharge.times[-1])
+        result.mission_duration_s = target_s
         result.mission_completed = actual_s >= target_s
         result.discharge_residuals = [target_s - actual_s] * tank_count
         result.discharge_residual = max(result.discharge_residuals, default=0.0)
@@ -465,7 +476,9 @@ class CandidateEvaluator:
         radii = [float(properties[i]["outer_diameter"]) / 2.0 for i in range(tank_count)]
         half_lengths = [float(properties[i].get("cylindrical_section_length", 0.0)) / 2.0
                         for i in range(tank_count)]
-        packaging = maximize_packaging_compaction(radii, half_lengths, self.packaging_dimensions)
+        packaging = maximize_packaging_compaction(
+            radii, half_lengths, self.packaging_dimensions, **self.placement_options)
+        result.packaging_evaluated = True
         result.packaging_feasible = result.packages = bool(packaging.feasible)
         result.z_shift_star = float(packaging.z_shift)
         result.zeta_p = float(packaging.zeta_p)
@@ -497,7 +510,9 @@ class CandidateEvaluator:
             result.discharge_failed = True
             result.designs = self._designs(candidate, orchestrator)
             self._progress("step 2 of 3: dormancy skipped, discharge failed")
-            self._progress("step 3 of 3: packaging skipped, discharge failed")
+            self._progress("step 3 of 3: packaging at screening thickness")
+            self._run_packaging(orchestrator, result)
+            result.packaging_screened = True
             return
         self._progress("step 2 of 3: dormancy")
         point = self._run_dormancy(candidate)
@@ -526,7 +541,9 @@ class CandidateEvaluator:
             result.sizing_status = "discharge_failed"
             result.designs = self._designs(with_insulation(candidate, screen), screening)
             self._progress("step 2 of 3: dormancy skipped, discharge failed")
-            self._progress("step 3 of 3: packaging skipped, discharge failed")
+            self._progress("step 3 of 3: packaging at screening thickness")
+            self._run_packaging(screening, result)
+            result.packaging_screened = True
             return
 
         self._progress("step 2 of 3: dormancy (insulation sizing by bisection)")
@@ -642,12 +659,16 @@ def candidate_row(variables: Sequence[DesignVariable], x: Sequence[float],
         row.update({"t_ins_star": candidate.t_ins_star, "sizing_status": candidate.sizing_status,
                     "n_dormancy_evals": candidate.n_dormancy_evals})
     row.update({"f_vent": candidate.f_vent, "packaging_feasible": candidate.packaging_feasible,
+                "packaging_screened": candidate.packaging_screened,
                 "feasible": candidate.feasible, "discharge_failed": candidate.discharge_failed,
                 "error": candidate.error or ""})
     if candidate.discharge_failed:
         # Blank cells mark quantities that were never computed (not zero results).
-        for name in ("eta_vent", "zeta_p", "g_dorm", "g_packaging", "f_vent", "packaging_feasible"):
+        for name in ("eta_vent", "g_dorm", "f_vent"):
             row[name] = ""
+        if not candidate.packaging_evaluated:
+            for name in ("zeta_p", "g_packaging", "packaging_feasible"):
+                row[name] = ""
     return row
 
 

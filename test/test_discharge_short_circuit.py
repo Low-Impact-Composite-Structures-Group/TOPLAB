@@ -1,4 +1,4 @@
-"""Discharge-infeasible candidates must skip dormancy and packaging and be rejected via g_dis."""
+"""Discharge-infeasible candidates skip dormancy but retain a packaging screen."""
 
 import csv
 from types import SimpleNamespace
@@ -48,7 +48,7 @@ def calls(monkeypatch):
         log["dormancy"] += 1
         return {"tanks": [{"initial_mass_kg": 10.0, "vented_mass_kg": 0.1}]}
 
-    def packaging(radii, half_lengths, dims):
+    def packaging(radii, half_lengths, dims, **kwargs):
         log["packaging"] += 1
         return SimpleNamespace(feasible=True, z_shift=0.0, zeta_p=0.2, placements=[])
 
@@ -67,17 +67,18 @@ def _evaluator(skip):
     ev.maximum_vented_fraction, ev.hold_period_s = 0.05, 3600.0
     ev.progress, ev.evaluation_count, ev._stdout = False, 0, None
     ev.skip_after_discharge_failure = skip
+    ev.placement_options = {}
     return ev
 
 
-def test_discharge_failure_skips_dormancy_and_packaging(calls, monkeypatch):
+def test_discharge_failure_skips_dormancy_but_screens_packaging(calls, monkeypatch):
     monkeypatch.setattr(_Orchestrator, "actual_s", 0.5 * MISSION_S)
     result = _evaluator(True).evaluate([0.5, 2.0])
-    assert calls == {"dormancy": 0, "packaging": 0}
+    assert calls == {"dormancy": 0, "packaging": 1}
     assert result.discharge_failed and not result.feasible and result.error is None
+    assert result.packaging_evaluated and result.packaging_screened
     g = constraint_vector(result)
-    assert g[0] > 0 and g[1:] == [0.0, 0.0]
-    assert g[0] == pytest.approx(0.5)  # shortfall in hours
+    assert g == pytest.approx([0.5, 0.0, -0.2])
     assert objective_vector(result, ("eta_g", "eta_v", "zeta_p")) == [0.0, 0.0, 0.0]
 
 
@@ -87,7 +88,9 @@ def test_discharge_failure_row_marks_unavailable_quantities(calls, monkeypatch):
     row = candidate_row([], [], result)
     assert row["discharge_failed"] is True and row["feasible"] is False
     assert row["g_dis"] > 0 and row["eta_g"] > 0
-    for name in ("zeta_p", "g_dorm", "g_packaging", "f_vent"):
+    assert row["packaging_screened"] and row["zeta_p"] == pytest.approx(0.2)
+    assert row["g_packaging"] == pytest.approx(-0.2)
+    for name in ("g_dorm", "f_vent"):
         assert row[name] == ""
 
 
@@ -110,3 +113,33 @@ def test_infeasible_placeholder_cannot_dominate_feasible():
                            mission_completed=True)
     cv = lambda r: sum(max(0.0, g) for g in constraint_vector(r))
     assert cv(bad) > 0 >= cv(good)
+
+
+def test_packaging_violation_is_retained_and_discharge_is_normalized():
+    bad = CandidateResult(discharge_failed=True, discharge_residual=1.0, mission_duration_s=3600.0,
+                          packaging_evaluated=True, packaging_screened=True, zeta_p=-0.5)
+    near = CandidateResult(discharge_residual=0.0, mission_duration_s=3600.0,
+                           packaging_evaluated=True, zeta_p=-0.1, mission_completed=True)
+    assert constraint_vector(bad) == pytest.approx([1 / 3600, 0, 0.5])
+    assert constraint_vector(near) == pytest.approx([0, 0, 0.1])
+    assert sum(max(0, v) for v in constraint_vector(bad)) > sum(max(0, v) for v in constraint_vector(near))
+
+
+def test_optimizer_forwards_base_placement_settings(monkeypatch):
+    settings = {"max_iterations": 42, "n_axial_samples": 20}
+    base = SimpleNamespace(packaging={
+        "aft_fuselage_dimensions": {"d1": 4, "d2": 4, "d3": 4, "l1": 8, "l2": 1, "l3": 1, "epsilon": 0.05},
+        "placement": settings,
+    })
+    ev = CandidateEvaluator(base, [], 0.05, 3600, progress=False, evaluation_timeout_s=None)
+    received = {}
+
+    def packaging(radii, half_lengths, dims, **kwargs):
+        received.update(kwargs)
+        return SimpleNamespace(feasible=True, z_shift=0.1, zeta_p=0.1, placements=[])
+
+    monkeypatch.setattr(evaluation, "maximize_packaging_compaction", packaging)
+    result = CandidateResult()
+    ev._run_packaging(_Orchestrator(base), result)
+    assert received == settings
+    assert result.packaging_evaluated and result.packaging_feasible

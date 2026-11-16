@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Sequence
+
+import numpy as np
 
 
 Vector3 = tuple[float, float, float]
@@ -312,6 +315,14 @@ def _segment_distance(
     e = _dot(v, w)
 
     small = 1e-14
+    if a < small and c < small:
+        return _norm(w)
+    if a < small:
+        t = min(1.0, max(0.0, e / c))
+        return _norm(_sub(w, _scale(v, t)))
+    if c < small:
+        s = min(1.0, max(0.0, -d / a))
+        return _norm(_add(w, _scale(u, s)))
     denom = a * c - b * b
 
     s_num = 0.0
@@ -407,6 +418,13 @@ def _pose_axis(center: Vector3, dims: AftFuselageDimensions) -> Vector3:
     return dims.tangent_at(z)
 
 
+@lru_cache(maxsize=32)
+def _surface_sampling_grid(n_axial: int, n_circumferential: int):
+    axial = np.linspace(-1.0, 1.0, n_axial + 1)[:, None]
+    angles = 2.0 * math.pi * np.arange(n_circumferential)[None, :] / n_circumferential
+    return axial, np.cos(angles), np.sin(angles)
+
+
 def _containment_violation(
     center: Vector3,
     axis: Vector3,
@@ -424,44 +442,37 @@ def _containment_violation(
     e1, e2 = _transverse_basis(axis)
     h = geometry.half_total_length
 
-    max_violation = -float("inf")
+    axial_extent = abs(axis[2]) * geometry.half_cyl_length + geometry.outer_radius
+    max_violation = max(
+        z_min + dims.epsilon - (center[2] - axial_extent),
+        center[2] + axial_extent + dims.epsilon - dims.total_length,
+    )
 
-    for i in range(n_axial_samples + 1):
-        delta = -h + 2.0 * h * i / n_axial_samples
-        radius = _capsule_radius_at_offset(
-            delta,
-            geometry.outer_radius,
-            geometry.half_cyl_length,
-        )
-        section_center = _add(center, _scale(axis, delta))
-
-        # At the poles, one point is sufficient.
-        n_phi = 1 if radius <= 1e-14 else n_circumferential_samples
-
-        for j in range(n_phi):
-            phi = 0.0 if n_phi == 1 else 2.0 * math.pi * j / n_phi
-            radial_vector = _add(
-                _scale(e1, radius * math.cos(phi)),
-                _scale(e2, radius * math.sin(phi)),
-            )
-            point = _add(section_center, radial_vector)
-            z = point[2]
-
-            if z < z_min:
-                violation = z_min - z + dims.epsilon
-            elif z > dims.total_length:
-                violation = z - dims.total_length + dims.epsilon
-            else:
-                local_y = dims.center_y_at(z)
-                radial_distance = math.hypot(
-                    point[0],
-                    point[1] - local_y,
-                )
-                allowed_radius = dims.radius_at(z) - dims.epsilon
-                violation = radial_distance - allowed_radius
-
-            max_violation = max(max_violation, violation)
-
+    axial, cos_phi, sin_phi = _surface_sampling_grid(n_axial_samples, n_circumferential_samples)
+    delta = axial * h
+    cap_distance = np.maximum(0.0, np.abs(delta) - geometry.half_cyl_length)
+    radius = np.sqrt(np.maximum(0.0, geometry.outer_radius**2 - cap_distance**2))
+    x = center[0] + axis[0] * delta + radius * (e1[0] * cos_phi + e2[0] * sin_phi)
+    y = center[1] + axis[1] * delta + radius * (e1[1] * cos_phi + e2[1] * sin_phi)
+    z = center[2] + axis[2] * delta + radius * (e1[2] * cos_phi + e2[2] * sin_phi)
+    inside = (z >= z_min) & (z <= dims.total_length)
+    if np.any(inside):
+        z_inside = z[inside]
+        local_y = np.zeros_like(z_inside)
+        fuselage_radius = np.full_like(z_inside, 0.5 * dims.d1)
+        cone1 = (z_inside > dims.l1) & (z_inside <= dims.interface_2)
+        cone2 = z_inside > dims.interface_2
+        if np.any(cone1):
+            dz = z_inside[cone1] - dims.l1
+            local_y[cone1] = dz * math.tan(math.radians(dims.psi_1))
+            fuselage_radius[cone1] = 0.5 * (dims.d1 + dz / dims.l2 * (dims.d2 - dims.d1))
+        if np.any(cone2):
+            dz = z_inside[cone2] - dims.interface_2
+            local_y[cone2] = (dims.l2 * math.tan(math.radians(dims.psi_1))
+                              + dz * math.tan(math.radians(dims.psi_2)))
+            fuselage_radius[cone2] = 0.5 * (dims.d2 + dz / dims.l3 * (dims.d3 - dims.d2))
+        radial_violation = np.hypot(x[inside], y[inside] - local_y) - fuselage_radius + dims.epsilon
+        max_violation = max(max_violation, float(np.max(radial_violation)))
     return max_violation
 
 
@@ -550,7 +561,7 @@ def _evaluate_placement(
             )
 
             pair_violation = max(0.0, dims.epsilon - gap)
-            if pair_violation > 0.0:
+            if pair_violation > 1e-10:
                 feasible = False
                 violations[i] += pair_violation
                 violations[j] += pair_violation
@@ -639,7 +650,11 @@ def _initial_center_sets(
     n = len(geometries)
     axial = _initial_centers_axial(geometries, dims, z_min)
 
-    if n <= 1:
+    if n == 1:
+        geometry = geometries[0]
+        center = z_min + dims.epsilon + 1e-8 + geometry.half_total_length
+        if center + geometry.half_total_length + dims.epsilon <= dims.l1:
+            return [("cylinder_stack", [(0.0, 0.0, center)]), ("axial", axial)]
         return [("axial", axial)]
 
     # Prefer the cylindrical region for transverse starts because it has a
@@ -673,13 +688,23 @@ def _initial_center_sets(
         staggered_x.append((sign * offset, local_y, z))
         staggered_y.append((0.0, local_y + sign * offset, z))
 
-    return [
+    starts = [
         ("axial", axial),
         ("transverse_x", transverse_x),
         ("transverse_y", transverse_y),
         ("staggered_x", staggered_x),
         ("staggered_y", staggered_y),
     ]
+    # A fully axial stack is a constructive fallback when the extended cylinder
+    # is long enough, rather than relying on local search to discover it.
+    cursor = z_min + dims.epsilon + 1e-8
+    stacked = []
+    for geometry in geometries:
+        stacked.append((0.0, 0.0, cursor + geometry.half_total_length))
+        cursor += geometry.total_length + dims.epsilon + 1e-8
+    if cursor - dims.epsilon <= dims.l1:
+        starts.insert(0, ("cylinder_stack", stacked))
+    return starts
 
 
 def _search_from_initial_centers(
@@ -834,9 +859,9 @@ def place_tanks_in_aft(
 ) -> AftPlacementResult:
     """Find feasible rigid-body poses using deterministic multistart search.
 
-    Five geometrically distinct starts are attempted for multi-tank problems:
-    axial, transverse-x, transverse-y, staggered-x, and staggered-y.  Each start
-    uses the same strict-improvement coordinate-descent search as before.  The
+    Axial, transverse and staggered starts are attempted for multi-tank problems.
+    A constructive axial stack is also used when it fits in the cylinder. Each start
+    uses a strict-improvement coordinate-descent search. The
     first feasible result is returned; if all starts fail, the failed result
     with the smallest maximum accumulated violation is returned.
     """
@@ -853,6 +878,8 @@ def place_tanks_in_aft(
 
     if not 0.0 < step_reduction < 1.0:
         raise ValueError("step_reduction must lie strictly between 0 and 1.")
+    if n_axial_samples <= 0 or n_circumferential_samples <= 0:
+        raise ValueError("Placement sample counts must be positive.")
 
     n = len(outer_radii)
 
