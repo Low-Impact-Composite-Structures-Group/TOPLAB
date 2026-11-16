@@ -1,0 +1,55 @@
+analysis:
+  name: SLH2 dormancy validation reference
+  description: Fixed baseline for the insulation RC and quasi-steady regression tests.
+  version: '1.0'
+network:
+  nodes:
+    - node_id: 1
+      type: tank
+      fluid: SLH2
+      geometry:
+        phi: 2.0
+        radius: 0.78
+      initial_conditions:
+        pressure: 1600000.0
+        temperature: 25.0
+      operating_limits:
+        minimum_pressure: 600000.0
+        venting_pressure: 2000000.0
+      materials:
+        liner:
+          nist_path: aluminum_6061T6_nist
+          thickness: 0.003
+        composite:
+          nist_path: carbon_epoxy_nist
+          winding_angle: 54.7
+          thickness: calculated
+        insulation:
+          model: modified_lockheed
+          thickness: 0.040
+          pressure_torr: 5.0e-4
+          degration_factor: 1.0
+          shell_thickness: 0.004
+          alpha_shell: 5.0
+          emissivity_shell: 0.05
+        safety_margin: 2.0
+      stopping_criteria:
+        minimum_density: 2.4
+        use_density_stopping_events: true
+  edges: []
+mission:
+  type: dormancy
+  profile: constant_flow
+  assigned_to_node: 1
+  ambient_temperature: 288.15
+  flow_rate: 0.0
+  duration: 43200.0
+solver:
+  method: LSODA
+  rtol: 1e-6
+  atol: 1e-9
+  max_step: 30.0
+output:
+  silent: true
+  save_plots: false
+  save_data: false

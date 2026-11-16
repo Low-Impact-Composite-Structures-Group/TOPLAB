@@ -1,6 +1,6 @@
 """Examples for the aft-fuselage packaging compaction search.
 
-Run next to ``aft_placement_modified.py``.  Each case first solves the ordinary
+Run as ``python -m toplab.packaging.test_zeta_compaction``. Each case first solves the ordinary
 placement problem at z_shift=0, then uses bisection to find the largest feasible
 forward bulkhead shift and reports zeta_p = z_shift / L1.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from aft_placement import (
+from toplab.packaging.aft_placement import (
     AftFuselageDimensions,
     maximize_packaging_compaction,
     plot_aft_placement,

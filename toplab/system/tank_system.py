@@ -938,6 +938,36 @@ class TankSystem:
         for edge in self.coupling_valves:
             edge_states.extend(edge.initialize(initial_tanks.tank_states))
         y0 = np.concatenate([y0, edge_states])
+        track_dormancy = bool(solver_config.get('track_dormancy', False))
+        if track_dormancy:
+            from toplab.fluids.coolprop_safe import safe_pressure_from_T_rho
+            n_tanks = len(self.tanks)
+            y0 = np.concatenate([y0, np.zeros(n_tanks)])
+
+            def dormancy_rhs(t, y):
+                derivatives, _, vent = self._rhs(t, y)
+                derivatives[-n_tanks:] = vent
+                return derivatives
+
+            self.solver.set_ode_function(dormancy_rhs)
+
+            def vent_event(i):
+                def event(t, y):
+                    rho = float(y[5 * i]) / self._cached_tank_properties[i]['volume']
+                    return safe_pressure_from_T_rho(float(y[5 * i + 1]), rho,
+                                                    self._coolprop_fluids[i]) - self.config.tanks[i].P_VENT
+                event.terminal = False
+                event.direction = 1
+                return event
+
+            vent_events = [vent_event(i) for i in range(n_tanks)]
+            # CoolProp's P->density->P round trip is not exact at the threshold.
+            initial_venting = [
+                event(0.0, y0) >= -1e-12 * max(1.0, abs(self.config.tanks[i].P_VENT))
+                for i, event in enumerate(vent_events)
+            ]
+        else:
+            vent_events = []
 
         # Integration setup - use mission duration from configuration
         if self.config.MISSION_DURATION is None:
@@ -997,12 +1027,19 @@ class TankSystem:
             self.solver, self.coupling_valves, stop_events, t_span_, y0_,
             switch_event=self._mode_switch_event, edge_flows=self._edge_flows_at,
             extras=self._discharge_heat_at,
-            log=self._log_summary, **integration_params,
+            log=self._log_summary, observe_events=vent_events, **integration_params,
         )
 
         warning = stopping.truncate_if_missed(solution)
         if warning:
             self._log_summary(f"   WARNING: {warning}")
+        if track_dormancy:
+            self.dormancy_vented_masses = solution.y[-n_tanks:, -1].copy()
+            self.dormancy_vent_onsets = [
+                0.0 if initial_venting[i] else next(
+                    (float(t) for t in solution.observed_events[i] if t <= solution.t[-1]), None)
+                for i in range(n_tanks)
+            ]
 
         elapsed_time = time.time() - start_time
         self._log_summary(f"Integration completed in {elapsed_time:.1f}s")

@@ -26,10 +26,7 @@ from toplab.orchestration.system_orchestrator import SystemOrchestrator
 from toplab.thermodynamics.insulation_rc_diagnostic import InsulationRCModel
 from toplab.system.state_management import MultiTankState
 
-CONFIG = (
-    Path(__file__).resolve().parents[3]
-    / "toplab-apps/analysis/novacom/slh2_baseline/config_slh2_baseline.yaml"
-)
+CONFIG = Path(__file__).with_name("slh2_reference.yaml")
 DURATION = 12 * 3600.0
 
 

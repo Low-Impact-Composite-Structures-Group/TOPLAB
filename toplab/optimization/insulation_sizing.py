@@ -5,8 +5,7 @@ assumed to decrease monotonically with thickness, so the smallest feasible grid 
 binary search with at most ``2 + ceil(log2(N - 1))`` dormancy simulations for ``N`` grid values
 (the two end points plus the bisection decisions).
 
-The routine only needs a callable ``thickness -> DormancyPoint``; it knows nothing about tanks, so a
-multi-tank sizing policy can be added by supplying a different callable.
+The single-coordinate routine is also used by the coupled, full-system coordinate search.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ INFEASIBLE = "dormancy_infeasible"  # even t_max violates dormancy
 
 @dataclass(frozen=True)
 class DormancyPoint:
-    """Outcome of one dormancy simulation. ``g_dorm = f_vent / f_vent_max - 1`` (<= 0 is feasible)."""
+    """Outcome of one dormancy simulation; ``g_dorm <= 0`` is feasible."""
     g_dorm: float
     f_vent: float
     data: Any = field(default=None, compare=False)  # full analysis payload, reused by the caller
@@ -119,6 +118,77 @@ def size_insulation(evaluate: Callable[[float], DormancyPoint], grid: Insulation
         else:
             low = middle
     return done(BRACKETED, high)
+
+
+@dataclass(frozen=True)
+class MultiTankSizingResult:
+    thicknesses: tuple[float, ...]
+    statuses: tuple[str, ...]
+    status: str
+    point: DormancyPoint
+    n_evaluations: int
+
+
+def size_tank_insulations(evaluate: Callable[[tuple[float, ...]], DormancyPoint],
+                          grid: InsulationGrid, tank_count: int) -> MultiTankSizingResult:
+    """Coordinate bisection with full-system verification, assuming coordinate monotonicity.
+
+    Start at the maximum. While infeasible, search each tank's own residual to seek a
+    feasible starting design. Once feasible, minimize each coordinate while requiring
+    *all* tanks to remain feasible. Stop on a fixed point or an infeasible cycle.
+    The outcome is coordinatewise, not globally, minimal.
+    """
+    if tank_count <= 0 or grid.t_max <= 0:
+        raise ValueError("Insulation sizing requires tanks and a positive grid maximum.")
+    cache: dict[tuple[float, ...], DormancyPoint] = {}
+
+    def at(values: tuple[float, ...]) -> DormancyPoint:
+        if values not in cache:
+            cache[values] = evaluate(values)
+        return cache[values]
+
+    if tank_count == 1:
+        def one(thickness: float) -> DormancyPoint:
+            return (DormancyPoint(math.inf, math.nan) if thickness <= 0.0 else
+                    at((thickness,)))
+        result = size_insulation(one, grid)
+        return MultiTankSizingResult((result.t_ins,), (result.status,),
+                                     "converged" if result.feasible else INFEASIBLE,
+                                     result.point, len(cache))
+
+    values = (grid.t_max,) * tank_count
+    point = at(values)
+    seen: set[tuple[float, ...]] = set()
+    statuses = [INFEASIBLE] * tank_count
+    while values not in seen:
+        seen.add(values)
+        previous = values
+        for i in range(tank_count):
+            globally_feasible = point.g_dorm <= 0.0
+
+            def at_coordinate(thickness: float) -> DormancyPoint:
+                if thickness <= 0.0:
+                    return DormancyPoint(math.inf, math.nan)
+                trial = list(values)
+                trial[i] = thickness
+                p = at(tuple(trial))
+                residuals = p.data["residuals"]
+                if len(residuals) != tank_count:
+                    raise ValueError("Dormancy simulation returned the wrong number of tank residuals.")
+                return DormancyPoint(p.g_dorm if globally_feasible else residuals[i],
+                                     p.f_vent, p.data)
+
+            sizing = size_insulation(at_coordinate, grid)
+            statuses[i] = sizing.status
+            updated = list(values)
+            updated[i] = sizing.t_ins
+            values = tuple(updated)
+            point = at(values)
+        if values == previous:
+            break
+    status = ("converged" if point.g_dorm <= 0.0 and values == previous else
+              "dormancy_infeasible" if values == previous else "nonconverged")
+    return MultiTankSizingResult(values, tuple(statuses), status, point, len(cache))
 
 
 def check_monotonic(evaluate: Callable[[float], DormancyPoint], grid: InsulationGrid,

@@ -58,6 +58,21 @@ def test_switch_event_attributes_come_from_the_caller():
     assert (switch.tank_idx, switch.pressure_pa, switch.direction) == (0, 2.0, 1)
 
 
+def test_nonterminal_events_are_collected_across_mode_switches():
+    edge = _Thermostat()
+
+    def observe(t, y):
+        return y[0] - 1.75
+
+    observe.terminal, observe.direction = False, 1
+    sol = integrate_with_mode_switches(
+        _Solver(lambda t, y: [1.0 if edge.on else -1.0]), [edge], [], (0.0, 4.0),
+        np.array([1.5]), switch_event=_event, edge_flows=lambda t, y: [0.0],
+        observe_events=[observe])
+    assert sol.observed_events[0] == pytest.approx([0.25, 2.25])
+    assert sol.t[-1] == pytest.approx(4.0)
+
+
 def test_valve_modes_and_states():
     valve = PressureTriggeredValve(0, 1, p_open=16e5, p_close=30e5, path=ValvePath(orifice_diameter_m=0.005),
                                    valve_time_constant_s=0.5)

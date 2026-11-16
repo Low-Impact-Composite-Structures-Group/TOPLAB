@@ -61,7 +61,8 @@ def nsga2_row(variables: Sequence[DesignVariable], x: Sequence[float], c: Candid
     flat = {**candidate_row(variables, x, c), "evaluation": c.eval_id, "worker_rank": c.worker_rank,
             "pid": c.pid, "status": candidate_status(c)}
     names = [v.name for v in variables]
-    order = [*ID_COLUMNS, *names, *SIZED_COLUMNS, *NSGA2_OBJECTIVES, *DIAGNOSTIC_COLUMNS,
+    sized = [key for key in flat if key.startswith("t_ins_star_")]
+    order = [*ID_COLUMNS, *names, *SIZED_COLUMNS, *sized, *NSGA2_OBJECTIVES, *DIAGNOSTIC_COLUMNS,
              *CONSTRAINT_COLUMNS, *STATUS_COLUMNS]
     row = {key: flat[key] for key in order if key in flat}
     row.update({key: value for key, value in flat.items() if key not in row})

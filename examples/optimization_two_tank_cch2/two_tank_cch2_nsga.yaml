@@ -9,7 +9,7 @@ design_variables:
   radius_2: {min: 0.30, max: 0.75, baseline: 0.55}
 
 # Insulation thickness is not evolved: for every candidate it is sized to the thinnest value on this
-# grid [m] that meets the dormancy requirement (binary search). All tanks share the sized thickness.
+# grid [m] that meets the dormancy requirement using per-tank coordinate bisection.
 insulation_sizing:
   t_min: 0.0
   t_max: 0.050

@@ -22,6 +22,7 @@ def integrate_with_mode_switches(
     edge_flows: Callable,
     extras: Callable = None,
     log: Callable[[str], None] = lambda msg: None,
+    observe_events: List[Callable] = None,
     **solver_kwargs,
 ):
     """Integrate until the end of ``t_span`` or until a stop event fires.
@@ -30,17 +31,22 @@ def integrate_with_mode_switches(
     ``edge_flows(t, y)`` returns the per-edge flows [kg/s] at an accepted point (evaluated with the
     mode that was active during the segment). Returns an object with ``t``, ``y``, ``edge_flows``
     (n_edges x n_points), ``extras`` (n_rows x n_points, from the optional
-    ``extras(t, y)`` callback evaluated at the same points) and ``t_events`` (one array per stop event).
+    ``extras(t, y)`` callback evaluated at the same points), ``t_events`` (one array per
+    stop event) and ``observed_events`` (one array per nonterminal observation event).
     """
     t0, t_end = float(t_span[0]), float(t_span[1])
     n_stop = len(stop_events)
     stop_times = [[] for _ in stop_events]
+    observe_events = observe_events or []
+    observed_times = [[] for _ in observe_events]
     times, states, flows, extra_rows = [], [], [], []
 
     for _ in range(MAX_SWITCHES):
         switches = [s for edge in edges for s in edge.mode_switches()]
-        events = list(stop_events) + [switch_event(s) for s in switches]
+        events = list(stop_events) + [switch_event(s) for s in switches] + observe_events
         sol = solver.integrate_full(t_span=(t0, t_end), y0=y0, events=events, **solver_kwargs)
+        if not sol.success:
+            raise RuntimeError(f"Integration failed at t={sol.t[-1]:g} s: {sol.message}")
 
         # A restart repeats the switch point, which the previous segment already recorded.
         keep = slice(1, None) if times else slice(None)
@@ -58,6 +64,8 @@ def integrate_with_mode_switches(
             stop_times[k].extend(te)
             stopped = stopped or len(te) > 0
         fired = [s for k, s in enumerate(switches) if len(sol.t_events[n_stop + k]) > 0]
+        for k, times_for_event in enumerate(observed_times):
+            times_for_event.extend(sol.t_events[n_stop + len(switches) + k])
         if stopped or not fired or sol.t[-1] >= t_end - 1e-9:
             break
 
@@ -74,4 +82,5 @@ def integrate_with_mode_switches(
         edge_flows=np.concatenate(flows, axis=1),
         extras=np.concatenate(extra_rows, axis=1),
         t_events=[np.asarray(t) for t in stop_times],
+        observed_events=[np.asarray(t) for t in observed_times],
     )

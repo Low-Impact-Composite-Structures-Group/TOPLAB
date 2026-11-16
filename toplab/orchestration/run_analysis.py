@@ -26,14 +26,17 @@ def _is_output_silent(config: AnalysisConfig) -> bool:
 
 def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
     """
-    Run a zero-outflow dormancy simulation from the same initial conditions as
-    discharge and verify the vented mass stays within the configured rate limit.
+    Run a zero-outflow hold from the discharge initial conditions.
+
+    With no loss limit (or a zero limit), require that vent pressure is not reached
+    before the end of the hold. A positive limit selects the legacy vent-loss mode.
+    Vent mass is integrated from the vent flow, not inferred from tank mass changes.
 
     Uses ``config.dormancy_check``:
         enabled: bool
         max_step_s: float (solver max step during the hold, default 300)
         duration_h: float (default 12.0)
-        maximum_loss_percent: float (required when enabled)
+        maximum_loss_percent: float (optional; positive selects legacy loss mode)
 
     Returns:
         dict with 'ran' (bool), 'passed' (bool), and 'tanks' (per-tank details),
@@ -44,13 +47,23 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         return {'ran': False}
 
     duration_h = float(dormancy_config.get('duration_h', 12.0))
-    maximum_loss_percent = float(dormancy_config.get('maximum_loss_percent'))
+    maximum_loss_percent = float(dormancy_config.get(
+        'maximum_loss_percent', dormancy_config.get('maximum_vented_percentage',
+        float(dormancy_config.get('maximum_loss_percent_per_hour', 0.0)) * duration_h)))
+    if duration_h <= 0.0 or maximum_loss_percent < 0.0:
+        raise ValueError("Dormancy duration must be positive and the vent loss limit nonnegative.")
+    if str(config.solver.get('method', 'RK45')).upper() == 'RK4_FIXED':
+        raise ValueError("Dormancy onset requires an adaptive solver with root-located events; "
+                         "RK4_FIXED detects events only at step boundaries.")
     ambient_temperature = config.missions[0].ambient_temperature if config.missions else 288.15
 
     if not silent:
         print(f"\n{'=' * 80}")
         print(f"DORMANCY VENTING CHECK ({duration_h:.1f} h) - same initial conditions as discharge")
-        print(f"Requirement: no more than {maximum_loss_percent:.3f}% of initial fuel mass vented during dormancy.")
+        if maximum_loss_percent > 0.0:
+            print(f"Requirement: no more than {maximum_loss_percent:.3f}% of initial fuel mass vented.")
+        else:
+            print("Requirement: no venting needed before the hold ends.")
         print('=' * 80)
 
     dormancy_mission = MissionSpec(
@@ -66,40 +79,55 @@ def run_dormancy_check(config: AnalysisConfig, silent: bool = False) -> dict:
         output={**config.output, 'save_plots': False, 'save_data': False, 'silent': True},
         dormancy_check=None,
         # Zero-outflow thermal evolution is slow; the mission step cap is unnecessarily fine here.
-        solver={**config.solver, 'max_step': float(dormancy_config.get('max_step_s', 300.0))},
+        solver={**config.solver, 'max_step': float(dormancy_config.get('max_step_s', 300.0)),
+                'track_dormancy': True},
     )
     orchestrator = SystemOrchestrator(dormancy_case, verbosity='summary', sizing_config=config)
-    results = orchestrator.run_simulation()
+    results = orchestrator.run_simulation(solver_config=dormancy_case.solver)
 
     actual_duration_h = float(results.times[-1]) / 3600.0
+    complete = actual_duration_h >= duration_h - max(1e-8, duration_h * 1e-9)
     all_tanks_pass = True
     tank_results = []
     for tank_index in range(len(orchestrator.tank_geometries)):
         initial_mass = results.multi_tank_states[0].get_tank_state(tank_index).fuel_mass
         final_mass = results.multi_tank_states[-1].get_tank_state(tank_index).fuel_mass
-        vented_mass = max(0.0, initial_mass - final_mass)
+        vented_mass = float(orchestrator.tank_system.dormancy_vented_masses[tank_index])
+        onset_s = orchestrator.tank_system.dormancy_vent_onsets[tank_index]
+        if initial_mass <= 0.0 or vented_mass < -1e-9:
+            raise RuntimeError("Invalid initial mass or integrated vent mass in dormancy simulation.")
         loss_percent = (
             100.0 * vented_mass / initial_mass
         )
-        passed = loss_percent <= maximum_loss_percent
+        passed = (loss_percent <= maximum_loss_percent if maximum_loss_percent > 0.0 else
+                  onset_s is None or onset_s >= duration_h * 3600.0)
         all_tanks_pass = all_tanks_pass and passed
         tank_results.append({
             'tank_index': tank_index,
             'initial_mass_kg': initial_mass,
+            'final_mass_kg': final_mass,
             'vented_mass_kg': vented_mass,
             'loss_percent': loss_percent,
+            'vent_onset_s': onset_s,
+            'vent_onset_censored': onset_s is None,
+            'loss_is_lower_bound': not complete,
             'passed': passed,
         })
         if not silent:
             status = 'PASS' if passed else 'FAIL'
-            print(f"  Tank {tank_index + 1}: vented {vented_mass:.3f} kg over {actual_duration_h:.2f} h "
-                  f"({loss_percent:.4f}% of initial mass, limit {maximum_loss_percent:.3f}%) - {status}")
+            onset = f"{onset_s / 3600.0:.3f} h" if onset_s is not None else f">= {duration_h:.3f} h"
+            print(f"  Tank {tank_index + 1}: vent onset {onset}; vented {vented_mass:.3f} kg "
+                  f"({loss_percent:.4f}% of initial mass) - {status}")
 
+    if not complete and any(tank['passed'] for tank in tank_results):
+        raise RuntimeError(f"Dormancy simulation stopped early at {actual_duration_h:g} h "
+                           f"before the required {duration_h:g} h; some tank outcomes are unknown.")
     if not silent:
         verdict = 'PASS' if all_tanks_pass else 'FAIL'
         print(f"  -> Dormancy venting requirement: {verdict}")
 
-    return {'ran': True, 'passed': all_tanks_pass, 'tanks': tank_results}
+    return {'ran': True, 'passed': all_tanks_pass, 'complete': complete,
+            'duration_s': actual_duration_h * 3600.0, 'tanks': tank_results}
 
 
 def _stdout_context(silent: bool):

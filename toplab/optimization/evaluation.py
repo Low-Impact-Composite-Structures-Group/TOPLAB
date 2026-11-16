@@ -10,7 +10,6 @@ from __future__ import annotations
 import copy
 import csv
 import contextlib
-import math
 import os
 import re
 import sys
@@ -24,7 +23,7 @@ import yaml
 
 from toplab.config import AnalysisConfig, load_config
 from toplab.optimization.insulation_sizing import (
-    DormancyPoint, InsulationGrid, size_insulation)
+    DormancyPoint, InsulationGrid, size_tank_insulations)
 from toplab.packaging.aft_placement import (
     AftFuselageDimensions, check_tank_radii_fit, maximize_packaging_compaction)
 
@@ -117,12 +116,16 @@ def apply_design(config: AnalysisConfig, variables: Sequence[DesignVariable],
                    output={**config.output, "silent": True, "save_plots": False, "save_data": False})
 
 
-def with_insulation(config: AnalysisConfig, thickness: float) -> AnalysisConfig:
-    """Return a copy of ``config`` with every tank's insulation set to ``thickness`` [m]."""
+def with_insulation(config: AnalysisConfig, thickness: float | Sequence[float]) -> AnalysisConfig:
+    """Return a copy with the specified insulation thickness for each tank [m]."""
+    thicknesses = ([float(thickness)] * len(config.tanks) if isinstance(thickness, (int, float))
+                   else list(thickness))
+    if len(thicknesses) != len(config.tanks):
+        raise ValueError("Insulation thickness count must match the tank count.")
     tanks = []
-    for tank in config.tanks:
+    for tank, value in zip(config.tanks, thicknesses):
         materials = copy.deepcopy(tank.materials)
-        materials.setdefault("insulation", {})["thickness"] = float(thickness)
+        materials.setdefault("insulation", {})["thickness"] = float(value)
         tanks.append(replace(tank, materials=materials))
     return replace(config, tanks=tanks)
 
@@ -224,9 +227,12 @@ class CandidateResult:
     # candidate; ``worker_rank``/``pid`` record where the analysis actually ran.
     # Set when discharge fails and dormancy sizing is skipped.
     discharge_failed: bool = False
-    # Internal insulation sizing (NSGA-II): the thickness used for the whole design, how it was
-    # found and how many dormancy simulations that took. ``None`` when thickness is not sized.
+    # Scalar alias for single-tank studies; multi-tank results use the per-tank lists.
     t_ins_star: float | None = None
+    t_ins_stars: list[float] = field(default_factory=list)
+    tank_sizing_statuses: list[str] = field(default_factory=list)
+    vent_onset_s: list[float | None] = field(default_factory=list)
+    dormancy_complete: bool | None = None
     sizing_status: str = ""
     n_dormancy_evals: int = 0
     eval_id: int = 0
@@ -248,7 +254,8 @@ def physical_residuals(result: CandidateResult) -> dict[str, float]:
     """Return the physical constraints in ``g <= 0`` form.
 
     ``g_dis`` is the discharge shortfall in hours, ``g_dorm`` the largest per-tank
-    vented fraction relative to its limit minus one, and ``g_packaging`` the negated
+    vented fraction relative to its limit minus one (legacy mode), or the normalized
+    shortfall to the required first-vent time (no-vent mode), and ``g_packaging`` the negated
     packaging compaction margin ``-zeta_p``. A candidate that failed to evaluate
     violates every constraint by :data:`FAILED_VIOLATION`.
     """
@@ -270,6 +277,7 @@ def dormancy_limits(base: AnalysisConfig, cfg: Mapping[str, Any]) -> tuple[float
     The optimisation YAML ``dormancy`` section wins; otherwise the base config's
     ``dormancy_check`` supplies ``duration_h`` and ``maximum_vented_percentage``,
     ``maximum_loss_percent`` or ``maximum_loss_percent_per_hour`` (scaled by the hold).
+    An absent or zero limit selects first-vent dormancy.
     """
     settings = cfg.get("dormancy", {}) or {}
     check = base.dormancy_check or {}
@@ -282,10 +290,10 @@ def dormancy_limits(base: AnalysisConfig, cfg: Mapping[str, Any]) -> tuple[float
         percent = check.get("maximum_loss_percent")
     if percent is None and "maximum_loss_percent_per_hour" in check:
         percent = float(check["maximum_loss_percent_per_hour"]) * hours
-    if percent is None or float(percent) <= 0.0:
-        raise ValueError("Define a positive dormancy.maximum_vented_percentage "
-                         "(or dormancy_check.maximum_loss_percent) for the venting limit.")
-    return hours * SECONDS_PER_HOUR, float(percent) / 100.0
+    percent = 0.0 if percent is None else float(percent)
+    if hours <= 0.0 or percent < 0.0:
+        raise ValueError("Dormancy hold must be positive and the vent loss limit nonnegative.")
+    return hours * SECONDS_PER_HOUR, percent / 100.0
 
 
 def venting_performance(vented_fraction: float, maximum_vented_fraction: float) -> float:
@@ -444,21 +452,28 @@ class CandidateEvaluator:
         return orchestrator
 
     def _run_dormancy(self, candidate: AnalysisConfig) -> DormancyPoint:
-        """Run the dormancy hold; ``g_dorm`` is the worst per-tank vented fraction over its limit, minus one."""
+        """Run the hold and return the worst per-tank loss or first-vent time residual."""
         from toplab.orchestration.run_analysis import run_dormancy_check
 
         dormancy_case = replace(candidate, dormancy_check={
-            "enabled": True, "duration_h": self.hold_period_s / 3600.0, "maximum_loss_percent": 100.0})
+            "enabled": True, "duration_h": self.hold_period_s / 3600.0,
+            "maximum_loss_percent": self.maximum_vented_fraction * 100.0})
         dormancy = run_dormancy_check(dormancy_case, silent=True)
         initial = [t["initial_mass_kg"] for t in dormancy["tanks"]]
         vented = [t["vented_mass_kg"] for t in dormancy["tanks"]]
         fractions = [v / m if m > 0.0 else 0.0 for v, m in zip(vented, initial)]
         limit = self.maximum_vented_fraction
-        residuals = [f / limit - 1.0 for f in fractions]
+        onsets = ([t.get("vent_onset_s") for t in dormancy["tanks"]] if limit > 0.0 else
+                  [t["vent_onset_s"] for t in dormancy["tanks"]])
+        if limit > 0.0:
+            residuals = [f / limit - 1.0 for f in fractions]
+        else:
+            residuals = [0.0 if t is None else 1.0 - t / self.hold_period_s for t in onsets]
         f_vent = sum(vented) / sum(initial) if sum(initial) > 0.0 else 0.0
         return DormancyPoint(max(residuals, default=0.0), f_vent,
                              {"vented_mass_kg": sum(vented), "per_tank_vented_fraction": fractions,
-                              "residuals": residuals})
+                              "residuals": residuals, "vent_onset_s": onsets,
+                              "complete": dormancy.get("complete", True)})
 
     @staticmethod
     def _record_dormancy(result: CandidateResult, point: DormancyPoint, limit: float) -> None:
@@ -466,7 +481,10 @@ class CandidateEvaluator:
         result.vented_mass_kg = data["vented_mass_kg"]
         result.per_tank_vented_fraction = data["per_tank_vented_fraction"]
         result.f_vent = point.f_vent
-        result.eta_vent = venting_performance(point.f_vent, limit)
+        result.eta_vent = (venting_performance(point.f_vent, limit) if limit > 0.0 else
+                           -point.g_dorm)
+        result.vent_onset_s = data.get("vent_onset_s", [])
+        result.dormancy_complete = data.get("complete", True)
         result.dormancy_residuals = data["residuals"]
         result.dormancy_residual = point.g_dorm
 
@@ -531,13 +549,14 @@ class CandidateEvaluator:
         from the screening thickness -> packaging, so packaging never precedes the dynamic analyses.
         """
         grid = self.insulation_grid
+        if grid.t_max <= 0.0:
+            raise ValueError("Insulation sizing requires a positive grid maximum.")
         # The thinnest insulation the model can simulate screens the mission; t = 0 cannot be built.
         screen = next(t for t in grid.values if t > 0.0)
         self._progress(f"step 1 of 3: discharge (screening at {screen * 1e3:.2f} mm insulation)")
         screening = self._run_discharge(with_insulation(candidate, screen), result)
         if self.skip_after_discharge_failure and not result.mission_completed:
             result.discharge_failed = True
-            result.t_ins_star = screen
             result.sizing_status = "discharge_failed"
             result.designs = self._designs(with_insulation(candidate, screen), screening)
             self._progress("step 2 of 3: dormancy skipped, discharge failed")
@@ -547,31 +566,30 @@ class CandidateEvaluator:
             return
 
         self._progress("step 2 of 3: dormancy (insulation sizing by bisection)")
-        simulations = [0]
-
-        def dormancy_at(thickness: float) -> DormancyPoint:
-            if thickness <= 0.0:
-                # A bare tank cannot be modelled (shell radius equals structure radius): it counts as violating.
-                return DormancyPoint(math.inf, math.nan)
-            simulations[0] += 1
-            point = self._run_dormancy(with_insulation(candidate, thickness))
-            self._progress(f"  bisection {simulations[0]}: t_ins={thickness * 1e3:.2f} mm, "
+        def dormancy_at(thicknesses: tuple[float, ...]) -> DormancyPoint:
+            point = self._run_dormancy(with_insulation(candidate, thicknesses))
+            self._progress(f"  bisection: t_ins={thicknesses}, "
                            f"f_vent={point.f_vent:.6g}, g_dorm={point.g_dorm:.6g}")
             return point
 
-        sizing = size_insulation(dormancy_at, grid)
-        final = with_insulation(candidate, sizing.t_ins)
-        if sizing.t_ins == screen:
+        sizing = size_tank_insulations(dormancy_at, grid, len(candidate.tanks))
+        if sizing.status == "nonconverged":
+            raise RuntimeError("Coupled insulation sizing did not converge; no sized design is reported.")
+        final = with_insulation(candidate, sizing.thicknesses)
+        if all(t == screen for t in sizing.thicknesses):
             orchestrator = screening
         else:
-            self._progress(f"  re-running discharge at t_ins*={sizing.t_ins * 1e3:.2f} mm")
+            self._progress(f"  re-running discharge at t_ins*={sizing.thicknesses}")
             orchestrator = self._run_discharge(final, result)
-        result.t_ins_star = sizing.t_ins
-        result.sizing_status = sizing.status
-        result.n_dormancy_evals = simulations[0]
+        result.t_ins_stars = list(sizing.thicknesses)
+        result.tank_sizing_statuses = list(sizing.statuses)
+        if len(sizing.thicknesses) == 1:
+            result.t_ins_star = sizing.thicknesses[0]
+        result.sizing_status = sizing.statuses[0] if len(sizing.thicknesses) == 1 else sizing.status
+        result.n_dormancy_evals = sizing.n_evaluations
         self._record_dormancy(result, sizing.point, self.maximum_vented_fraction)
-        self._progress(f"  dormancy complete after {simulations[0]} bisections: "
-                       f"t_ins*={sizing.t_ins * 1e3:.2f} mm ({sizing.status})")
+        self._progress(f"  dormancy complete after {sizing.n_evaluations} simulations: "
+                       f"t_ins*={sizing.thicknesses} ({sizing.status})")
         self._progress("step 3 of 3: packaging")
         self._run_packaging(orchestrator, result)
         self._progress(f"  packaging done: feasible={result.packaging_feasible}, zeta_p={result.zeta_p:.4f}")
@@ -658,6 +676,17 @@ def candidate_row(variables: Sequence[DesignVariable], x: Sequence[float],
     if candidate.t_ins_star is not None:
         row.update({"t_ins_star": candidate.t_ins_star, "sizing_status": candidate.sizing_status,
                     "n_dormancy_evals": candidate.n_dormancy_evals})
+    for i, thickness in enumerate(candidate.t_ins_stars, 1):
+        row[f"t_ins_star_{i}"] = thickness
+        row[f"sizing_status_{i}"] = candidate.tank_sizing_statuses[i - 1]
+    if candidate.t_ins_stars or candidate.sizing_status:
+        row["sizing_status"] = candidate.sizing_status
+        row["n_dormancy_evals"] = candidate.n_dormancy_evals
+    for i, onset in enumerate(candidate.vent_onset_s, 1):
+        row[f"vent_onset_s_{i}"] = "" if onset is None else onset
+        row[f"vent_onset_censored_{i}"] = onset is None
+    if candidate.dormancy_complete is not None:
+        row["dormancy_complete"] = candidate.dormancy_complete
     row.update({"f_vent": candidate.f_vent, "packaging_feasible": candidate.packaging_feasible,
                 "packaging_screened": candidate.packaging_screened,
                 "feasible": candidate.feasible, "discharge_failed": candidate.discharge_failed,

@@ -67,6 +67,21 @@ which latexmk
 
 The audited environment definition includes runtime, plotting, test, and documentation dependencies used across the repository, including plotting support (`seaborn`), YAML parsing (`pyyaml`), and LaTeX tooling for PGF/document builds.
 
+## Tests
+
+From the repository root, run the default suite with:
+
+```bash
+python -m pytest
+```
+
+The long-running RC circuit validation directory is excluded from automatic discovery.
+Run it explicitly when needed (or specify an individual file or test):
+
+```bash
+python -m pytest test/rc_circuit_validation
+```
+
 ## General Spirit of the Code
 
 TOPLAB is designed around a few core ideas:
