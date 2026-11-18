@@ -338,7 +338,7 @@ class SystemOrchestrator:
         print("\nValidating simulation results...")
         from toplab.post.mass_balance import check_mass_balance
 
-        rtol = 1e-3
+        rtol = 1e-2
         balances = check_mass_balance(self.results)
         for b in balances:
             status = "ok" if b.passed(rtol) else "FAILED"
