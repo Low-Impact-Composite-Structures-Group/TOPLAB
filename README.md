@@ -98,6 +98,61 @@ The best feasible result found is reported, not a proof of global optimality.
 If the search finds no positive-radius feasible arrangement, it exits with an
 error rather than claiming that the geometry is necessarily impossible.
 
+## Aft-fuselage tank packaging: method and limitations
+
+The aft-placement implementation in `toplab/packaging/aft_placement.py` is a
+**pragmatic, provisional heuristic**, not a general-purpose packing solver.
+Its growing collection of layout-specific starting guesses is a workaround for
+the limitations of its local search. In particular, adding another special-case
+seed whenever a layout is missed is a hacky approach and is not a sustainable
+substitute for a general formulation.
+
+The current method represents each tank as a rigid capsule (a sphere is a
+capsule with zero cylindrical length) within a piecewise axisymmetric fuselage.
+Tank centres are searched in Cartesian coordinates; tank axes follow the local
+fuselage centreline tangent rather than being freely oriented. A deterministic
+collection of axial, lateral, staggered, and geometry-specific starts is tried.
+For each start, a coordinate-descent search moves one tank at a time and accepts
+only moves that reduce that tank's current constraint violation. The first
+placement found to be feasible at the requested sampling resolution is returned.
+
+Tank-to-tank surface gaps use capsule axis-segment distances. Fuselage
+containment is checked on a sampled tank surface, using radial cross-section
+clearance and explicit axial end-plane clearance; it is not an exact continuous
+surface or shortest-distance clearance certificate. Sampling resolution, step
+size, iteration limits and the available starts can therefore affect the result.
+Additional, finer-resolution checks are advisable when reporting a placement.
+
+The compaction routine repeatedly runs this heuristic while bisecting the
+allowable datum shift, with `zeta_p = z_shift / l1`. A positive shift indicates
+forward compaction within the cylindrical datum range; a negative shift means
+that the algorithm found a placement only after extending the cylinder aft of
+the original bulkhead. Forward compaction is capped at `z_shift = l1`, so
+`zeta_p = 1` is the maximum *tested* value, not evidence that the tanks are
+positioned as far forward as physically possible.
+
+**Caveats:**
+
+- A sampled feasible placement is a candidate layout, not a proof of exact
+  continuous containment or of global optimality.
+- A failed search is not proof of physical infeasibility. It can miss a valid
+  arrangement when escape requires coordinated moves or a temporary increase in
+  constraint violation.
+- Bisection assumes reliable feasibility decisions. A missed feasible trial
+  can make the reported compaction pessimistic, and a negative result does not
+  establish that an aft shift is physically necessary. The numerical bisection
+  tolerance is not a bound on global packing error.
+
+**TODO — reformulate the general packaging algorithm:** investigate jointly
+optimizing tank positions with general constraints and a bounded global or
+population-based search followed by local refinement, rather than continually
+adding layout-specific starts. Benchmark alternatives against the existing
+cases and independent feasible examples, measuring success rates, runtime,
+clearance accuracy and compaction quality. Retain a constructive fallback where
+appropriate, distinguish search failure from proven infeasibility, and revisit
+the compaction search and continuous-clearance verification. No particular
+replacement or global-optimality guarantee has yet been established.
+
 ## General Spirit of the Code
 
 TOPLAB is designed around a few core ideas:
