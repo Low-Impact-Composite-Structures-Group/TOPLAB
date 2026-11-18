@@ -6,6 +6,11 @@ searches for feasible rigid-body poses for all tanks.
 
 No generalized coordinates are used. Tank positions are internal Cartesian
 coordinates, while tank orientation follows the local fuselage axis.
+
+The placement search is a provisional multistart heuristic. Layout-specific
+seeds compensate for local-search limitations; failure is not proof of
+infeasibility, and sampled containment is not an exact clearance certificate.
+See the README's aft-fuselage packaging section for caveats and reformulation TODO.
 """
 
 from __future__ import annotations
@@ -736,6 +741,50 @@ def _cylinder_multi_seed(
     return placed
 
 
+def _lateral_pair_with_forward_stack_seed(
+    geometries: Sequence[TankGeometry],
+    dims: AftFuselageDimensions,
+    z_min: float,
+) -> list[Vector3] | None:
+    """Seed two long tanks side by side, with the remaining tanks forward."""
+    if len(geometries) < 3:
+        return None
+
+    pair = sorted(
+        range(len(geometries)),
+        key=lambda i: geometries[i].half_cyl_length,
+        reverse=True,
+    )[:2]
+    if geometries[pair[1]].half_cyl_length <= 0.0:
+        return None
+
+    margin = 1e-8
+    first, second = (geometries[i] for i in pair)
+    separation = first.outer_radius + second.outer_radius + dims.epsilon + margin
+    z_pair = z_min + dims.epsilon + margin + max(
+        first.half_total_length, second.half_total_length
+    )
+    if z_pair > dims.total_length:
+        return None
+    y_pair = dims.center_y_at(z_pair)
+    centers: list[Vector3 | None] = [None] * len(geometries)
+    centers[pair[0]] = (-0.5 * separation, y_pair, z_pair)
+    centers[pair[1]] = (0.5 * separation, y_pair, z_pair)
+
+    cursor = z_pair + max(first.half_total_length, second.half_total_length)
+    for i, geometry in enumerate(geometries):
+        if i in pair:
+            continue
+        z = cursor + dims.epsilon + margin + geometry.half_total_length
+        if z > dims.total_length:
+            return None
+        centers[i] = (0.0, dims.center_y_at(z), z)
+        cursor = z + geometry.half_total_length
+
+    assert all(center is not None for center in centers)
+    return [center for center in centers if center is not None]
+
+
 def _initial_center_sets(
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
@@ -805,6 +854,10 @@ def _initial_center_sets(
     multi = _cylinder_multi_seed(geometries, dims, z_min)
     if multi is not None:
         starts.insert(0, ("cylinder_multi", multi))
+    lateral_pair = _lateral_pair_with_forward_stack_seed(geometries, dims, z_min)
+    if lateral_pair is not None:
+        axial_index = next(i for i, (name, _) in enumerate(starts) if name == "axial")
+        starts.insert(axial_index, ("lateral_pair_forward_stack", lateral_pair))
     return starts
 
 
@@ -960,12 +1013,13 @@ def place_tanks_in_aft(
 ) -> AftPlacementResult:
     """Find feasible rigid-body poses using deterministic multistart search.
 
-    Axial, transverse and staggered starts are attempted for multi-tank problems.
-    Constructive axial-stack and staggered-cylinder starts are also used when they
-    fit in the cylinder. Each start
-    uses a strict-improvement coordinate-descent search. The
-    first feasible result is returned; if all starts fail, the failed result
-    with the smallest maximum accumulated violation is returned.
+    Axial, transverse, staggered, and mixed lateral-pair/forward-stack starts
+    are attempted for multi-tank problems. Constructive axial-stack and
+    staggered-cylinder starts are also used when they fit in the cylinder.
+    Each start uses a strict-improvement coordinate-descent search. The first
+    feasible result is returned; if all starts fail, the failed result with the
+    smallest maximum accumulated violation is returned. Search failure does not
+    prove that no feasible placement exists.
     """
     if len(outer_radii) != len(half_cyl_lengths):
         raise ValueError(
