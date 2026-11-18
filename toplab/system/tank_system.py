@@ -98,7 +98,7 @@ class TankSystem:
         self.verbosity = self._normalize_verbosity(verbosity)
         self._ode_progress_interval_s = 60.0
         self._ode_progress_bucket = -1
-        print("Initializing TankSystem...")
+        self._log_summary("Initializing TankSystem...")
 
         self.tank_geometries = tank_geometries
         self.config = config
@@ -137,7 +137,6 @@ class TankSystem:
 
         # Initialize caching system
         self._cached_tank_properties = {}
-        self._properties_printed = set()  # Track which tanks have printed properties
         self._min_densities = {}   # Per-tank minimum densities (non-CH2 tanks)
         self._min_pressures = {}   # Per-tank minimum pressures (CH2 tanks)
         self._tank_fluids = {}     # Per-tank fluid type string (upper-cased)
@@ -147,7 +146,10 @@ class TankSystem:
         self._setup_tanks()
         self._setup_coupling_rules()
 
-        print(f"Tank system initialized with {len(self.tanks)} tanks and {len(self.coupling_valves)} coupling rules")
+        self._log_summary(
+            f"Tank system initialized with {len(self.tanks)} tanks and "
+            f"{len(self.coupling_valves)} coupling rules"
+        )
 
     @staticmethod
     def _normalize_verbosity(verbosity: str) -> str:
@@ -176,17 +178,10 @@ class TankSystem:
 
     def _setup_tanks(self):
         """Setup tanks from provided geometries and configurations."""
-        print(f"\nTANK SETUP:")
-
-        # Print tank configurations
-        for i, tank_config in enumerate(self.config.tanks):
-            print(f"   Tank {i+1} ({tank_config.name}): P_VENT={tank_config.P_VENT/1e5:.0f} bar, P_MIN={tank_config.P_MIN/1e5:.0f} bar")
-
         # Setup each tank
         for i, (tank_geom, tank_config) in enumerate(zip(self.tank_geometries, self.config.tanks)):
-            print(f"Setting up Tank {i+1} ({tank_config.name})...")
-
             tank_properties = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
+            self._cached_tank_properties[i] = tank_properties
             thermal_model = self._create_thermal_model(tank_properties)
             dynamic_model = IsochoricModelSwitcher(
                 scenario=tank_config.scenario,
@@ -212,7 +207,6 @@ class TankSystem:
                 self._min_pressures[i] = float(raw_p_min)
                 self._min_densities[i] = 0.0  # unused for CH2; keep dict consistent
                 tank_properties['minimum_density'] = 0.0
-                print(f"   Tank {i+1} (CH2): pressure-based stopping at {float(raw_p_min)/1e5:.1f} bar")
             else:
                 # All other fluid types: stop on minimum density
                 per_tank_min = None
@@ -229,7 +223,6 @@ class TankSystem:
                     )
                 self._min_densities[i] = per_tank_min
                 tank_properties['minimum_density'] = per_tank_min
-                print(f"   Tank {i+1}: V={tank_properties['volume']:.4f} m³, A_in={tank_properties['inner_surface_area']:.3f} m², rho_min={per_tank_min:.3f} kg/m³")
 
             self.tanks.append(tank_geom)
             self.thermal_models.append(thermal_model)
@@ -299,10 +292,6 @@ class TankSystem:
         for edge in self.coupling_valves:
             self._edge_slices.append(slice(start, start + edge.n_states))
             start += edge.n_states
-
-        # Cache tank properties to avoid repeated calculations during simulation
-        for i, tank_geom in enumerate(self.tank_geometries):
-            self._cached_tank_properties[i] = self._get_tank_properties(tank_geom, tank_id=f"Tank{i+1}", tank_index=i)
 
     def _calculate_coupling_enthalpy(self, tank_idx: int, multi_state: MultiTankState, edge_flows: List[float]) -> float:
         inflow_edges = [
@@ -456,10 +445,6 @@ class TankSystem:
         endcap_thickness = endcap_model.compute_thickness(tank_section, design_pressure_structural)
         thickness_wall = max(cylinder_thickness, endcap_thickness)  # Governing thickness
 
-        print(f"   Netting Analysis Results for {tank_id}:")
-        print(f"      Radius: {inner_radius:.3f} m")
-        print(f"      Working pressure: {working_pressure/1e5:.0f} bar, Safety factor: {safety_factor:.2f}")
-        print(f"      Structural design pressure: {design_pressure_structural/1e5:.0f} bar")
         # Radii for each layer (inside → outside)
         liner_outer_radius = inner_radius + thickness_liner
         wall_outer_radius = liner_outer_radius + thickness_wall   # = r_structure
@@ -488,31 +473,26 @@ class TankSystem:
         foam_mass  = _layer_mass(insulation_model.density, r_structure, r_shell)
         shell_mass = _layer_mass(liner_material.density, r_shell, r_shell_outer)  # same Al as liner
 
-        print(f"\n[{tank_id} Geometry]")
-        print(f"  Inner radius:     {inner_radius:.4f} m")
-        print(f"  Structure radius: {r_structure:.4f} m  "
-              f"(liner {thickness_liner*1000:.1f}mm + wall {thickness_wall*1000:.1f}mm)")
-        print(f"  Shell radius:     {r_shell:.4f} m  (insulation {thickness_insulation*1000:.0f}mm)")
-        print(f"  Shell outer:      {r_shell_outer:.4f} m  (shell {shell_thickness*1000:.1f}mm)")
-        print(f"  Cylinder length:  {cylinder_length:.4f} m  (φ={tank.phi:.2f})")
-        print(f"\n[{tank_id} Structural – netting analysis]")
-        print(f"  Working pressure:  {working_pressure/1e5:.0f} bar  →  "
-              f"design: {design_pressure_structural/1e5:.0f} bar  (SF={safety_factor:.1f})")
-        print(f"  Liner:   {liner_material.name}, {thickness_liner*1000:.1f} mm, {liner_mass:.1f} kg")
-        print(f"  Wall:    {composite_material.name}, {thickness_wall*1000:.1f} mm "
-              f"({math.degrees(composite_material.winding_angle):.1f}°), {wall_mass:.1f} kg")
-        print(f"  Insulation: {insulation_model.name}, {thickness_insulation*1000:.0f} mm, {foam_mass:.1f} kg")
-        print(f"  Shell:   {liner_material.name}, {shell_thickness*1000:.1f} mm, {shell_mass:.1f} kg")
         dry_mass = liner_mass + wall_mass + foam_mass + shell_mass
-        print(f"  Total dry mass: {dry_mass:.1f} kg")
-        print(f"\n[{tank_id} Thermal areas]")
-        print(f"  Inner surface (A_in):  {inner_surface_area:.4f} m²")
-        print(f"  Shell surface (A_sh):  {outer_surface_area:.4f} m²")
-
-        # Netting analysis detail for reference
-        print(f"\n[{tank_id} Netting analysis detail]")
-        print(f"  Cylinder wall: {cylinder_thickness*1000:.1f} mm  |  Endcap: {endcap_thickness*1000:.1f} mm  "
-              f"(governing: {thickness_wall*1000:.1f} mm)")
+        self._log_debug(
+            f"\n[{tank_id} Geometry and netting analysis]\n"
+            f"  Working pressure: {working_pressure/1e5:.0f} bar; "
+            f"design pressure: {design_pressure_structural/1e5:.0f} bar "
+            f"(SF={safety_factor:.1f})\n"
+            f"  Inner radius: {inner_radius:.4f} m; structure radius: {r_structure:.4f} m; "
+            f"shell radius: {r_shell:.4f} m; outer radius: {r_shell_outer:.4f} m\n"
+            f"  Cylinder length: {cylinder_length:.4f} m (φ={tank.phi:.2f})\n"
+            f"  Liner: {liner_material.name}, {thickness_liner*1000:.1f} mm, {liner_mass:.1f} kg\n"
+            f"  Wall: {composite_material.name}, {thickness_wall*1000:.1f} mm "
+            f"({math.degrees(composite_material.winding_angle):.1f}°), {wall_mass:.1f} kg\n"
+            f"  Insulation: {insulation_model.name}, {thickness_insulation*1000:.0f} mm, "
+            f"{foam_mass:.1f} kg\n"
+            f"  Shell: {liner_material.name}, {shell_thickness*1000:.1f} mm, {shell_mass:.1f} kg\n"
+            f"  Total dry mass: {dry_mass:.1f} kg\n"
+            f"  Inner/shell areas: {inner_surface_area:.4f}/{outer_surface_area:.4f} m²\n"
+            f"  Cylinder/endcap wall thickness: {cylinder_thickness*1000:.1f}/"
+            f"{endcap_thickness*1000:.1f} mm (governing: {thickness_wall*1000:.1f} mm)"
+        )
 
         thickness_info = {
             'wall_thickness': thickness_wall,
@@ -522,9 +502,6 @@ class TankSystem:
             'cylindrical_section_length': cylinder_length,
             'phi': tank.phi,
         }
-
-        if hasattr(self, '_properties_printed') and tank_index not in self._properties_printed:
-            self._properties_printed.add(tank_index)
 
         return {
             'volume': volume,

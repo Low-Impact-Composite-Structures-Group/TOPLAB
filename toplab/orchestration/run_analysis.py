@@ -262,18 +262,37 @@ def run_analysis(
                     print(f"  Data Points: {len(results.times)}")
 
                     if hasattr(results, 'multi_tank_states') and results.multi_tank_states:
-                        initial_state = results.multi_tank_states[0].get_tank_state(0)
-                        final_state = results.multi_tank_states[-1].get_tank_state(0)
-                        fuel_consumed = initial_state.fuel_mass - final_state.fuel_mass
+                        initial_multi_state = results.multi_tank_states[0]
+                        final_multi_state = results.multi_tank_states[-1]
+                        initial_mass = sum(
+                            initial_multi_state.get_tank_state(i).fuel_mass
+                            for i in range(len(orchestrator.tank_geometries))
+                        )
+                        final_mass = sum(
+                            final_multi_state.get_tank_state(i).fuel_mass
+                            for i in range(len(orchestrator.tank_geometries))
+                        )
+                        fuel_consumed = initial_mass - final_mass
 
-                        print(f"  Initial Mass: {initial_state.fuel_mass:.2f} kg")
-                        print(f"  Final Mass: {final_state.fuel_mass:.2f} kg")
-                        print(f"  Fuel Consumed: {fuel_consumed:.2f} kg")
-                        print(f"  Initial H2 Temperature: {initial_state.h2_temperature:.1f} K")
-                        print(f"  Final H2 Temperature: {final_state.h2_temperature:.1f} K")
-                        print(f"  Initial Pressure: {initial_state.pressure/1e5:.1f} bar")
-                        print(f"  Final Pressure: {final_state.pressure/1e5:.1f} bar")
-                        print(f"  Average Discharge: {fuel_consumed/results.times[-1]:.6f} kg/s")
+                        print(f"  System Initial Mass: {initial_mass:.2f} kg")
+                        print(f"  System Final Mass: {final_mass:.2f} kg")
+                        print(f"  System Fuel Consumed: {fuel_consumed:.2f} kg")
+                        print(f"  Average Net Fuel Use: {fuel_consumed/results.times[-1]:.6f} kg/s")
+                        for tank_index in range(len(orchestrator.tank_geometries)):
+                            initial_tank = initial_multi_state.get_tank_state(tank_index)
+                            final_tank = final_multi_state.get_tank_state(tank_index)
+                            tank_consumed = initial_tank.fuel_mass - final_tank.fuel_mass
+                            print(
+                                f"  Tank {tank_index + 1}: initial mass={initial_tank.fuel_mass:.2f} kg, "
+                                f"final mass={final_tank.fuel_mass:.2f} kg, "
+                                f"fuel consumed={tank_consumed:.2f} kg"
+                            )
+                            print(
+                                f"    H2 temperature: {initial_tank.h2_temperature:.1f} → "
+                                f"{final_tank.h2_temperature:.1f} K; pressure: "
+                                f"{initial_tank.pressure/1e5:.1f} → "
+                                f"{final_tank.pressure/1e5:.1f} bar"
+                            )
 
                 nofigures = bool(config.output.get('no_figures', False))
 
