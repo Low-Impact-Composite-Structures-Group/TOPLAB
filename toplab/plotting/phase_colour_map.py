@@ -2,7 +2,8 @@
 Standalone script to generate a hydrogen density–temperature phase colour map
 using the DelftColourPlotter utilities and CoolProp saturation data. It is not used as a module in the main project.
 
-Configure values below (no CLI args needed). Set SAVE=True to write to disk; otherwise, the plot will be shown interactively.
+Configure values below (no CLI args needed). Set SAVE=True to write the configured
+format and a 1000-DPI PNG; otherwise, the plot will be shown interactively.
 """
 from __future__ import annotations
 
@@ -31,7 +32,8 @@ plt.rcParams.update({
 # ====== Configurable values ======
 # Appearance
 GREYSCALE: bool = False
-DPI: int = 300  # Lower DPI for PGF (vector format)
+DPI: int = 300
+PNG_DPI: int = 1000
 
 # Save options
 SAVE: bool = True
@@ -55,7 +57,7 @@ CALLOUT_FONT_SIZE: float = 17.0
 ISOBAR_LABEL_FONT_SIZE: float = 12.0
 
 # Isobar and marker size configuration
-ISOBAR_PRESSURES: list[float] = [13, 100, 200, 400, 700]  # bar
+ISOBAR_PRESSURES: list[float] = [100, 200, 400, 700]  # bar
 CRITICAL_MARKER_SIZE: float = 70.0
 DEFAULT_MARKER_SIZE: float = 150.0
 # Marker definitions (labels support mathtext for H$_2$)
@@ -146,9 +148,9 @@ def main():
         temperature_range=(TMIN, TMAX),
         density_range=(RHOMIN, RHOMAX),
         resolution=(NX, NY),
-        save_path=str(save_path) if save_path else None,
+        save_path=None,
         dpi=DPI,
-        marker_points=MARKERS,
+        marker_points=None,
         legend_location=LEGEND_LOC,
         legend_ncols=LEGEND_NCOLS,
         isobar_pressures_bar=ISOBAR_PRESSURES,
@@ -161,8 +163,19 @@ def main():
     if save_path is None:
         plt.show()
     else:
-        print(f"PGF file saved to: {save_path}")
-        print(f"Include in LaTeX with: \\input{{{save_path}}}")
+        requested_format = save_path.suffix.lower().lstrip(".")
+        formats = [requested_format]
+        if requested_format != "png":
+            formats.append("png")
+        for fmt in formats:
+            output_path = save_path.with_suffix(f".{fmt}")
+            saved_files = plotter._save_figure(
+                fig, str(output_path), dpi=PNG_DPI if fmt == "png" else DPI, formats=[fmt]
+            )
+            if not saved_files:
+                raise RuntimeError(f"Failed to save phase colour map to {output_path}")
+            if fmt == "pgf":
+                print(f"Include in LaTeX with: \\input{{{saved_files[0]}}}")
 
 
 if __name__ == "__main__":
