@@ -8,6 +8,7 @@ from toplab.packaging.aft_placement import (
     _capsule_radius_at_offset,
     _containment_violation,
     _evaluate_placement,
+    _initial_center_sets,
     _segment_distance,
     _transverse_basis,
     max_required_aft_shift,
@@ -195,7 +196,8 @@ def test_four_tank_extended_cylinder_has_constructive_placement():
     shift = max_required_aft_shift(radii, half_lengths, dims)
     result = place_tanks_in_aft(radii, half_lengths, dims, z_min=-shift)
     assert result.feasible
-    assert "cylinder_stack" in result.message
+    assert "cylinder_stack" in dict(_initial_center_sets(
+        [TankGeometry(r, h) for r, h in zip(radii, half_lengths)], dims, -shift))
     assert all(p.s_leftmost_pole >= -shift + dims.epsilon - 1e-10 for p in result.placements)
 
 
@@ -203,6 +205,94 @@ def test_two_small_tanks_can_be_placed_in_unshifted_fuselage():
     result = place_tanks_in_aft([0.45, 0.45], [0.2, 0.2], _dims())
     assert result.feasible
     assert all(p.max_violation <= 1e-10 for p in result.placements)
+
+
+def test_staggered_cylinder_pair_reduces_aft_shift():
+    dims = AftFuselageDimensions(2.16, 1.17, 0.328, 2.067, 1.8, 3.407, 0.05, 12, 9)
+    radii, half_lengths = [0.5215, 0.5215], [1.5825, 1.5825]
+    trial = place_tanks_in_aft(radii, half_lengths, dims, z_min=-5.85, max_iterations=100)
+    assert trial.feasible
+    result = maximize_packaging_compaction(radii, half_lengths, dims, max_iterations=100)
+    assert not result.feasible
+    assert -5.81 < result.z_shift < -5.80
+    geometries = [TankGeometry(r, h) for r, h in zip(radii, half_lengths)]
+    centers = [p.center for p in result.placements]
+    assert _evaluate_placement(centers, geometries, dims, result.z_shift, 400, 128)[0]
+    assert all(abs(p.x) + radii[i] + dims.epsilon <= dims.d1 / 2
+               for i, p in enumerate(result.placements))
+    assert all(p.s_leftmost_pole >= result.z_shift + dims.epsilon
+               and p.s_rightmost_pole <= dims.l1 - dims.epsilon for p in result.placements)
+    assert _capsule_surface_gap(centers[0], (0, 0, 1), geometries[0],
+                                centers[1], (0, 0, 1), geometries[1]) >= dims.epsilon - 1e-10
+
+
+@pytest.mark.parametrize("radii,half_lengths", [
+    ([0.7, 0.35], [0.8, 0.2]),
+    ([0.6, 0.45], [0.0, 0.0]),
+    ([0.25, 0.3], [0.8, 0.5]),
+])
+def test_cylinder_pair_seed_respects_clearances_for_varied_shapes(radii, half_lengths):
+    dims = _dims()
+    result = place_tanks_in_aft(radii, half_lengths, dims, z_min=-4, max_iterations=100)
+    assert result.feasible
+    assert "cylinder_pair" in result.message
+    geometries = [TankGeometry(r, h) for r, h in zip(radii, half_lengths)]
+    assert _evaluate_placement([p.center for p in result.placements], geometries,
+                               dims, -4, 400, 128)[0]
+    assert all(p.s_leftmost_pole >= -4 + dims.epsilon - 1e-10 for p in result.placements)
+
+
+@pytest.mark.parametrize("count", [3, 4, 5])
+def test_multiple_tanks_pack_laterally_in_cylinder(count):
+    dims = _dims()
+    radii, half_lengths = [0.33] * count, [0.4] * count
+    result = place_tanks_in_aft(radii, half_lengths, dims, max_iterations=100)
+    assert result.feasible
+    assert "cylinder_multi" in result.message
+    assert max(p.z for p in result.placements) - min(p.z for p in result.placements) < 1e-6
+    geometries = [TankGeometry(r, h) for r, h in zip(radii, half_lengths)]
+    assert _evaluate_placement([p.center for p in result.placements], geometries,
+                               dims, 0, 400, 128)[0]
+
+
+def test_multi_tank_stagger_checks_all_pairs_and_beats_axial_stack():
+    dims = _dims()
+    radii = [0.5215, 0.49, 0.5215, 0.46, 0.5]
+    half_lengths = [1.5825, 1.1, 1.4, 0.8, 1.2]
+    result = place_tanks_in_aft(radii, half_lengths, dims, z_min=-12, max_iterations=100)
+    assert result.feasible
+    assert "cylinder_multi" in result.message
+    geometries = [TankGeometry(r, h) for r, h in zip(radii, half_lengths)]
+    centers = [p.center for p in result.placements]
+    assert _evaluate_placement(centers, geometries, dims, -12, 400, 128)[0]
+    for i in range(len(radii)):
+        for j in range(i):
+            assert _capsule_surface_gap(centers[i], (0, 0, 1), geometries[i],
+                                        centers[j], (0, 0, 1), geometries[j]) >= dims.epsilon - 1e-9
+    envelope = max(p.s_rightmost_pole for p in result.placements) - min(
+        p.s_leftmost_pole for p in result.placements)
+    stack_length = sum(2 * (r + h) for r, h in zip(radii, half_lengths)) + 4 * dims.epsilon
+    assert envelope < stack_length - 1.0
+
+
+@pytest.mark.parametrize("count,max_shift", [(3, 9.4), (4, 12.97), (5, 16.53)])
+def test_long_multi_tank_compaction_finds_staggered_shift(count, max_shift):
+    dims = AftFuselageDimensions(2.16, 1.17, 0.328, 2.067, 1.8, 3.407, 0.05, 12, 9)
+    radii, half_lengths = [0.5215] * count, [1.5825] * count
+    result = maximize_packaging_compaction(radii, half_lengths, dims, max_iterations=100,
+                                          z_tolerance=0.01)
+    assert not result.feasible
+    assert -max_shift < result.z_shift < 0
+    assert "cylinder_multi" in result.message
+    geometries = [TankGeometry(r, h) for r, h in zip(radii, half_lengths)]
+    assert _evaluate_placement([p.center for p in result.placements], geometries,
+                               dims, result.z_shift, 400, 128)[0]
+
+
+def test_multiple_tanks_do_not_fit_if_clearance_exceeds_cylinder():
+    dims = AftFuselageDimensions(1, 1, 1, 1, 0.1, 0.1, 0.05)
+    result = place_tanks_in_aft([0.44] * 5, [0.2] * 5, dims)
+    assert not result.feasible
 
 
 def test_compaction_fallback_returns_infeasible_margin_for_four_spheres():

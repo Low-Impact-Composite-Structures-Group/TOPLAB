@@ -82,6 +82,22 @@ Run it explicitly when needed (or specify an individual file or test):
 python -m pytest test/rc_circuit_validation
 ```
 
+## Equal-circle packing
+
+The standalone script below finds a large common radius for equal circles inside
+an outer circle. `epsilon` is the minimum clearance between every pair and from
+the outer boundary; all dimensions are in metres.
+
+```bash
+python toplab/packaging/circle_packing.py --diameter 2.16 --count 5 --epsilon 0.05
+```
+
+Use `--save packing.png --no-show` to save a plot without opening a window;
+`--restarts` and `--seed` control the reproducible multistart numerical search.
+The best feasible result found is reported, not a proof of global optimality.
+If the search finds no positive-radius feasible arrangement, it exits with an
+error rather than claiming that the geometry is necessarily impossible.
+
 ## General Spirit of the Code
 
 TOPLAB is designed around a few core ideas:

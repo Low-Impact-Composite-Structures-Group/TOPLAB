@@ -641,6 +641,101 @@ def _symmetric_offsets_from_radii(
     return [position - midpoint for position in positions]
 
 
+def _cylinder_pair_seed(
+    geometries: Sequence[TankGeometry],
+    dims: AftFuselageDimensions,
+    z_min: float,
+) -> list[Vector3] | None:
+    """Construct two parallel capsules in the cylinder, staggering their end caps if needed."""
+    if len(geometries) != 2:
+        return None
+    first, second = geometries
+    margin = 1e-8
+    offsets = [0.5 * dims.d1 - dims.epsilon - g.outer_radius - margin for g in geometries]
+    if min(offsets) < 0.0:
+        return None
+    transverse_distance = sum(offsets)
+    required_distance = first.outer_radius + second.outer_radius + dims.epsilon + margin
+    if transverse_distance >= required_distance:
+        axial_distance = 0.0
+    else:
+        axial_distance = (first.half_cyl_length + second.half_cyl_length +
+                          math.sqrt(required_distance**2 - transverse_distance**2))
+    # Place the forwardmost pole against the cylinder/taper interface.
+    z_first = dims.l1 - dims.epsilon - margin - max(
+        first.half_total_length, axial_distance + second.half_total_length)
+    centers = [(-offsets[0], 0.0, z_first), (offsets[1], 0.0, z_first + axial_distance)]
+    if min(c[2] - g.half_total_length for c, g in zip(centers, geometries)) < z_min + dims.epsilon:
+        return None
+    return centers
+
+
+def _cylinder_multi_seed(
+    geometries: Sequence[TankGeometry],
+    dims: AftFuselageDimensions,
+    z_min: float,
+) -> list[Vector3] | None:
+    """Build a compact cylinder layout from several transverse arrangements."""
+    n = len(geometries)
+    if n < 3:
+        return None
+    margin = 1e-8
+    offsets = [0.5 * dims.d1 - dims.epsilon - g.outer_radius - margin for g in geometries]
+    if min(offsets) < 0.0:
+        return None
+
+    def append_center(centers: list[Vector3], i: int, x: float, y: float) -> Vector3:
+        geometry = geometries[i]
+        z = geometry.half_total_length
+        for j, (px, py, pz) in enumerate(centers):
+            other = geometries[j]
+            lateral = math.hypot(x - px, y - py)
+            distance = geometry.outer_radius + other.outer_radius + dims.epsilon + margin
+            if lateral < distance:
+                z = max(z, pz + other.half_cyl_length + geometry.half_cyl_length +
+                        math.sqrt(max(0.0, distance * distance - lateral * lateral)))
+        return x, y, z
+
+    layouts: list[list[Vector3]] = []
+    # Ring layouts and a centre-plus-ring layout provide genuinely transverse
+    # arrangements, rather than forcing every tank onto one lateral line.
+    for center_index in [None, *range(min(n, 8))]:
+        ring_indices = [i for i in range(n) if i != center_index]
+        for stride in range(1, min(len(ring_indices), 8) + 1):
+            if math.gcd(stride, len(ring_indices)) != 1:
+                continue
+            slots = {i: (k * stride) % len(ring_indices) for k, i in enumerate(ring_indices)}
+            centers: list[Vector3] = []
+            for i in range(n):
+                angle = 2.0 * math.pi * slots[i] / len(ring_indices) if i in slots else 0.0
+                radius = offsets[i] if i in slots else 0.0
+                centers.append(append_center(centers, i, radius * math.cos(angle), radius * math.sin(angle)))
+            layouts.append(centers)
+
+    # Greedy candidate positions also allow several radial distances for unequal tanks.
+    centers = []
+    for i, offset in enumerate(offsets):
+        candidates = [(offset * scale * math.cos(2.0 * math.pi * k / 24),
+                       offset * scale * math.sin(2.0 * math.pi * k / 24))
+                      for scale in (1.0, 0.75, 0.5, 0.25) for k in range(24)]
+        candidates.append((0.0, 0.0))
+        trials = [append_center(centers, i, x, y) for x, y in candidates]
+        centers.append(min(trials, key=lambda p: p[2]))
+    layouts.append(centers)
+
+    def extent(layout: list[Vector3]) -> float:
+        return max(center[2] + geometry.half_total_length
+                   for center, geometry in zip(layout, geometries))
+
+    best = min(layouts, key=extent)
+    shift = dims.l1 - dims.epsilon - margin - extent(best)
+    placed = [(x, y, z + shift) for x, y, z in best]
+    if min(center[2] - geometry.half_total_length
+           for center, geometry in zip(placed, geometries)) < z_min + dims.epsilon:
+        return None
+    return placed
+
+
 def _initial_center_sets(
     geometries: Sequence[TankGeometry],
     dims: AftFuselageDimensions,
@@ -704,6 +799,12 @@ def _initial_center_sets(
         cursor += geometry.total_length + dims.epsilon + 1e-8
     if cursor - dims.epsilon <= dims.l1:
         starts.insert(0, ("cylinder_stack", stacked))
+    pair = _cylinder_pair_seed(geometries, dims, z_min)
+    if pair is not None:
+        starts.insert(0, ("cylinder_pair", pair))
+    multi = _cylinder_multi_seed(geometries, dims, z_min)
+    if multi is not None:
+        starts.insert(0, ("cylinder_multi", multi))
     return starts
 
 
@@ -860,7 +961,8 @@ def place_tanks_in_aft(
     """Find feasible rigid-body poses using deterministic multistart search.
 
     Axial, transverse and staggered starts are attempted for multi-tank problems.
-    A constructive axial stack is also used when it fits in the cylinder. Each start
+    Constructive axial-stack and staggered-cylinder starts are also used when they
+    fit in the cylinder. Each start
     uses a strict-improvement coordinate-descent search. The
     first feasible result is returned; if all starts fail, the failed result
     with the smallest maximum accumulated violation is returned.
