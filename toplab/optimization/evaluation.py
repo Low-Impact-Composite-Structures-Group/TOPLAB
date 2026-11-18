@@ -163,7 +163,15 @@ def maximum_outer_radii(config: AnalysisConfig, variables: Sequence[DesignVariab
             t_ins = bounds["insulation_thickness"].upper
         else:
             t_ins = float(insulation["thickness"])
-        pressure = float(tank.initial_conditions["pressure"]) * float(materials["safety_margin"])
+        operating_limits = tank.operating_limits
+        design_pressure = operating_limits.get("venting_pressure")
+        if design_pressure is None:
+            from toplab.sizing import defaults
+
+            design_pressure = (
+                float(tank.initial_conditions["pressure"]) * defaults.VENTING_PRESSURE_FACTOR
+            )
+        pressure = float(design_pressure) * float(materials["safety_margin"])
         composite = tank.nist_materials()["composite"]
 
         class _Section:

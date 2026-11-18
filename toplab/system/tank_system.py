@@ -437,8 +437,8 @@ class TankSystem:
         cylinder_model = CompositeCylinder()
         endcap_model = CompositeSphericalEndCap()
 
-        # Burst pressure FS scales the design pressure for wall thickness
-        design_pressure_structural = working_pressure * safety_factor
+        # Size the wall against the configured venting pressure, with the safety factor.
+        design_pressure_structural = design_pressure * safety_factor
 
         # Calculate thickness for both sections
         cylinder_thickness = cylinder_model.compute_thickness(tank_section, design_pressure_structural)
@@ -477,6 +477,7 @@ class TankSystem:
         self._log_debug(
             f"\n[{tank_id} Geometry and netting analysis]\n"
             f"  Working pressure: {working_pressure/1e5:.0f} bar; "
+            f"venting pressure: {design_pressure/1e5:.0f} bar; "
             f"design pressure: {design_pressure_structural/1e5:.0f} bar "
             f"(SF={safety_factor:.1f})\n"
             f"  Inner radius: {inner_radius:.4f} m; structure radius: {r_structure:.4f} m; "
