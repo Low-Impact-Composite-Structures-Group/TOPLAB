@@ -32,6 +32,7 @@ class NSGA2Settings:
     objectives: tuple[str, ...] = NSGA2_OBJECTIVES
     convergence: ConvergenceSettings = ConvergenceSettings()
     n_workers: int = 1  # ignored: parallelism comes from the MPI world size (mpirun -n N)
+    save_front_history: bool = False
 
 
 def candidate_status(c: CandidateResult) -> str:
@@ -119,6 +120,7 @@ class NSGA2Result:
     history: list[tuple[tuple[float, ...], CandidateResult]] = field(default_factory=list)
     termination_reason: str = ""  # "converged" or "max_generations"
     convergence_trace: list[dict[str, Any]] = field(default_factory=list)  # per-generation front movement
+    front_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _evaluate_batch_serial(evaluator, X: np.ndarray, on_result=None) -> list[CandidateResult]:
@@ -231,6 +233,7 @@ class NSGA2Optimizer:
         self.evaluator = self.problem.evaluator
         self.live_log = None  # optional RowLogger; every evaluation is appended as it completes
         self.convergence_log = None  # optional RowLogger; one row per generation as it completes
+        self.front_log = None  # optional RowLogger; feasible front members per generation
 
         raw = self.cfg.get("nsga2", {}) or {}
         objectives = tuple(raw.get("objectives", NSGA2Settings.objectives))
@@ -244,7 +247,8 @@ class NSGA2Optimizer:
             eliminate_duplicates=bool(raw.get("eliminate_duplicates", True)),
             objectives=objectives,
             convergence=ConvergenceSettings.from_config(raw.get("convergence")),
-            n_workers=int(raw.get("n_workers", 1)))
+            n_workers=int(raw.get("n_workers", 1)),
+            save_front_history=bool(raw.get("save_front_history", False)))
 
     def initial_population(self) -> np.ndarray:
         """Random sample inside the bounds with the baseline design as the first member."""
@@ -261,6 +265,7 @@ class NSGA2Optimizer:
         from pymoo.optimize import minimize
 
         history: list[tuple[tuple[float, ...], CandidateResult]] = []
+        front_history: list[dict[str, Any]] = []
 
         mpi = None
         try:
@@ -300,13 +305,42 @@ class NSGA2Optimizer:
             return results
 
         try:
+            def record_front(algorithm):
+                front = algorithm.opt
+                rows = []
+                if front is not None:
+                    for individual in front:
+                        if not bool(np.all(individual.get("feas"))):
+                            continue
+                        x, f, candidate = individual.get("X", "F", "candidate")
+                        rows.append({
+                            "generation": int(algorithm.n_gen),
+                            "feasible": True,
+                            "evaluation": candidate.eval_id,
+                            **{v.name: float(value) for v, value in zip(self.variables, x)},
+                            **{name: -float(value) for name, value in zip(self.settings.objectives, f)},
+                        })
+                if not rows:
+                    rows.append({
+                        "generation": int(algorithm.n_gen),
+                        "feasible": False,
+                        "evaluation": None,
+                        **{v.name: None for v in self.variables},
+                        **{name: None for name in self.settings.objectives},
+                    })
+                for row in rows:
+                    front_history.append(row)
+                    if self.front_log is not None:
+                        self.front_log.append(row)
+
             problem = TankDesignProblem(batch, self.variables, self.settings.objectives)
             algorithm = NSGA2(pop_size=self.settings.population_size,
                               eliminate_duplicates=self.settings.eliminate_duplicates,
                               sampling=self.initial_population())
             termination = NSGA2Termination(
                 self.settings.generations, self.settings.convergence,
-                on_generation=self.convergence_log.append if self.convergence_log is not None else None)
+                on_generation=self.convergence_log.append if self.convergence_log is not None else None,
+                on_front=record_front if self.settings.save_front_history else None)
             result = minimize(problem, algorithm, termination=termination,
                               seed=self.settings.seed, verbose=False)
             termination = result.algorithm.termination  # pymoo works on a copy
@@ -317,12 +351,12 @@ class NSGA2Optimizer:
         if result.X is None:
             return NSGA2Result(self.variables, self.settings.objectives,
                                np.empty((0, len(self.variables))), [], history,
-                               termination.reason, termination.trace)
+                               termination.reason, termination.trace, front_history)
         pareto_x = np.atleast_2d(result.X)
         by_x = {x: c for x, c in history}
         pareto = [by_x[tuple(float(v) for v in x)] for x in pareto_x]
         return NSGA2Result(self.variables, self.settings.objectives, pareto_x, pareto, history,
-                           termination.reason, termination.trace)
+                           termination.reason, termination.trace, front_history)
 
 
 def pareto_rows(result: NSGA2Result) -> list[dict[str, Any]]:

@@ -200,6 +200,134 @@ def test_convergence_trace_is_logged_live_to_the_csv(tmp_path):
     assert len(lines) - 1 == len(result.convergence_trace) == 6
 
 
+def test_front_movement_uses_previous_generation_independent_of_tolerance():
+    from toplab.optimization.convergence import _FrontMovement
+
+    class Front:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self, *keys):
+            return np.array([True]), np.array([[self.value]])
+
+    class Algorithm:
+        def __init__(self, value):
+            self.opt = Front(value)
+
+    traces = []
+    for tolerance in (0.001, 0.1):
+        movement = _FrontMovement(tol=tolerance, only_feas=True)
+        values = []
+        for value in (0.0, 0.05, 0.09, 0.14):
+            movement.update(Algorithm(value))
+            values.append(movement.last_movement)
+        traces.append(values)
+    assert traces[0] == pytest.approx(traces[1])
+    assert traces[0][1:] == pytest.approx([0.05, 0.04, 0.05])
+
+
+def test_front_history_logs_feasible_front_for_each_generation(tmp_path):
+    import csv
+    from toplab.optimization.convergence import ConvergenceSettings
+    from toplab.optimization.evaluation import RowLogger
+
+    path = tmp_path / "fronts.csv"
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator())
+    opt.settings = dataclasses.replace(
+        opt.settings, population_size=10, generations=4, seed=3,
+        convergence=ConvergenceSettings(enabled=True, period=10),
+        save_front_history=True)
+    opt.front_log = RowLogger(path)
+    result = opt.run()
+    with path.open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert {int(row["generation"]) for row in rows} == {1, 2, 3, 4}
+    assert all(row["feasible"] == "True" for row in rows)
+    history = {c.eval_id: (x, c) for x, c in result.history}
+    for row in rows:
+        x, candidate = history[int(row["evaluation"])]
+        assert float(row["radius_1"]) == pytest.approx(x[0])
+        assert float(row["eta_g"]) == pytest.approx(candidate.eta_g)
+        assert float(row["eta_v"]) == pytest.approx(candidate.eta_v)
+    last = [row for row in rows if int(row["generation"]) == 4]
+    assert {int(row["evaluation"]) for row in last} == {c.eval_id for c in result.pareto}
+    assert result.front_history == opt.front_log._rows
+
+
+def test_front_history_marks_empty_generations_and_works_without_convergence(tmp_path):
+    import csv
+    from toplab.optimization.evaluation import RowLogger
+
+    class InfeasibleEvaluator(FakeEvaluator):
+        def evaluate(self, x):
+            candidate = super().evaluate(x)
+            candidate.packaging_feasible = False
+            return candidate
+
+    path = tmp_path / "fronts.csv"
+    opt = NSGA2Optimizer(NSGA_YAML, evaluator=InfeasibleEvaluator())
+    opt.settings = dataclasses.replace(opt.settings, population_size=6, generations=3, seed=3,
+                                       save_front_history=True)
+    opt.front_log = RowLogger(path)
+    result = opt.run()
+    with path.open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert result.convergence_trace == []
+    assert [int(row["generation"]) for row in rows] == [1, 2, 3]
+    assert all(row["feasible"] == "False" and not row["eta_g"] for row in rows)
+
+
+def test_movement_trace_replays_actual_stopping_for_multiple_tolerances():
+    from toplab.optimization.convergence import ConvergenceSettings
+
+    def run(tolerance, period):
+        opt = NSGA2Optimizer(NSGA_YAML, evaluator=FakeEvaluator())
+        opt.settings = dataclasses.replace(
+            opt.settings, population_size=10, generations=40, seed=3,
+            convergence=ConvergenceSettings(enabled=True, tolerance=tolerance, period=period,
+                                            min_generations=4))
+        return opt.run()
+
+    reference = run(1e-12, 41)
+    for tolerance, period in ((0.01, 2), (0.05, 3), (0.5, 2)):
+        streak = 0
+        expected = 40
+        for row in reference.convergence_trace:
+            streak = streak + 1 if row["front_movement"] <= tolerance else 0
+            if row["generation"] >= 4 and streak >= period:
+                expected = row["generation"]
+                break
+        actual = run(tolerance, period)
+        assert len(actual.convergence_trace) == expected
+        assert [row["front_movement"] for row in actual.convergence_trace] == pytest.approx(
+            [row["front_movement"] for row in reference.convergence_trace[:expected]])
+
+
+def test_runner_writes_front_history_when_enabled(tmp_path, monkeypatch):
+    import csv
+    import toplab.optimization.nsga2_optimizer as nsga2
+    from toplab.optimization.convergence import ConvergenceSettings
+    from toplab.optimization.runners import run_nsga2
+
+    original = nsga2.NSGA2Optimizer
+
+    def make_optimizer(path):
+        opt = original(path, evaluator=FakeEvaluator())
+        opt.settings = dataclasses.replace(
+            opt.settings, population_size=6, generations=3, seed=3, save_front_history=True,
+            convergence=ConvergenceSettings(enabled=True, period=10))
+        return opt
+
+    monkeypatch.setattr(nsga2, "NSGA2Optimizer", make_optimizer)
+    monkeypatch.setenv("TOPLAB_RESULTS_DIR", str(tmp_path))
+    result = run_nsga2(NSGA_YAML, plot=False)
+    with (tmp_path / "nsga2_front_history.csv").open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == len(result.front_history) > 0
+    assert {int(row["generation"]) for row in rows} == {1, 2, 3}
+    assert (tmp_path / "nsga2_convergence.csv").exists()
+
+
 def test_hung_evaluation_is_killed_and_reported_as_error():
     import time
     from toplab.optimization.evaluation import CandidateEvaluator

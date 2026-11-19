@@ -47,26 +47,27 @@ class ConvergenceSettings:
 
 
 class _FrontMovement(MultiObjectiveSpaceTermination):
-    """pymoo's front-movement criterion that also reports the movement it measured."""
+    """Measure pymoo's front distance against the immediately preceding generation."""
 
     last_movement = math.inf
 
     def _update(self, algorithm):
-        self.last_movement = math.inf  # stays infinite when there is nothing to compare
-        return super()._update(algorithm)
-
-    def _delta(self, prev, current):
-        self.last_movement = float(super()._delta(prev, current))
-        return self.last_movement
+        previous = self.data
+        current = self._data(algorithm)
+        self.data = current
+        self.last_movement = math.inf if previous is None else float(self._delta(previous, current))
+        return 1.0 if self.last_movement <= self.tol else 0.0
 
 
 class NSGA2Termination(Termination):
     """Stop at ``max_generations`` or, if enabled, when the front has converged."""
 
     def __init__(self, max_generations: int, convergence: ConvergenceSettings | None = None,
-                 on_generation: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 on_generation: Callable[[dict[str, Any]], None] | None = None,
+                 on_front: Callable[[Any], None] | None = None) -> None:
         super().__init__()
         self.on_generation = on_generation  # called with each trace row as soon as it is known
+        self.on_front = on_front
         if max_generations < 1:
             raise ValueError("nsga2.generations must be at least 1.")
         self.max_generations = int(max_generations)
@@ -79,6 +80,8 @@ class NSGA2Termination(Termination):
     def _update(self, algorithm) -> float:
         generation = int(algorithm.n_gen)
         settings = self.convergence
+        if self.on_front is not None:
+            self.on_front(algorithm)
         if settings.enabled:
             within = self._movement.update(algorithm) >= 1.0
             self.streak = self.streak + 1 if within else 0
