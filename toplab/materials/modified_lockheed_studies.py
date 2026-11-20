@@ -6,14 +6,14 @@ import matplotlib.pyplot as plt
 
 from toplab.materials.modified_lockheed import (
     DEFAULT_LAYER_DENSITY,
-    DEFAULT_PRESSURE_TORR,
+    DEFAULT_PRESSURE_MBAR,
     modified_lockheed_heat_flux_components,
 )
 
 
 T_HOT = 300.0
 LAYER_DENSITY = DEFAULT_LAYER_DENSITY
-PRESSURE_TORR = DEFAULT_PRESSURE_TORR
+PRESSURE_MBAR = DEFAULT_PRESSURE_MBAR
 THICKNESSES_M = (0.005, 0.0075, 0.010, 0.020, 0.030, 0.050)
 DEGRADATION_FACTORS = (0.5, 1.0, 2.0, 5.0)
 COLD_TEMPERATURES_K = (20.0, 40.0, 60.0, 80.0)
@@ -23,7 +23,7 @@ OUTPUT_DIRECTORY = Path(__file__).resolve().parent / "output"
 def main():
     print("NASA Modified Lockheed MLI heat-flux sweep")
     print(
-        f"Th={T_HOT:.1f} K, P={PRESSURE_TORR:g} torr, "
+        f"Th={T_HOT:.1f} K, P={PRESSURE_MBAR:g} mbar, "
         f"Nstar={LAYER_DENSITY:g} layers/cm, epsilon=0.031, Df=1.0"
     )
     print(
@@ -40,7 +40,7 @@ def main():
                 T_cold=T_cold,
                 thickness=thickness,
                 layer_density=LAYER_DENSITY,
-                pressure_torr=PRESSURE_TORR,
+                pressure_mbar=PRESSURE_MBAR,
             )
             print(
                 f"{T_cold:8.1f} {thickness * 1000:11.1f} "
@@ -71,21 +71,22 @@ def main():
     print("\nResidual-gas pressure sensitivity")
     print("Th=300 K, Tc=20 K, t_ins=20 mm, Nstar=16 layers/cm")
     print(
-        f"{'P [torr]':>12} {'q_solid':>12} {'q_radiation':>14} "
+        f"{'P [mbar]':>12} {'q_solid':>12} {'q_radiation':>14} "
         f"{'q_gas':>12} {'q_total':>12}"
     )
-    pressures = (1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3)
+    pressures = (1.3332236842105264e-6, 1.3332236842105264e-5,
+                 1.3332236842105264e-4, 1.3332236842105264e-3)
     pressure_components = []
-    for pressure_torr in pressures:
+    for pressure_mbar in pressures:
         components = modified_lockheed_heat_flux_components(
             T_hot=300.0,
             T_cold=20.0,
             thickness=0.020,
             layer_density=16.0,
-            pressure_torr=pressure_torr,
+            pressure_mbar=pressure_mbar,
         )
         print(
-            f"{pressure_torr:12.1e} {components.q_solid:12.6g} "
+            f"{pressure_mbar:12.1e} {components.q_solid:12.6g} "
             f"{components.q_radiation:14.6g} {components.q_gas:12.6g} "
             f"{components.q_total:12.6g}"
         )
@@ -101,7 +102,7 @@ def main():
         pressure_axes.plot(pressures, values, marker="o", label=name)
     pressure_axes.set_xscale("log")
     pressure_axes.set_yscale("log")
-    pressure_axes.set_xlabel("Interstitial pressure [torr]")
+    pressure_axes.set_xlabel("Interstitial pressure [mbar]")
     pressure_axes.set_ylabel("Heat flux [W/m²]")
     pressure_axes.set_title("Modified Lockheed component pressure sensitivity")
     pressure_axes.grid(True, which="both", alpha=0.3)
@@ -125,7 +126,7 @@ def main():
             T_cold=20.0,
             thickness=0.020,
             layer_density=16.0,
-            pressure_torr=PRESSURE_TORR,
+            pressure_mbar=PRESSURE_MBAR,
             degradation_factor=degradation_factor,
         )
 

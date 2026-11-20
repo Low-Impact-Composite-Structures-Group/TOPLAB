@@ -205,7 +205,7 @@ class TestInsulatedTankThermalModel:
 
     def test_modified_lockheed_option_drives_existing_half_layer_heat_flows(self):
         insulation_model = insulation_model_from_config(
-            {"model": "modified_lockheed", "pressure_torr": 1.0e-5}
+            {"model": "modified_lockheed", "pressure_mbar": 1.0e-5}
         )
         model = _make_thermal_model(insulation_model=insulation_model)
         half_thickness = 0.5 * (model.r_shell - model.r_structure)

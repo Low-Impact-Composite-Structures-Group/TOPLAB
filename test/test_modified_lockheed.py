@@ -57,7 +57,7 @@ def test_modified_lockheed_thickness_sets_continuous_layer_count_and_reduces_hea
 
 def test_modified_lockheed_components_include_solid_and_radiation_at_low_pressure():
     components = modified_lockheed_heat_flux_components(
-        300.0, 20.0, 0.02, pressure_torr=1.0e-12
+        300.0, 20.0, 0.02, pressure_mbar=1.0e-12
     )
     assert components.q_solid > 0.0
     assert components.q_radiation > 0.0
@@ -71,12 +71,27 @@ def test_modified_lockheed_gas_component_scales_linearly_with_pressure():
     pressures = (1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3)
     gas_fluxes = [
         modified_lockheed_heat_flux_components(
-            300.0, 20.0, 0.02, pressure_torr=pressure
+            300.0, 20.0, 0.02, pressure_mbar=pressure
         ).q_gas
         for pressure in pressures
     ]
     for pressure, gas_flux in zip(pressures, gas_fluxes):
         assert gas_flux == pytest.approx(gas_fluxes[0] * pressure / pressures[0])
+
+
+def test_mbar_pressure_preserves_published_correlation_and_default():
+    pressure_mbar = 5.0e-4 * (1013.25 / 760.0)
+    components = modified_lockheed_heat_flux_components(
+        300.0, 20.0, 0.02, pressure_mbar=pressure_mbar
+    )
+    expected_gas = 1.46e4 * 5.0e-4 * (300.0**0.52 - 20.0**0.52) / 32.0
+    assert components.q_gas == pytest.approx(expected_gas)
+    assert modified_lockheed_heat_flux(300.0, 20.0, 0.02) == pytest.approx(
+        modified_lockheed_heat_flux(300.0, 20.0, 0.02,
+                                   pressure_mbar=1.0e-5 * (1013.25 / 760.0))
+    )
+    with pytest.raises(ValueError, match="pressure_torr is no longer supported"):
+        insulation_model_from_config({"model": "modified_lockheed", "pressure_torr": 5.0e-4})
 
 
 def test_modified_lockheed_degradation_factor_scales_total_heat_flux():
@@ -94,7 +109,7 @@ def test_modified_lockheed_degradation_factor_scales_total_heat_flux():
         ({"T_cold": 301.0}, "greater than or equal"),
         ({"thickness": 0.0}, "thickness"),
         ({"layer_density": 0.0}, "layer_density"),
-        ({"pressure_torr": -1.0}, "pressure_torr"),
+        ({"pressure_mbar": -1.0}, "pressure_mbar"),
         ({"degradation_factor": 0.0}, "degradation_factor"),
     ],
 )
@@ -110,7 +125,7 @@ def test_modified_lockheed_configuration_exposes_correlation_parameters():
         {
             "model": "modified_lockheed",
             "layer_density": 20.0,
-            "pressure_torr": 2.0e-5,
+            "pressure_mbar": 2.0e-5,
             "degradation_factor": 2.0,
             "specific_heat": 900.0,
         }
@@ -123,7 +138,7 @@ def test_modified_lockheed_configuration_exposes_correlation_parameters():
         20.0,
         0.02,
         layer_density=20.0,
-        pressure_torr=2.0e-5,
+        pressure_mbar=2.0e-5,
         degradation_factor=2.0,
     )
     assert model.heat_flux(300.0, 20.0, 0.02) == pytest.approx(expected)

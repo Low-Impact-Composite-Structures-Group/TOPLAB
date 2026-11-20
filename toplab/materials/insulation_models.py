@@ -24,7 +24,7 @@ ROHACELL = InsulationModel(
 
 def make_modified_lockheed_model(
     layer_density: float = modified_lockheed.DEFAULT_LAYER_DENSITY,
-    pressure_torr: float = modified_lockheed.DEFAULT_PRESSURE_TORR,
+    pressure_mbar: float = modified_lockheed.DEFAULT_PRESSURE_MBAR,
     emissivity: float = modified_lockheed.DEFAULT_EMISSIVITY,
     Cs: float = modified_lockheed.DEFAULT_CS,
     Cr: float = modified_lockheed.DEFAULT_CR,
@@ -43,7 +43,7 @@ def make_modified_lockheed_model(
             T_cold=T_cold,
             thickness=thickness,
             layer_density=layer_density,
-            pressure_torr=pressure_torr,
+            pressure_mbar=pressure_mbar,
             emissivity=emissivity,
             Cs=Cs,
             Cr=Cr,
@@ -70,9 +70,14 @@ def insulation_model_from_config(insulation_config: Optional[Mapping]) -> Insula
             "use 'modified_lockheed' instead"
         )
     if model == "modified_lockheed":
+        if "pressure_torr" in cfg:
+            raise ValueError(
+                "pressure_torr is no longer supported; convert it to pressure_mbar "
+                "using 1 torr = 1013.25/760 mbar."
+            )
         parameter_names = (
             "layer_density",
-            "pressure_torr",
+            "pressure_mbar",
             "Cs",
             "Cr",
             "Cg",

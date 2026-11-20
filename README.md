@@ -247,15 +247,18 @@ as `examples/output/modified_lockheed_thickness_sweep.png` and
 
 The Modified Lockheed model is a semi-empirical MLI correlation returning
 `q` in W/m². Temperatures are in K, layer density is in layers/cm, and
-physical insulation thickness is in m, and interstitial pressure is in torr.
+physical insulation thickness is in m, and interstitial pressure is in mbar.
 `Cs`, `Cr`, and `Cg` are empirical constants; the published Modified Lockheed
 defaults are `Cs = 2.4e-4`, `Cr = 4.944e-10`, and `Cg = 1.46e4`, with
-`epsilon = 0.031`. Its default
+`epsilon = 0.031`. `Cg` uses the published torr-based convention; pressure
+is converted internally (1 torr = 1013.25/760 mbar). To migrate existing
+configs, replace `pressure_torr` with `pressure_mbar` and multiply its value
+by 1013.25/760; the old key is rejected. Its default
 degradation factor `Df = 1` represents ideal blanket performance; practical
 tank-applied MLI may require a degradation factor to account for seams,
 penetrations, edges, and installation imperfections. Configure this option as
 `model: modified_lockheed` in the insulation block; available correlation
-settings include `layer_density`, `pressure_torr`, `emissivity_mli`,
+settings include `layer_density`, `pressure_mbar`, `emissivity_mli`,
 `degradation_factor`, `Cs`, `Cr`, and `Cg`. Effective insulation
 `density` and constant `specific_heat` continue to use the existing lumped
 thermal-mass treatment.

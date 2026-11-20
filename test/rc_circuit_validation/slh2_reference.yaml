@@ -27,7 +27,7 @@ network:
         insulation:
           model: modified_lockheed
           thickness: 0.040
-          pressure_torr: 5.0e-4
+          pressure_mbar: 6.666118421052632e-4
           degration_factor: 1.0
           shell_thickness: 0.004
           alpha_shell: 5.0

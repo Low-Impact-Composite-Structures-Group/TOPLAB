@@ -17,7 +17,8 @@ DEFAULT_CR = 4.944e-10
 DEFAULT_CG = 1.46e4
 DEFAULT_EMISSIVITY = 0.031
 DEFAULT_LAYER_DENSITY = 16.0  # [layers/cm]
-DEFAULT_PRESSURE_TORR = 1.0e-5  # [torr]
+MBAR_PER_TORR = 1013.25 / 760.0
+DEFAULT_PRESSURE_MBAR = 1.0e-5 * MBAR_PER_TORR  # [mbar]
 DEFAULT_DEGRADATION_FACTOR = 1.0
 
 DEFAULT_EFFECTIVE_DENSITY = 300.0   # [kg/m^3], fitted equivalent density
@@ -38,7 +39,7 @@ def modified_lockheed_heat_flux_components(
     T_cold: float,
     thickness: float,
     layer_density: float = DEFAULT_LAYER_DENSITY,
-    pressure_torr: float = DEFAULT_PRESSURE_TORR,
+    pressure_mbar: float = DEFAULT_PRESSURE_MBAR,
     emissivity: float = DEFAULT_EMISSIVITY,
     Cs: float = DEFAULT_CS,
     Cr: float = DEFAULT_CR,
@@ -48,14 +49,15 @@ def modified_lockheed_heat_flux_components(
     """Return Modified Lockheed component heat fluxes and diagnostic values.
 
     Temperatures are in K, ``thickness`` in m, ``layer_density`` in layers/cm,
-    and ``pressure_torr`` in torr. Heat fluxes are returned in W/m².
+    and ``pressure_mbar`` in mbar. Cg retains the published torr-based
+    convention. Heat fluxes are returned in W/m².
     """
     named_values = {
         "T_hot": T_hot,
         "T_cold": T_cold,
         "thickness": thickness,
         "layer_density": layer_density,
-        "pressure_torr": pressure_torr,
+        "pressure_mbar": pressure_mbar,
         "emissivity": emissivity,
         "Cs": Cs,
         "Cr": Cr,
@@ -74,8 +76,8 @@ def modified_lockheed_heat_flux_components(
         raise ValueError("thickness must be greater than 0 m")
     if layer_density <= 0.0:
         raise ValueError("layer_density must be greater than 0 layers/cm")
-    if pressure_torr < 0.0:
-        raise ValueError("pressure_torr must be greater than or equal to 0 torr")
+    if pressure_mbar < 0.0:
+        raise ValueError("pressure_mbar must be greater than or equal to 0 mbar")
     if degradation_factor <= 0.0:
         raise ValueError("degradation_factor must be greater than 0")
 
@@ -104,7 +106,7 @@ def modified_lockheed_heat_flux_components(
         * (T_hot**4.67 - T_cold**4.67)
         / number_of_layers
     )
-    q_gas = Cg * pressure_torr * (T_hot**0.52 - T_cold**0.52) / number_of_layers
+    q_gas = Cg * (pressure_mbar / MBAR_PER_TORR) * (T_hot**0.52 - T_cold**0.52) / number_of_layers
 
     q_solid *= degradation_factor
     q_radiation *= degradation_factor
@@ -124,7 +126,7 @@ def modified_lockheed_heat_flux(
     T_cold: float,
     thickness: float,
     layer_density: float = DEFAULT_LAYER_DENSITY,
-    pressure_torr: float = DEFAULT_PRESSURE_TORR,
+    pressure_mbar: float = DEFAULT_PRESSURE_MBAR,
     emissivity: float = DEFAULT_EMISSIVITY,
     Cs: float = DEFAULT_CS,
     Cr: float = DEFAULT_CR,
@@ -137,7 +139,7 @@ def modified_lockheed_heat_flux(
         T_cold=T_cold,
         thickness=thickness,
         layer_density=layer_density,
-        pressure_torr=pressure_torr,
+        pressure_mbar=pressure_mbar,
         emissivity=emissivity,
         Cs=Cs,
         Cr=Cr,
