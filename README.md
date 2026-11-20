@@ -263,6 +263,14 @@ settings include `layer_density`, `pressure_mbar`, `emissivity_mli`,
 `density` and constant `specific_heat` continue to use the existing lumped
 thermal-mass treatment.
 
+For a tank without insulation, set `thermal_mode: uninsulated` and `thickness: 0.0`
+in its insulation block. The outer shell remains present and is assumed to be in
+perfect thermal contact with the structure: their heat capacities are combined and
+ambient heat exchange is applied to their common temperature. Insulation and shell
+temperature slots are reconstructed from the structure temperature in results;
+there is no insulation mass. Shell thickness and ambient heat-transfer parameters
+remain required. This is a physical assumption, not a model of contact resistance.
+
 The outer shell is configured with `alpha_shell` (ambient convective coefficient)
 and `emissivity_shell`. The legacy names `alpha_amb` and `emissivity` are still
 accepted for the shell; `emissivity` only refers to the MLI emissivity when

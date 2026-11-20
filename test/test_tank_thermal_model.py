@@ -38,6 +38,7 @@ def _make_thermal_model(
     emissivity=0.05,
     T_amb=288.15,
     insulation_model=None,
+    insulation_mode="transient_lumped",
 ):
     liner = NISTMetal.aluminum_6061T6_nist()
     wall = NISTComposite.carbon_epoxy_nist()
@@ -76,6 +77,7 @@ def _make_thermal_model(
         wall_material=wall,
         shell_material=liner,
         insulation_model=insulation_model or ROHACELL,
+        insulation_mode=insulation_mode,
     )
 
 
@@ -179,6 +181,39 @@ class TestInsulatedTankThermalModel:
         model = _make_thermal_model()
         assert model.compute_shell_to_insulation_heat_flux(288.0, 174.0) > 0.0
         assert model.compute_insulation_to_structure_heat_flux(174.0, 60.0) > 0.0
+
+    def test_modified_lockheed_half_layer_flows_reverse_sign(self):
+        model = _make_thermal_model(insulation_model=insulation_model_from_config(
+            {"model": "modified_lockheed", "pressure_mbar": 0.001}))
+        for flow in (model.compute_shell_to_insulation_heat_flux,
+                     model.compute_insulation_to_structure_heat_flux):
+            assert flow(288.0, 280.0) > 0
+            assert flow(280.0, 288.0) == pytest.approx(-flow(288.0, 280.0))
+            assert flow(280.0, 280.0) == pytest.approx(0.0)
+        midpoint = model.determine_initial_insulation_temperature(288.0, 280.0)
+        assert 280.0 < midpoint < 288.0
+
+    def test_uninsulated_combines_structure_and_shell_energy(self, monkeypatch):
+        model = _make_thermal_model(t_insulation=0.0, insulation_mode="uninsulated")
+        state = _make_state(structure_temperature=270.0, shell_temperature=100.0)
+        monkeypatch.setattr(model, "compute_structure_to_h2_heat_flux", lambda *args: 12.0)
+        t = state.structure_temperature
+        capacity = (model.m_liner * model.liner_material.determine_specific_heat(t)
+                    + model.m_wall * model.wall_material.determine_specific_heat(t)
+                    + model.m_shell * model.shell_material.determine_specific_heat(t))
+        q_ambient = model.compute_ambient_to_shell_heat_flux(t)
+        derivative = model.compute_structure_temperature_derivative(0.0, state)
+        assert derivative == pytest.approx((q_ambient - 12.0) / capacity)
+        assert model.compute_insulation_temperature_derivative(0.0, state) == 0.0
+        assert model.compute_shell_temperature_derivative(0.0, state) == 0.0
+        q_shell, q_structure = model.compute_insulation_heat_flows(state)
+        assert q_shell == pytest.approx(q_structure)
+        assert q_shell == pytest.approx(q_ambient - model.m_shell
+                                        * model.shell_material.determine_specific_heat(t) * derivative)
+
+    def test_uninsulated_rejects_positive_thickness(self):
+        with pytest.raises(ValueError, match="must equal structure radius"):
+            _make_thermal_model(t_insulation=0.001, insulation_mode="uninsulated")
 
     def test_insulation_half_layer_heat_flow_is_zero_at_equal_temperature(self):
         model = _make_thermal_model()

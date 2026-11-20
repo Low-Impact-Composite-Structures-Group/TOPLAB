@@ -10,10 +10,13 @@ from toplab.config.schema import EdgeSpec
 from toplab.optimization.evaluation import CandidateEvaluator, CandidateResult, candidate_row, dormancy_limits
 from toplab.optimization.insulation_sizing import DormancyPoint, InsulationGrid, size_tank_insulations
 from toplab.orchestration.run_analysis import run_dormancy_check
+from toplab.orchestration.system_orchestrator import SystemOrchestrator
 
 
 CONFIG = (Path(__file__).resolve().parents[2] /
           "toplab-apps/analysis/novacom/cch2_two_tanks/config_cch2_two_tanks.yaml")
+COUPLED_CONFIG = (Path(__file__).resolve().parents[2] /
+                  "toplab-apps/analysis/novacom/ch2_cch2/ch2_cch2_config.yaml")
 
 
 def _point(values, residuals):
@@ -27,6 +30,68 @@ def test_heterogeneous_tanks_size_independently():
     assert result.status == "converged"
     assert result.thicknesses == (0.02, 0.04)
     assert result.point.g_dorm <= 0
+
+
+@pytest.mark.parametrize("bare_residual", [-0.1, 0.1])
+def test_fixed_uninsulated_tank_still_checks_dormancy(bare_residual):
+    seen = []
+    def evaluate(t):
+        seen.append(t)
+        return _point(t, [bare_residual, 0.04 - t[1]])
+    result = size_tank_insulations(evaluate, InsulationGrid(0.01, 0.05, 0.01), 2, (True, False))
+    assert all(t[0] == 0 for t in seen)
+    assert result.thicknesses[0] == 0
+    assert result.statuses[0] == "uninsulated"
+    assert (result.status == "converged") == (bare_residual <= 0)
+    if bare_residual <= 0:
+        assert result.thicknesses[1] == 0.04
+
+
+def test_all_uninsulated_tanks_still_run_dormancy():
+    seen = []
+    def evaluate(t):
+        seen.append(t)
+        return _point(t, [0.1])
+    result = size_tank_insulations(evaluate, InsulationGrid(0.0, 0.0, 0.01), 1, (True,))
+    assert seen == [(0.0,)]
+    assert result.status == "dormancy_infeasible"
+    assert result.statuses == ("uninsulated",)
+
+
+def test_uninsulated_tank_initialization_and_reported_temperatures():
+    config = load_config(CONFIG)
+    tank = config.tanks[0]
+    materials = {**tank.materials, "insulation": {
+        **tank.materials["insulation"], "thermal_mode": "uninsulated", "thickness": 0.0}}
+    config = replace(config, tanks=[replace(tank, materials=materials), config.tanks[1]],
+                     solver={**config.solver, "max_simulation_time": 10})
+    orchestrator = SystemOrchestrator(config, verbosity="quiet")
+    results = orchestrator.run_simulation(solver_config=config.solver)
+    props = orchestrator.tank_system._cached_tank_properties[0]
+    assert props["foam_mass"] == 0.0
+    assert props["shell_mass"] > 0.0
+    for multi in results.multi_tank_states:
+        state = multi.get_tank_state(0)
+        assert state.shell_temperature == state.structure_temperature
+        assert state.insulation_temperature == state.structure_temperature
+
+
+def test_formerly_failing_transient_mli_dormancy():
+    config = load_config(COUPLED_CONFIG)
+    first, second = config.tanks
+    insulation1 = {**first.materials["insulation"], "thermal_mode": "transient_lumped",
+                   "model": "modified_lockheed", "thickness": 0.001, "pressure_mbar": 0.001}
+    insulation2 = {**second.materials["insulation"], "thermal_mode": "transient_lumped",
+                   "model": "modified_lockheed", "thickness": 0.0035, "pressure_mbar": 0.001}
+    first = replace(first, geometry={**first.geometry, "radius": 0.4, "phi": 2.0},
+                    materials={**first.materials, "insulation": insulation1})
+    second = replace(second, geometry={**second.geometry, "radius": 0.8, "phi": 2.0},
+                     materials={**second.materials, "insulation": insulation2})
+    config = replace(config, tanks=[first, second],
+                     dormancy_check={"enabled": True, "duration_h": 12.0, "max_step_s": 300.0},
+                     solver={**config.solver, "method": "LSODA", "rtol": 1e-4, "atol": 1e-7})
+    result = run_dormancy_check(config, silent=True)
+    assert result["complete"] and result["duration_s"] == pytest.approx(43200.0)
 
 
 def test_coupled_sizing_preserves_full_system_feasibility():
@@ -172,6 +237,85 @@ def test_sized_vector_is_used_by_final_discharge_packaging_and_history(monkeypat
     row = candidate_row([], [], result)
     assert row["t_ins_star_1"] == 0.02 and row["t_ins_star_2"] == 0.04
     assert row["vent_onset_censored_1"] and row["vent_onset_s_1"] == ""
+
+
+def test_sized_evaluator_keeps_uninsulated_tank_fixed(monkeypatch):
+    config = load_config(CONFIG)
+    tank = config.tanks[0]
+    materials = {**tank.materials, "insulation": {
+        **tank.materials["insulation"], "thermal_mode": "uninsulated", "thickness": 0.0}}
+    config = replace(config, tanks=[replace(tank, materials=materials), config.tanks[1]])
+    evaluator = object.__new__(CandidateEvaluator)
+    evaluator.insulation_grid = InsulationGrid(0.01, 0.05, 0.01)
+    evaluator.maximum_vented_fraction = 0.0
+    evaluator.skip_after_discharge_failure = True
+    evaluator.progress = False
+    calls = []
+
+    def thicknesses(case):
+        return tuple(t.materials["insulation"]["thickness"] for t in case.tanks)
+
+    def discharge(case, result):
+        calls.append(("discharge", thicknesses(case)))
+        result.mission_completed = True
+        return case
+
+    def dormancy(case):
+        t = thicknesses(case)
+        calls.append(("dormancy", t))
+        return DormancyPoint(max(-0.1, 0.04 - t[1]), 0.0, {
+            "residuals": [-0.1, 0.04 - t[1]], "vented_mass_kg": 0.0,
+            "per_tank_vented_fraction": [0.0, 0.0], "vent_onset_s": [None, None]})
+
+    monkeypatch.setattr(evaluator, "_run_discharge", discharge)
+    monkeypatch.setattr(evaluator, "_run_dormancy", dormancy)
+    monkeypatch.setattr(evaluator, "_run_packaging",
+                        lambda case, result: calls.append(("packaging", thicknesses(case))))
+    monkeypatch.setattr(evaluator, "_designs", lambda case, orchestrator: [])
+    result = CandidateResult()
+    evaluator._evaluate_sized(config, result)
+    assert calls[0] == ("discharge", (0.0, 0.01))
+    assert all(t[0] == 0.0 for _, t in calls)
+    assert calls[-2:] == [("discharge", (0.0, 0.04)), ("packaging", (0.0, 0.04))]
+    assert result.t_ins_stars == [0.0, 0.04]
+    assert result.tank_sizing_statuses[0] == "uninsulated"
+
+
+def test_sized_evaluator_accepts_zero_grid_for_uninsulated_tank(monkeypatch):
+    config = load_config(CONFIG)
+    tank = config.tanks[0]
+    materials = {**tank.materials, "insulation": {
+        **tank.materials["insulation"], "thermal_mode": "uninsulated", "thickness": 0.0}}
+    config = replace(config, tanks=[replace(tank, materials=materials)])
+    evaluator = object.__new__(CandidateEvaluator)
+    evaluator.insulation_grid = InsulationGrid(0.0, 0.0, 0.0025)
+    evaluator.maximum_vented_fraction = 0.0
+    evaluator.skip_after_discharge_failure = True
+    evaluator.progress = False
+    calls = []
+
+    def discharge(case, result):
+        calls.append(("discharge", case.tanks[0].materials["insulation"]["thickness"]))
+        result.mission_completed = True
+        return case
+
+    def dormancy(case):
+        calls.append(("dormancy", case.tanks[0].materials["insulation"]["thickness"]))
+        return DormancyPoint(0.1, 0.0, {
+            "residuals": [0.1], "vented_mass_kg": 0.0,
+            "per_tank_vented_fraction": [0.0], "vent_onset_s": [10.0]})
+
+    monkeypatch.setattr(evaluator, "_run_discharge", discharge)
+    monkeypatch.setattr(evaluator, "_run_dormancy", dormancy)
+    monkeypatch.setattr(evaluator, "_run_packaging",
+                        lambda case, result: calls.append(("packaging", case.tanks[0].materials["insulation"]["thickness"])))
+    monkeypatch.setattr(evaluator, "_designs", lambda case, orchestrator: [])
+    result = CandidateResult()
+    evaluator._evaluate_sized(config, result)
+    assert calls == [("discharge", 0.0), ("dormancy", 0.0), ("packaging", 0.0)]
+    assert result.t_ins_star == 0.0
+    assert result.sizing_status == "uninsulated"
+    assert result.dormancy_residual == 0.1
 
 
 def test_fixed_step_solver_is_rejected_for_dormancy():

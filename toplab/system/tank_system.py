@@ -582,10 +582,10 @@ class TankSystem:
             # half-layer heat flows, avoiding a nonphysical initial storage pulse.
             T_h2_init = tank_config.T_INIT
             T_structure_init = T_h2_init + 0.1
-            T_shell_init = self.config.AMBIENT_TEMPERATURE
-            T_insulation_init = self.thermal_models[i].determine_initial_insulation_temperature(
-                T_structure_init, T_shell_init
-            )
+            thermal = self.thermal_models[i]
+            T_shell_init = T_structure_init if thermal.is_uninsulated else self.config.AMBIENT_TEMPERATURE
+            T_insulation_init = (T_structure_init if thermal.is_uninsulated else
+                                 thermal.determine_initial_insulation_temperature(T_structure_init, T_shell_init))
             state.extend([
                 m_init,
                 T_h2_init,
@@ -638,17 +638,22 @@ class TankSystem:
                     P_i = PropsSI("P", "T", T_i, "Dmass", rho_i, self._coolprop_fluids[i])
                 thermal = self.thermal_models[i]
                 try:
+                    if thermal.is_uninsulated:
+                        T_sh = T_ins = T_s
                     Q_amb = thermal.compute_ambient_to_shell_heat_flux(T_sh)
                     if thermal.is_quasi_steady:
                         Q_sh_ins = Q_ins_str = thermal.compute_blanket_heat_flow(T_sh, T_s)
                         T_ins = thermal.reconstruct_insulation_temperature(T_sh, T_s)
-                    else:
+                    elif not thermal.is_uninsulated:
                         Q_sh_ins = thermal.compute_shell_to_insulation_heat_flux(T_sh, T_ins)
                         Q_ins_str = thermal.compute_insulation_to_structure_heat_flux(T_ins, T_s)
                     alpha_s = thermal.get_alpha_s(T_i, T_s, P_i)
                     Q_str = alpha_s * thermal.A_in * (T_s - T_i)
-                    heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_sh-ins={Q_sh_ins:+.1f}W  "
-                                f"Q_ins-str={Q_ins_str:+.1f}W  Q_str-H2={Q_str:+.1f}W")
+                    if thermal.is_uninsulated:
+                        heat_str = f"Q_amb={Q_amb:+.1f}W  Q_str-H2={Q_str:+.1f}W (uninsulated)"
+                    else:
+                        heat_str = (f"Q_amb={Q_amb:+.1f}W  Q_sh-ins={Q_sh_ins:+.1f}W  "
+                                    f"Q_ins-str={Q_ins_str:+.1f}W  Q_str-H2={Q_str:+.1f}W")
                 except Exception as e:
                     heat_str = f"heat flows unavailable ({e})"
                 lines.append(
@@ -1065,7 +1070,10 @@ class TankSystem:
                     fluid=self._coolprop_fluids[tank_idx],
                 )
                 thermal_model = self.thermal_models[tank_idx]
-                if thermal_model.is_quasi_steady:
+                if thermal_model.is_uninsulated:
+                    tank_state.shell_temperature = tank_state.structure_temperature
+                    tank_state.insulation_temperature = tank_state.structure_temperature
+                elif thermal_model.is_quasi_steady:
                     # Not an integrated state: algebraic mid-blanket temperature for reporting.
                     tank_state.insulation_temperature = thermal_model.reconstruct_insulation_temperature(
                         tank_state.shell_temperature, tank_state.structure_temperature

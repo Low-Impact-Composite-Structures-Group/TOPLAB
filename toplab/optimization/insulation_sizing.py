@@ -130,7 +130,8 @@ class MultiTankSizingResult:
 
 
 def size_tank_insulations(evaluate: Callable[[tuple[float, ...]], DormancyPoint],
-                          grid: InsulationGrid, tank_count: int) -> MultiTankSizingResult:
+                          grid: InsulationGrid, tank_count: int,
+                          fixed_uninsulated: tuple[bool, ...] | None = None) -> MultiTankSizingResult:
     """Coordinate bisection with full-system verification, assuming coordinate monotonicity.
 
     Start at the maximum. While infeasible, search each tank's own residual to seek a
@@ -138,14 +139,26 @@ def size_tank_insulations(evaluate: Callable[[tuple[float, ...]], DormancyPoint]
     *all* tanks to remain feasible. Stop on a fixed point or an infeasible cycle.
     The outcome is coordinatewise, not globally, minimal.
     """
-    if tank_count <= 0 or grid.t_max <= 0:
-        raise ValueError("Insulation sizing requires tanks and a positive grid maximum.")
+    if tank_count <= 0:
+        raise ValueError("Insulation sizing requires at least one tank.")
+    fixed = fixed_uninsulated if fixed_uninsulated is not None else (False,) * tank_count
+    if len(fixed) != tank_count:
+        raise ValueError("Fixed insulation flags must match the tank count.")
+    if not all(fixed) and grid.t_max <= 0:
+        raise ValueError("Insulated tanks require a positive grid maximum.")
     cache: dict[tuple[float, ...], DormancyPoint] = {}
 
     def at(values: tuple[float, ...]) -> DormancyPoint:
         if values not in cache:
             cache[values] = evaluate(values)
         return cache[values]
+
+    if all(fixed):
+        values = (0.0,) * tank_count
+        point = at(values)
+        return MultiTankSizingResult(values, ("uninsulated",) * tank_count,
+                                     "converged" if point.g_dorm <= 0 else INFEASIBLE,
+                                     point, len(cache))
 
     if tank_count == 1:
         def one(thickness: float) -> DormancyPoint:
@@ -156,14 +169,16 @@ def size_tank_insulations(evaluate: Callable[[tuple[float, ...]], DormancyPoint]
                                      "converged" if result.feasible else INFEASIBLE,
                                      result.point, len(cache))
 
-    values = (grid.t_max,) * tank_count
+    values = tuple(0.0 if is_fixed else grid.t_max for is_fixed in fixed)
     point = at(values)
     seen: set[tuple[float, ...]] = set()
-    statuses = [INFEASIBLE] * tank_count
+    statuses = ["uninsulated" if is_fixed else INFEASIBLE for is_fixed in fixed]
     while values not in seen:
         seen.add(values)
         previous = values
         for i in range(tank_count):
+            if fixed[i]:
+                continue
             globally_feasible = point.g_dorm <= 0.0
 
             def at_coordinate(thickness: float) -> DormancyPoint:

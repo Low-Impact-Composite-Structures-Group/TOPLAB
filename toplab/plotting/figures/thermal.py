@@ -61,6 +61,10 @@ class ThermalFigures:
         line_styles = ['-', '--', '-.', ':']
         for series_index, (label, values) in enumerate(heat_flows.items()):
             if values is not None:
+                if thermal_model.is_uninsulated and label == 'Shell to insulation':
+                    label = 'Shell to structure'
+                elif thermal_model.is_uninsulated and label == 'Insulation to structure':
+                    continue
                 ax.plot(
                     times_hours,
                     values,

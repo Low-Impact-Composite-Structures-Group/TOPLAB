@@ -157,7 +157,9 @@ def maximum_outer_radii(config: AnalysisConfig, variables: Sequence[DesignVariab
             raise ValueError(f"Tank {index} has no radius in the base configuration to bound.")
         materials = tank.materials
         insulation = materials.get("insulation", {})
-        if max_insulation is not None:
+        if str(insulation.get("thermal_mode", "transient_lumped")).strip().lower() == "uninsulated":
+            t_ins = 0.0
+        elif max_insulation is not None:
             t_ins = max_insulation
         elif "insulation_thickness" in bounds:
             t_ins = bounds["insulation_thickness"].upper
@@ -557,16 +559,22 @@ class CandidateEvaluator:
         from the screening thickness -> packaging, so packaging never precedes the dynamic analyses.
         """
         grid = self.insulation_grid
-        if grid.t_max <= 0.0:
-            raise ValueError("Insulation sizing requires a positive grid maximum.")
-        # The thinnest insulation the model can simulate screens the mission; t = 0 cannot be built.
-        screen = next(t for t in grid.values if t > 0.0)
-        self._progress(f"step 1 of 3: discharge (screening at {screen * 1e3:.2f} mm insulation)")
-        screening = self._run_discharge(with_insulation(candidate, screen), result)
+        fixed = tuple(str(t.materials.get("insulation", {}).get("thermal_mode", "")).strip().lower()
+                      == "uninsulated" for t in candidate.tanks)
+        if any(is_fixed and float(t.materials["insulation"]["thickness"]) != 0.0
+               for t, is_fixed in zip(candidate.tanks, fixed)):
+            raise ValueError("Uninsulated tanks must have zero configured insulation thickness.")
+        if not all(fixed) and grid.t_max <= 0.0:
+            raise ValueError("Insulated tanks require a positive grid maximum.")
+        screen = next((t for t in grid.values if t > 0.0), 0.0)
+        screening_thicknesses = tuple(0.0 if is_fixed else screen for is_fixed in fixed)
+        screening_candidate = with_insulation(candidate, screening_thicknesses)
+        self._progress(f"step 1 of 3: discharge (screening thicknesses {screening_thicknesses} m)")
+        screening = self._run_discharge(screening_candidate, result)
         if self.skip_after_discharge_failure and not result.mission_completed:
             result.discharge_failed = True
             result.sizing_status = "discharge_failed"
-            result.designs = self._designs(with_insulation(candidate, screen), screening)
+            result.designs = self._designs(screening_candidate, screening)
             self._progress("step 2 of 3: dormancy skipped, discharge failed")
             self._progress("step 3 of 3: packaging at screening thickness")
             self._run_packaging(screening, result)
@@ -580,11 +588,11 @@ class CandidateEvaluator:
                            f"f_vent={point.f_vent:.6g}, g_dorm={point.g_dorm:.6g}")
             return point
 
-        sizing = size_tank_insulations(dormancy_at, grid, len(candidate.tanks))
+        sizing = size_tank_insulations(dormancy_at, grid, len(candidate.tanks), fixed)
         if sizing.status == "nonconverged":
             raise RuntimeError("Coupled insulation sizing did not converge; no sized design is reported.")
         final = with_insulation(candidate, sizing.thicknesses)
-        if all(t == screen for t in sizing.thicknesses):
+        if sizing.thicknesses == screening_thicknesses:
             orchestrator = screening
         else:
             self._progress(f"  re-running discharge at t_ins*={sizing.thicknesses}")
