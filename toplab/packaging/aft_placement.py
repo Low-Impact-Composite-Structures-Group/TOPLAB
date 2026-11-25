@@ -1468,3 +1468,108 @@ def plot_aft_placement(result: AftPlacementResult):
     )
 
     return fig
+
+# ---------------------------------------------------------------------------
+# Static (Matplotlib / PGF) rendering
+# ---------------------------------------------------------------------------
+
+DEFAULT_SCENE_VIEW = {"elev": 25.0, "azim": -60.0, "roll": 0.0}
+
+
+def resolve_scene_view(scene_cfg: dict | None) -> dict:
+    """Merge a user ``packaging.scene`` block with the default camera."""
+    scene = dict(DEFAULT_SCENE_VIEW)
+    for key, value in (scene_cfg or {}).items():
+        if key not in scene:
+            raise KeyError(
+                f"Unknown packaging.scene key '{key}'; "
+                f"allowed keys: {sorted(scene)}"
+            )
+        scene[key] = float(value)
+    return scene
+
+
+def plot_aft_placement_static(
+    result: AftPlacementResult,
+    scene_cfg: dict | None = None,
+):
+    """Render a static Matplotlib view with z horizontal and y vertical.
+
+    The Matplotlib axes are (z, x, y) so that the fuselage axis runs
+    horizontally and the vertical coordinate is the physical y.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    scene = resolve_scene_view(scene_cfg)
+    colors = ["#2d6a4f", "#1e3a5f", "#7b2d2d", "#6b4c11", "#4a1060"]
+
+    fig = plt.figure(figsize=(6.0, 3.2))
+    ax = fig.add_subplot(111, projection="3d", computed_zorder=False)
+
+    dims = result.dims
+    zz, tt = np.meshgrid(
+        np.linspace(0.0, dims.total_length, 60),
+        np.linspace(0.0, 2.0 * np.pi, 40),
+    )
+    rr = np.vectorize(dims.radius_at)(zz)
+    yc = np.vectorize(dims.center_y_at)(zz)
+    ax.plot_surface(
+        zz, rr * np.cos(tt), yc + rr * np.sin(tt),
+        color="#8fbcd4", alpha=0.12, linewidth=0, shade=False,
+        rstride=1, cstride=1, antialiased=False,
+    )
+
+    for placement in result.placements:
+        i = placement.tank_index
+        geometry = TankGeometry(
+            result.outer_radii[i], result.half_cyl_lengths[i]
+        )
+        e1, e2 = _transverse_basis(placement.axis)
+        deltas = np.linspace(
+            -geometry.half_total_length, geometry.half_total_length, 40
+        )
+        phis = np.linspace(0.0, 2.0 * np.pi, 32)
+        pts = np.zeros((len(deltas), len(phis), 3))
+        for r_idx, delta in enumerate(deltas):
+            rad = _capsule_radius_at_offset(
+                float(delta), geometry.outer_radius, geometry.half_cyl_length
+            )
+            centre = _add(
+                placement.center, _scale(placement.axis, float(delta))
+            )
+            for c_idx, phi in enumerate(phis):
+                pts[r_idx, c_idx] = _add(
+                    centre,
+                    _add(
+                        _scale(e1, rad * math.cos(float(phi))),
+                        _scale(e2, rad * math.sin(float(phi))),
+                    ),
+                )
+        ax.plot_surface(
+            pts[..., 2], pts[..., 0], pts[..., 1],
+            color=colors[i % len(colors)], alpha=0.75, linewidth=0,
+            shade=True, antialiased=False,
+        )
+
+    ax.set_xlabel(r"$z$ [m]")
+    ax.set_ylabel(r"$x$ [m]")
+    ax.set_zlabel(r"$y$ [m]")
+    ax.view_init(
+        elev=scene["elev"], azim=scene["azim"], roll=scene["roll"]
+    )
+
+    ymax = float(np.max(yc + rr)) if rr.size else 1.0
+    ymin = float(np.min(yc - rr)) if rr.size else -1.0
+    xext = float(np.max(rr))
+    ax.set_xlim(0.0, dims.total_length)
+    ax.set_ylim(-xext, xext)
+    ax.set_zlim(ymin, ymax)
+    ax.set_box_aspect(
+        (dims.total_length, 2.0 * xext, ymax - ymin), zoom=1.2
+    )
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    return fig

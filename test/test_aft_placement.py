@@ -302,3 +302,30 @@ def test_compaction_fallback_returns_infeasible_margin_for_four_spheres():
     assert not result.feasible
     assert result.zeta_p < 0
     assert all(p.feasible for p in result.placements)
+
+
+def test_scene_view_defaults_and_overrides():
+    from toplab.packaging.aft_placement import resolve_scene_view
+
+    assert resolve_scene_view(None)["elev"] == 25.0
+    assert resolve_scene_view({"azim": -90})["azim"] == -90.0
+    with pytest.raises(KeyError):
+        resolve_scene_view({"zoom": 2})
+
+
+def test_static_plot_applies_configured_view():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from toplab.packaging.aft_placement import plot_aft_placement_static
+
+    dims = AftFuselageDimensions(
+        d1=2.16, d2=1.17, d3=0.328, l1=2.067, l2=1.8, l3=3.407,
+        epsilon=0.05, psi_1=12.0, psi_2=9.0,
+    )
+    result = maximize_packaging_compaction(
+        outer_radii=[0.5], half_cyl_lengths=[0.5], dims=dims,
+    )
+    fig = plot_aft_placement_static(result, {"elev": 10, "azim": -45})
+    ax = fig.axes[0]
+    assert (ax.elev, ax.azim) == (10.0, -45.0)

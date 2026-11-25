@@ -389,6 +389,7 @@ def _run_aft_packaging(
         AftFuselageDimensions,
         maximize_packaging_compaction,
         plot_aft_placement,
+        plot_aft_placement_static,
     )
 
     # ------------------------------------------------------------------
@@ -625,6 +626,27 @@ def _run_aft_packaging(
     if generate_3d_plot:
 
         try:
+            plot_dir = (
+                Path(config_path).parent
+                / "output"
+                / "plots"
+            )
+            plot_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                static_fig = plot_aft_placement_static(
+                    result, packaging_cfg.get("scene")
+                )
+                pgf_path = plot_dir / "aft_placement_3d.pgf"
+                static_fig.savefig(pgf_path, backend="pgf")
+                import matplotlib.pyplot as plt
+                plt.close(static_fig)
+                if not silent:
+                    print(f"  Saved 3-D PGF: {pgf_path}")
+            except Exception as exc:
+                if not silent:
+                    print(f"  WARNING: 3-D PGF generation failed: {exc}")
+
             fig = plot_aft_placement(result)
 
             plot_dir = (
